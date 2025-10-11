@@ -18,5 +18,5 @@ set PATH=%PATH%;%VS_PATH%\VC\Tools\MSVC\%MSVC_VER%\bin\Hostx64\x64
 echo MSVC VER: %MSVC_VER%
 
 :run
-indextts2runtime\python.exe indextts2_api.py --use_deepspeed --cuda_kernel
+indextts2runtime\python.exe indextts2_api.py --use_deepspeed --cuda_kernel --fp16
 pause
