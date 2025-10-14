@@ -36,6 +36,7 @@ parser.add_argument("-p", "--port", type=int, default="9880", help="default: 988
 parser.add_argument("--fp16", action="store_true", default=False, help="Use FP16 for inference if available")
 parser.add_argument("--use_deepspeed", action="store_true", default=False, help="Use Deepspeed to accelerate if available")
 parser.add_argument("--cuda_kernel", action="store_true", default=False, help="Use cuda kernel for inference if available")
+parser.add_argument("--no_qwen_emo", action="store_true", default=False, help="Disable Qwen_emotion, which can save about 2GB VRAM, but text emotion prompt will be no longer available.")
 args = parser.parse_args()
 
 # device = args.device
@@ -50,6 +51,7 @@ tts_pipeline = IndexTTS2(
     use_fp16=args.fp16,
     use_deepspeed=args.use_deepspeed,
     use_cuda_kernel=args.cuda_kernel,
+    use_qwen_emo=not args.no_qwen_emo,
 )
 
 APP = FastAPI()

@@ -38,7 +38,7 @@ import torch.nn.functional as F
 class IndexTTS2:
     def __init__(
             self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", use_fp16=False, device=None,
-            use_cuda_kernel=None,use_deepspeed=False
+            use_cuda_kernel=None,use_deepspeed=False,use_qwen_emo=True
     ):
         """
         Args:
@@ -76,8 +76,10 @@ class IndexTTS2:
         self.dtype = torch.float16 if self.use_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
 
-        self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
-
+        if use_qwen_emo:
+            self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
+        else:
+            self.qwen_emo = None
         self.gpt = UnifiedVoice(**self.cfg.gpt)
         self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
         load_checkpoint(self.gpt, self.gpt_path)
@@ -387,6 +389,8 @@ class IndexTTS2:
             # automatically generate emotion vectors from text prompt
             if emo_text is None:
                 emo_text = text  # use main text prompt
+            if self.qwen_emo is None:
+                raise RuntimeError("Qwen_Emo has been disabled, emotion text is not available!!!")
             emo_dict = self.qwen_emo.inference(emo_text)
             print(f"detected emotion vectors from text: {emo_dict}")
             # convert ordered dict to list of vectors; the order is VERY important!
@@ -494,7 +498,7 @@ class IndexTTS2:
             print(f"  >> Warning: input text contains {text_token_ids.count(self.tokenizer.unk_token_id)} unknown tokens (id={self.tokenizer.unk_token_id}):")
             print( "     Tokens which can't be encoded: ", [t for t, id in zip(text_tokens_list, text_token_ids) if id == self.tokenizer.unk_token_id])
             print(f"     Consider updating the BPE model or modifying the text to avoid unknown tokens.")
-                  
+
         if verbose:
             print("text_tokens_list:", text_tokens_list)
             print("segments count:", segments_count)
