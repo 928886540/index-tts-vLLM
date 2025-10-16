@@ -193,7 +193,7 @@ if __name__ == "__main__":
         use_fp16=args.fp16,
         # use_deepspeed=args.use_deepspeed,
         use_cuda_kernel=args.cuda_kernel,
-        # use_qwen_emo=not args.no_qwen_emo,
+        use_qwen_emo=not args.no_qwen_emo,
     )
     try:
         if host == "None":

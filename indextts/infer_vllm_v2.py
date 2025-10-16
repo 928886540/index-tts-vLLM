@@ -42,7 +42,7 @@ import torch.nn.functional as F
 
 class IndexTTS2:
     def __init__(
-        self, model_dir="checkpoints", is_fp16=False, device=None, use_cuda_kernel=None, gpu_memory_utilization=0.25,**kwargs
+        self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None, use_cuda_kernel=None, gpu_memory_utilization=0.25, use_qwen_emo=True, **kwargs
     ):
         """
         Args:
@@ -70,7 +70,6 @@ class IndexTTS2:
             self.use_cuda_kernel = False
             print(">> Be patient, it may take a while to run in CPU mode.")
 
-        cfg_path = os.path.join(model_dir, "config.yaml")
         self.cfg = OmegaConf.load(cfg_path)
         self.model_dir = model_dir
         self.dtype = torch.float16 if self.is_fp16 else None
@@ -89,7 +88,10 @@ class IndexTTS2:
         )
         indextts_vllm = AsyncLLM.from_engine_args(engine_args)
 
-        self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
+        if use_qwen_emo:
+            self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
+        else:
+            self.qwen_emo = None
 
         self.gpt = UnifiedVoice(indextts_vllm, **self.cfg.gpt)
         self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
@@ -252,6 +254,8 @@ class IndexTTS2:
             # assert emo_alpha == 1.0
             if emo_text is None:
                 emo_text = text
+            if self.qwen_emo is None:
+                raise RuntimeError("Qwen_Emo has been disabled, emotion text is not available!!!")
             emo_dict, content = self.qwen_emo.inference(emo_text)
             print(emo_dict)
             emo_vector = list(emo_dict.values())

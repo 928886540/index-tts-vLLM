@@ -60,7 +60,7 @@ if __name__ == "__main__":
                     use_fp16=cmd_args.fp16,
                     # use_deepspeed=cmd_args.deepspeed,
                     use_cuda_kernel=cmd_args.cuda_kernel,
-                    # use_qwen_emo=not cmd_args.no_qwen_emo,
+                    use_qwen_emo=not cmd_args.no_qwen_emo,
                     )
     # 支持的语言列表
     LANGUAGES = {
