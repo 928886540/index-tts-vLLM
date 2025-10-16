@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
 from io import BytesIO
 
-from indextts.infer_v2 import IndexTTS2
+from indextts.infer_vllm_v2 import IndexTTS2
 
 from pydantic import BaseModel
 
@@ -44,15 +44,6 @@ port = args.port
 host = args.bind_addr
 argv = sys.argv
 
-
-tts_pipeline = IndexTTS2(
-    model_dir=args.model_dir,
-    cfg_path=os.path.join(args.model_dir, "config.yaml"),
-    use_fp16=args.fp16,
-    use_deepspeed=args.use_deepspeed,
-    use_cuda_kernel=args.cuda_kernel,
-    use_qwen_emo=not args.no_qwen_emo,
-)
 
 APP = FastAPI()
 
@@ -116,7 +107,7 @@ async def tts_handle(req: dict):
             emo_text = None
             if req["normalize_emo_vec"]:
                 emo_vec = tts_pipeline.normalize_emo_vec(emo_vec)
-        sampling_rate, wav_data = tts_pipeline.infer(
+        sampling_rate, wav_data = await tts_pipeline.infer(
             spk_audio_prompt=req["ref_audio_path"],
             emo_audio_prompt=req["emo_ref_audio_path"] if req["emo_ref_audio_path"] else None,
             text=req["text"],
@@ -196,6 +187,14 @@ async def tts_post_endpoint(request: TTS_Request):
 
 
 if __name__ == "__main__":
+    tts_pipeline = IndexTTS2(
+        model_dir=args.model_dir,
+        cfg_path=os.path.join(args.model_dir, "config.yaml"),
+        use_fp16=args.fp16,
+        # use_deepspeed=args.use_deepspeed,
+        use_cuda_kernel=args.cuda_kernel,
+        # use_qwen_emo=not args.no_qwen_emo,
+    )
     try:
         if host == "None":
             host = None
