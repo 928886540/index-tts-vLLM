@@ -239,6 +239,22 @@ class IndexTTS2:
 
         return wavs_list
 
+    def normalize_emo_vec(self, emo_vector, apply_bias=True):
+        # apply biased emotion factors for better user experience,
+        # by de-emphasizing emotions that can cause strange results
+        if apply_bias:
+            # [happy, angry, sad, afraid, disgusted, melancholic, surprised, calm]
+            emo_bias = [0.9375, 0.875, 1.0, 1.0, 0.9375, 0.9375, 0.6875, 0.5625]
+            emo_vector = [vec * bias for vec, bias in zip(emo_vector, emo_bias)]
+
+        # the total emotion sum must be 0.8 or less
+        emo_sum = sum(emo_vector)
+        if emo_sum > 0.8:
+            scale_factor = 0.8 / emo_sum
+            emo_vector = [vec * scale_factor for vec in emo_vector]
+
+        return emo_vector
+
     async def infer(self, spk_audio_prompt, text, output_path,
               emo_audio_prompt=None, emo_alpha=1.0,
               emo_vector=None,
