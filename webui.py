@@ -57,7 +57,7 @@ if __name__ == "__main__":
     MODE = 'local'
     tts = IndexTTS2(model_dir=cmd_args.model_dir,
                     cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
-                    use_fp16=cmd_args.fp16,
+                    is_fp16=cmd_args.fp16,
                     # use_deepspeed=cmd_args.deepspeed,
                     use_cuda_kernel=cmd_args.cuda_kernel,
                     use_qwen_emo=not cmd_args.no_qwen_emo,

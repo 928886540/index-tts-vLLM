@@ -190,7 +190,7 @@ if __name__ == "__main__":
     tts_pipeline = IndexTTS2(
         model_dir=args.model_dir,
         cfg_path=os.path.join(args.model_dir, "config.yaml"),
-        use_fp16=args.fp16,
+        is_fp16=args.fp16,
         # use_deepspeed=args.use_deepspeed,
         use_cuda_kernel=args.cuda_kernel,
         use_qwen_emo=not args.no_qwen_emo,
