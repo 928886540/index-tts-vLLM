@@ -8,7 +8,7 @@
  *   2. Reads/writes config to localStorage under key "indextts_tavo_config"
  *   3. Mounts a floating gear button → settings panel
  *   4. Sets up a MutationObserver on the configured chat container
- *   5. Injects a 🔊 button into each message; click → TTS pipeline
+ *   5. Injects a compact audio card into each message; click → TTS pipeline
  *
  * Pipeline (per message):
  *   text → [optional] LLM parse → segments → /tts_cache_stream or /tts_dialogue_stream
@@ -77,12 +77,12 @@
   function loadConfig() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return structuredClone(DEFAULTS);
+      if (!raw) return clonePlain(DEFAULTS);
       const parsed = JSON.parse(raw);
-      return mergeDeep(structuredClone(DEFAULTS), parsed);
+      return mergeDeep(clonePlain(DEFAULTS), parsed);
     } catch (e) {
       console.warn('[IndexTTS_TAVO] config parse failed, using defaults:', e);
-      return structuredClone(DEFAULTS);
+      return clonePlain(DEFAULTS);
     }
   }
 
@@ -100,6 +100,11 @@
       }
     }
     return target;
+  }
+
+  function clonePlain(value) {
+    if (typeof structuredClone === 'function') return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
   }
 
   function scriptOrigin() {
@@ -302,83 +307,321 @@
     return text;
   }
 
+  const STATUS_TEXT = {
+    idle: '待播放',
+    loading: '生成中...',
+    ready: '就绪',
+    error: '失败',
+  };
+
   function injectMessageButton(msgEl) {
     if (msgEl.getAttribute(INJECTED_ATTR)) return;
     msgEl.setAttribute(INJECTED_ATTR, '1');
 
-    const btn = document.createElement('button');
-    btn.textContent = '🔊';
-    btn.title = 'IndexTTS: 朗读这条消息';
-    btn.className = '_itts_play_btn';
-    Object.assign(btn.style, {
-      marginLeft: '4px', padding: '2px 6px', cursor: 'pointer',
-      border: '1px solid #888', background: 'transparent',
-      borderRadius: '4px', fontSize: '14px',
-    });
+    const card = buildAudioCard();
+    msgEl.appendChild(card.root);
 
-    btn.addEventListener('click', async (ev) => {
+    card.playBtn.addEventListener('click', async (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
+      if (card.state === 'error') {
+        clearCardAudio(card);
+        setCardState(card, 'idle');
+      }
+      if (card.audio) {
+        if (card.audio.paused) {
+          await playCardAudio(card).catch(() => {});
+        } else {
+          card.audio.pause();
+        }
+        return;
+      }
       const text = extractTextForTts(findMessageText(msgEl));
-      if (!text) return;
-      await playForMessage(msgEl, text, btn);
+      if (!text) {
+        setCardState(card, 'error', '没有可朗读文本');
+        return;
+      }
+      await playForMessage(msgEl, text, card);
     });
-
-    msgEl.appendChild(btn);
 
     if (cfg.autoPlay) {
       // best-effort: schedule a click after DOM settles
-      setTimeout(() => btn.click(), 200);
+      setTimeout(() => card.playBtn.click(), 200);
     }
   }
 
-  async function playForMessage(msgEl, text, btn) {
-    btn.disabled = true;
-    btn.textContent = '⏳';
+  function buildAudioCard() {
+    const root = document.createElement('div');
+    root.className = '_itts_audio_card';
+    Object.assign(root.style, {
+      marginTop: '8px',
+      maxWidth: '360px',
+      border: '1px solid rgba(148, 163, 184, 0.28)',
+      background: 'rgba(15, 23, 42, 0.82)',
+      borderRadius: '8px',
+      padding: '8px',
+      color: '#e5e7eb',
+      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      fontSize: '12px',
+      boxSizing: 'border-box',
+    });
+
+    const top = document.createElement('div');
+    top.className = '_itts_audio_card_top';
+    Object.assign(top.style, {
+      display: 'grid',
+      gridTemplateColumns: '34px minmax(0, 1fr)',
+      gap: '8px',
+      alignItems: 'center',
+    });
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '▶';
+    btn.title = 'IndexTTS: 朗读这条消息';
+    btn.className = '_itts_play_btn _itts_card_play';
+    Object.assign(btn.style, {
+      width: '34px',
+      height: '34px',
+      borderRadius: '50%',
+      border: '1px solid rgba(255, 255, 255, 0.2)',
+      background: '#2563eb',
+      color: '#fff',
+      cursor: 'pointer',
+      fontSize: '13px',
+      lineHeight: '1',
+      padding: '0',
+      textAlign: 'center',
+      boxShadow: '0 2px 8px rgba(37, 99, 235, 0.35)',
+    });
+    top.appendChild(btn);
+
+    const meta = document.createElement('div');
+    meta.className = '_itts_audio_meta';
+    Object.assign(meta.style, {
+      minWidth: '0',
+      display: 'grid',
+      gap: '4px',
+    });
+
+    const title = document.createElement('div');
+    title.className = '_itts_audio_title';
+    title.textContent = 'IndexTTS';
+    Object.assign(title.style, {
+      fontWeight: '650',
+      lineHeight: '1.2',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    });
+    meta.appendChild(title);
+
+    const status = document.createElement('div');
+    status.className = '_itts_audio_status';
+    status.textContent = STATUS_TEXT.idle;
+    Object.assign(status.style, {
+      color: '#9ca3af',
+      lineHeight: '1.2',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    });
+    meta.appendChild(status);
+
+    const progressTrack = document.createElement('div');
+    progressTrack.className = '_itts_progress_track';
+    Object.assign(progressTrack.style, {
+      width: '100%',
+      height: '3px',
+      overflow: 'hidden',
+      borderRadius: '999px',
+      background: 'rgba(148, 163, 184, 0.28)',
+    });
+
+    const progressBar = document.createElement('div');
+    progressBar.className = '_itts_progress_bar';
+    Object.assign(progressBar.style, {
+      width: '0%',
+      height: '100%',
+      borderRadius: '999px',
+      background: '#38bdf8',
+      transition: 'width 120ms linear',
+    });
+    progressTrack.appendChild(progressBar);
+    meta.appendChild(progressTrack);
+
+    top.appendChild(meta);
+    root.appendChild(top);
+
+    const body = document.createElement('div');
+    body.className = '_itts_audio_body';
+    Object.assign(body.style, {
+      marginTop: '7px',
+      display: 'none',
+    });
+    root.appendChild(body);
+
+    const card = {
+      root,
+      playBtn: btn,
+      title,
+      status,
+      progressBar,
+      body,
+      audio: null,
+      objectUrl: null,
+      state: 'idle',
+      disposed: false,
+    };
+    root._ittsCard = card;
+    return card;
+  }
+
+  function setCardState(card, state, detail) {
+    card.state = state;
+    card.root.setAttribute('data-itts-state', state);
+    card.status.textContent = detail || STATUS_TEXT[state] || state;
+    card.playBtn.disabled = state === 'loading';
+    card.playBtn.textContent = state === 'loading' ? '...' : '▶';
+    card.playBtn.style.background = state === 'error' ? '#b91c1c' : '#2563eb';
+    card.body.style.display = detail && state === 'error' ? 'block' : (card.audio ? 'block' : 'none');
+    if (state !== 'error' && !card.audio) {
+      card.body.textContent = '';
+    }
+    if (state === 'error') {
+      if (card.audio) {
+        if (window.__indextts_tavo_active_audio === card.audio) {
+          window.__indextts_tavo_active_audio = null;
+        }
+        card.audio.pause();
+        card.audio.removeAttribute('src');
+        card.audio.load();
+        card.audio = null;
+      }
+      if (card.objectUrl) {
+        URL.revokeObjectURL(card.objectUrl);
+        card.objectUrl = null;
+      }
+      card.body.textContent = detail || STATUS_TEXT.error;
+      card.progressBar.style.width = '0%';
+    }
+  }
+
+  function clearCardAudio(card) {
+    if (card.audio) {
+      if (window.__indextts_tavo_active_audio === card.audio) {
+        window.__indextts_tavo_active_audio = null;
+      }
+      card.audio.pause();
+      card.audio.removeAttribute('src');
+      card.audio.load();
+      card.audio = null;
+    }
+    if (card.objectUrl) {
+      URL.revokeObjectURL(card.objectUrl);
+      card.objectUrl = null;
+    }
+    card.body.innerHTML = '';
+    card.progressBar.style.width = '0%';
+  }
+
+  function disposeCard(card) {
+    if (!card || card.disposed) return;
+    card.disposed = true;
+    clearCardAudio(card);
+  }
+
+  function wireAudioToCard(card, audio) {
+    card.audio = audio;
+    audio.controls = true;
+    audio.preload = 'none';
+    audio.style.width = '100%';
+    audio.style.display = 'block';
+
+    audio.addEventListener('play', () => {
+      const active = window.__indextts_tavo_active_audio;
+      if (active && active !== audio) active.pause();
+      window.__indextts_tavo_active_audio = audio;
+      card.playBtn.textContent = '❚❚';
+    });
+    audio.addEventListener('pause', () => {
+      if (window.__indextts_tavo_active_audio === audio) {
+        window.__indextts_tavo_active_audio = null;
+      }
+      card.playBtn.textContent = '▶';
+    });
+    audio.addEventListener('ended', () => {
+      card.playBtn.textContent = '▶';
+      card.progressBar.style.width = '100%';
+    });
+    audio.addEventListener('timeupdate', () => {
+      if (!audio.duration || !isFinite(audio.duration)) return;
+      const pct = Math.max(0, Math.min(100, (audio.currentTime / audio.duration) * 100));
+      card.progressBar.style.width = pct.toFixed(1) + '%';
+    });
+    audio.addEventListener('error', () => {
+      setCardState(card, 'error', '音频加载失败');
+    });
+  }
+
+  async function playCardAudio(card) {
+    if (!card.audio) return;
+    const active = window.__indextts_tavo_active_audio;
+    if (active && active !== card.audio) active.pause();
+    try {
+      await card.audio.play();
+    } catch (e) {
+      if (window.__indextts_tavo_active_audio === card.audio) {
+        window.__indextts_tavo_active_audio = null;
+      }
+      throw e;
+    }
+  }
+
+  async function playForMessage(msgEl, text, card) {
+    setCardState(card, 'loading');
+    clearCardAudio(card);
     try {
       const segments = await parseTextToSegments(text);
-
-      // Container for audio
-      let audioWrap = msgEl.querySelector('._itts_audio_wrap');
-      if (!audioWrap) {
-        audioWrap = document.createElement('div');
-        audioWrap.className = '_itts_audio_wrap';
-        audioWrap.style.marginTop = '6px';
-        msgEl.appendChild(audioWrap);
-      }
-      audioWrap.innerHTML = '';
 
       if (segments.length === 1 && segments[0].role === 'default') {
         // Fast path: single-segment via GET (browser handles WAV streaming)
         const voice = cfg.voiceMap.default;
         if (!voice) throw new Error('default voice not configured');
         const audio = document.createElement('audio');
-        audio.controls = true;
-        audio.preload = cfg.autoPlay ? 'auto' : 'none';
+        card.title.textContent = 'IndexTTS · 单段';
+        wireAudioToCard(card, audio);
         audio.src = tts_stream_url(segments[0].text, voice);
-        audioWrap.appendChild(audio);
-        if (cfg.autoPlay) await audio.play().catch(() => {});
+        card.body.appendChild(audio);
+        card.body.style.display = 'block';
+        setCardState(card, 'ready');
+        await playCardAudio(card).catch(() => {});
       } else {
         // Multi-segment: POST and let the browser stream the response
         const res = await fetchDialogueStream(segments, cfg.voiceMap);
         const blob = await res.blob();   // TODO: replace with MediaSource for true streaming
         const url = URL.createObjectURL(blob);
         const audio = document.createElement('audio');
-        audio.controls = true;
-        audio.preload = 'auto';
+        card.objectUrl = url;
+        card.title.textContent = 'IndexTTS · 多段';
+        wireAudioToCard(card, audio);
         audio.src = url;
-        audioWrap.appendChild(audio);
-        if (cfg.autoPlay) await audio.play().catch(() => {});
+        card.body.appendChild(audio);
+        card.body.style.display = 'block';
+        setCardState(card, 'ready');
+        await playCardAudio(card).catch(() => {});
       }
-
-      btn.textContent = '🔊';
     } catch (e) {
       console.error('[IndexTTS_TAVO]', e);
-      btn.textContent = '⚠️';
-      btn.title = String(e);
+      setCardState(card, 'error', shortError(e));
     } finally {
-      btn.disabled = false;
+      if (card.state !== 'loading') card.playBtn.disabled = false;
     }
+  }
+
+  function shortError(err) {
+    const msg = err && err.message ? err.message : String(err || 'unknown error');
+    return msg.replace(/\s+/g, ' ').slice(0, 120);
   }
 
   // -------------------------------------------------------------------------
@@ -404,9 +647,22 @@
           }
           node.querySelectorAll && node.querySelectorAll(cfg.messageSelector).forEach(injectMessageButton);
         }
+        for (const node of r.removedNodes) {
+          if (!(node instanceof HTMLElement)) continue;
+          cleanupRemovedNode(node);
+        }
       }
     });
     observer.observe(root, { childList: true, subtree: true });
+  }
+
+  function cleanupRemovedNode(node) {
+    const cards = [];
+    if (node.matches && node.matches('._itts_audio_card')) cards.push(node);
+    node.querySelectorAll && node.querySelectorAll('._itts_audio_card').forEach(cardEl => cards.push(cardEl));
+    for (const cardEl of cards) {
+      if (cardEl._ittsCard) disposeCard(cardEl._ittsCard);
+    }
   }
 
   function stopObserver() {
@@ -593,10 +849,16 @@
 
   window.IndexTTS_TAVO = {
     init,
-    getConfig: () => structuredClone(cfg),
+    getConfig: () => clonePlain(cfg),
     setConfig: (patch) => { mergeDeep(cfg, patch); saveConfig(cfg); startObserver(); },
     rescan: () => startObserver(),
   };
+
+  window.addEventListener('beforeunload', () => {
+    document.querySelectorAll('._itts_audio_card').forEach(cardEl => {
+      if (cardEl._ittsCard) disposeCard(cardEl._ittsCard);
+    });
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

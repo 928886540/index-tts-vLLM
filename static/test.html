@@ -48,6 +48,9 @@
       color: #9aa4b2;
       font-size: 13px;
     }
+    audio {
+      max-height: 34px;
+    }
   </style>
 </head>
 <body>
@@ -63,9 +66,8 @@
         <div class="mes_text">&lt;tts&gt;旁白：走廊尽头的灯忽明忽暗。小明：别怕，我在这里。&lt;/tts&gt;</div>
       </article>
     </section>
-    <p class="hint">打开右下角设置按钮，配置 default/narrator/人物音色和可选 LLM。此页面只验证 JS 注入与 UI，不会自动触发语音生成。</p>
+    <p class="hint">打开右下角设置按钮，配置 default/narrator/人物音色和可选 LLM。页面会注入轻量音频卡；只有点击卡片播放按钮后才会触发语音生成。</p>
   </main>
   <script src="./tavo.js"></script>
 </body>
 </html>
-

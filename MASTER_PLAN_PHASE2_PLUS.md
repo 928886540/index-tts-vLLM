@@ -1,7 +1,7 @@
 # IndexTTS × TAVO 总体计划与分工(Phase 2+)
 
 最后更新:2026-05-25
-作者:Claude (Opus 4.7, 1M context),分支 `VLLM-tavo-api`
+作者:Claude 初版；Codex 接手维护，分支 `VLLM-tavo-api`
 配套已存在文档:
 - `COLLABORATION_PLAN_20260525.md` —— 双 Agent 协作守则(commit 前缀、分支隔离、避免踩坑)
 - `TAVO_INTEGRATION_PHASE1.md` —— Phase 1 已完成的 `/tts_stream` 文档
@@ -23,12 +23,13 @@ TAVO 浏览器
    │
    └─ 本机 IndexTTS 服务(0.0.0.0:9880)
         ├─ /tts_stream              ✅ P1 单段流式 (已完成)
-        ├─ /tts_dialogue_stream     ★ P2 多角色 + 情感 + 流式
-        ├─ /voices                  ★ P2 音色库 CRUD
-        ├─ /tts_cache_stream        ★ P3 快照 + 懒加载
-        ├─ /cache                   ★ P3 缓存管理
-        ├─ /parse_text              ⚪ P4 (可选)服务端代调 LLM
-        ├─ /static/tavo.js          ★ P5 自包含 JS
+        ├─ /tts_dialogue_stream     ✅ P2 多角色 + 情感 + 流式
+        ├─ /voices                  ✅ P2 音色库 CRUD
+        ├─ /tts_cache_stream        ✅ P3 单段快照 + 懒加载
+        ├─ /tts_dialogue_cache_stream ✅ P3 多角色整段快照 + 懒加载
+        ├─ /cache                   ✅ P3 缓存管理
+        ├─ /parse_text              ⚪ P4 (可选)服务端代调 LLM；当前先走客户端第三方 LLM
+        ├─ /static/tavo.js          ✅ P5 自包含 JS
         └─ /health                  ✅ 已完成
 ```
 
@@ -36,6 +37,19 @@ TAVO 浏览器
 - **轻量化**(目标用户:小白)。能不上数据库就不上,先文件系统;真要 DB 时**只用 SQLite**(Python 自带,零安装)。**永远不上 MySQL/MariaDB**。
 - **零配置启动**。解压 → 双击 bat → 复制一行 `<script>` 到 TAVO → 完成。
 - **本地资源,0 上传,完全 NSFW,0 费用**(用户原话)。
+
+### 参考图的轻量化落地
+
+用户提供的“Leon 自制音频服务接入系统”图可以作为最终形态参考，但本项目第一版不照搬重后台:
+
+| 图中层级 | 当前轻量版对应 | 取舍 |
+|---|---|---|
+| 客户端/使用层 | TAVO 浏览器 + 一条 `static/tavo.js` | 不做独立 Web 后台，先用浮动设置面板 |
+| API 服务层 | `indextts2_api.py` FastAPI | 单进程本地服务，先不拆微服务 |
+| 任务队列/异步调度 | `asyncio.Lock` 串行保护模型状态 | 暂不上 Redis/RabbitMQ；后续需要任务恢复再上 SQLite task 表 |
+| IndexTTS 服务层 | 本机 IndexTTS2 pipeline | 保持本地模型，不上传数据 |
+| 存储层 | `prompts/library`、`outputs/cache`、`static/` | 纯文件优先，小白可直接看懂和备份 |
+| 数据库层 | 当前无 DB；预留 `profile_store.py` SQLite | 只有 profile/历史/索引复杂后才启用 SQLite，永不上 MySQL |
 
 ---
 
@@ -51,9 +65,9 @@ TAVO 浏览器
 | 子任务 | 谁 | 文件 | 状态 |
 |---|---|---|---|
 | 2A `indextts/voice_library.py` 纯函数模块 | Codex | `indextts/voice_library.py` | 🟡 dispatching (background) |
-| 2B `POST /tts_dialogue_stream` 端点 | Claude | `indextts2_api.py` | 待开工 |
-| 2C `/voices` HTTP 包装(GET/POST/DELETE) | Claude | `indextts2_api.py` | 待开工(依赖 2A) |
-| 2D 文档 `TAVO_INTEGRATION_PHASE2.md` | Claude | 新建 | 待开工 |
+| 2B `POST /tts_dialogue_stream` 端点 | Claude/Codex | `indextts2_api.py` | ✅ 已完成 |
+| 2C `/voices` HTTP 包装(GET/POST/DELETE) | Codex | `indextts2_api.py` | ✅ 已完成 |
+| 2D 文档 `TAVO_INTEGRATION_PHASE2.md` | Codex | 新建 | 待补 |
 
 **请求 schema(POST /tts_dialogue_stream):**
 
@@ -95,9 +109,10 @@ TAVO 浏览器
 | 子任务 | 谁 | 文件 |
 |---|---|---|
 | 3A `indextts/snapshot_cache.py` 模块 | Codex | 新建 |
-| 3B 端点 `/tts_cache_stream`(带缓存的流式) | Claude | `indextts2_api.py` |
-| 3C 端点 `/cache` GET 列表 / DELETE 清理 | Claude | `indextts2_api.py` |
-| 3D 客户端懒加载约定:`<audio preload="none">` + 点击触发 | Claude(在 tavo.js 里) | `static/tavo.js`(P5) |
+| 3B 端点 `/tts_cache_stream`(带缓存的流式) | Codex | `indextts2_api.py` | ✅ |
+| 3C 端点 `/cache` GET 列表 / DELETE 清理 | Codex | `indextts2_api.py` | ✅ |
+| 3D 客户端懒加载约定:`<audio preload="none">` + 点击触发 | Codex | `static/tavo.js`(P5) | ✅ |
+| 3E 多角色整段缓存 `/tts_dialogue_cache_stream` | Codex | `indextts2_api.py` | ✅ |
 
 **缓存键设计:**
 ```python
@@ -125,7 +140,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 |---|---|---|
 | 4A 系统提示词模板 | Claude | `docs/llm_parse_prompt.md` 新建 |
 | 4B [可选] 服务端代理 `/parse_text` | Claude | `indextts2_api.py` + 新模块 `indextts/llm_proxy.py` |
-| 4C 客户端直调示例(放 tavo.js 里) | Claude | `static/tavo.js` |
+| 4C 客户端直调示例(放 tavo.js 里) | Codex | `static/tavo.js` | ✅ OpenAI-compatible |
 
 **默认策略:** 客户端直调(用户在浏览器里填 OpenAI/Claude API key 存 localStorage)。
 **可选策略:** 服务端代理(给不想前端管 key 的用户)。
@@ -146,9 +161,10 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 | 子任务 | 谁 | 文件 |
 |---|---|---|
 | 5A 静态文件路由 | Claude | `indextts2_api.py`(`app.mount("/static", ...)`) |
-| 5B `tavo.js` 核心 | Claude | `static/tavo.js` 新建 |
-| 5C Settings 面板 UI | Claude | `static/tavo.js`(浮动面板) |
-| 5D 集成测试 HTML | Claude | `static/test.html` |
+| 5B `tavo.js` 核心 | Codex | `static/tavo.js` 新建 | ✅ |
+| 5C Settings 面板 UI | Codex | `static/tavo.js`(浮动面板) | ✅ 基础版 |
+| 5D 集成测试 HTML | Codex | `static/test.html` | ✅ |
+| 5E xiaomi 风格轻量音频卡 | Codex worker | `static/tavo.js` | 进行中 |
 
 **tavo.js 责任:**
 - MutationObserver 监听 TAVO 聊天 DOM
@@ -164,9 +180,9 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 **依赖:** 纯 vanilla JS,无第三方库,无 build 步骤。文件直接是源码,小白可读可改。
 
 ### ⚪ Phase 6:UI 优化 + 音色卡设计
-- 参考 `D:\apiWorkSpace\ComfyUI-aki\ComfyUI-aki-v3\ComfyUI\app\ios`(xiaomi tts 项目)
-- 音色卡组件、波形可视化、播放控制条
-- **暂不展开**,等 P2-P5 跑通再做
+- 已探索 `D:\apiWorkSpace\ComfyUI-aki\ComfyUI-aki-v3\ComfyUI\app\ios`(xiaomi tts 项目)
+- 借鉴点: 轻量卡、完整播放器懒加载、cache-first、单全局 audio、history handoff
+- 当前先做轻量卡，不做完整大后台
 
 ---
 
@@ -210,23 +226,15 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 ## 四、执行顺序(从现在开始)
 
 ```
-[正在跑]   Codex P2A (voice_library.py)
-[等]       ↓ 完成后 push
-[Claude]   P2B + P2C (/tts_dialogue_stream + /voices)
-[Claude]   P2D 文档
+[已完成] P2A/P2B/P2C: voice_library + dialogue endpoint + voices API
+[已完成] P3A/P3B/P3C/P3E: snapshot_cache + cache endpoints + dialogue cache
+[已完成] P4C: 客户端 OpenAI-compatible LLM 解析配置
+[已完成] P5A/P5B/P5C/P5D: static route + tavo.js + settings + test.html
+[进行中] P5E/P6A: xiaomi 风格轻量音频卡、单全局 audio、懒加载卡片
+[进行中] 架构文档: 参考用户图，落成轻量实际版
+[预研] 可选 SQLite profile_store: 只在 profile/历史/任务索引需要时接入
             ↓
-[派 Codex] P3A (snapshot_cache.py)
-[Claude]   P3B + P3C (缓存端点)
-            ↓
-[Claude]   P4A 提示词模板
-[Claude 可选] P4B 服务端 LLM 代理
-            ↓
-[Claude]   P5A + P5B + P5C(/static + tavo.js + settings 面板)
-[Claude]   P5D 测试页
-            ↓
-联调 → 给用户上手测试 → 收反馈
-            ↓
-[酌情] P6 UI 优化(参考 xiaomi)
+静态验证 → 提交推送 → 等用户允许后再启动服务联调
 ```
 
 每个阶段完成都 `git push userrepo` 让用户随时能 pull 测试。
@@ -263,6 +271,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 | 日期时间 | 修订者 | 变更 |
 |---|---|---|
 | 2026-05-25 02:00 | Claude (Opus 4.7) | 初版。整合用户陆续提出的:多角色情感(P2)、轻量化 + SQLite 准入条件、单 JS 注入(P5)、快照缓存 + 懒加载(P3) |
+| 2026-05-25 03:xx | Codex | 接手后更新真实状态；加入用户架构图的轻量化映射；标记缓存、多角色、单 JS、客户端 LLM 的完成状态 |
 
 ---
 

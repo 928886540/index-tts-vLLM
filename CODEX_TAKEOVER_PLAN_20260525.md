@@ -29,9 +29,9 @@ TAVO API worktree:
   - `d8df358 [claude] Add MASTER_PLAN_PHASE2_PLUS for the full TAVO integration scope`
   - `14c7b6b [claude] Add /tts_dialogue_stream endpoint (Phase 2B) for multi-voice + emotion`
 - 当前未提交主线:
-  - `indextts2_api.py`: `/tts_cache_stream`、`/tts_dialogue_cache_stream`、`/cache` 接口层
-  - `static/tavo.js`: 默认走 `/tts_cache_stream`，保留懒加载 `<audio preload="none">`
-  - 本文件状态修订
+- `indextts2_api.py`: `/tts_cache_stream`、`/tts_dialogue_cache_stream`、`/cache` 接口层
+- `static/tavo.js`: 默认走 `/tts_cache_stream`，保留懒加载 `<audio preload="none">`
+- `indextts/profile_store.py`: 可选 SQLite profile/usage 模块，已合入但未接 API
 
 ## 正在分发的子任务
 
@@ -49,6 +49,24 @@ TAVO API worktree:
    - 状态: 已完成并推送到 `VLLM`
    - 提交: `a45c59e [codex] Add snapshot_cache module for lazy TTS reuse`
    - 目标: 纯文件缓存 `outputs/cache/<sha1>.wav|.json`，用于后续懒加载复用
+
+3. SQLite profile 模块
+   - 类型: worker
+   - 分支/仓库: `VLLM`
+   - 状态: 已完成并推送到 `VLLM`
+   - 提交: `e9dff09 [codex] Add lightweight SQLite profile store`
+   - 目标: 可选保存 TAVO profile、角色音色映射、LLM 配置摘要和 usage logs
+   - 当前: 只合入模块，不接 API，避免提前扩大复杂度
+
+4. 轻量音频卡
+   - 类型: worker
+   - 状态: 已完成待提交
+   - 目标: 消息内紧凑音频卡、懒加载、单全局 audio、状态/mini progress
+
+5. 轻量架构文档
+   - 类型: worker
+   - 状态: 已完成待提交
+   - 文件: `LIGHTWEIGHT_ARCHITECTURE_20260525.md`
 
 ## 接下来主线顺序
 
@@ -72,7 +90,8 @@ TAVO API worktree:
    - 已默认优先调用 `/tts_cache_stream` 和 `/tts_dialogue_cache_stream`
    - 已加: LLM 解析配置面板(OpenAI-compatible endpoint/key/model/prompt)
    - 已加: role -> voice 行文本映射 UI
-   - 待做: 借鉴 xiaomi 的轻量音频卡、单全局活动 audio、完整播放器懒加载
+   - 已加: 借鉴 xiaomi 的轻量音频卡、单全局活动 audio、点击后才触发生成
+   - 待做: 完整播放器懒加载和历史 handoff
 
 5. 写用户向 Quickstart
    - 启动本地服务
@@ -87,6 +106,7 @@ Codex 主线当前可改:
 - `static/test.html`
 - `CODEX_TAKEOVER_PLAN_20260525.md`
 - 后续缓存集成需要的 `indextts/snapshot_cache.py`
+- 可选 SQLite profile 模块 `indextts/profile_store.py`
 
 不要改:
 - `音色参考音频/`
