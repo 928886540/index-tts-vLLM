@@ -206,9 +206,11 @@
     return apiUrl(endpoint + params.toString());
   }
 
-  // For multi-segment (after LLM parse). Returns a Blob URL — we POST,
-  // then stream the response into a MediaSource. For Phase 5B skeleton
-  // this just POSTs and returns once response.body is available.
+  // For multi-segment (after LLM parse). We POST parsed segments and return
+  // the fetch Response; the caller currently buffers it into a Blob for the
+  // browser audio element. This keeps the client simple for the lightweight
+  // TAVO bridge. MediaSource can be added later if true client-side streaming
+  // is needed.
   async function fetchDialogueStream(segments, voices) {
     const endpoint = cfg.cache.enabled ? '/tts_dialogue_cache_stream' : '/tts_dialogue_stream';
     const body = {
@@ -762,7 +764,7 @@
         // Multi-segment: POST and let the browser stream the response
         const res = await fetchDialogueStream(segments, cfg.voiceMap);
         updateCacheChip(card, res.headers.get('X-IndexTTS-Cache'));
-        const blob = await res.blob();   // TODO: replace with MediaSource for true streaming
+        const blob = await res.blob();   // Keep simple; MediaSource can be added later.
         const url = URL.createObjectURL(blob);
         const audio = document.createElement('audio');
         card.objectUrl = url;

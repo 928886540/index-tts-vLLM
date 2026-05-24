@@ -64,10 +64,10 @@ TAVO 浏览器
 
 | 子任务 | 谁 | 文件 | 状态 |
 |---|---|---|---|
-| 2A `indextts/voice_library.py` 纯函数模块 | Codex | `indextts/voice_library.py` | 🟡 dispatching (background) |
+| 2A `indextts/voice_library.py` 纯函数模块 | Codex | `indextts/voice_library.py` | ✅ 已完成 |
 | 2B `POST /tts_dialogue_stream` 端点 | Claude/Codex | `indextts2_api.py` | ✅ 已完成 |
 | 2C `/voices` HTTP 包装(GET/POST/DELETE) | Codex | `indextts2_api.py` | ✅ 已完成 |
-| 2D 文档 `TAVO_INTEGRATION_PHASE2.md` | Codex | 新建 | 待补 |
+| 2D 文档 | Codex | `TAVO_API_REFERENCE_20260525.md` | ✅ 已完成 |
 
 **请求 schema(POST /tts_dialogue_stream):**
 
@@ -138,7 +138,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 
 | 子任务 | 谁 | 文件 |
 |---|---|---|
-| 4A 系统提示词模板 | Claude | `docs/llm_parse_prompt.md` 新建 |
+| 4A 系统提示词模板 | Codex | `TAVO_LLM_PROMPT_20260525.md` |
 | 4B [可选] 服务端代理 `/parse_text` | Claude | `indextts2_api.py` + 新模块 `indextts/llm_proxy.py` |
 | 4C 客户端直调示例(放 tavo.js 里) | Codex | `static/tavo.js` | ✅ OpenAI-compatible |
 
@@ -164,7 +164,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 | 5B `tavo.js` 核心 | Codex | `static/tavo.js` 新建 | ✅ |
 | 5C Settings 面板 UI | Codex | `static/tavo.js`(浮动面板) | ✅ 基础版 |
 | 5D 集成测试 HTML | Codex | `static/test.html` | ✅ |
-| 5E xiaomi 风格轻量音频卡 | Codex worker | `static/tavo.js` | 进行中 |
+| 5E xiaomi 风格轻量音频卡 | Codex | `static/tavo.js` | ✅ 基础版 |
 | 5F 音色库选择器 | Codex | `static/tavo.js` | ✅ 手动刷新/设默认/插入映射 |
 | 5G 缓存管理 UI | Codex | `static/tavo.js` | ✅ 手动刷新/删除/prune |
 
@@ -198,20 +198,20 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 | `indextts/infer_vllm_v2.py` | 已改(stream callback / trim) |
 | `webui.py` | 已改(WebUI 流式) |
 | `patch_vllm.py` | 已改(GBK 修复) |
-| **`indextts/voice_library.py`** | 🟡 **正在做(P2A)** |
-| **`indextts/snapshot_cache.py`** | 待做(P3A) |
+| **`indextts/voice_library.py`** | 已完成 |
+| **`indextts/snapshot_cache.py`** | 已完成 |
 | `prompts/audio_history.json` | Codex 维护 |
 | 启动 bat 文件 | Codex 维护(已被 gitignore) |
 
 ### Claude 的领地(`VLLM-tavo-api` 分支)
 | 文件 | 状态 |
 |---|---|
-| `indextts2_api.py` | 已加 `/tts_stream` / `/health`,继续加 P2-P5 端点 |
-| `static/tavo.js` | 待做(P5B) |
-| `static/test.html` | 待做(P5D) |
+| `indextts2_api.py` | 已加 P1-P5 端点、CORS、static mount |
+| `static/tavo.js` | 已完成基础版: 单 JS、设置面板、LLM、音色、缓存、轻量卡 |
+| `static/test.html` | 已完成基础测试页 |
 | `indextts/llm_proxy.py` | 待做(P4B,可选) |
 | 所有 `TAVO_*.md` / `MASTER_*.md` 文档 | Claude 维护 |
-| `docs/llm_parse_prompt.md` | 待做(P4A) |
+| `TAVO_LLM_PROMPT_20260525.md` | 已完成(P4A) |
 
 ### 共享只读(不要修改对方维护的)
 - `HANDOFF_WORK_SUMMARY_*.md` —— Codex 写,Claude 只读
@@ -232,8 +232,8 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 [已完成] P3A/P3B/P3C/P3E: snapshot_cache + cache endpoints + dialogue cache
 [已完成] P4C: 客户端 OpenAI-compatible LLM 解析配置
 [已完成] P5A/P5B/P5C/P5D: static route + tavo.js + settings + test.html
-[进行中] P5E/P6A: xiaomi 风格轻量音频卡、单全局 audio、懒加载卡片
-[进行中] 架构文档: 参考用户图，落成轻量实际版
+[已完成] P5E/P6A 基础版: xiaomi 风格轻量音频卡、单全局 audio、懒加载卡片
+[已完成] 架构文档: 参考用户图，落成轻量实际版
 [预研] 可选 SQLite profile_store: 只在 profile/历史/任务索引需要时接入
 [已完成] P5F: 设置面板音色库选择器，手动刷新 `/voices`
 [已完成] P5G: 设置面板快照缓存管理，手动刷新 `/cache`
@@ -278,6 +278,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 | 2026-05-25 03:xx | Codex | 接手后更新真实状态；加入用户架构图的轻量化映射；标记缓存、多角色、单 JS、客户端 LLM 的完成状态 |
 | 2026-05-25 03:xx | Codex | 增加设置面板音色库选择器和 `TAVO_API_REFERENCE_20260525.md` |
 | 2026-05-25 03:xx | Codex | 增加设置面板快照缓存管理 UI |
+| 2026-05-25 04:xx | Codex | 增加 LLM 提示词文档、选择器指南、轻量测试页，并修正 P2-P6 实际状态 |
 
 ---
 

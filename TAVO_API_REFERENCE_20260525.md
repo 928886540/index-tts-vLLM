@@ -30,6 +30,12 @@ The script stores settings in browser `localStorage` under `indextts_tavo_config
 
 Static mock page for checking TAVO-style DOM injection and settings UI. It does not call TTS until a user clicks an audio card.
 
+Related docs:
+
+- `QUICKSTART_TAVO.md`: first-run setup for non-technical users.
+- `TAVO_SELECTOR_GUIDE_20260525.md`: selector, regex, and one-line injection troubleshooting.
+- `TAVO_LLM_PROMPT_20260525.md`: optional third-party LLM parsing prompt and JSON schema.
+
 ## Health
 
 ### GET `/health`
