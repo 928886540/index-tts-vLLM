@@ -421,6 +421,169 @@ class TextTokenizer:
                 merged_segments.append(segment)
         return merged_segments
 
+    @staticmethod
+    def _piece_body(token: str) -> str:
+        return token.lstrip("▁")
+
+    @staticmethod
+    def _piece_has_digit(token: str) -> bool:
+        return any(ch.isdigit() for ch in TextTokenizer._piece_body(token))
+
+    @staticmethod
+    def _is_sentence_end_piece(tokens: List[str], index: int) -> bool:
+        body = TextTokenizer._piece_body(tokens[index])
+        if not body:
+            return False
+
+        # Do not treat decimal points like 2.5 as sentence endings.
+        if body == "." and index > 0 and index + 1 < len(tokens):
+            if TextTokenizer._piece_has_digit(tokens[index - 1]) and TextTokenizer._piece_has_digit(tokens[index + 1]):
+                return False
+
+        if body in {".", "!", "?", "。", "！", "？", "...", "…", "……"}:
+            return True
+        return body.endswith(("...", "……", "…", ".", "!", "?", "。", "！", "？"))
+
+    @staticmethod
+    def _is_closing_piece(token: str) -> bool:
+        body = TextTokenizer._piece_body(token)
+        if not body:
+            return False
+        closers = set("'\"”’)]}）】》」』")
+        return all(ch in closers for ch in body)
+
+    @staticmethod
+    def _is_weak_boundary_piece(token: str) -> bool:
+        body = TextTokenizer._piece_body(token)
+        if not body:
+            return False
+        weak_boundaries = {",", "，", "、", ";", "；", ":", "：", "-", "—", "–"}
+        return body in weak_boundaries or body.endswith(tuple(weak_boundaries))
+
+    @staticmethod
+    def _split_oversized_sentence(
+        sentence: List[str],
+        target_text_tokens_per_segment: int,
+        hard_max_text_tokens_per_segment: int,
+        min_text_tokens_per_segment: int,
+    ) -> List[List[str]]:
+        if len(sentence) <= hard_max_text_tokens_per_segment:
+            return [sentence]
+
+        pieces: List[List[str]] = []
+        start = 0
+        sentence_len = len(sentence)
+        while sentence_len - start > hard_max_text_tokens_per_segment:
+            preferred_end = min(sentence_len, start + target_text_tokens_per_segment)
+            hard_end = min(sentence_len, start + hard_max_text_tokens_per_segment)
+            min_end = min(
+                hard_end - 1,
+                start + max(1, min(min_text_tokens_per_segment, target_text_tokens_per_segment)),
+            )
+            cut = None
+
+            # First use the closest weak boundary after the target length, if one exists.
+            for idx in range(preferred_end, hard_end):
+                if TextTokenizer._is_weak_boundary_piece(sentence[idx]):
+                    cut = idx + 1
+                    break
+
+            # Otherwise use the nearest weak boundary before the target length.
+            if cut is None:
+                for idx in range(preferred_end - 1, min_end - 1, -1):
+                    if TextTokenizer._is_weak_boundary_piece(sentence[idx]):
+                        cut = idx + 1
+                        break
+
+            if cut is None or cut <= start:
+                cut = preferred_end
+
+            pieces.append(sentence[start:cut])
+            start = cut
+
+        if start < sentence_len:
+            pieces.append(sentence[start:])
+        return [piece for piece in pieces if piece]
+
+    @staticmethod
+    def split_segments_by_sentence_boundary(
+        tokenized_str: List[str],
+        max_text_tokens_per_segment: int,
+        hard_max_text_tokens_per_segment: int = None,
+        min_text_tokens_per_segment: int = 0,
+        quick_streaming_tokens: int = 0,
+    ) -> List[List[str]]:
+        """
+        Stream-friendly soft segmentation.
+
+        Complete sentence endings are preferred. The token limits are used as a
+        target and a safety cap, not as a reason to cut through normal sentences.
+        Oversized sentences fall back to weak punctuation before hard token cuts.
+        """
+        if len(tokenized_str) == 0:
+            return []
+
+        target_tokens = max(1, int(max_text_tokens_per_segment))
+        hard_tokens = int(hard_max_text_tokens_per_segment or max(target_tokens, target_tokens * 2))
+        hard_tokens = max(target_tokens, hard_tokens)
+        min_tokens = max(0, int(min_text_tokens_per_segment))
+        quick_tokens = max(0, int(quick_streaming_tokens))
+
+        sentences: List[List[str]] = []
+        current_sentence: List[str] = []
+        sentence_end_pending = False
+        for i, token in enumerate(tokenized_str):
+            current_sentence.append(token)
+            if TextTokenizer._is_sentence_end_piece(tokenized_str, i):
+                sentence_end_pending = True
+
+            next_is_closing = i + 1 < len(tokenized_str) and TextTokenizer._is_closing_piece(tokenized_str[i + 1])
+            if sentence_end_pending and not next_is_closing:
+                sentences.append(current_sentence)
+                current_sentence = []
+                sentence_end_pending = False
+
+        if current_sentence:
+            sentences.append(current_sentence)
+
+        pieces: List[List[str]] = []
+        for sentence in sentences:
+            pieces.extend(
+                TextTokenizer._split_oversized_sentence(
+                    sentence,
+                    target_tokens,
+                    hard_tokens,
+                    min_tokens,
+                )
+            )
+
+        merged_segments: List[List[str]] = []
+        current_segment: List[str] = []
+        for piece in pieces:
+            if not piece:
+                continue
+            if not current_segment:
+                current_segment = piece
+                continue
+
+            first_segment = len(merged_segments) == 0
+            target_for_current = quick_tokens if first_segment and quick_tokens > 0 else target_tokens
+            combined_len = len(current_segment) + len(piece)
+            should_merge = combined_len <= target_for_current
+            if not should_merge and len(current_segment) < min_tokens and combined_len <= hard_tokens:
+                should_merge = True
+
+            if should_merge:
+                current_segment = current_segment + piece
+            else:
+                merged_segments.append(current_segment)
+                current_segment = piece
+
+        if current_segment:
+            merged_segments.append(current_segment)
+
+        return merged_segments
+
     punctuation_marks_tokens = [
         ".",
         "!",

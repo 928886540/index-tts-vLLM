@@ -216,6 +216,14 @@ class IndexTTS2:
         feat = (feat - self.semantic_mean) / self.semantic_std
         return feat
 
+    def _set_gr_progress(self, value, desc):
+        if self.gr_progress is None:
+            return
+        try:
+            self.gr_progress(value, desc=desc)
+        except Exception:
+            pass
+
     def insert_interval_silence(self, wavs, sampling_rate=22050, interval_silence=200):
         """
         Insert silences between sentences.
@@ -262,8 +270,27 @@ class IndexTTS2:
               verbose=False, max_text_tokens_per_sentence=120, **generation_kwargs):
         print(">> start inference...")
         start_time = time.perf_counter()
+        self._set_gr_progress(0.01, "准备生成...")
+        max_text_tokens_per_sentence = int(
+            generation_kwargs.pop("max_text_tokens_per_segment", max_text_tokens_per_sentence)
+        )
+        diffusion_steps = int(generation_kwargs.pop("diffusion_steps", 16))
+        stream_chunk_callback = generation_kwargs.pop("stream_chunk_callback", None)
+        stop_generation_callback = generation_kwargs.pop("stop_generation_callback", None)
+        quick_streaming_tokens = int(generation_kwargs.pop("quick_streaming_tokens", 0))
+        prefer_sentence_boundary = bool(generation_kwargs.pop("prefer_sentence_boundary", False))
+        sentence_split_hard_max_tokens = generation_kwargs.pop("sentence_split_hard_max_tokens", None)
+        sentence_split_min_tokens = int(generation_kwargs.pop("sentence_split_min_tokens", 0))
+        if sentence_split_hard_max_tokens is not None:
+            sentence_split_hard_max_tokens = int(sentence_split_hard_max_tokens)
+
+        def should_stop_generation():
+            if stop_generation_callback is None:
+                return False
+            return bool(stop_generation_callback())
 
         if use_emo_text:
+            self._set_gr_progress(0.03, "分析情感描述...")
             emo_audio_prompt = None
             emo_alpha = 1.0
             # assert emo_audio_prompt is None
@@ -289,6 +316,7 @@ class IndexTTS2:
 
         # 如果参考音频改变了，才需要重新生成, 提升速度
         if self.cache_spk_cond is None or self.cache_spk_audio_prompt != spk_audio_prompt:
+            self._set_gr_progress(0.05, "处理音色参考音频...")
             audio, sr = librosa.load(spk_audio_prompt)
             audio = torch.tensor(audio).unsqueeze(0)
             audio_22k = torchaudio.transforms.Resample(sr, 22050)(audio)
@@ -354,12 +382,31 @@ class IndexTTS2:
         else:
             emo_cond_emb = self.cache_emo_cond
 
+        self._set_gr_progress(0.10, "文本分句...")
         text_tokens_list = self.tokenizer.tokenize(text)
-        sentences = self.tokenizer.split_segments(text_tokens_list, max_text_tokens_per_sentence)
+        if prefer_sentence_boundary:
+            sentences = self.tokenizer.split_segments_by_sentence_boundary(
+                text_tokens_list,
+                max_text_tokens_per_sentence,
+                hard_max_text_tokens_per_segment=sentence_split_hard_max_tokens,
+                min_text_tokens_per_segment=sentence_split_min_tokens,
+                quick_streaming_tokens=quick_streaming_tokens,
+            )
+        else:
+            sentences = self.tokenizer.split_segments(
+                text_tokens_list,
+                max_text_tokens_per_sentence,
+                quick_streaming_tokens=quick_streaming_tokens,
+            )
+        total_segments = max(1, len(sentences))
+        self._set_gr_progress(0.12, f"共 {len(sentences)} 段，开始合成...")
         if verbose:
             print("text_tokens_list:", text_tokens_list)
             print("sentences count:", len(sentences))
             print("max_text_tokens_per_sentence:", max_text_tokens_per_sentence)
+            print("quick_streaming_tokens:", quick_streaming_tokens)
+            print("prefer_sentence_boundary:", prefer_sentence_boundary)
+            print("sentence_split_hard_max_tokens:", sentence_split_hard_max_tokens)
             print(*sentences, sep="\n")
 
         sampling_rate = 22050
@@ -370,7 +417,17 @@ class IndexTTS2:
         s2mel_time = 0
         bigvgan_time = 0
         has_warned = False
-        for sent in sentences:
+        stopped = False
+        for seg_idx, sent in enumerate(sentences):
+            segment_start_time = time.perf_counter()
+            if should_stop_generation():
+                stopped = True
+                print(">> generation stopped by user request")
+                break
+            self._set_gr_progress(
+                0.12 + 0.78 * seg_idx / total_segments,
+                f"正在生成第 {seg_idx + 1}/{len(sentences)} 段",
+            )
             text_tokens = self.tokenizer.convert_tokens_to_ids(sent)
             text_tokens = torch.tensor(text_tokens, dtype=torch.int32, device=self.device).unsqueeze(0)
 
@@ -403,9 +460,17 @@ class IndexTTS2:
                     emo_cond_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
                     emo_vec=emovec,
                 )
+                if should_stop_generation():
+                    stopped = True
+                    print(">> generation stopped by user request")
+                    break
                 # print("codes: ", codes)
                 gpt_gen_time += time.perf_counter() - m_start_time
-                if not has_warned and (codes[:, -1] != self.stop_mel_token).any():
+                if (
+                    not has_warned
+                    and codes.shape[-1] >= self.cfg.gpt.max_mel_tokens
+                    and (codes[:, -1] != self.stop_mel_token).any()
+                ):
                     warnings.warn(
                         f"WARN: generation stopped due to exceeding `max_mel_tokens` ({self.cfg.gpt.max_mel_tokens}). "
                         f"Input text tokens: {text_tokens.shape[1]}. "
@@ -454,11 +519,14 @@ class IndexTTS2:
                     use_speed=use_speed,
                 )
                 gpt_forward_time += time.perf_counter() - m_start_time
+                if should_stop_generation():
+                    stopped = True
+                    print(">> generation stopped by user request")
+                    break
 
                 dtype = None
                 with torch.amp.autocast(text_tokens.device.type, enabled=dtype is not None, dtype=dtype):
                     m_start_time = time.perf_counter()
-                    diffusion_steps = 25
                     inference_cfg_rate = 0.7
                     latent = self.s2mel.models['gpt_layer'](latent)
                     S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
@@ -478,6 +546,10 @@ class IndexTTS2:
                                                                    inference_cfg_rate=inference_cfg_rate)
                     vc_target = vc_target[:, :, ref_mel.size(-1):]
                     s2mel_time += time.perf_counter() - m_start_time
+                    if should_stop_generation():
+                        stopped = True
+                        print(">> generation stopped by user request")
+                        break
 
                     m_start_time = time.perf_counter()
                     wav = self.bigvgan(vc_target.float()).squeeze().unsqueeze(0)
@@ -486,12 +558,49 @@ class IndexTTS2:
                     wav = wav.squeeze(1)
 
                 wav = torch.clamp(32767 * wav, -32767.0, 32767.0)
+                if should_stop_generation():
+                    stopped = True
+                    print(">> generation stopped by user request")
+                    break
                 if verbose:
                     print(f"wav shape: {wav.shape}", "min:", wav.min(), "max:", wav.max())
                 # wavs.append(wav[:, :-512])
-                wavs.append(wav.cpu())  # to cpu before saving
+                chunk_wav = wav.cpu()
+                wavs.append(chunk_wav)  # to cpu before saving
+                chunk_audio_length = chunk_wav.shape[-1] / sampling_rate
+                chunk_elapsed = time.perf_counter() - segment_start_time
+                if stream_chunk_callback is not None or verbose:
+                    chunk_rtf = chunk_elapsed / chunk_audio_length if chunk_audio_length > 0 else float("inf")
+                    print(
+                        f">> chunk {seg_idx + 1}/{len(sentences)}: "
+                        f"text_tokens={len(sent)}, audio={chunk_audio_length:.2f}s, "
+                        f"elapsed={chunk_elapsed:.2f}s, RTF={chunk_rtf:.2f}"
+                    )
+                if stream_chunk_callback is not None:
+                    result = stream_chunk_callback(
+                        chunk_wav,
+                        sampling_rate,
+                        seg_idx,
+                        len(sentences),
+                    )
+                    if hasattr(result, "__await__"):
+                        await result
+            self._set_gr_progress(
+                0.12 + 0.78 * (seg_idx + 1) / total_segments,
+                f"已完成第 {seg_idx + 1}/{len(sentences)} 段",
+            )
         end_time = time.perf_counter()
 
+        if stopped:
+            self._set_gr_progress(1.0, "已停止生成")
+            print(">> generation stopped before final audio merge")
+            return None
+
+        if not wavs:
+            self._set_gr_progress(1.0, "未生成音频")
+            return None
+
+        self._set_gr_progress(0.92, "合并音频...")
         wavs = self.insert_interval_silence(wavs, sampling_rate=sampling_rate, interval_silence=interval_silence)
 
         wav = torch.cat(wavs, dim=1)
@@ -505,6 +614,7 @@ class IndexTTS2:
         print(f">> RTF: {(end_time - start_time) / wav_length:.4f}")
 
         # save audio
+        self._set_gr_progress(0.96, "保存音频...")
         wav = wav.cpu()  # to cpu
         if output_path:
             # 直接保存音频到指定路径中
@@ -515,11 +625,13 @@ class IndexTTS2:
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
             torchaudio.save(output_path, wav.type(torch.int16), sampling_rate)
             print(">> wav file saved to:", output_path)
+            self._set_gr_progress(1.0, "生成完成")
             return output_path
         else:
             # 返回以符合Gradio的格式要求
             wav_data = wav.type(torch.int16)
             wav_data = wav_data.numpy().T
+            self._set_gr_progress(1.0, "生成完成")
             return (sampling_rate, wav_data)
 
 

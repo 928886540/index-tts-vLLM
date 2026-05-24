@@ -1,4 +1,6 @@
 import html
+import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -11,6 +13,8 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import pandas as pd
+import torch
+import torchaudio
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -76,7 +80,20 @@ if __name__ == "__main__":
     os.makedirs("outputs/tasks",exist_ok=True)
     os.makedirs("prompts",exist_ok=True)
 
-    MAX_LENGTH_TO_USE_SPEED = 70
+    STREAM_TARGET_SEGMENT_TOKENS = 96
+    STREAM_HARD_SEGMENT_TOKENS = 112
+    STREAM_FIRST_SEGMENT_TOKENS = 48
+    STREAM_MIN_SEGMENT_TOKENS = 28
+
+    def get_stream_split_limits(requested_segment_tokens):
+        target_tokens = min(int(requested_segment_tokens), STREAM_TARGET_SEGMENT_TOKENS)
+        hard_tokens = min(
+            STREAM_HARD_SEGMENT_TOKENS,
+            max(target_tokens + 24, int(target_tokens * 1.35)),
+        )
+        first_tokens = min(STREAM_FIRST_SEGMENT_TOKENS, target_tokens)
+        return target_tokens, hard_tokens, first_tokens
+
     example_cases = []
     with open("examples/cases.jsonl", "r", encoding="utf-8") as f:
         for line in f:
@@ -112,12 +129,29 @@ if __name__ == "__main__":
         # exclude emotion control mode 3 (emotion from text description)
         return [x for x in example_cases if x[1] != EMO_CHOICES_ALL[3]]
 
+    cancel_generation = {"value": False, "task": None, "loop": None}
+
+    def request_cancel():
+        cancel_generation["value"] = True
+        task = cancel_generation.get("task")
+        loop = cancel_generation.get("loop")
+        if task is not None and not task.done():
+            if loop is not None and loop.is_running():
+                loop.call_soon_threadsafe(task.cancel)
+            else:
+                task.cancel()
+        gr.Info(i18n("已请求停止，正在中断当前生成"))
+
     async def gen_single(emo_control_method,prompt, text,
                 emo_ref_path, emo_weight,
                 vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                 emo_text,emo_random,
+                stream_mode,
                 max_text_tokens_per_segment=120,
                     *args, progress=gr.Progress()):
+        cancel_generation["value"] = False
+        cancel_generation["task"] = None
+        cancel_generation["loop"] = asyncio.get_running_loop()
         output_path = None
         if not output_path:
             output_path = os.path.join("outputs", f"spk_{int(time.time())}.wav")
@@ -155,15 +189,109 @@ if __name__ == "__main__":
             emo_text = None
 
         print(f"Emo control mode:{emo_control_method},weight:{emo_weight},vec:{vec}")
-        output = await tts.infer(spk_audio_prompt=prompt, text=text,
+        requested_segment_tokens = int(max_text_tokens_per_segment)
+        if not stream_mode:
+            tts.gr_progress = progress
+            infer_task = asyncio.create_task(tts.infer(spk_audio_prompt=prompt, text=text,
                         output_path=output_path,
                         emo_audio_prompt=emo_ref_path, emo_alpha=emo_weight,
                         emo_vector=vec,
                         use_emo_text=(emo_control_method==3), emo_text=emo_text,use_random=emo_random,
                         verbose=cmd_args.verbose,
-                        max_text_tokens_per_segment=int(max_text_tokens_per_segment),
-                        **kwargs)
-        return gr.update(value=output,visible=True)
+                        max_text_tokens_per_sentence=requested_segment_tokens,
+                        stop_generation_callback=lambda: cancel_generation["value"],
+                        **kwargs))
+            cancel_generation["task"] = infer_task
+            try:
+                output = await infer_task
+            except asyncio.CancelledError:
+                progress(1.0, desc="已停止生成")
+                yield gr.update(value=None), gr.update(value=None, visible=True)
+                return
+            finally:
+                if cancel_generation.get("task") is infer_task:
+                    cancel_generation["task"] = None
+                    cancel_generation["loop"] = None
+            yield gr.update(value=None), gr.update(value=output, visible=True)
+            return
+
+        effective_segment_tokens, stream_hard_tokens, stream_first_tokens = get_stream_split_limits(requested_segment_tokens)
+        task_id = time.strftime("stream_%Y%m%d_%H%M%S")
+        task_dir = os.path.join("outputs", "tasks", task_id)
+        os.makedirs(task_dir, exist_ok=True)
+        play_queue = asyncio.Queue()
+        tts.gr_progress = progress
+        progress(
+            0.01,
+            desc=f"流式播放准备中，完整句优先，目标 {effective_segment_tokens} Token，保险上限 {stream_hard_tokens}",
+        )
+        yield gr.update(value=None), gr.update(value=None, visible=True)
+
+        async def on_stream_chunk(wav, sampling_rate, idx, total):
+            if cancel_generation["value"]:
+                return
+            chunk_path = os.path.join(task_dir, f"chunk_{idx + 1:03d}.wav")
+            play_path = os.path.join(task_dir, f"play_{idx + 1:03d}.wav")
+            torchaudio.save(chunk_path, wav.type(torch.int16), sampling_rate)
+            torchaudio.save(play_path, wav.type(torch.int16), sampling_rate)
+            await play_queue.put(play_path)
+
+        infer_task = asyncio.create_task(tts.infer(
+                spk_audio_prompt=prompt,
+                text=text,
+                output_path=output_path,
+                emo_audio_prompt=emo_ref_path,
+                emo_alpha=emo_weight,
+                emo_vector=vec,
+                use_emo_text=(emo_control_method == 3),
+                emo_text=emo_text,
+                use_random=emo_random,
+                interval_silence=200,
+                verbose=cmd_args.verbose,
+                max_text_tokens_per_sentence=effective_segment_tokens,
+                prefer_sentence_boundary=True,
+                quick_streaming_tokens=stream_first_tokens,
+                sentence_split_hard_max_tokens=stream_hard_tokens,
+                sentence_split_min_tokens=STREAM_MIN_SEGMENT_TOKENS,
+                stream_chunk_callback=on_stream_chunk,
+                stop_generation_callback=lambda: cancel_generation["value"],
+                **kwargs,
+        ))
+        cancel_generation["task"] = infer_task
+
+        try:
+            while not infer_task.done() or not play_queue.empty():
+                try:
+                    play_path = await asyncio.wait_for(play_queue.get(), timeout=0.2)
+                    yield gr.update(value=play_path), gr.update(value=None, visible=True)
+                except asyncio.TimeoutError:
+                    continue
+
+            try:
+                final_path = await infer_task
+            except asyncio.CancelledError:
+                final_path = None
+
+            while not play_queue.empty():
+                play_path = await play_queue.get()
+                yield gr.update(value=play_path), gr.update(value=None, visible=True)
+            if cancel_generation["value"] or final_path is None:
+                progress(1.0, desc="已停止生成")
+                yield gr.update(value=None), gr.update(value=None, visible=True)
+                return
+            progress(1.0, desc="生成完成")
+            yield gr.update(value=None), gr.update(value=final_path, visible=True)
+        except asyncio.CancelledError:
+            cancel_generation["value"] = True
+            if not infer_task.done():
+                infer_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await infer_task
+            raise
+        finally:
+            if cancel_generation.get("task") is infer_task:
+                cancel_generation["task"] = None
+                cancel_generation["loop"] = None
 
     def update_prompt_audio():
         update_button = gr.update(interactive=True)
@@ -175,7 +303,479 @@ if __name__ == "__main__":
     def create_experimental_warning_message():
         return create_warning_message(i18n('提示：此功能为实验版，结果尚不稳定，我们正在持续优化中。'))
 
-    with gr.Blocks(title="IndexTTS Demo") as demo:
+    CUSTOM_CSS = """
+    /* Gradio's queue ETA is misleading for TTS because each segment has different cost. */
+    .eta-bar,
+    .meta-text.progress-text {
+        display: none !important;
+    }
+    .progress-level-inner {
+        font-family: var(--font);
+        font-size: 14px;
+        font-weight: 600;
+    }
+    #hidden_stream_file {
+        display: none !important;
+    }
+    #custom_player_wrap {
+        border: 1px solid var(--border-color-primary);
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--block-background-fill);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+    #custom_player {
+        display: none;
+    }
+    .stream_header {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        margin-bottom: 10px;
+    }
+    .stream_title {
+        color: var(--body-text-color);
+        font-size: 14px;
+        font-weight: 700;
+    }
+    #stream_badge {
+        background: var(--button-secondary-background-fill);
+        border: 1px solid var(--border-color-primary);
+        border-radius: 999px;
+        color: var(--body-text-color);
+        font-size: 12px;
+        line-height: 1;
+        padding: 5px 8px;
+    }
+    #stream_status {
+        color: var(--body-text-color-subdued);
+        font-size: 13px;
+        margin-top: 2px;
+    }
+    .stream_controls {
+        align-items: center;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 36px 74px minmax(120px, 1fr);
+    }
+    #stream_play_button {
+        align-items: center;
+        border: 1px solid var(--border-color-primary);
+        border-radius: 8px;
+        cursor: pointer;
+        display: flex;
+        font-size: 14px;
+        height: 34px;
+        justify-content: center;
+        padding: 0;
+        width: 36px;
+    }
+    #stream_time {
+        color: var(--body-text-color);
+        font-variant-numeric: tabular-nums;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+    #stream_progress {
+        background: var(--border-color-primary);
+        border-radius: 999px;
+        cursor: pointer;
+        height: 8px;
+        overflow: hidden;
+        position: relative;
+    }
+    #stream_progress_fill {
+        background: var(--body-text-color);
+        border-radius: inherit;
+        height: 100%;
+        transform-origin: left center;
+        transform: scaleX(0);
+        width: 100%;
+    }
+    """
+
+    STREAM_JS = """
+    function(...args) {
+        const STATE_KEY = "__indextts_stream_player";
+        const state = window[STATE_KEY] || {
+            queue: [],
+            seen: new Set(),
+            playing: false,
+            completed: true,
+            unlocked: false,
+            ignoredHref: null,
+            clickBound: false,
+            bindTimer: null,
+            pollTimer: null,
+            prebufferTimer: null,
+            prebufferSegments: 2,
+            prebufferTimeoutMs: 2200,
+            observer: null,
+            player: null,
+            root: null,
+            playButton: null,
+            progress: null,
+        };
+        window[STATE_KEY] = state;
+
+        function byId(id) {
+            return document.getElementById(id);
+        }
+
+        function getPlayer() {
+            return byId("custom_player");
+        }
+
+        function getRoot() {
+            return byId("hidden_stream_file");
+        }
+
+        function setText(id, text) {
+            const node = byId(id);
+            if (node) {
+                node.textContent = text;
+            }
+        }
+
+        function setStatus(text) {
+            setText("stream_status", text);
+        }
+
+        function setBadge() {
+            setText("stream_badge", `${state.seen.size} 段`);
+        }
+
+        function formatTime(seconds) {
+            if (!Number.isFinite(seconds) || seconds < 0) {
+                return "--:--";
+            }
+            const total = Math.floor(seconds);
+            const min = Math.floor(total / 60);
+            const sec = String(total % 60).padStart(2, "0");
+            return `${min}:${sec}`;
+        }
+
+        function updatePlaybackUi() {
+            const player = getPlayer();
+            const fill = byId("stream_progress_fill");
+            const progress = byId("stream_progress");
+            const playButton = byId("stream_play_button");
+            if (!player) {
+                return;
+            }
+            const duration = Number.isFinite(player.duration) ? player.duration : 0;
+            const current = Number.isFinite(player.currentTime) ? player.currentTime : 0;
+            const ratio = duration > 0 ? Math.max(0, Math.min(1, current / duration)) : 0;
+            if (fill) {
+                fill.style.transform = `scaleX(${ratio})`;
+            }
+            if (progress) {
+                progress.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+            }
+            if (playButton) {
+                playButton.textContent = player.paused ? "▶" : "Ⅱ";
+            }
+            setText("stream_current", formatTime(current));
+            setText("stream_duration", formatTime(duration));
+            setBadge();
+        }
+
+        function normalizeHref(href) {
+            if (!href) {
+                return null;
+            }
+            try {
+                return new URL(href, window.location.href).href;
+            } catch (_) {
+                return href;
+            }
+        }
+
+        function findHref() {
+            const root = getRoot();
+            if (!root) {
+                return null;
+            }
+            const nodes = root.querySelectorAll("a[href], audio[src], source[src]");
+            for (const node of nodes) {
+                const href = normalizeHref(node.href || node.src || node.getAttribute("href") || node.getAttribute("src"));
+                if (href && (href.includes("/file=") || href.includes("/gradio_api/file=") || href.toLowerCase().includes(".wav"))) {
+                    return href;
+                }
+            }
+            const text = root.textContent || "";
+            const match = text.match(/(?:\\/gradio_api\\/file=|\\/file=|[A-Za-z]:\\\\)[^\\s"'<>]+\\.wav/i);
+            return match ? normalizeHref(match[0]) : null;
+        }
+
+        function clearPrebufferTimer() {
+            if (state.prebufferTimer) {
+                window.clearTimeout(state.prebufferTimer);
+                state.prebufferTimer = null;
+            }
+        }
+
+        function maybeStartPlayback() {
+            if (state.playing || !state.queue.length) {
+                return;
+            }
+            if (state.queue.length >= state.prebufferSegments) {
+                clearPrebufferTimer();
+                playNext();
+                return;
+            }
+            setStatus(`缓冲中 ${state.queue.length}/${state.prebufferSegments}`);
+            if (!state.prebufferTimer) {
+                state.prebufferTimer = window.setTimeout(() => {
+                    state.prebufferTimer = null;
+                    if (!state.playing && state.queue.length) {
+                        playNext();
+                    }
+                }, state.prebufferTimeoutMs);
+            }
+        }
+
+        function playNext() {
+            const player = getPlayer();
+            clearPrebufferTimer();
+            if (!player) {
+                state.playing = false;
+                return;
+            }
+            if (!state.queue.length) {
+                state.playing = false;
+                updatePlaybackUi();
+                if (!state.completed) {
+                    setStatus("等下一段");
+                }
+                return;
+            }
+            const href = state.queue.shift();
+            state.playing = true;
+            player.src = href;
+            player.load();
+            updatePlaybackUi();
+            player.play().then(() => {
+                setStatus(`播放中，队列 ${state.queue.length}`);
+                updatePlaybackUi();
+            }).catch(() => {
+                state.playing = false;
+                setStatus("点播放按钮解锁");
+                updatePlaybackUi();
+            });
+        }
+
+        function enqueue(href) {
+            href = normalizeHref(href);
+            if (!href || state.seen.has(href)) {
+                return;
+            }
+            if (state.ignoredHref && href === state.ignoredHref) {
+                return;
+            }
+            state.ignoredHref = null;
+            state.seen.add(href);
+            state.queue.push(href);
+            state.completed = false;
+            setStatus(`收到 ${state.seen.size} 段`);
+            setBadge();
+            if (!state.playing) {
+                maybeStartPlayback();
+            }
+        }
+
+        function resetStream() {
+            const player = getPlayer();
+            clearPrebufferTimer();
+            state.queue = [];
+            state.seen = new Set();
+            state.playing = false;
+            state.completed = false;
+            state.ignoredHref = findHref();
+            if (player) {
+                player.pause();
+                player.removeAttribute("src");
+                player.load();
+            }
+            setStatus("等待首段");
+            updatePlaybackUi();
+        }
+
+        function stopPlayback() {
+            const player = getPlayer();
+            clearPrebufferTimer();
+            state.queue = [];
+            state.playing = false;
+            state.completed = true;
+            state.ignoredHref = findHref();
+            if (player) {
+                player.pause();
+                player.removeAttribute("src");
+                player.load();
+            }
+            setStatus("已请求停止");
+            updatePlaybackUi();
+        }
+
+        function buildSilentWavUrl() {
+            const sampleRate = 8000;
+            const samples = 800;
+            const bytes = 44 + samples * 2;
+            const buffer = new ArrayBuffer(bytes);
+            const view = new DataView(buffer);
+            function writeString(offset, value) {
+                for (let i = 0; i < value.length; i++) {
+                    view.setUint8(offset + i, value.charCodeAt(i));
+                }
+            }
+            writeString(0, "RIFF");
+            view.setUint32(4, 36 + samples * 2, true);
+            writeString(8, "WAVE");
+            writeString(12, "fmt ");
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, "data");
+            view.setUint32(40, samples * 2, true);
+            return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+        }
+
+        function unlockPlayer() {
+            const player = getPlayer();
+            if (!player || state.unlocked) {
+                return;
+            }
+            const silentUrl = buildSilentWavUrl();
+            player.src = silentUrl;
+            player.play().then(() => {
+                state.unlocked = true;
+                setTimeout(() => {
+                    player.pause();
+                    player.removeAttribute("src");
+                    player.load();
+                    URL.revokeObjectURL(silentUrl);
+                    setStatus("等待首段");
+                    updatePlaybackUi();
+                }, 120);
+            }).catch(() => {
+                URL.revokeObjectURL(silentUrl);
+                setStatus("点播放按钮解锁");
+                updatePlaybackUi();
+            });
+        }
+
+        function bind() {
+            const player = getPlayer();
+            const root = getRoot();
+            if (!player || !root) {
+                window.clearTimeout(state.bindTimer);
+                state.bindTimer = window.setTimeout(bind, 250);
+                return;
+            }
+
+            if (state.player !== player) {
+                player.addEventListener("timeupdate", updatePlaybackUi);
+                player.addEventListener("loadedmetadata", updatePlaybackUi);
+                player.addEventListener("play", updatePlaybackUi);
+                player.addEventListener("pause", updatePlaybackUi);
+                player.addEventListener("ended", () => {
+                    if (state.queue.length) {
+                        playNext();
+                    } else {
+                        state.playing = false;
+                        state.completed = true;
+                        setStatus("队列已播完");
+                        updatePlaybackUi();
+                    }
+                });
+                state.player = player;
+            }
+
+            const playButton = byId("stream_play_button");
+            if (playButton && state.playButton !== playButton) {
+                playButton.addEventListener("click", () => {
+                    const player = getPlayer();
+                    if (!player) {
+                        return;
+                    }
+                    if (!player.src && state.queue.length) {
+                        playNext();
+                    } else if (player.paused) {
+                        player.play().catch(() => setStatus("点播放按钮解锁"));
+                    } else {
+                        player.pause();
+                    }
+                    updatePlaybackUi();
+                });
+                state.playButton = playButton;
+            }
+
+            const progress = byId("stream_progress");
+            if (progress && state.progress !== progress) {
+                progress.addEventListener("click", (event) => {
+                    const player = getPlayer();
+                    if (!player || !Number.isFinite(player.duration) || player.duration <= 0) {
+                        return;
+                    }
+                    const rect = progress.getBoundingClientRect();
+                    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+                    player.currentTime = ratio * player.duration;
+                    updatePlaybackUi();
+                });
+                state.progress = progress;
+            }
+
+            if (state.root !== root) {
+                if (state.observer) {
+                    state.observer.disconnect();
+                }
+                state.observer = new MutationObserver(() => enqueue(findHref()));
+                state.observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["href", "src"] });
+                state.root = root;
+            }
+
+            if (!state.clickBound) {
+                document.addEventListener("click", (event) => {
+                    const target = event.target;
+                    if (target && target.closest && target.closest("#gen_button")) {
+                        resetStream();
+                        unlockPlayer();
+                    } else if (target && target.closest && target.closest("#stop_button")) {
+                        stopPlayback();
+                    }
+                }, true);
+                state.clickBound = true;
+            }
+
+            if (!state.pollTimer) {
+                state.pollTimer = window.setInterval(() => enqueue(findHref()), 200);
+            }
+            if (state.completed) {
+                setStatus("监听已启动");
+            }
+            updatePlaybackUi();
+            enqueue(findHref());
+        }
+
+        bind();
+        if (args.length > 0 && args[15] !== false) {
+            resetStream();
+            unlockPlayer();
+        } else if (args.length > 0) {
+            setStatus("流式播放已关闭");
+        }
+        return args;
+    }
+    """
+
+    STREAM_HEAD = f"<script>({STREAM_JS})();</script>"
+
+    with gr.Blocks(title="IndexTTS Demo", css=CUSTOM_CSS, head=STREAM_HEAD) as demo:
         mutex = threading.Lock()
         gr.HTML('''
         <h2><center>IndexTTS2: A Breakthrough in Emotionally Expressive and Duration-Controlled Auto-Regressive Zero-Shot Text-to-Speech</h2>
@@ -195,8 +795,34 @@ if __name__ == "__main__":
                     default = prompt_list[0]
                 with gr.Column():
                     input_text_single = gr.TextArea(label=i18n("文本"),key="input_text_single", placeholder=i18n("请输入目标文本"), info=f"{i18n('当前模型版本')}{tts.model_version or '1.0'}")
-                    gen_button = gr.Button(i18n("生成语音"), key="gen_button",interactive=True)
-                output_audio = gr.Audio(label=i18n("生成结果"), visible=True,key="output_audio")
+                    with gr.Row():
+                        gen_button = gr.Button(i18n("生成语音"), key="gen_button", elem_id="gen_button", interactive=True)
+                        stop_button = gr.Button(i18n("停止生成"), key="stop_button", elem_id="stop_button")
+                        stream_mode_checkbox = gr.Checkbox(label=i18n("流式播放"), value=True)
+                with gr.Column():
+                    output_audio = gr.Audio(label=i18n("生成结果"), visible=True,key="output_audio")
+                    gr.HTML(
+                        """
+                        <div id="custom_player_wrap">
+                            <div class="stream_header">
+                                <div>
+                                    <div class="stream_title">流式播放</div>
+                                    <div id="stream_status">流式播放器待命</div>
+                                </div>
+                                <div id="stream_badge">0 段</div>
+                            </div>
+                            <audio id="custom_player" preload="auto"></audio>
+                            <div class="stream_controls">
+                                <button id="stream_play_button" type="button" aria-label="播放或暂停">▶</button>
+                                <div id="stream_time"><span id="stream_current">0:00</span> / <span id="stream_duration">--:--</span></div>
+                                <div id="stream_progress" role="slider" aria-label="播放进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                                    <div id="stream_progress_fill"></div>
+                                </div>
+                            </div>
+                        </div>
+                        """
+                    )
+                    hidden_stream_file = gr.File(label="stream chunk", elem_id="hidden_stream_file", visible=True)
 
             experimental_checkbox = gr.Checkbox(label=i18n("显示实验功能"), value=False)
 
@@ -337,11 +963,24 @@ if __name__ == "__main__":
                                     vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
         )
 
-        def on_input_text_change(text, max_text_tokens_per_segment):
+        def on_input_text_change(text, max_text_tokens_per_segment, stream_mode):
             if text and len(text) > 0:
                 text_tokens_list = tts.tokenizer.tokenize(text)
 
-                segments = tts.tokenizer.split_segments(text_tokens_list, max_text_tokens_per_segment=int(max_text_tokens_per_segment))
+                if stream_mode:
+                    target_tokens, hard_tokens, first_tokens = get_stream_split_limits(max_text_tokens_per_segment)
+                    segments = tts.tokenizer.split_segments_by_sentence_boundary(
+                        text_tokens_list,
+                        max_text_tokens_per_segment=target_tokens,
+                        hard_max_text_tokens_per_segment=hard_tokens,
+                        min_text_tokens_per_segment=STREAM_MIN_SEGMENT_TOKENS,
+                        quick_streaming_tokens=first_tokens,
+                    )
+                else:
+                    segments = tts.tokenizer.split_segments(
+                        text_tokens_list,
+                        max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                    )
                 data = []
                 for i, s in enumerate(segments):
                     segment_str = ''.join(s)
@@ -415,13 +1054,19 @@ if __name__ == "__main__":
 
         input_text_single.change(
             on_input_text_change,
-            inputs=[input_text_single, max_text_tokens_per_segment],
+            inputs=[input_text_single, max_text_tokens_per_segment, stream_mode_checkbox],
             outputs=[segments_preview]
         )
 
         max_text_tokens_per_segment.change(
             on_input_text_change,
-            inputs=[input_text_single, max_text_tokens_per_segment],
+            inputs=[input_text_single, max_text_tokens_per_segment, stream_mode_checkbox],
+            outputs=[segments_preview]
+        )
+
+        stream_mode_checkbox.change(
+            on_input_text_change,
+            inputs=[input_text_single, max_text_tokens_per_segment, stream_mode_checkbox],
             outputs=[segments_preview]
         )
 
@@ -429,13 +1074,18 @@ if __name__ == "__main__":
                             inputs=[],
                             outputs=[gen_button])
 
-        gen_button.click(gen_single,
+        gen_event = gen_button.click(gen_single,
                         inputs=[emo_control_method,prompt_audio, input_text_single, emo_upload, emo_weight,
                                 vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                                 emo_text,emo_random,
+                                stream_mode_checkbox,
                                 max_text_tokens_per_segment,
                                 *advanced_params,
                         ],
-                        outputs=[output_audio])
+                        outputs=[hidden_stream_file, output_audio],
+                        js=STREAM_JS,
+                        stream_every=0.05)
+        stop_button.click(request_cancel, queue=False)
+        demo.load(js=STREAM_JS)
     demo.queue(20)
     demo.launch(server_name=cmd_args.host, server_port=cmd_args.port, inbrowser=True)
