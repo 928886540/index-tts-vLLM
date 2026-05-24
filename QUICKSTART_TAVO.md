@@ -1,111 +1,159 @@
-# TAVO 快速接入草稿
+# TAVO 轻量接入指南
 
-目标: 小白只做一次本地启动，再在 TAVO 里引入一条 JS。
+这份指南面向第一次接入的用户：本地 IndexTTS2 服务由你自己启动，TAVO 里只需要引入一条 JS，然后在设置面板里填少量配置。
 
-## 1. 启动 IndexTTS API
+本文档只说明接入流程，不要求验证 TTS 效果。不要为了验证去启动或调用 TTS 接口，因为语音生成会占用 GPU。
 
-使用现有启动脚本启动本地 API。给 TAVO 局域网浏览器访问时，服务需要绑定到 `0.0.0.0`，端口默认 `9880`。
+## 1. 启动前确认
 
-启动后终端会显示这些接口:
+你需要先有一台能访问 IndexTTS2 API 的机器。常见情况是服务跑在局域网内的一台电脑上，端口为 `9880`。
 
-- `/tts_stream`: 单段流式
-- `/tts_cache_stream`: 单段流式 + 本地快照缓存
-- `/tts_dialogue_stream`: 多角色 + 情绪流式
-- `/tts_dialogue_cache_stream`: 多角色 + 情绪流式 + 本地快照缓存
-- `/voices`: 本地音色库
-- `/cache`: 本地快照缓存管理
-- `/static/tavo.js`: TAVO 单文件桥接脚本
+如果 TAVO 在另一台设备的浏览器里打开，IndexTTS2 API 需要能被局域网访问，例如使用本机局域网 IP：
 
-## 2. 准备音色
+```text
+http://<lan-ip>:9880
+```
 
-推荐把参考音频放到本地音色库:
+这里的 `<lan-ip>` 换成运行 IndexTTS2 服务那台电脑的局域网 IP，例如 `192.168.1.23`。
+
+## 2. 在 TAVO 里只引入一条 JS
+
+把下面这一行放到 TAVO 可注入 HTML/JS 的位置：
+
+```html
+<script src="http://<lan-ip>:9880/static/tavo.js"></script>
+```
+
+只需要这一条，不需要再手写其它初始化代码。脚本加载后，TAVO 页面里会出现 IndexTTS 设置入口。
+
+## 3. 推荐设置流程
+
+第一次打开设置面板时，建议按这个顺序填写：
+
+1. 填 `API Base`
+
+   通常会根据 `<script src>` 自动识别成：
+
+   ```text
+   http://<lan-ip>:9880
+   ```
+
+   如果没有自动填好，就手动填这个地址。
+
+2. 选择或填写默认音色
+
+   默认音色用于旁白、未命中角色映射的消息，以及不开 LLM 解析时的普通朗读。建议先填一个稳定可用的音色，例如：
+
+   ```text
+   narrator
+   ```
+
+3. 填角色音色映射
+
+   用一行一个 `角色=音色` 的格式：
+
+   ```text
+   default=narrator
+   narrator=narrator
+   小明=male_01
+   小红=female_01
+   ```
+
+   `default` 是兜底音色，`narrator` 是旁白音色，人物角色也可以分别映射到不同音色。
+
+高级设置可以先不动。选择器、正则、TTS 参数、缓存管理、LLM Prompt 等选项都可以在基础播放跑通后再调整。
+
+## 4. 音色库怎么放
+
+推荐把参考音频放在本地音色库目录：
 
 ```text
 prompts/library/
   narrator.wav
-  alice.wav
-  bob.wav
+  male_01.wav
+  female_01.wav
 ```
 
-也可以通过 `/voices` 接口保存音色。当前阶段不需要 MySQL，不需要 SQLite，音色库就是本地文件夹。
-
-## 3. 在 TAVO 里引入一条 JS
-
-把下面这一行放到 TAVO 可注入 HTML/JS 的位置，IP 换成本机局域网 IP:
-
-```html
-<script src="http://192.168.x.x:9880/static/tavo.js"></script>
-```
-
-脚本会自动把 API Base 设成这个 `script src` 的来源。页面右下角会出现 IndexTTS 设置按钮。
-
-## 4. 设置项
-
-基础设置:
-- `API Base URL`: 通常自动填好。
-- `Chat 容器选择器`: TAVO 聊天列表容器，默认 `#chat`。
-- `单条消息选择器`: 默认 `.mes`。
-- `消息文本选择器`: 默认 `.mes_text`。
-
-音色设置:
+设置里填写音色时，通常使用文件名去掉 `.wav` 后的名字：
 
 ```text
-default=narrator
-narrator=narrator
-小明=alice
-小红=bob
+narrator
+male_01
+female_01
 ```
 
-值可以是 `prompts/library` 里的音色名，也可以是直接文件路径。
+旁白 `narrator` 和人物角色可以映射到不同音色。例如旁白用 `narrator.wav`，小明用 `male_01.wav`，小红用 `female_01.wav`。
 
-设置面板里的“音色库”区域可以手动刷新 `/voices`，选择音色后可直接设为默认，或插入一行 `role=voice` 映射。这个刷新不会自动发生，只有点击按钮才会请求本地服务。
+设置面板里的音色库区域用于查看和选择 `prompts/library/*.wav`。刷新音色库只是在需要时读取本地音色列表，不会生成语音。
 
-正则设置:
+## 5. 快照缓存与懒加载
+
+接入脚本使用“点击才处理”的方式：
+
+- 不会在页面加载时预生成大量音频。
+- 不会因为历史消息很多就一次性请求所有 TTS。
+- 只有你点击某条消息的音频卡时，才会生成音频或读取已有缓存。
+- 已生成的音频会按文本、音色、情绪和参数形成快照缓存；下次遇到相同内容时可直接复用。
+- 音频元素使用懒加载思路，未点击的卡片不会提前加载完整音频。
+
+设置面板里的快照缓存管理只用于查看、删除或清理本地缓存文件，不代表会自动触发语音生成。
+
+## 6. 可选 LLM 解析
+
+LLM 解析是可选项。不开 LLM 时，会按普通单段文本朗读，并使用默认音色或角色映射音色。
+
+如果你想让模型把消息拆成旁白、人物台词和情绪，可以在设置面板中填写第三方 OpenAI-compatible 配置：
 
 ```text
-\[TTS\]([\s\S]*?)\[/TTS\]
-<tts>([\s\S]*?)</tts>
+Endpoint: https://your-openai-compatible-endpoint/v1/chat/completions
+Model: your-model-name
+API Key: your-api-key
 ```
 
-命中第一个捕获组时只朗读捕获组内容；不命中时朗读整条消息。
-
-## 5. 可选 LLM 解析
-
-打开“启用第三方 LLM 解析多角色/情绪”，填写 OpenAI-compatible endpoint、model、API key。
-
-LLM 输出会被解析成:
+LLM 需要输出 `segments`，每个片段包含角色和文本，也可以包含情绪参数：
 
 ```json
 {
   "segments": [
-    {"role": "narrator", "text": "旁白正文", "emo_vec": [0,0,0,0,0,0,0,0.3]},
-    {"role": "小明", "text": "人物台词", "emo_text": "压低声音, 带着喘息"}
+    {
+      "role": "narrator",
+      "text": "旁白正文",
+      "emo_vec": [0, 0, 0, 0, 0, 0, 0, 0.3]
+    },
+    {
+      "role": "小明",
+      "text": "人物台词",
+      "emo_text": "压低声音，带一点紧张"
+    }
   ]
 }
 ```
 
-不开 LLM 时，默认按单段 `default` 音色朗读。
+说明：
 
-## 6. 快照与懒加载
+- `role` 会用于匹配角色音色映射。
+- `emo_vec` 是 8 维情绪向量，即 `emo_vec[8]`。
+- `emo_text` 是文字情绪描述。
+- `emo_vec` 和 `emo_text` 可以按需要选择使用。
 
-默认启用快照缓存:
+## 7. Profile 配置保存
 
-- 第一次点击播放时生成音频，并写入 `outputs/cache/<sha1>.wav`。
-- 下次同样的文本、音色、情感和参数会直接复用本地 WAV。
-- `<audio preload="none">` 保持懒加载，消息很多时不会预先请求所有音频。
-- 设置面板里的“快照缓存”可以手动刷新、删除选中缓存或清理旧缓存。这些操作只管理本地文件，不会触发语音生成。
+设置面板里的 Profile 功能是可选的，用于把当前配置保存起来，方便以后切换。
 
-## 7. 配置预设
+Profile 使用 SQLite 即可，不需要 MySQL。普通接入也可以完全不使用 Profile，不影响基础播放和缓存逻辑。
 
-设置面板里的“配置预设/Profile”可以把当前配置保存到本地 SQLite:
+## 8. 不做 GPU 验证
 
-- 保存内容包括 API 地址、选择器、正则、音色映射、LLM endpoint/model/prompt、TTS 参数。
-- 不保存明文 LLM API key；key 仍只留在当前浏览器 localStorage。
-- 这是可选功能，不影响默认 TTS 主链路。
+为了避免占用用户 GPU，本文档不要求也不建议做以下验证：
 
-## 8. 当前限制
+- 不启动 TTS 服务做演示。
+- 不调用 `/tts_stream`、`/tts_cache_stream`、`/tts_dialogue_stream` 或 `/tts_dialogue_cache_stream`。
+- 不批量生成测试音频。
 
-- 轻量音频卡已具备基础播放、状态、mini progress；完整播放器懒加载还没做。
-- LLM 目前按 OpenAI-compatible chat completions 实现；Anthropic/Gemini 原生协议还没单独适配。
-- 详细接口参考见 `TAVO_API_REFERENCE_20260525.md`。
-- 这份文档是草稿，等第一次真实联调后再整理成最终用户文档。
+文档接入检查只需要确认 TAVO 能加载：
+
+```html
+<script src="http://<lan-ip>:9880/static/tavo.js"></script>
+```
+
+真实语音生成留给用户在需要时手动点击音频卡触发。

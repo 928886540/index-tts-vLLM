@@ -1,4 +1,4 @@
-/* IndexTTS × TAVO bridge — single-file injection (Phase 5B skeleton)
+/* IndexTTS × TAVO bridge — single-file injection
  *
  * Usage in TAVO:
  *   <script src="http://<lan-ip>:9880/static/tavo.js"></script>
@@ -14,9 +14,11 @@
  *   text → [optional] LLM parse → segments → /tts_cache_stream or /tts_dialogue_stream
  *        → <audio preload="none"> inserted under message
  *
- * Phase 5B status: skeleton only. The settings UI is functional; the
- *   LLM parse and message detection are stubs (TODO markers in code).
- *   Audio playback against /tts_stream works for plain single-voice mode.
+ * Current status:
+ *   - Single-message lazy playback via /tts_stream or /tts_cache_stream.
+ *   - Optional LLM dialogue parsing with role voices and emotion fields.
+ *   - Multi-role playback via /tts_dialogue_stream or /tts_dialogue_cache_stream.
+ *   - Local voice picker, profile presets, cache controls, and message cards.
  *
  * Conventions:
  *   - Vanilla JS, no framework, no build step.
@@ -49,7 +51,7 @@
       provider: 'openai',         // openai-compatible endpoint for now
       endpoint: '',               // e.g. https://api.openai.com/v1/chat/completions
       apiKey: '',
-      model: '',
+      model: 'gpt-4o-mini',
       systemPrompt: '',           // optional override; see defaultLlmPrompt()
     },
     params: {
@@ -278,11 +280,11 @@
       const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
       const cleaned = segments
         .map(seg => ({
-          role: String(seg.role || 'narrator').trim() || 'narrator',
+          role: normalizeRole(seg.role),
           text: String(seg.text || '').trim(),
-          emo_vec: Array.isArray(seg.emo_vec) && seg.emo_vec.length === 8 ? seg.emo_vec.map(Number) : undefined,
+          emo_vec: sanitizeEmotionVector(seg.emo_vec),
           emo_text: seg.emo_text ? String(seg.emo_text).trim() : undefined,
-          emo_alpha: seg.emo_alpha == null ? undefined : Number(seg.emo_alpha),
+          emo_alpha: sanitizeOptionalNumber(seg.emo_alpha, 0, 1),
         }))
         .filter(seg => seg.text);
       return cleaned.length ? cleaned : [{ role: 'default', text: rawText }];
@@ -294,14 +296,39 @@
 
   function defaultLlmPrompt() {
     return [
-      '你是 TTS 对话切分器。把用户给出的小说/正文切成可朗读片段。',
-      '必须只输出 JSON 对象，不要 Markdown，不要解释。',
-      'JSON 格式: {"segments":[{"role":"narrator","text":"...","emo_vec":[0,0,0,0,0,0,0,0],"emo_text":"..."}]}',
-      '旁白 role 固定为 narrator；人物台词 role 使用人物名。',
-      'emo_vec 必须是 8 个 0 到 1 的数字；无法确定时可以省略 emo_vec，改用 emo_text。',
-      'emo_text 用自然语言描述语气、情绪、喘息、颤抖、压低声音等适合 TTS 的表达。',
-      '不要改写正文，不要合并不同角色，不要输出空 text。',
+      '你是 IndexTTS 的 TAVO 文本解析器。把用户给出的小说/正文切成可朗读片段。',
+      '只输出一个 JSON 对象，不要 Markdown，不要解释，不要代码块。',
+      '顶层格式必须是: {"segments":[...]}',
+      '每个 segment 必须包含 role 和 text；可选字段是 emo_vec、emo_text、emo_alpha。',
+      '旁白、正文叙述、环境描写的 role 固定为 narrator；人物台词 role 使用人物名或称呼。',
+      '不要改写、润色、扩写或删减原文 text；不要合并不同说话人；不要输出空 text。',
+      'emo_vec 如果输出，必须是 8 个 0 到 1 的数字；不确定时省略 emo_vec。',
+      '同一个 segment 里 emo_vec 和 emo_text 尽量二选一；需要喘息、颤抖、耳语等细节时优先用 emo_text。',
+      'emo_text 用自然语言描述 TTS 语气和状态，例如: 压低声音, 轻微喘息, 声音颤抖, 带哭腔, 贴近耳语。',
+      '当情绪需要喘息、停顿、害怕、疲惫、亲密、愤怒等细节时，优先补充 emo_text。',
+      '示例: {"segments":[{"role":"narrator","text":"雨声敲着窗。","emo_vec":[0.05,0,0,0,0.1,0,0.05,0.25]},{"role":"小明","text":"你怎么还不睡？","emo_text":"压低声音, 带着轻微喘息"}]}',
     ].join('\n');
+  }
+
+  function normalizeRole(role) {
+    const raw = String(role || '').trim();
+    if (!raw) return 'narrator';
+    if (/^(旁白|叙述|正文|环境|narration|narrator)$/i.test(raw)) return 'narrator';
+    return raw;
+  }
+
+  function sanitizeEmotionVector(vec) {
+    if (!Array.isArray(vec) || vec.length !== 8) return undefined;
+    const cleaned = vec.map(v => Number(v));
+    if (cleaned.some(v => !Number.isFinite(v))) return undefined;
+    return cleaned.map(v => Math.max(0, Math.min(1, v)));
+  }
+
+  function sanitizeOptionalNumber(value, min, max) {
+    if (value == null || value === '') return undefined;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return undefined;
+    return Math.max(min, Math.min(max, n));
   }
 
   function parseJsonObject(text) {
@@ -370,10 +397,17 @@
     return text;
   }
 
+  function compactText(text, maxLen) {
+    const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!cleaned) return '';
+    const limit = maxLen || 72;
+    return cleaned.length > limit ? cleaned.slice(0, limit - 1) + '...' : cleaned;
+  }
+
   const STATUS_TEXT = {
-    idle: '待播放',
+    idle: '点击生成并播放',
     loading: '生成中...',
-    ready: '就绪',
+    ready: '音频已生成',
     error: '失败',
   };
 
@@ -383,6 +417,7 @@
 
     const card = buildAudioCard();
     msgEl.appendChild(card.root);
+    updateCardPreview(card, extractTextForTts(findMessageText(msgEl)));
 
     card.playBtn.addEventListener('click', async (ev) => {
       ev.preventDefault();
@@ -491,6 +526,35 @@
     });
     meta.appendChild(status);
 
+    const preview = document.createElement('div');
+    preview.className = '_itts_audio_preview';
+    Object.assign(preview.style, {
+      color: '#cbd5e1',
+      lineHeight: '1.25',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      minHeight: '15px',
+    });
+    meta.appendChild(preview);
+
+    const chips = document.createElement('div');
+    chips.className = '_itts_audio_chips';
+    Object.assign(chips.style, {
+      display: 'flex',
+      gap: '5px',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+    });
+
+    const lazyChip = buildChip('lazy');
+    chips.appendChild(lazyChip);
+
+    const cacheChip = buildChip(cfg.cache.enabled ? 'cache:on' : 'cache:off');
+    chips.appendChild(cacheChip);
+
+    meta.appendChild(chips);
+
     const progressTrack = document.createElement('div');
     progressTrack.className = '_itts_progress_track';
     Object.assign(progressTrack.style, {
@@ -529,6 +593,8 @@
       playBtn: btn,
       title,
       status,
+      preview,
+      cacheChip,
       progressBar,
       body,
       audio: null,
@@ -538,6 +604,37 @@
     };
     root._ittsCard = card;
     return card;
+  }
+
+  function buildChip(text) {
+    const chip = document.createElement('span');
+    chip.textContent = text;
+    Object.assign(chip.style, {
+      display: 'inline-block',
+      padding: '1px 5px',
+      borderRadius: '999px',
+      border: '1px solid rgba(148, 163, 184, 0.24)',
+      color: '#cbd5e1',
+      background: 'rgba(30, 41, 59, 0.68)',
+      fontSize: '10px',
+      lineHeight: '1.4',
+    });
+    return chip;
+  }
+
+  function updateCardPreview(card, text) {
+    if (!card.preview) return;
+    card.preview.textContent = compactText(text, 88);
+  }
+
+  function updateCacheChip(card, value) {
+    if (!card.cacheChip) return;
+    if (!cfg.cache.enabled) {
+      card.cacheChip.textContent = 'cache:off';
+      return;
+    }
+    const state = String(value || '').toUpperCase();
+    card.cacheChip.textContent = state === 'HIT' ? 'cache:hit' : state === 'MISS' ? 'cache:miss' : 'cache:on';
   }
 
   function setCardState(card, state, detail) {
@@ -646,6 +743,7 @@
     clearCardAudio(card);
     try {
       const segments = await parseTextToSegments(text);
+      updateCardPreview(card, text);
 
       if (segments.length === 1 && segments[0].role === 'default') {
         // Fast path: single-segment via GET (browser handles WAV streaming)
@@ -653,6 +751,7 @@
         if (!voice) throw new Error('default voice not configured');
         const audio = document.createElement('audio');
         card.title.textContent = 'IndexTTS · 单段';
+        updateCacheChip(card);
         wireAudioToCard(card, audio);
         audio.src = tts_stream_url(segments[0].text, voice);
         card.body.appendChild(audio);
@@ -662,6 +761,7 @@
       } else {
         // Multi-segment: POST and let the browser stream the response
         const res = await fetchDialogueStream(segments, cfg.voiceMap);
+        updateCacheChip(card, res.headers.get('X-IndexTTS-Cache'));
         const blob = await res.blob();   // TODO: replace with MediaSource for true streaming
         const url = URL.createObjectURL(blob);
         const audio = document.createElement('audio');
@@ -777,6 +877,22 @@
     title.style.cssText = 'font-weight:600;font-size:14px;margin-bottom:8px;color:#9c6cff;';
     panel.appendChild(title);
 
+    let fieldTarget = panel;
+
+    function createSection(titleText, open) {
+      const section = document.createElement('details');
+      section.open = !!open;
+      section.style.cssText = 'margin:10px 0;padding:10px;border:1px solid #333;border-radius:8px;background:#14141c;';
+      const summary = document.createElement('summary');
+      summary.textContent = titleText;
+      summary.style.cssText = 'cursor:pointer;font-size:12px;font-weight:650;color:#dbeafe;margin:-2px 0 8px;';
+      const body = document.createElement('div');
+      section.appendChild(summary);
+      section.appendChild(body);
+      panel.appendChild(section);
+      return body;
+    }
+
     function fieldRow(labelText, inputEl) {
       const row = document.createElement('div');
       row.style.cssText = 'margin-bottom:8px;';
@@ -785,7 +901,7 @@
       lbl.style.cssText = 'font-size:12px;opacity:0.8;margin-bottom:2px;';
       row.appendChild(lbl);
       row.appendChild(inputEl);
-      panel.appendChild(row);
+      fieldTarget.appendChild(row);
       return row;
     }
 
@@ -806,8 +922,16 @@
       return i;
     }
 
+    const basicSection = createSection('基础设置', true);
+    const voiceSection = createSection('音色库', true);
+    const advancedSection = createSection('高级设置', false);
+
+    fieldTarget = basicSection;
+
     const apiBaseInput = textInput(cfg.apiBase, 'http://192.168.1.100:9880');
     fieldRow('API Base URL', apiBaseInput);
+
+    fieldTarget = advancedSection;
 
     const chatSelInput = textInput(cfg.chatSelector, '#chat');
     fieldRow('Chat 容器选择器', chatSelInput);
@@ -818,14 +942,18 @@
     const textSelInput = textInput(cfg.textSelector, '.mes_text');
     fieldRow('消息文本选择器', textSelInput);
 
+    fieldTarget = basicSection;
+
     const defaultVoiceInput = textInput(cfg.voiceMap.default, 'voice library name or absolute path');
     fieldRow('默认音色 (default)', defaultVoiceInput);
 
     const voiceMapInput = textAreaInput(voiceMapToLines(cfg.voiceMap), 'default=voice_a\nnarrator=voice_a\n小明=voice_b', 72);
     fieldRow('角色音色映射(role=voice,每行一条)', voiceMapInput);
 
+    fieldTarget = voiceSection;
+
     const voiceLibBox = document.createElement('div');
-    voiceLibBox.style.cssText = 'margin:8px 0 10px;padding:10px;border:1px solid #333;border-radius:6px;background:#14141c;';
+    voiceLibBox.style.cssText = 'margin:0 0 2px;';
     const voiceLibTitle = document.createElement('div');
     voiceLibTitle.textContent = '音色库';
     voiceLibTitle.style.cssText = 'font-size:12px;font-weight:600;color:#93c5fd;margin-bottom:8px;';
@@ -865,7 +993,7 @@
     const voiceStatus = document.createElement('div');
     voiceStatus.style.cssText = 'margin-top:7px;font-size:11px;opacity:0.75;min-height:16px;';
     voiceLibBox.appendChild(voiceStatus);
-    panel.appendChild(voiceLibBox);
+    voiceSection.appendChild(voiceLibBox);
 
     function selectedVoiceName() {
       return (voiceSelect.value || '').trim();
@@ -927,6 +1055,7 @@
     });
 
     const regexInput = textAreaInput((cfg.localRegex.rules || []).join('\n'), '\\[TTS\\]([\\s\\S]*?)\\[/TTS\\]', 64);
+    fieldTarget = advancedSection;
     fieldRow('本地正则(每行一条,第一个捕获组为朗读正文)', regexInput);
 
     const cacheToggle = document.createElement('input');
@@ -1009,7 +1138,7 @@
     const profileStatus = document.createElement('div');
     profileStatus.style.cssText = 'margin-top:7px;font-size:11px;opacity:0.75;min-height:16px;';
     profileBox.appendChild(profileStatus);
-    panel.appendChild(profileBox);
+    advancedSection.appendChild(profileBox);
 
     function setProfileStatus(text) {
       profileStatus.textContent = text || '';
@@ -1115,7 +1244,7 @@
     const cacheStatus = document.createElement('div');
     cacheStatus.style.cssText = 'margin-top:7px;font-size:11px;opacity:0.75;min-height:16px;';
     cacheBox.appendChild(cacheStatus);
-    panel.appendChild(cacheBox);
+    advancedSection.appendChild(cacheBox);
 
     function setCacheStatus(text) {
       cacheStatus.textContent = text || '';

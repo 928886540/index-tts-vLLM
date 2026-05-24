@@ -58,6 +58,7 @@ APP.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-IndexTTS-Cache", "X-IndexTTS-Cache-Key"],
 )
 if os.path.isdir("static"):
     APP.mount("/static", StaticFiles(directory="static"), name="static")
