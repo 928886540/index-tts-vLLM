@@ -165,6 +165,29 @@
     return profile;
   }
 
+  async function fetchCacheItems(limit) {
+    const res = await fetch(apiUrl('/cache?limit=' + encodeURIComponent(limit || 50)), { cache: 'no-store' });
+    if (!res.ok) throw new Error('/cache 返回 ' + res.status);
+    const data = await res.json();
+    return Array.isArray(data.items) ? data.items : [];
+  }
+
+  async function deleteCacheItem(key) {
+    const res = await fetch(apiUrl('/cache/' + encodeURIComponent(key)), { method: 'DELETE' });
+    if (!res.ok) throw new Error('/cache 删除失败 ' + res.status);
+    return res.json();
+  }
+
+  async function pruneCache(maxItems) {
+    const res = await fetch(apiUrl('/cache/prune'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ max_items: Number(maxItems || 5000) }),
+    });
+    if (!res.ok) throw new Error('/cache/prune 失败 ' + res.status);
+    return res.json();
+  }
+
   // Returns a stream URL for <audio src=...>. Browser fetches lazily because
   // the generated <audio> uses preload="none" unless autoPlay is enabled.
   function tts_stream_url(text, voicePathOrName) {
@@ -1048,6 +1071,111 @@
         renderPanel(panel);
       } catch (e) {
         setProfileStatus('加载失败: ' + shortError(e));
+      }
+    });
+
+    const cacheBox = document.createElement('div');
+    cacheBox.style.cssText = 'margin:12px 0 10px;padding:10px;border:1px solid #333;border-radius:6px;background:#14141c;';
+    const cacheTitle = document.createElement('div');
+    cacheTitle.textContent = '快照缓存';
+    cacheTitle.style.cssText = 'font-size:12px;font-weight:600;color:#86efac;margin-bottom:8px;';
+    cacheBox.appendChild(cacheTitle);
+
+    const cacheSelect = document.createElement('select');
+    cacheSelect.style.cssText = 'width:100%;padding:4px 6px;background:#0d0d14;color:#eee;border:1px solid #333;border-radius:4px;font-size:12px;margin-bottom:8px;';
+    const emptyCacheOption = document.createElement('option');
+    emptyCacheOption.value = '';
+    emptyCacheOption.textContent = '未加载缓存';
+    cacheSelect.appendChild(emptyCacheOption);
+    cacheBox.appendChild(cacheSelect);
+
+    const pruneInput = textInput('5000', 'max cache items');
+    pruneInput.style.marginBottom = '8px';
+    cacheBox.appendChild(pruneInput);
+
+    const cacheBtnRow = document.createElement('div');
+    cacheBtnRow.style.cssText = 'display:flex;gap:8px;';
+
+    const cacheRefreshBtn = document.createElement('button');
+    cacheRefreshBtn.textContent = '刷新缓存';
+    cacheRefreshBtn.style.cssText = 'flex:1;padding:6px;background:#333;color:#eee;border:0;border-radius:4px;cursor:pointer;';
+    cacheBtnRow.appendChild(cacheRefreshBtn);
+
+    const cacheDeleteBtn = document.createElement('button');
+    cacheDeleteBtn.textContent = '删除选中';
+    cacheDeleteBtn.style.cssText = 'flex:1;padding:6px;background:#7f1d1d;color:#fff;border:0;border-radius:4px;cursor:pointer;';
+    cacheBtnRow.appendChild(cacheDeleteBtn);
+
+    const cachePruneBtn = document.createElement('button');
+    cachePruneBtn.textContent = '清理旧缓存';
+    cachePruneBtn.style.cssText = 'flex:1;padding:6px;background:#166534;color:#fff;border:0;border-radius:4px;cursor:pointer;';
+    cacheBtnRow.appendChild(cachePruneBtn);
+    cacheBox.appendChild(cacheBtnRow);
+
+    const cacheStatus = document.createElement('div');
+    cacheStatus.style.cssText = 'margin-top:7px;font-size:11px;opacity:0.75;min-height:16px;';
+    cacheBox.appendChild(cacheStatus);
+    panel.appendChild(cacheBox);
+
+    function setCacheStatus(text) {
+      cacheStatus.textContent = text || '';
+    }
+
+    function selectedCacheKey() {
+      return (cacheSelect.value || '').trim();
+    }
+
+    async function refreshCacheList() {
+      setCacheStatus('读取缓存...');
+      try {
+        const items = await fetchCacheItems(80);
+        cacheSelect.innerHTML = '';
+        if (!items.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '暂无缓存';
+          cacheSelect.appendChild(opt);
+          setCacheStatus('暂无缓存');
+          return;
+        }
+        items.forEach((item) => {
+          const key = String(item.key || '').trim();
+          if (!key) return;
+          const opt = document.createElement('option');
+          opt.value = key;
+          const hits = item.hit_count == null ? 0 : Number(item.hit_count || 0);
+          const preview = String(item.text_preview || key).replace(/\s+/g, ' ').slice(0, 42);
+          opt.textContent = hits + 'x · ' + preview;
+          cacheSelect.appendChild(opt);
+        });
+        setCacheStatus('已刷新 ' + cacheSelect.options.length + ' 条缓存');
+      } catch (e) {
+        setCacheStatus('缓存不可用: ' + shortError(e));
+      }
+    }
+
+    cacheRefreshBtn.addEventListener('click', refreshCacheList);
+    cacheDeleteBtn.addEventListener('click', async () => {
+      const key = selectedCacheKey();
+      if (!key) { setCacheStatus('请先选择缓存'); return; }
+      try {
+        setCacheStatus('删除缓存...');
+        const result = await deleteCacheItem(key);
+        setCacheStatus(result.deleted ? '已删除' : '未找到缓存');
+        await refreshCacheList();
+      } catch (e) {
+        setCacheStatus('删除失败: ' + shortError(e));
+      }
+    });
+    cachePruneBtn.addEventListener('click', async () => {
+      try {
+        const maxItems = Number(pruneInput.value || 5000);
+        setCacheStatus('清理缓存...');
+        const result = await pruneCache(maxItems);
+        setCacheStatus('已清理 ' + (result.deleted || 0) + ' 条');
+        await refreshCacheList();
+      } catch (e) {
+        setCacheStatus('清理失败: ' + shortError(e));
       }
     });
 

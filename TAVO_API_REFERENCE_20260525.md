@@ -273,6 +273,8 @@ Response:
 
 No GPU use.
 
+TAVO UI note: `static/tavo.js` only calls this endpoint when the user clicks the settings panel cache refresh button.
+
 ### POST `/cache/prune`
 
 Purpose: keep only the newest or most recently used cache entries.
@@ -291,6 +293,8 @@ Response:
 
 No GPU use.
 
+TAVO UI note: `static/tavo.js` only calls this endpoint when the user clicks "清理旧缓存".
+
 ### DELETE `/cache/{key}`
 
 Purpose: delete one snapshot by cache key.
@@ -302,6 +306,8 @@ Response:
 ```
 
 No GPU use.
+
+TAVO UI note: `static/tavo.js` only calls this endpoint when the user deletes a selected cache entry.
 
 ## Profiles
 
@@ -473,4 +479,3 @@ Browser `localStorage` key: `indextts_tavo_config`.
   "autoPlay": false
 }
 ```
-
