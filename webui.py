@@ -305,6 +305,7 @@ if __name__ == "__main__":
         task_dir = os.path.join("outputs", "tasks", task_id)
         os.makedirs(task_dir, exist_ok=True)
         play_queue = asyncio.Queue()
+        last_play_path = {"value": None}
         tts.gr_progress = progress
         progress(
             0.01,
@@ -349,6 +350,7 @@ if __name__ == "__main__":
             while not infer_task.done() or not play_queue.empty():
                 try:
                     play_path = await asyncio.wait_for(play_queue.get(), timeout=0.2)
+                    last_play_path["value"] = play_path
                     yield gr.update(value=play_path), gr.update(value=None, visible=True)
                 except asyncio.TimeoutError:
                     continue
@@ -360,13 +362,14 @@ if __name__ == "__main__":
 
             while not play_queue.empty():
                 play_path = await play_queue.get()
+                last_play_path["value"] = play_path
                 yield gr.update(value=play_path), gr.update(value=None, visible=True)
             if cancel_generation["value"] or final_path is None:
                 progress(1.0, desc="已停止生成")
                 yield gr.update(value=None), gr.update(value=None, visible=True)
                 return
             progress(1.0, desc="生成完成")
-            yield gr.update(value=None), gr.update(value=final_path, visible=True)
+            yield gr.update(value=last_play_path["value"]), gr.update(value=final_path, visible=True)
         except asyncio.CancelledError:
             cancel_generation["value"] = True
             if not infer_task.done():
