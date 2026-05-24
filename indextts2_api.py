@@ -7,6 +7,7 @@ now_dir = os.getcwd()
 import argparse
 import asyncio
 import signal
+from typing import Optional, List, Dict
 import numpy as np
 import soundfile as sf
 import torch
@@ -67,6 +68,32 @@ class TTS_Request(BaseModel):
     repetition_penalty: float = 10
 
 
+# Phase 2 dialogue request models.
+# Caller is expected to pre-parse the source text into segments (typically by
+# calling a 3rd-party LLM client-side, e.g. from tavo.js). Each segment names
+# a role; each role maps to a voice in `voices`. Per-segment emotion can be
+# given as `emo_vec` (8-dim) or `emo_text` (natural language like "压低声音,
+# 带着喘息"). emo_vec wins when both present.
+class TTS_Segment(BaseModel):
+    role: str
+    text: str
+    emo_vec: Optional[List[float]] = None
+    emo_text: Optional[str] = None
+    emo_alpha: Optional[float] = None
+
+
+class TTS_Dialogue_Request(BaseModel):
+    segments: List[TTS_Segment]
+    # role -> voice library name OR direct file path
+    voices: Dict[str, str]
+    interval_ms: int = 350
+    top_p: float = 0.8
+    top_k: int = 30
+    temperature: float = 0.8
+    repetition_penalty: float = 10
+    emo_alpha: float = 0.7  # default if a segment doesn't override
+
+
 def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
     io_buffer = BytesIO()
     sf.write(io_buffer, data, rate, format="wav")
@@ -118,6 +145,32 @@ def _chunk_to_pcm_bytes(chunk_wav) -> bytes:
         wav = chunk_wav
     wav_int16 = (wav.clamp(-1.0, 1.0) * 32767.0).to(torch.int16)
     return wav_int16.numpy().tobytes()
+
+
+def _silence_pcm_bytes(sample_rate: int, ms: int, channels: int = 1) -> bytes:
+    # Generate int16 silence PCM for inserting between dialogue segments.
+    n_samples = max(0, int(sample_rate * ms / 1000))
+    return b"\x00" * (n_samples * channels * 2)
+
+
+def _resolve_voice(name_or_path: str) -> Optional[str]:
+    # Resolve a voice reference. Order:
+    #   1. If it exists as a filesystem path, use it directly.
+    #   2. Otherwise look it up in indextts.voice_library (which Codex owns).
+    # voice_library is optional — if the module isn't shipped yet, only direct
+    # paths work and the caller will see "voices unresolved" for names.
+    if not name_or_path:
+        return None
+    if os.path.exists(name_or_path):
+        return name_or_path
+    try:
+        from indextts import voice_library  # provided by Codex on VLLM branch
+        path = voice_library.get_voice_path(name_or_path)
+        if path and os.path.exists(path):
+            return path
+    except ImportError:
+        pass
+    return None
 
 
 def handle_control(command: str):
@@ -266,6 +319,141 @@ async def tts_stream_handle(req: dict):
     return StreamingResponse(stream_generator(), media_type="audio/wav")
 
 
+async def tts_dialogue_stream_handle(req: dict):
+    """Phase 2: multi-segment streaming for narrator + character dialogue.
+
+    Caller provides pre-parsed segments (typically the output of a 3rd-party
+    LLM call done client-side) along with a role->voice mapping. Each segment
+    is inferred in order; chunks are streamed as they arrive; silence is
+    inserted between segments.
+
+    Voice references can be either a voice library name (resolved via
+    indextts.voice_library, owned by Codex on the VLLM branch) or a direct
+    filesystem path. Missing voices are reported up-front with a 400 so the
+    client doesn't get half a stream and then an error.
+    """
+    segments = req.get("segments") or []
+    voices = req.get("voices") or {}
+    if not segments:
+        return JSONResponse(status_code=400, content={"message": "segments is required"})
+    if not voices:
+        return JSONResponse(status_code=400, content={"message": "voices is required"})
+
+    # Pre-resolve every role -> voice path. Detect missing up-front.
+    default_path = _resolve_voice(voices.get("default", ""))
+    role_voice_paths: Dict[str, str] = {}
+    unresolved_roles: List[str] = []
+    seen_roles = set()
+    for seg in segments:
+        role = (seg.get("role") or "").strip()
+        if not role or role in seen_roles:
+            seen_roles.add(role)
+            continue
+        seen_roles.add(role)
+        path = _resolve_voice(voices.get(role, "")) or default_path
+        if not path:
+            unresolved_roles.append(role)
+        else:
+            role_voice_paths[role] = path
+    if unresolved_roles:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "message": "voices unresolved for these roles (provide them in `voices` or set a `default`)",
+                "roles": unresolved_roles,
+            },
+        )
+
+    interval_ms = int(req.get("interval_ms", 350))
+    default_emo_alpha = float(req.get("emo_alpha", 0.7))
+    sampling_kwargs = {
+        "top_p": float(req.get("top_p", 0.8)),
+        "top_k": int(req.get("top_k", 30)),
+        "temperature": float(req.get("temperature", 0.8)),
+        "repetition_penalty": float(req.get("repetition_penalty", 10)),
+    }
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+    SENTINEL = object()
+    sample_rate_holder = {"sr": None}
+
+    async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
+        sample_rate_holder["sr"] = sr
+        await queue.put(_chunk_to_pcm_bytes(chunk_wav))
+
+    async def run_infer():
+        try:
+            async with tts_stream_lock:
+                for idx, seg in enumerate(segments):
+                    role = (seg.get("role") or "").strip()
+                    text = (seg.get("text") or "").strip()
+                    if not text:
+                        continue
+                    voice_path = role_voice_paths.get(role) or default_path
+                    if not voice_path:
+                        # Should be unreachable: caught up-front, but be safe.
+                        continue
+
+                    emo_vec = seg.get("emo_vec") or None
+                    emo_text_seg = seg.get("emo_text") or None
+                    seg_alpha = seg.get("emo_alpha")
+                    seg_alpha = float(seg_alpha) if seg_alpha is not None else default_emo_alpha
+                    # emo_vec wins when both are present; matches the V26
+                    # convention and the LLM-output schema we recommend.
+                    if emo_vec:
+                        emo_text_seg = None
+                        use_emo_text_seg = False
+                    else:
+                        use_emo_text_seg = bool(emo_text_seg)
+
+                    # Inter-segment silence. Sample rate is known after the
+                    # first chunk arrived, so only insert from idx>=1 onward.
+                    if idx > 0 and sample_rate_holder["sr"]:
+                        await queue.put(
+                            _silence_pcm_bytes(sample_rate_holder["sr"], interval_ms)
+                        )
+
+                    await tts_pipeline.infer(
+                        spk_audio_prompt=voice_path,
+                        emo_audio_prompt=None,
+                        text=text,
+                        emo_text=emo_text_seg,
+                        use_emo_text=use_emo_text_seg,
+                        emo_alpha=seg_alpha,
+                        emo_vector=emo_vec,
+                        output_path=None,
+                        stream_chunk_callback=on_chunk,
+                        **sampling_kwargs,
+                    )
+        except Exception:
+            traceback.print_exc()
+        finally:
+            await queue.put(SENTINEL)
+
+    async def stream_generator():
+        infer_task = asyncio.create_task(run_infer())
+        try:
+            first = await queue.get()
+            if first is SENTINEL:
+                yield _wav_streaming_header(22050, channels=1, bits=16)
+                return
+            sr = sample_rate_holder["sr"] or 22050
+            yield _wav_streaming_header(sr, channels=1, bits=16)
+            yield first
+            while True:
+                chunk = await queue.get()
+                if chunk is SENTINEL:
+                    break
+                yield chunk
+        finally:
+            try:
+                await infer_task
+            except Exception:
+                pass
+
+    return StreamingResponse(stream_generator(), media_type="audio/wav")
+
+
 @APP.get("/control")
 async def control(command: str = None):
     if command is None:
@@ -360,6 +548,35 @@ async def tts_stream_post_endpoint(request: TTS_Request):
     return await tts_stream_handle(req)
 
 
+@APP.post("/tts_dialogue_stream")
+async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
+    """Phase 2: multi-voice + emotion streaming for TAVO dialogue.
+
+    Body schema:
+        {
+          "segments": [
+            {"role": "narrator", "text": "...", "emo_vec": [0,0,0,0,0,0,0,0.8]},
+            {"role": "小明",     "text": "...", "emo_text": "压低声音,带着喘息"}
+          ],
+          "voices": {
+            "narrator": "voice_a",        // library name or absolute path
+            "小明":     "voice_b",
+            "default":  "voice_a"          // fallback for any unmapped role
+          },
+          "interval_ms": 350,
+          "top_p": 0.8, "top_k": 30, "temperature": 0.8,
+          "repetition_penalty": 10,
+          "emo_alpha": 0.7
+        }
+
+    Returns chunked audio/wav. First bytes go out as soon as the first
+    segment's first chunk is decoded; later segments are inserted after a
+    configurable silence gap.
+    """
+    req = request.dict()
+    return await tts_dialogue_stream_handle(req)
+
+
 # @APP.get("/set_gpt_weights")
 # async def set_gpt_weights(weights_path: str = None):
 #     return JSONResponse(status_code=200, content={"message": "index不需要切换模型"})
@@ -384,9 +601,10 @@ if __name__ == "__main__":
             host = None
         bind_for_log = host if host not in (None, "None") else "<all>"
         print(f"IndexTTS API listening on http://{bind_for_log}:{port}")
-        print(f"  - GET/POST /tts          (one-shot, returns full WAV)")
-        print(f"  - GET/POST /tts_stream   (streaming WAV chunks, for TAVO regex)")
-        print(f"  - GET      /health       (liveness probe)")
+        print(f"  - GET/POST /tts                  (one-shot, returns full WAV)")
+        print(f"  - GET/POST /tts_stream           (single-segment streaming, for TAVO regex)")
+        print(f"  - POST     /tts_dialogue_stream  (multi-voice + emotion streaming)")
+        print(f"  - GET      /health               (liveness probe)")
         if host in ("127.0.0.1", "localhost"):
             print("  [NOTE] Bound to localhost only. For LAN/TAVO use, pass `-a 0.0.0.0`.")
         uvicorn.run(app=APP, host=host, port=port)
