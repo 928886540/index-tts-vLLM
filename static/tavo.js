@@ -801,6 +801,108 @@
     const voiceMapInput = textAreaInput(voiceMapToLines(cfg.voiceMap), 'default=voice_a\nnarrator=voice_a\n小明=voice_b', 72);
     fieldRow('角色音色映射(role=voice,每行一条)', voiceMapInput);
 
+    const voiceLibBox = document.createElement('div');
+    voiceLibBox.style.cssText = 'margin:8px 0 10px;padding:10px;border:1px solid #333;border-radius:6px;background:#14141c;';
+    const voiceLibTitle = document.createElement('div');
+    voiceLibTitle.textContent = '音色库';
+    voiceLibTitle.style.cssText = 'font-size:12px;font-weight:600;color:#93c5fd;margin-bottom:8px;';
+    voiceLibBox.appendChild(voiceLibTitle);
+
+    const voiceSelect = document.createElement('select');
+    voiceSelect.style.cssText = 'width:100%;padding:4px 6px;background:#0d0d14;color:#eee;border:1px solid #333;border-radius:4px;font-size:12px;margin-bottom:8px;';
+    const emptyVoiceOption = document.createElement('option');
+    emptyVoiceOption.value = '';
+    emptyVoiceOption.textContent = '未加载音色';
+    voiceSelect.appendChild(emptyVoiceOption);
+    voiceLibBox.appendChild(voiceSelect);
+
+    const voiceRoleInput = textInput('narrator', 'role name');
+    voiceRoleInput.style.marginBottom = '8px';
+    voiceLibBox.appendChild(voiceRoleInput);
+
+    const voiceBtnRow = document.createElement('div');
+    voiceBtnRow.style.cssText = 'display:flex;gap:8px;';
+
+    const voiceRefreshBtn = document.createElement('button');
+    voiceRefreshBtn.textContent = '刷新音色';
+    voiceRefreshBtn.style.cssText = 'flex:1;padding:6px;background:#333;color:#eee;border:0;border-radius:4px;cursor:pointer;';
+    voiceBtnRow.appendChild(voiceRefreshBtn);
+
+    const voiceDefaultBtn = document.createElement('button');
+    voiceDefaultBtn.textContent = '设为默认';
+    voiceDefaultBtn.style.cssText = 'flex:1;padding:6px;background:#2563eb;color:#fff;border:0;border-radius:4px;cursor:pointer;';
+    voiceBtnRow.appendChild(voiceDefaultBtn);
+
+    const voiceInsertBtn = document.createElement('button');
+    voiceInsertBtn.textContent = '插入映射';
+    voiceInsertBtn.style.cssText = 'flex:1;padding:6px;background:#4f46e5;color:#fff;border:0;border-radius:4px;cursor:pointer;';
+    voiceBtnRow.appendChild(voiceInsertBtn);
+    voiceLibBox.appendChild(voiceBtnRow);
+
+    const voiceStatus = document.createElement('div');
+    voiceStatus.style.cssText = 'margin-top:7px;font-size:11px;opacity:0.75;min-height:16px;';
+    voiceLibBox.appendChild(voiceStatus);
+    panel.appendChild(voiceLibBox);
+
+    function selectedVoiceName() {
+      return (voiceSelect.value || '').trim();
+    }
+
+    function setVoiceStatus(text) {
+      voiceStatus.textContent = text || '';
+    }
+
+    function upsertVoiceMapLine(role, voiceName) {
+      const next = parseVoiceMapLines(voiceMapInput.value);
+      next[role] = voiceName;
+      voiceMapInput.value = voiceMapToLines(next);
+    }
+
+    async function refreshVoiceList() {
+      setVoiceStatus('读取音色库...');
+      try {
+        const voices = await listVoices();
+        voiceSelect.innerHTML = '';
+        if (!voices.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '暂无音色';
+          voiceSelect.appendChild(opt);
+          setVoiceStatus('暂无音色');
+          return;
+        }
+        voices.forEach((voice) => {
+          const name = String(voice.name || '').trim();
+          if (!name) return;
+          const opt = document.createElement('option');
+          opt.value = name;
+          const size = Number(voice.size_bytes || 0);
+          const sizeText = size ? ' · ' + Math.round(size / 1024) + ' KB' : '';
+          opt.textContent = name + (voice.ext || '') + sizeText;
+          voiceSelect.appendChild(opt);
+        });
+        setVoiceStatus('已刷新 ' + voiceSelect.options.length + ' 个音色');
+      } catch (e) {
+        setVoiceStatus('音色库不可用: ' + shortError(e));
+      }
+    }
+
+    voiceRefreshBtn.addEventListener('click', refreshVoiceList);
+    voiceDefaultBtn.addEventListener('click', () => {
+      const name = selectedVoiceName();
+      if (!name) { setVoiceStatus('请先选择音色'); return; }
+      defaultVoiceInput.value = name;
+      setVoiceStatus('默认音色 = ' + name);
+    });
+    voiceInsertBtn.addEventListener('click', () => {
+      const name = selectedVoiceName();
+      const role = (voiceRoleInput.value || 'narrator').trim();
+      if (!name) { setVoiceStatus('请先选择音色'); return; }
+      if (!role) { setVoiceStatus('请输入 role'); return; }
+      upsertVoiceMapLine(role, name);
+      setVoiceStatus('已写入: ' + role + '=' + name);
+    });
+
     const regexInput = textAreaInput((cfg.localRegex.rules || []).join('\n'), '\\[TTS\\]([\\s\\S]*?)\\[/TTS\\]', 64);
     fieldRow('本地正则(每行一条,第一个捕获组为朗读正文)', regexInput);
 

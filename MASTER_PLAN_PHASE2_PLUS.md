@@ -165,6 +165,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 | 5C Settings 面板 UI | Codex | `static/tavo.js`(浮动面板) | ✅ 基础版 |
 | 5D 集成测试 HTML | Codex | `static/test.html` | ✅ |
 | 5E xiaomi 风格轻量音频卡 | Codex worker | `static/tavo.js` | 进行中 |
+| 5F 音色库选择器 | Codex | `static/tavo.js` | ✅ 手动刷新/设默认/插入映射 |
 
 **tavo.js 责任:**
 - MutationObserver 监听 TAVO 聊天 DOM
@@ -233,6 +234,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 [进行中] P5E/P6A: xiaomi 风格轻量音频卡、单全局 audio、懒加载卡片
 [进行中] 架构文档: 参考用户图，落成轻量实际版
 [预研] 可选 SQLite profile_store: 只在 profile/历史/任务索引需要时接入
+[已完成] P5F: 设置面板音色库选择器，手动刷新 `/voices`
             ↓
 静态验证 → 提交推送 → 等用户允许后再启动服务联调
 ```
@@ -272,6 +274,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 |---|---|---|
 | 2026-05-25 02:00 | Claude (Opus 4.7) | 初版。整合用户陆续提出的:多角色情感(P2)、轻量化 + SQLite 准入条件、单 JS 注入(P5)、快照缓存 + 懒加载(P3) |
 | 2026-05-25 03:xx | Codex | 接手后更新真实状态；加入用户架构图的轻量化映射；标记缓存、多角色、单 JS、客户端 LLM 的完成状态 |
+| 2026-05-25 03:xx | Codex | 增加设置面板音色库选择器和 `TAVO_API_REFERENCE_20260525.md` |
 
 ---
 

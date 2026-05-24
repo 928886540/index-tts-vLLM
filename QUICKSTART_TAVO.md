@@ -58,6 +58,8 @@ narrator=narrator
 
 值可以是 `prompts/library` 里的音色名，也可以是直接文件路径。
 
+设置面板里的“音色库”区域可以手动刷新 `/voices`，选择音色后可直接设为默认，或插入一行 `role=voice` 映射。这个刷新不会自动发生，只有点击按钮才会请求本地服务。
+
 正则设置:
 
 ```text
@@ -104,4 +106,5 @@ LLM 输出会被解析成:
 
 - 轻量音频卡已具备基础播放、状态、mini progress；完整播放器懒加载还没做。
 - LLM 目前按 OpenAI-compatible chat completions 实现；Anthropic/Gemini 原生协议还没单独适配。
+- 详细接口参考见 `TAVO_API_REFERENCE_20260525.md`。
 - 这份文档是草稿，等第一次真实联调后再整理成最终用户文档。
