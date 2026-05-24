@@ -24,26 +24,30 @@ TAVO API worktree:
 - `D:\apiWorkSpace\index-tts2-vLLM\.claude\worktrees\tavo-api`
 - 分支 `VLLM-tavo-api`
 - 已合入 `VLLM` 的 `voice_library.py`
+- 已合入 `VLLM` 的 `snapshot_cache.py`
 - 已有提交:
   - `d8df358 [claude] Add MASTER_PLAN_PHASE2_PLUS for the full TAVO integration scope`
   - `14c7b6b [claude] Add /tts_dialogue_stream endpoint (Phase 2B) for multi-voice + emotion`
 - 当前未提交主线:
-  - `indextts2_api.py`: CORS、`/static/tavo.js`、`/voices` HTTP 包装
-  - `static/tavo.js`: 单 JS 注入骨架、本地正则、默认单音色播放
-  - 本文件
+  - `indextts2_api.py`: `/tts_cache_stream`、`/tts_dialogue_cache_stream`、`/cache` 接口层
+  - `static/tavo.js`: 默认走 `/tts_cache_stream`，保留懒加载 `<audio preload="none">`
+  - 本文件状态修订
 
 ## 正在分发的子任务
 
 1. xiaomi TTS UI 参考探索
    - 类型: 只读 explorer
    - 路径: `D:\apiWorkSpace\ComfyUI-aki\ComfyUI-aki-v3\ComfyUI\app\ios`
-   - 输出: 页面结构、音频库、音频卡片、播放控件可借鉴点
+   - 状态: 已完成
+   - 关键结论: 借鉴“轻量卡 + 完整播放器懒加载”、cache-first 播放、单全局活动 audio、historyItems/audioCacheKey/currentTime handoff
 
 2. 快照缓存模块
    - 类型: worker
    - 分支/仓库: `VLLM`
    - 只写: `indextts/snapshot_cache.py`
    - 禁止: 不碰 `indextts2_api.py`、`static/*`、文档、音色参考目录
+   - 状态: 已完成并推送到 `VLLM`
+   - 提交: `a45c59e [codex] Add snapshot_cache module for lazy TTS reuse`
    - 目标: 纯文件缓存 `outputs/cache/<sha1>.wav|.json`，用于后续懒加载复用
 
 ## 接下来主线顺序
@@ -60,16 +64,15 @@ TAVO API worktree:
    - push 到 `origin VLLM-tavo-api`
 
 3. 集成缓存模块
-   - 等 worker 完成 `snapshot_cache.py`
-   - 合入 `VLLM-tavo-api`
-   - 在 `indextts2_api.py` 加 `/tts_cache_stream`、`/cache`
+   - `snapshot_cache.py` 已合入 `VLLM-tavo-api`
+   - `indextts2_api.py` 已加 `/tts_cache_stream`、`/tts_dialogue_cache_stream`、`/cache`
    - 仍然只做语法/静态检查，不跑推理
 
 4. 完善 `static/tavo.js`
-   - LLM 解析配置面板
-   - role -> voice 映射 UI
-   - 懒加载策略: `<audio preload="none">`
-   - 优先调用缓存流接口，未命中再生成
+   - 已默认优先调用 `/tts_cache_stream` 和 `/tts_dialogue_cache_stream`
+   - 已加: LLM 解析配置面板(OpenAI-compatible endpoint/key/model/prompt)
+   - 已加: role -> voice 行文本映射 UI
+   - 待做: 借鉴 xiaomi 的轻量音频卡、单全局活动 audio、完整播放器懒加载
 
 5. 写用户向 Quickstart
    - 启动本地服务
@@ -104,4 +107,3 @@ Codex 主线当前可改:
 - 启动 IndexTTS API server
 - 调 `/tts`、`/tts_stream`、`/tts_dialogue_stream`
 - 任何会加载模型或生成音频的命令
-

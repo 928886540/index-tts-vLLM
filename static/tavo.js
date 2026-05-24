@@ -11,7 +11,7 @@
  *   5. Injects a 🔊 button into each message; click → TTS pipeline
  *
  * Pipeline (per message):
- *   text → [optional] LLM parse → segments → POST /tts_dialogue_stream
+ *   text → [optional] LLM parse → segments → /tts_cache_stream or /tts_dialogue_stream
  *        → <audio preload="none"> inserted under message
  *
  * Phase 5B status: skeleton only. The settings UI is functional; the
@@ -46,11 +46,11 @@
     },
     llm: {
       enabled: false,
-      provider: 'openai',         // openai | anthropic | gemini | custom
+      provider: 'openai',         // openai-compatible endpoint for now
       endpoint: '',               // e.g. https://api.openai.com/v1/chat/completions
       apiKey: '',
       model: '',
-      systemPrompt: '',           // optional override
+      systemPrompt: '',           // optional override; see defaultLlmPrompt()
     },
     params: {
       top_p: 0.8,
@@ -67,6 +67,9 @@
         '\\[TTS\\]([\\s\\S]*?)\\[/TTS\\]',
         '<tts>([\\s\\S]*?)</tts>',
       ],
+    },
+    cache: {
+      enabled: true,
     },
     autoPlay: false,              // false = lazy load (user clicks per message)
   };
@@ -117,9 +120,10 @@
     return base + path;
   }
 
-  // Returns a stream URL for <audio src=...>. Browser will fetch and play
-  // as bytes arrive (chunked WAV).
+  // Returns a stream URL for <audio src=...>. Browser fetches lazily because
+  // the generated <audio> uses preload="none" unless autoPlay is enabled.
   function tts_stream_url(text, voicePathOrName) {
+    const endpoint = cfg.cache.enabled ? '/tts_cache_stream?' : '/tts_stream?';
     const params = new URLSearchParams({
       text: text,
       ref_audio_path: voicePathOrName,
@@ -129,13 +133,14 @@
       repetition_penalty: cfg.params.repetition_penalty,
       emo_alpha: cfg.params.emo_alpha,
     });
-    return apiUrl('/tts_stream?' + params.toString());
+    return apiUrl(endpoint + params.toString());
   }
 
   // For multi-segment (after LLM parse). Returns a Blob URL — we POST,
   // then stream the response into a MediaSource. For Phase 5B skeleton
   // this just POSTs and returns once response.body is available.
   async function fetchDialogueStream(segments, voices) {
+    const endpoint = cfg.cache.enabled ? '/tts_dialogue_cache_stream' : '/tts_dialogue_stream';
     const body = {
       segments: segments,
       voices: voices,
@@ -146,14 +151,14 @@
       repetition_penalty: cfg.params.repetition_penalty,
       emo_alpha: cfg.params.emo_alpha,
     };
-    const res = await fetch(apiUrl('/tts_dialogue_stream'), {
+    const res = await fetch(apiUrl(endpoint), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
-      throw new Error('tts_dialogue_stream failed: ' + res.status + ' ' + txt);
+      throw new Error(endpoint + ' failed: ' + res.status + ' ' + txt);
     }
     return res;
   }
@@ -172,7 +177,7 @@
   }
 
   // -------------------------------------------------------------------------
-  // LLM parsing (Phase 4 — stub for now)
+  // LLM parsing (Phase 4 client-side, OpenAI-compatible endpoints)
   // -------------------------------------------------------------------------
   // Returns Promise<[{role, text, emo_vec?, emo_text?}]>
   // If LLM disabled or fails: returns a single segment with role "default".
@@ -180,10 +185,92 @@
     if (!cfg.llm.enabled || !cfg.llm.apiKey || !cfg.llm.endpoint) {
       return [{ role: 'default', text: rawText }];
     }
-    // TODO(Phase 4): actually call the configured LLM with a system prompt
-    // that asks for [{role, text, emo_vec[8] | emo_text}].
-    console.info('[IndexTTS_TAVO] LLM parse not implemented yet, falling back to single segment');
-    return [{ role: 'default', text: rawText }];
+    try {
+      const res = await fetch(cfg.llm.endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + cfg.llm.apiKey,
+        },
+        body: JSON.stringify({
+          model: cfg.llm.model,
+          temperature: 0.2,
+          messages: [
+            { role: 'system', content: cfg.llm.systemPrompt || defaultLlmPrompt() },
+            { role: 'user', content: rawText },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error('LLM HTTP ' + res.status + ': ' + await res.text());
+      const data = await res.json();
+      const content = data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content
+        : JSON.stringify(data);
+      const parsed = parseJsonObject(content);
+      const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
+      const cleaned = segments
+        .map(seg => ({
+          role: String(seg.role || 'narrator').trim() || 'narrator',
+          text: String(seg.text || '').trim(),
+          emo_vec: Array.isArray(seg.emo_vec) && seg.emo_vec.length === 8 ? seg.emo_vec.map(Number) : undefined,
+          emo_text: seg.emo_text ? String(seg.emo_text).trim() : undefined,
+          emo_alpha: seg.emo_alpha == null ? undefined : Number(seg.emo_alpha),
+        }))
+        .filter(seg => seg.text);
+      return cleaned.length ? cleaned : [{ role: 'default', text: rawText }];
+    } catch (e) {
+      console.warn('[IndexTTS_TAVO] LLM parse failed, falling back to single segment:', e);
+      return [{ role: 'default', text: rawText }];
+    }
+  }
+
+  function defaultLlmPrompt() {
+    return [
+      '你是 TTS 对话切分器。把用户给出的小说/正文切成可朗读片段。',
+      '必须只输出 JSON 对象，不要 Markdown，不要解释。',
+      'JSON 格式: {"segments":[{"role":"narrator","text":"...","emo_vec":[0,0,0,0,0,0,0,0],"emo_text":"..."}]}',
+      '旁白 role 固定为 narrator；人物台词 role 使用人物名。',
+      'emo_vec 必须是 8 个 0 到 1 的数字；无法确定时可以省略 emo_vec，改用 emo_text。',
+      'emo_text 用自然语言描述语气、情绪、喘息、颤抖、压低声音等适合 TTS 的表达。',
+      '不要改写正文，不要合并不同角色，不要输出空 text。',
+    ].join('\n');
+  }
+
+  function parseJsonObject(text) {
+    const raw = String(text || '').trim();
+    try { return JSON.parse(raw); } catch (_) {}
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) {
+      try { return JSON.parse(fenced[1]); } catch (_) {}
+    }
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      return JSON.parse(raw.slice(start, end + 1));
+    }
+    throw new Error('LLM did not return JSON');
+  }
+
+  function voiceMapToLines(map) {
+    return Object.keys(map || {})
+      .sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)))
+      .map(role => role + '=' + (map[role] || ''))
+      .join('\n');
+  }
+
+  function parseVoiceMapLines(text) {
+    const next = {};
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq <= 0) continue;
+      const role = trimmed.slice(0, eq).trim();
+      const voice = trimmed.slice(eq + 1).trim();
+      if (role && voice) next[role] = voice;
+    }
+    if (!next.default && cfg.voiceMap.default) next.default = cfg.voiceMap.default;
+    return next;
   }
 
   // -------------------------------------------------------------------------
@@ -392,6 +479,14 @@
       return i;
     }
 
+    function textAreaInput(value, placeholder, minHeight) {
+      const i = document.createElement('textarea');
+      i.value = value || '';
+      i.placeholder = placeholder || '';
+      i.style.cssText = 'width:100%;min-height:' + (minHeight || 64) + 'px;padding:4px 6px;background:#0d0d14;color:#eee;border:1px solid #333;border-radius:4px;font-size:12px;';
+      return i;
+    }
+
     const apiBaseInput = textInput(cfg.apiBase, 'http://192.168.1.100:9880');
     fieldRow('API Base URL', apiBaseInput);
 
@@ -407,19 +502,34 @@
     const defaultVoiceInput = textInput(cfg.voiceMap.default, 'voice library name or absolute path');
     fieldRow('默认音色 (default)', defaultVoiceInput);
 
-    const regexInput = document.createElement('textarea');
-    regexInput.value = (cfg.localRegex.rules || []).join('\n');
-    regexInput.placeholder = '\\[TTS\\]([\\s\\S]*?)\\[/TTS\\]';
-    regexInput.style.cssText = 'width:100%;min-height:64px;padding:4px 6px;background:#0d0d14;color:#eee;border:1px solid #333;border-radius:4px;font-size:12px;';
+    const voiceMapInput = textAreaInput(voiceMapToLines(cfg.voiceMap), 'default=voice_a\nnarrator=voice_a\n小明=voice_b', 72);
+    fieldRow('角色音色映射(role=voice,每行一条)', voiceMapInput);
+
+    const regexInput = textAreaInput((cfg.localRegex.rules || []).join('\n'), '\\[TTS\\]([\\s\\S]*?)\\[/TTS\\]', 64);
     fieldRow('本地正则(每行一条,第一个捕获组为朗读正文)', regexInput);
 
-    // TODO(Phase 5C): voice mapping per role (dynamic rows), LLM config UI,
-    //   parameter sliders. Skeleton only exposes the bare minimum.
+    const cacheToggle = document.createElement('input');
+    cacheToggle.type = 'checkbox';
+    cacheToggle.checked = !!cfg.cache.enabled;
+    fieldRow('启用快照缓存(重复文本直接复用本地音频)', cacheToggle);
 
-    const note = document.createElement('div');
-    note.textContent = '多角色 / LLM 配置 / 参数滑块 见 Phase 5C(待开发)。';
-    note.style.cssText = 'font-size:11px;opacity:0.5;margin:10px 0;';
-    panel.appendChild(note);
+    const llmToggle = document.createElement('input');
+    llmToggle.type = 'checkbox';
+    llmToggle.checked = !!cfg.llm.enabled;
+    fieldRow('启用第三方 LLM 解析多角色/情绪', llmToggle);
+
+    const llmEndpointInput = textInput(cfg.llm.endpoint, 'https://api.openai.com/v1/chat/completions');
+    fieldRow('LLM Endpoint(OpenAI-compatible)', llmEndpointInput);
+
+    const llmModelInput = textInput(cfg.llm.model, 'gpt-4o-mini');
+    fieldRow('LLM Model', llmModelInput);
+
+    const llmKeyInput = textInput(cfg.llm.apiKey, 'sk-...');
+    llmKeyInput.type = 'password';
+    fieldRow('LLM API Key(仅存浏览器 localStorage)', llmKeyInput);
+
+    const llmPromptInput = textAreaInput(cfg.llm.systemPrompt, defaultLlmPrompt(), 120);
+    fieldRow('LLM System Prompt(可留空)', llmPromptInput);
 
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
@@ -432,8 +542,15 @@
       cfg.chatSelector = chatSelInput.value.trim() || '#chat';
       cfg.messageSelector = msgSelInput.value.trim() || '.mes';
       cfg.textSelector = textSelInput.value.trim() || '.mes_text';
-      cfg.voiceMap.default = defaultVoiceInput.value.trim();
+      cfg.voiceMap = parseVoiceMapLines(voiceMapInput.value);
+      cfg.voiceMap.default = defaultVoiceInput.value.trim() || cfg.voiceMap.default || '';
       cfg.localRegex.rules = regexInput.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      cfg.cache.enabled = cacheToggle.checked;
+      cfg.llm.enabled = llmToggle.checked;
+      cfg.llm.endpoint = llmEndpointInput.value.trim();
+      cfg.llm.model = llmModelInput.value.trim();
+      cfg.llm.apiKey = llmKeyInput.value.trim();
+      cfg.llm.systemPrompt = llmPromptInput.value.trim();
       saveConfig(cfg);
       startObserver();
       panel.style.display = 'none';

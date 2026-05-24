@@ -14,7 +14,7 @@ import soundfile as sf
 import torch
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from io import BytesIO
@@ -113,6 +113,10 @@ class Voice_Save_Request(BaseModel):
     ext: str = ".wav"
 
 
+class Cache_Prune_Request(BaseModel):
+    max_items: int = 5000
+
+
 def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
     io_buffer = BytesIO()
     sf.write(io_buffer, data, rate, format="wav")
@@ -155,6 +159,28 @@ def _wav_streaming_header(sample_rate: int, channels: int = 1, bits: int = 16) -
     )
 
 
+def _wav_file_header(data_bytes_len: int, sample_rate: int, channels: int = 1, bits: int = 16) -> bytes:
+    byte_rate = sample_rate * channels * bits // 8
+    block_align = channels * bits // 8
+    data_bytes_len = max(0, int(data_bytes_len))
+    riff_size = 36 + data_bytes_len
+    return (
+        b"RIFF"
+        + riff_size.to_bytes(4, "little")
+        + b"WAVE"
+        + b"fmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + channels.to_bytes(2, "little")
+        + sample_rate.to_bytes(4, "little")
+        + byte_rate.to_bytes(4, "little")
+        + block_align.to_bytes(2, "little")
+        + bits.to_bytes(2, "little")
+        + b"data"
+        + data_bytes_len.to_bytes(4, "little")
+    )
+
+
 def _chunk_to_pcm_bytes(chunk_wav) -> bytes:
     # chunk_wav: torch tensor on CPU, shape [channels, samples], float32 in
     # roughly [-1, 1]. Convert to int16 mono PCM.
@@ -192,6 +218,45 @@ def _resolve_voice(name_or_path: str) -> Optional[str]:
     return None
 
 
+def _resolve_ref_audio(req: dict):
+    ref = req.get("ref_audio_path", "")
+    resolved = _resolve_voice(ref)
+    if not resolved:
+        return JSONResponse(
+            status_code=400,
+            content={"message": "ref_audio_path not found", "ref_audio_path": ref},
+        )
+    req["ref_audio_path"] = resolved
+    return None
+
+
+def _audio_file_meta(path: str) -> dict:
+    try:
+        st = os.stat(path)
+        return {"size": st.st_size, "mtime": int(st.st_mtime)}
+    except OSError:
+        return {}
+
+
+def _single_tts_cache_payload(req: dict) -> dict:
+    ref_path = req.get("ref_audio_path", "")
+    return {
+        "kind": "tts_stream_v1",
+        "text": req.get("text", ""),
+        "ref_audio_path": ref_path,
+        "ref_meta": _audio_file_meta(ref_path),
+        "emo_text": req.get("emo_text") or "",
+        "emo_ref_audio_path": req.get("emo_ref_audio_path") or "",
+        "emo_vec": req.get("emo_vec") or [],
+        "normalize_emo_vec": bool(req.get("normalize_emo_vec", False)),
+        "top_k": int(req.get("top_k", 30)),
+        "top_p": float(req.get("top_p", 0.8)),
+        "temperature": float(req.get("temperature", 0.8)),
+        "emo_alpha": float(req.get("emo_alpha", 0.7)),
+        "repetition_penalty": float(req.get("repetition_penalty", 10)),
+    }
+
+
 def handle_control(command: str):
     if command == "restart":
         os.execl(sys.executable, sys.executable, *argv)
@@ -214,6 +279,9 @@ async def tts_handle(req: dict):
     check_res = check_params(req)
     if check_res is not None:
         return check_res
+    resolve_res = _resolve_ref_audio(req)
+    if resolve_res is not None:
+        return resolve_res
     try:
         emo_text = req["emo_text"]
         use_emo_text = bool(req["emo_text"])
@@ -259,6 +327,9 @@ async def tts_stream_handle(req: dict):
     check_res = check_params(req)
     if check_res is not None:
         return check_res
+    resolve_res = _resolve_ref_audio(req)
+    if resolve_res is not None:
+        return resolve_res
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=64)
     SENTINEL = object()
@@ -336,6 +407,119 @@ async def tts_stream_handle(req: dict):
                 pass
 
     return StreamingResponse(stream_generator(), media_type="audio/wav")
+
+
+async def tts_cache_stream_handle(req: dict):
+    """Single-segment streaming endpoint with file-backed snapshot caching."""
+    check_res = check_params(req)
+    if check_res is not None:
+        return check_res
+    resolve_res = _resolve_ref_audio(req)
+    if resolve_res is not None:
+        return resolve_res
+
+    from indextts import snapshot_cache
+
+    payload = _single_tts_cache_payload(req)
+    cache_key = snapshot_cache.make_cache_key(payload)
+    cached_path = snapshot_cache.get_cached_audio(cache_key)
+    if cached_path:
+        return FileResponse(
+            cached_path,
+            media_type="audio/wav",
+            headers={"X-IndexTTS-Cache": "HIT", "X-IndexTTS-Cache-Key": cache_key},
+        )
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+    SENTINEL = object()
+    sample_rate_holder = {"sr": None}
+    error_holder = {"exc": None}
+    pcm_chunks = []
+
+    async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
+        pcm = _chunk_to_pcm_bytes(chunk_wav)
+        sample_rate_holder["sr"] = sr
+        pcm_chunks.append(pcm)
+        await queue.put(pcm)
+
+    async def run_infer():
+        try:
+            async with tts_stream_lock:
+                emo_text = req.get("emo_text")
+                use_emo_text = bool(emo_text)
+                if emo_text == "auto":
+                    emo_text = None
+                    use_emo_text = True
+                emo_vec = req.get("emo_vec") or []
+                if not emo_vec:
+                    emo_vec = None
+                else:
+                    use_emo_text = False
+                    emo_text = None
+                    if req.get("normalize_emo_vec"):
+                        emo_vec = tts_pipeline.normalize_emo_vec(emo_vec)
+
+                await tts_pipeline.infer(
+                    spk_audio_prompt=req["ref_audio_path"],
+                    emo_audio_prompt=req.get("emo_ref_audio_path") or None,
+                    text=req["text"],
+                    emo_text=emo_text,
+                    use_emo_text=use_emo_text,
+                    emo_alpha=float(req.get("emo_alpha", 0.7)),
+                    emo_vector=emo_vec,
+                    top_p=float(req.get("top_p", 0.8)),
+                    top_k=int(req.get("top_k", 30)),
+                    temperature=float(req.get("temperature", 0.8)),
+                    repetition_penalty=float(req.get("repetition_penalty", 10)),
+                    output_path=None,
+                    stream_chunk_callback=on_chunk,
+                )
+        except Exception as e:
+            error_holder["exc"] = e
+            traceback.print_exc()
+        finally:
+            await queue.put(SENTINEL)
+
+    async def stream_generator():
+        infer_task = asyncio.create_task(run_infer())
+        try:
+            first = await queue.get()
+            if first is SENTINEL:
+                yield _wav_streaming_header(22050, channels=1, bits=16)
+                return
+
+            sr = sample_rate_holder["sr"] or 22050
+            yield _wav_streaming_header(sr, channels=1, bits=16)
+            yield first
+            while True:
+                chunk = await queue.get()
+                if chunk is SENTINEL:
+                    break
+                yield chunk
+        finally:
+            try:
+                await infer_task
+            except Exception:
+                pass
+            if error_holder["exc"] is None and pcm_chunks and sample_rate_holder["sr"]:
+                pcm = b"".join(pcm_chunks)
+                wav_bytes = _wav_file_header(len(pcm), sample_rate_holder["sr"]) + pcm
+                metadata = {
+                    "text_preview": (req.get("text") or "")[:120],
+                    "ref_audio_path": req.get("ref_audio_path", ""),
+                    "params": payload,
+                }
+                try:
+                    snapshot_cache.save_cached_audio(cache_key, wav_bytes, metadata)
+                    snapshot_cache.prune_cache(max_items=5000)
+                except Exception:
+                    traceback.print_exc()
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="audio/wav",
+        headers={"X-IndexTTS-Cache": "MISS", "X-IndexTTS-Cache-Key": cache_key},
+    )
 
 
 async def tts_dialogue_stream_handle(req: dict):
@@ -473,6 +657,180 @@ async def tts_dialogue_stream_handle(req: dict):
     return StreamingResponse(stream_generator(), media_type="audio/wav")
 
 
+async def tts_dialogue_cache_stream_handle(req: dict):
+    """Multi-role dialogue streaming with whole-dialogue file cache."""
+    segments = req.get("segments") or []
+    voices = req.get("voices") or {}
+    if not segments:
+        return JSONResponse(status_code=400, content={"message": "segments is required"})
+    if not voices:
+        return JSONResponse(status_code=400, content={"message": "voices is required"})
+
+    default_path = _resolve_voice(voices.get("default", ""))
+    role_voice_paths: Dict[str, str] = {}
+    unresolved_roles: List[str] = []
+    seen_roles = set()
+    for seg in segments:
+        role = (seg.get("role") or "").strip()
+        if not role or role in seen_roles:
+            seen_roles.add(role)
+            continue
+        seen_roles.add(role)
+        path = _resolve_voice(voices.get(role, "")) or default_path
+        if not path:
+            unresolved_roles.append(role)
+        else:
+            role_voice_paths[role] = path
+    if unresolved_roles:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "message": "voices unresolved for these roles (provide them in `voices` or set a `default`)",
+                "roles": unresolved_roles,
+            },
+        )
+
+    from indextts import snapshot_cache
+
+    interval_ms = int(req.get("interval_ms", 350))
+    default_emo_alpha = float(req.get("emo_alpha", 0.7))
+    sampling_kwargs = {
+        "top_p": float(req.get("top_p", 0.8)),
+        "top_k": int(req.get("top_k", 30)),
+        "temperature": float(req.get("temperature", 0.8)),
+        "repetition_penalty": float(req.get("repetition_penalty", 10)),
+    }
+    role_payload = {
+        role: {"path": path, "meta": _audio_file_meta(path)}
+        for role, path in sorted(role_voice_paths.items())
+    }
+    cache_payload = {
+        "kind": "tts_dialogue_stream_v1",
+        "segments": [
+            {
+                "role": (seg.get("role") or "").strip(),
+                "text": (seg.get("text") or "").strip(),
+                "emo_vec": seg.get("emo_vec") or None,
+                "emo_text": seg.get("emo_text") or None,
+                "emo_alpha": seg.get("emo_alpha"),
+            }
+            for seg in segments
+        ],
+        "voices": role_payload,
+        "default_voice": {"path": default_path, "meta": _audio_file_meta(default_path)} if default_path else None,
+        "interval_ms": interval_ms,
+        "emo_alpha": default_emo_alpha,
+        **sampling_kwargs,
+    }
+    cache_key = snapshot_cache.make_cache_key(cache_payload)
+    cached_path = snapshot_cache.get_cached_audio(cache_key)
+    if cached_path:
+        return FileResponse(
+            cached_path,
+            media_type="audio/wav",
+            headers={"X-IndexTTS-Cache": "HIT", "X-IndexTTS-Cache-Key": cache_key},
+        )
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+    SENTINEL = object()
+    sample_rate_holder = {"sr": None}
+    error_holder = {"exc": None}
+    pcm_chunks = []
+
+    async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
+        pcm = _chunk_to_pcm_bytes(chunk_wav)
+        sample_rate_holder["sr"] = sr
+        pcm_chunks.append(pcm)
+        await queue.put(pcm)
+
+    async def run_infer():
+        try:
+            async with tts_stream_lock:
+                for idx, seg in enumerate(segments):
+                    role = (seg.get("role") or "").strip()
+                    text = (seg.get("text") or "").strip()
+                    if not text:
+                        continue
+                    voice_path = role_voice_paths.get(role) or default_path
+                    if not voice_path:
+                        continue
+
+                    emo_vec = seg.get("emo_vec") or None
+                    emo_text_seg = seg.get("emo_text") or None
+                    seg_alpha = seg.get("emo_alpha")
+                    seg_alpha = float(seg_alpha) if seg_alpha is not None else default_emo_alpha
+                    if emo_vec:
+                        emo_text_seg = None
+                        use_emo_text_seg = False
+                    else:
+                        use_emo_text_seg = bool(emo_text_seg)
+
+                    if idx > 0 and sample_rate_holder["sr"]:
+                        silence = _silence_pcm_bytes(sample_rate_holder["sr"], interval_ms)
+                        pcm_chunks.append(silence)
+                        await queue.put(silence)
+
+                    await tts_pipeline.infer(
+                        spk_audio_prompt=voice_path,
+                        emo_audio_prompt=None,
+                        text=text,
+                        emo_text=emo_text_seg,
+                        use_emo_text=use_emo_text_seg,
+                        emo_alpha=seg_alpha,
+                        emo_vector=emo_vec,
+                        output_path=None,
+                        stream_chunk_callback=on_chunk,
+                        **sampling_kwargs,
+                    )
+        except Exception as e:
+            error_holder["exc"] = e
+            traceback.print_exc()
+        finally:
+            await queue.put(SENTINEL)
+
+    async def stream_generator():
+        infer_task = asyncio.create_task(run_infer())
+        try:
+            first = await queue.get()
+            if first is SENTINEL:
+                yield _wav_streaming_header(22050, channels=1, bits=16)
+                return
+            sr = sample_rate_holder["sr"] or 22050
+            yield _wav_streaming_header(sr, channels=1, bits=16)
+            yield first
+            while True:
+                chunk = await queue.get()
+                if chunk is SENTINEL:
+                    break
+                yield chunk
+        finally:
+            try:
+                await infer_task
+            except Exception:
+                pass
+            if error_holder["exc"] is None and pcm_chunks and sample_rate_holder["sr"]:
+                pcm = b"".join(pcm_chunks)
+                wav_bytes = _wav_file_header(len(pcm), sample_rate_holder["sr"]) + pcm
+                metadata = {
+                    "text_preview": " ".join(
+                        (seg.get("text") or "").strip() for seg in segments
+                    )[:120],
+                    "roles": sorted(role_voice_paths.keys()),
+                    "params": cache_payload,
+                }
+                try:
+                    snapshot_cache.save_cached_audio(cache_key, wav_bytes, metadata)
+                    snapshot_cache.prune_cache(max_items=5000)
+                except Exception:
+                    traceback.print_exc()
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="audio/wav",
+        headers={"X-IndexTTS-Cache": "MISS", "X-IndexTTS-Cache-Key": cache_key},
+    )
+
+
 @APP.get("/control")
 async def control(command: str = None):
     if command is None:
@@ -535,6 +893,44 @@ async def voices_delete_endpoint(name: str):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=400, content={"message": "voice delete failed", "Exception": str(e)})
+
+
+@APP.get("/cache")
+async def cache_list_endpoint(limit: int = 200):
+    """List local TTS snapshot cache metadata."""
+    try:
+        from indextts import snapshot_cache
+
+        return JSONResponse(content={"items": snapshot_cache.list_cache(limit=limit)})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "cache list failed", "Exception": str(e)})
+
+
+@APP.post("/cache/prune")
+async def cache_prune_endpoint(request: Cache_Prune_Request):
+    """Prune old local TTS snapshots by LRU-ish metadata timestamps."""
+    try:
+        from indextts import snapshot_cache
+
+        deleted = snapshot_cache.prune_cache(max_items=request.max_items)
+        return JSONResponse(content={"deleted": deleted, "max_items": request.max_items})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "cache prune failed", "Exception": str(e)})
+
+
+@APP.delete("/cache/{key}")
+async def cache_delete_endpoint(key: str):
+    """Delete one local TTS snapshot by cache key."""
+    try:
+        from indextts import snapshot_cache
+
+        deleted = snapshot_cache.delete_cache(key)
+        return JSONResponse(content={"deleted": deleted, "key": key})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "cache delete failed", "Exception": str(e)})
 
 
 @APP.get("/tts")
@@ -618,6 +1014,42 @@ async def tts_stream_post_endpoint(request: TTS_Request):
     return await tts_stream_handle(req)
 
 
+@APP.get("/tts_cache_stream")
+async def tts_cache_stream_get_endpoint(
+    text: str = None,
+    ref_audio_path: str = None,
+    emo_text: str = None,
+    emo_ref_audio_path: str = None,
+    top_k: int = 30,
+    top_p: float = 0.8,
+    temperature: float = 0.8,
+    emo_alpha: float = 0.7,
+    normalize_emo_vec: bool = False,
+    repetition_penalty: float = 10,
+):
+    """Streaming TTS with local snapshot cache for lazy TAVO playback."""
+    req = {
+        "text": text,
+        "emo_text": emo_text,
+        "ref_audio_path": ref_audio_path,
+        "emo_ref_audio_path": emo_ref_audio_path,
+        "top_k": top_k,
+        "top_p": top_p,
+        "temperature": temperature,
+        "emo_alpha": float(emo_alpha),
+        "emo_vec": [],
+        "normalize_emo_vec": normalize_emo_vec,
+        "repetition_penalty": float(repetition_penalty),
+    }
+    return await tts_cache_stream_handle(req)
+
+
+@APP.post("/tts_cache_stream")
+async def tts_cache_stream_post_endpoint(request: TTS_Request):
+    req = request.dict()
+    return await tts_cache_stream_handle(req)
+
+
 @APP.post("/tts_dialogue_stream")
 async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
     """Phase 2: multi-voice + emotion streaming for TAVO dialogue.
@@ -647,6 +1079,13 @@ async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
     return await tts_dialogue_stream_handle(req)
 
 
+@APP.post("/tts_dialogue_cache_stream")
+async def tts_dialogue_cache_stream_endpoint(request: TTS_Dialogue_Request):
+    """Multi-voice + emotion streaming with local whole-dialogue cache."""
+    req = request.dict()
+    return await tts_dialogue_cache_stream_handle(req)
+
+
 # @APP.get("/set_gpt_weights")
 # async def set_gpt_weights(weights_path: str = None):
 #     return JSONResponse(status_code=200, content={"message": "index不需要切换模型"})
@@ -673,8 +1112,11 @@ if __name__ == "__main__":
         print(f"IndexTTS API listening on http://{bind_for_log}:{port}")
         print(f"  - GET/POST /tts                  (one-shot, returns full WAV)")
         print(f"  - GET/POST /tts_stream           (single-segment streaming, for TAVO regex)")
+        print(f"  - GET/POST /tts_cache_stream     (single-segment streaming with file cache)")
         print(f"  - POST     /tts_dialogue_stream  (multi-voice + emotion streaming)")
+        print(f"  - POST     /tts_dialogue_cache_stream (multi-voice streaming with file cache)")
         print(f"  - GET/POST /voices               (local voice library)")
+        print(f"  - GET/POST /cache                (local TTS snapshot cache)")
         print(f"  - GET      /static/tavo.js       (single-file TAVO bridge)")
         print(f"  - GET      /health               (liveness probe)")
         if host in ("127.0.0.1", "localhost"):
