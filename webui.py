@@ -1171,7 +1171,7 @@ if __name__ == "__main__":
             outputs=[segments_preview]
         )
 
-        prompt_audio.change(update_prompt_audio,
+        prompt_audio.upload(update_prompt_audio,
                             inputs=[prompt_audio],
                             outputs=[gen_button, audio_history_dropdown])
 

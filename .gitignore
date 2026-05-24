@@ -33,3 +33,5 @@ desktop.ini
 /checkpoints/*
 !/checkpoints/*.yaml
 /outputs/
+/prompts/audio_history.json
+/prompts/history/
