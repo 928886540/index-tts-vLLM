@@ -125,6 +125,46 @@
     return base + path;
   }
 
+  function profileNamePath(name) {
+    return '/profiles/' + encodeURIComponent(name);
+  }
+
+  function configForProfile() {
+    const data = clonePlain(cfg);
+    if (data.llm) delete data.llm.apiKey;
+    return data;
+  }
+
+  async function fetchProfiles() {
+    const res = await fetch(apiUrl('/profiles'), { cache: 'no-store' });
+    if (!res.ok) throw new Error('/profiles 返回 ' + res.status);
+    const data = await res.json();
+    return Array.isArray(data.profiles) ? data.profiles : [];
+  }
+
+  async function saveProfile(name) {
+    const res = await fetch(apiUrl('/profiles'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, data: configForProfile() }),
+    });
+    if (!res.ok) throw new Error('/profiles 保存失败 ' + res.status);
+    return res.json();
+  }
+
+  async function loadProfile(name) {
+    const keepApiKey = cfg.llm && cfg.llm.apiKey ? cfg.llm.apiKey : '';
+    const res = await fetch(apiUrl(profileNamePath(name)), { cache: 'no-store' });
+    if (!res.ok) throw new Error(profileNamePath(name) + ' 返回 ' + res.status);
+    const profile = await res.json();
+    mergeDeep(cfg, profile.data || {});
+    cfg.llm = cfg.llm || clonePlain(DEFAULTS.llm);
+    cfg.llm.apiKey = keepApiKey;
+    saveConfig(cfg);
+    startObserver();
+    return profile;
+  }
+
   // Returns a stream URL for <audio src=...>. Browser fetches lazily because
   // the generated <audio> uses preload="none" unless autoPlay is enabled.
   function tts_stream_url(text, voicePathOrName) {
@@ -787,13 +827,7 @@
     const llmPromptInput = textAreaInput(cfg.llm.systemPrompt, defaultLlmPrompt(), 120);
     fieldRow('LLM System Prompt(可留空)', llmPromptInput);
 
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
-
-    const saveBtn = document.createElement('button');
-    saveBtn.textContent = '保存并应用';
-    saveBtn.style.cssText = 'flex:1;padding:6px;background:#7b3cff;color:#fff;border:0;border-radius:4px;cursor:pointer;';
-    saveBtn.addEventListener('click', () => {
+    function applyInputsToConfig() {
       cfg.apiBase = apiBaseInput.value.trim();
       cfg.chatSelector = chatSelInput.value.trim() || '#chat';
       cfg.messageSelector = msgSelInput.value.trim() || '.mes';
@@ -807,6 +841,122 @@
       cfg.llm.model = llmModelInput.value.trim();
       cfg.llm.apiKey = llmKeyInput.value.trim();
       cfg.llm.systemPrompt = llmPromptInput.value.trim();
+    }
+
+    const profileBox = document.createElement('div');
+    profileBox.style.cssText = 'margin:12px 0 10px;padding:10px;border:1px solid #333;border-radius:6px;background:#14141c;';
+    const profileTitle = document.createElement('div');
+    profileTitle.textContent = '配置预设/Profile';
+    profileTitle.style.cssText = 'font-size:12px;font-weight:600;color:#c4b5fd;margin-bottom:8px;';
+    profileBox.appendChild(profileTitle);
+
+    const profileNameInput = textInput('', 'profile name');
+    profileNameInput.style.marginBottom = '8px';
+    profileBox.appendChild(profileNameInput);
+
+    const profileSelect = document.createElement('select');
+    profileSelect.style.cssText = 'width:100%;padding:4px 6px;background:#0d0d14;color:#eee;border:1px solid #333;border-radius:4px;font-size:12px;margin-bottom:8px;';
+    const emptyProfileOption = document.createElement('option');
+    emptyProfileOption.value = '';
+    emptyProfileOption.textContent = '未加载列表';
+    profileSelect.appendChild(emptyProfileOption);
+    profileBox.appendChild(profileSelect);
+
+    const profileBtnRow = document.createElement('div');
+    profileBtnRow.style.cssText = 'display:flex;gap:8px;';
+
+    const profileSaveBtn = document.createElement('button');
+    profileSaveBtn.textContent = '保存';
+    profileSaveBtn.style.cssText = 'flex:1;padding:6px;background:#4f46e5;color:#fff;border:0;border-radius:4px;cursor:pointer;';
+    profileBtnRow.appendChild(profileSaveBtn);
+
+    const profileRefreshBtn = document.createElement('button');
+    profileRefreshBtn.textContent = '刷新列表';
+    profileRefreshBtn.style.cssText = 'flex:1;padding:6px;background:#333;color:#eee;border:0;border-radius:4px;cursor:pointer;';
+    profileBtnRow.appendChild(profileRefreshBtn);
+
+    const profileLoadBtn = document.createElement('button');
+    profileLoadBtn.textContent = '加载';
+    profileLoadBtn.style.cssText = 'flex:1;padding:6px;background:#2563eb;color:#fff;border:0;border-radius:4px;cursor:pointer;';
+    profileBtnRow.appendChild(profileLoadBtn);
+    profileBox.appendChild(profileBtnRow);
+
+    const profileStatus = document.createElement('div');
+    profileStatus.style.cssText = 'margin-top:7px;font-size:11px;opacity:0.75;min-height:16px;';
+    profileBox.appendChild(profileStatus);
+    panel.appendChild(profileBox);
+
+    function setProfileStatus(text) {
+      profileStatus.textContent = text || '';
+    }
+
+    async function refreshProfileList() {
+      setProfileStatus('读取预设列表...');
+      try {
+        const profiles = await fetchProfiles();
+        profileSelect.innerHTML = '';
+        if (!profiles.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '暂无预设';
+          profileSelect.appendChild(opt);
+          setProfileStatus('暂无预设');
+          return;
+        }
+        profiles.forEach((profile) => {
+          const name = String(profile.name || '').trim();
+          if (!name) return;
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name;
+          profileSelect.appendChild(opt);
+        });
+        setProfileStatus('已刷新 ' + profileSelect.options.length + ' 个预设');
+      } catch (e) {
+        setProfileStatus('Profile 不可用: ' + shortError(e));
+      }
+    }
+
+    profileRefreshBtn.addEventListener('click', refreshProfileList);
+
+    profileSaveBtn.addEventListener('click', async () => {
+      const name = profileNameInput.value.trim();
+      if (!name) { setProfileStatus('请输入 profile name'); return; }
+      try {
+        applyInputsToConfig();
+        saveConfig(cfg);
+        setProfileStatus('保存预设...');
+        await saveProfile(name);
+        profileSelect.value = name;
+        setProfileStatus('已保存: ' + name);
+        await refreshProfileList();
+        profileSelect.value = name;
+      } catch (e) {
+        setProfileStatus('保存失败: ' + shortError(e));
+      }
+    });
+
+    profileLoadBtn.addEventListener('click', async () => {
+      const name = (profileSelect.value || profileNameInput.value).trim();
+      if (!name) { setProfileStatus('请选择或输入 profile name'); return; }
+      try {
+        setProfileStatus('加载预设...');
+        await loadProfile(name);
+        setProfileStatus('已加载: ' + name);
+        renderPanel(panel);
+      } catch (e) {
+        setProfileStatus('加载失败: ' + shortError(e));
+      }
+    });
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = '保存并应用';
+    saveBtn.style.cssText = 'flex:1;padding:6px;background:#7b3cff;color:#fff;border:0;border-radius:4px;cursor:pointer;';
+    saveBtn.addEventListener('click', () => {
+      applyInputsToConfig();
       saveConfig(cfg);
       startObserver();
       panel.style.display = 'none';

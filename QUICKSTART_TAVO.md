@@ -92,9 +92,16 @@ LLM 输出会被解析成:
 - 下次同样的文本、音色、情感和参数会直接复用本地 WAV。
 - `<audio preload="none">` 保持懒加载，消息很多时不会预先请求所有音频。
 
-## 7. 当前限制
+## 7. 配置预设
 
-- 还没有做漂亮的 xiaomi 风格轻量音频卡，只是基础播放按钮和设置面板。
+设置面板里的“配置预设/Profile”可以把当前配置保存到本地 SQLite:
+
+- 保存内容包括 API 地址、选择器、正则、音色映射、LLM endpoint/model/prompt、TTS 参数。
+- 不保存明文 LLM API key；key 仍只留在当前浏览器 localStorage。
+- 这是可选功能，不影响默认 TTS 主链路。
+
+## 8. 当前限制
+
+- 轻量音频卡已具备基础播放、状态、mini progress；完整播放器懒加载还没做。
 - LLM 目前按 OpenAI-compatible chat completions 实现；Anthropic/Gemini 原生协议还没单独适配。
 - 这份文档是草稿，等第一次真实联调后再整理成最终用户文档。
-

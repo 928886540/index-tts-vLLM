@@ -113,6 +113,16 @@ class Voice_Save_Request(BaseModel):
     ext: str = ".wav"
 
 
+class Profile_Save_Request(BaseModel):
+    name: str
+    data: dict
+
+
+class Usage_Log_Request(BaseModel):
+    event_type: str
+    payload: dict
+
+
 class Cache_Prune_Request(BaseModel):
     max_items: int = 5000
 
@@ -895,6 +905,84 @@ async def voices_delete_endpoint(name: str):
         return JSONResponse(status_code=400, content={"message": "voice delete failed", "Exception": str(e)})
 
 
+@APP.get("/profiles")
+async def profiles_list_endpoint():
+    """List lightweight TAVO profiles from the local SQLite store."""
+    try:
+        from indextts import profile_store
+
+        return JSONResponse(content={"profiles": profile_store.list_profiles()})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "profiles list failed", "Exception": str(e)})
+
+
+@APP.get("/profiles/{name}")
+async def profiles_get_endpoint(name: str):
+    """Return one lightweight TAVO profile by name."""
+    try:
+        from indextts import profile_store
+
+        profile = profile_store.get_profile(name)
+        if profile is None:
+            return JSONResponse(status_code=404, content={"message": "profile not found", "name": name})
+        return JSONResponse(content=profile)
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "profile get failed", "Exception": str(e)})
+
+
+@APP.post("/profiles")
+async def profiles_save_endpoint(request: Profile_Save_Request):
+    """Save one lightweight TAVO profile to the local SQLite store."""
+    try:
+        from indextts import profile_store
+
+        profile_id = profile_store.save_profile(request.name, request.data)
+        return JSONResponse(content={"id": profile_id, "name": request.name})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "profile save failed", "Exception": str(e)})
+
+
+@APP.delete("/profiles/{name}")
+async def profiles_delete_endpoint(name: str):
+    """Delete one lightweight TAVO profile by name."""
+    try:
+        from indextts import profile_store
+
+        deleted = profile_store.delete_profile(name)
+        return JSONResponse(content={"deleted": deleted, "name": name})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "profile delete failed", "Exception": str(e)})
+
+
+@APP.get("/usage")
+async def usage_list_endpoint(limit: int = 200):
+    """List recent lightweight TAVO usage events from the local SQLite store."""
+    try:
+        from indextts import profile_store
+
+        return JSONResponse(content={"items": profile_store.list_usage(limit=limit)})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "usage list failed", "Exception": str(e)})
+
+
+@APP.post("/usage")
+async def usage_append_endpoint(request: Usage_Log_Request):
+    """Append one lightweight TAVO usage event to the local SQLite store."""
+    try:
+        from indextts import profile_store
+
+        usage_id = profile_store.append_usage(request.event_type, request.payload)
+        return JSONResponse(content={"id": usage_id, "event_type": request.event_type})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "usage append failed", "Exception": str(e)})
+
+
 @APP.get("/cache")
 async def cache_list_endpoint(limit: int = 200):
     """List local TTS snapshot cache metadata."""
@@ -1117,6 +1205,8 @@ if __name__ == "__main__":
         print(f"  - POST     /tts_dialogue_cache_stream (multi-voice streaming with file cache)")
         print(f"  - GET/POST /voices               (local voice library)")
         print(f"  - GET/POST /cache                (local TTS snapshot cache)")
+        print(f"  - GET/POST /profiles             (optional local profile store)")
+        print(f"  - GET/POST /usage                (optional local usage log)")
         print(f"  - GET      /static/tavo.js       (single-file TAVO bridge)")
         print(f"  - GET      /health               (liveness probe)")
         if host in ("127.0.0.1", "localhost"):
