@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -79,11 +80,16 @@ if __name__ == "__main__":
 
     os.makedirs("outputs/tasks",exist_ok=True)
     os.makedirs("prompts",exist_ok=True)
+    os.makedirs(os.path.join("prompts", "history"), exist_ok=True)
 
-    STREAM_TARGET_SEGMENT_TOKENS = 96
-    STREAM_HARD_SEGMENT_TOKENS = 112
-    STREAM_FIRST_SEGMENT_TOKENS = 48
+    STREAM_TARGET_SEGMENT_TOKENS = 82
+    STREAM_HARD_SEGMENT_TOKENS = 92
+    STREAM_FIRST_SEGMENT_TOKENS = 42
     STREAM_MIN_SEGMENT_TOKENS = 28
+    STREAM_DIFFUSION_STEPS = 12
+    AUDIO_HISTORY_PATH = os.path.join("prompts", "audio_history.json")
+    AUDIO_HISTORY_DIR = os.path.join("prompts", "history")
+    AUDIO_HISTORY_LIMIT = 30
 
     def get_stream_split_limits(requested_segment_tokens):
         target_tokens = min(int(requested_segment_tokens), STREAM_TARGET_SEGMENT_TOKENS)
@@ -93,6 +99,85 @@ if __name__ == "__main__":
         )
         first_tokens = min(STREAM_FIRST_SEGMENT_TOKENS, target_tokens)
         return target_tokens, hard_tokens, first_tokens
+
+    def safe_audio_history_name(path):
+        base = os.path.basename(path or "audio.wav")
+        stem, ext = os.path.splitext(base)
+        ext = ext if ext else ".wav"
+        safe_stem = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in stem).strip("._-")
+        if not safe_stem:
+            safe_stem = "audio"
+        return f"{int(time.time())}_{safe_stem[:48]}{ext}"
+
+    def load_audio_history():
+        if not os.path.exists(AUDIO_HISTORY_PATH):
+            return []
+        try:
+            with open(AUDIO_HISTORY_PATH, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        except Exception:
+            return []
+
+        cleaned = []
+        seen = set()
+        for record in records:
+            path = record.get("path") if isinstance(record, dict) else None
+            if not path or path in seen or not os.path.exists(path):
+                continue
+            seen.add(path)
+            cleaned.append({
+                "name": record.get("name") or os.path.basename(path),
+                "path": path,
+                "source": record.get("source") or path,
+                "time": record.get("time") or "",
+            })
+        return cleaned[:AUDIO_HISTORY_LIMIT]
+
+    def save_audio_history(records):
+        with open(AUDIO_HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(records[:AUDIO_HISTORY_LIMIT], f, ensure_ascii=False, indent=2)
+
+    def audio_history_choices():
+        return [(record["name"], record["path"]) for record in load_audio_history()]
+
+    def add_audio_history(audio_path):
+        if not audio_path or not os.path.exists(audio_path):
+            return None
+
+        history_dir_abs = os.path.abspath(AUDIO_HISTORY_DIR)
+        source_abs = os.path.abspath(audio_path)
+        for record in load_audio_history():
+            if os.path.abspath(record.get("source", "")) == source_abs or os.path.abspath(record["path"]) == source_abs:
+                stable_path = record["path"]
+                break
+        else:
+            stable_path = None
+
+        if stable_path is not None:
+            already_in_history = True
+        else:
+            already_in_history = False
+
+        try:
+            already_in_history = already_in_history or os.path.commonpath([history_dir_abs, source_abs]) == history_dir_abs
+        except ValueError:
+            pass
+
+        if already_in_history and stable_path is None:
+            stable_path = audio_path
+        elif stable_path is None:
+            stable_path = os.path.join(AUDIO_HISTORY_DIR, safe_audio_history_name(audio_path))
+            shutil.copy2(audio_path, stable_path)
+
+        records = [record for record in load_audio_history() if os.path.abspath(record["path"]) != os.path.abspath(stable_path)]
+        records.insert(0, {
+            "name": os.path.basename(stable_path),
+            "path": stable_path,
+            "source": source_abs,
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        save_audio_history(records)
+        return stable_path
 
     example_cases = []
     with open("examples/cases.jsonl", "r", encoding="utf-8") as f:
@@ -249,6 +334,7 @@ if __name__ == "__main__":
                 interval_silence=200,
                 verbose=cmd_args.verbose,
                 max_text_tokens_per_sentence=effective_segment_tokens,
+                diffusion_steps=STREAM_DIFFUSION_STEPS,
                 prefer_sentence_boundary=True,
                 quick_streaming_tokens=stream_first_tokens,
                 sentence_split_hard_max_tokens=stream_hard_tokens,
@@ -293,9 +379,17 @@ if __name__ == "__main__":
                 cancel_generation["task"] = None
                 cancel_generation["loop"] = None
 
-    def update_prompt_audio():
-        update_button = gr.update(interactive=True)
-        return update_button
+    def update_prompt_audio(audio_path):
+        stable_path = add_audio_history(audio_path)
+        return (
+            gr.update(interactive=True),
+            gr.update(choices=audio_history_choices(), value=stable_path),
+        )
+
+    def select_audio_history(audio_path):
+        if not audio_path or not os.path.exists(audio_path):
+            return gr.update(), gr.update(interactive=False)
+        return gr.update(value=audio_path), gr.update(interactive=True)
 
     def create_warning_message(warning_text):
         return gr.HTML(f"<div style=\"padding: 0.5em 0.8em; border-radius: 0.5em; background: #ffa87d; color: #000; font-weight: bold\">{html.escape(warning_text)}</div>")
@@ -787,8 +881,15 @@ if __name__ == "__main__":
         with gr.Tab(i18n("音频生成")):
             with gr.Row():
                 os.makedirs("prompts",exist_ok=True)
-                prompt_audio = gr.Audio(label=i18n("音色参考音频"),key="prompt_audio",
-                                        sources=["upload","microphone"],type="filepath")
+                with gr.Column():
+                    prompt_audio = gr.Audio(label=i18n("音色参考音频"),key="prompt_audio",
+                                            sources=["upload","microphone"],type="filepath")
+                    audio_history_dropdown = gr.Dropdown(
+                        label=i18n("音色试用记录"),
+                        choices=audio_history_choices(),
+                        value=None,
+                        interactive=True,
+                    )
                 prompt_list = os.listdir("prompts")
                 default = ''
                 if prompt_list:
@@ -1070,9 +1171,13 @@ if __name__ == "__main__":
             outputs=[segments_preview]
         )
 
-        prompt_audio.upload(update_prompt_audio,
-                            inputs=[],
-                            outputs=[gen_button])
+        prompt_audio.change(update_prompt_audio,
+                            inputs=[prompt_audio],
+                            outputs=[gen_button, audio_history_dropdown])
+
+        audio_history_dropdown.change(select_audio_history,
+                            inputs=[audio_history_dropdown],
+                            outputs=[prompt_audio, gen_button])
 
         gen_event = gen_button.click(gen_single,
                         inputs=[emo_control_method,prompt_audio, input_text_single, emo_upload, emo_weight,
