@@ -12,7 +12,7 @@ from vllm import ModelRegistry
 from indextts.gpt.index_tts_gpt2_vllm_v1 import GPT2TTSModel
 
 ModelRegistry.register_model("GPT2InferenceModel", GPT2TTSModel)
-print("✅  Registry GPT2TTSModel to vllm")
+print("Registry GPT2TTSModel to vllm")
 
 
 # 将 position_ids 减去 prefill 的长度再加 1，以便正确计算每一步 decode 的 position embedding
