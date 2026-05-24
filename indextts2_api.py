@@ -1,6 +1,7 @@
 import os
 import sys
 import traceback
+import base64
 
 now_dir = os.getcwd()
 
@@ -12,7 +13,9 @@ import numpy as np
 import soundfile as sf
 import torch
 from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 from io import BytesIO
 
@@ -49,6 +52,15 @@ argv = sys.argv
 
 
 APP = FastAPI()
+APP.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+if os.path.isdir("static"):
+    APP.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 class TTS_Request(BaseModel):
@@ -92,6 +104,13 @@ class TTS_Dialogue_Request(BaseModel):
     temperature: float = 0.8
     repetition_penalty: float = 10
     emo_alpha: float = 0.7  # default if a segment doesn't override
+
+
+class Voice_Save_Request(BaseModel):
+    name: str
+    source_path: Optional[str] = None
+    audio_base64: Optional[str] = None
+    ext: str = ".wav"
 
 
 def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
@@ -467,6 +486,57 @@ async def health():
     return JSONResponse(content={"status": "ok"})
 
 
+@APP.get("/voices")
+async def voices_list_endpoint():
+    """List the local voice library stored under prompts/library."""
+    try:
+        from indextts import voice_library
+
+        return JSONResponse(content={"voices": voice_library.list_voices()})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "voices list failed", "Exception": str(e)})
+
+
+@APP.post("/voices")
+async def voices_save_endpoint(request: Voice_Save_Request):
+    """Save a voice by local file path or base64 audio bytes.
+
+    This stays filesystem-only for the lightweight TAVO flow. No database is
+    needed: users can also manage prompts/library directly if they prefer.
+    """
+    try:
+        from indextts import voice_library
+
+        if request.source_path:
+            path = voice_library.save_voice_from_path(request.source_path, request.name)
+        elif request.audio_base64:
+            audio_bytes = base64.b64decode(request.audio_base64)
+            path = voice_library.save_voice(audio_bytes, request.name, request.ext)
+        else:
+            return JSONResponse(
+                status_code=400,
+                content={"message": "source_path or audio_base64 is required"},
+            )
+        return JSONResponse(content={"name": voice_library.safe_voice_name(request.name), "path": path})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "voice save failed", "Exception": str(e)})
+
+
+@APP.delete("/voices/{name}")
+async def voices_delete_endpoint(name: str):
+    """Delete one local voice by library name."""
+    try:
+        from indextts import voice_library
+
+        deleted = voice_library.delete_voice(name)
+        return JSONResponse(content={"deleted": deleted, "name": voice_library.safe_voice_name(name)})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "voice delete failed", "Exception": str(e)})
+
+
 @APP.get("/tts")
 async def tts_get_endpoint(
     text: str = None,
@@ -604,6 +674,8 @@ if __name__ == "__main__":
         print(f"  - GET/POST /tts                  (one-shot, returns full WAV)")
         print(f"  - GET/POST /tts_stream           (single-segment streaming, for TAVO regex)")
         print(f"  - POST     /tts_dialogue_stream  (multi-voice + emotion streaming)")
+        print(f"  - GET/POST /voices               (local voice library)")
+        print(f"  - GET      /static/tavo.js       (single-file TAVO bridge)")
         print(f"  - GET      /health               (liveness probe)")
         if host in ("127.0.0.1", "localhost"):
             print("  [NOTE] Bound to localhost only. For LAN/TAVO use, pass `-a 0.0.0.0`.")
