@@ -539,6 +539,13 @@ class IndexTTS2:
                                                                  n_quantizers=3,
                                                                  f0=None)[0]
                     cat_condition = torch.cat([prompt_condition, cond], dim=1)
+                    if stream_chunk_callback is not None or verbose:
+                        print(
+                            f">> s2mel input {seg_idx + 1}/{len(sentences)}: "
+                            f"text_tokens={len(sent)}, semantic_codes={int(code_lens[0])}, "
+                            f"target_frames={int(target_lengths[0])}, "
+                            f"cat_frames={cat_condition.size(1)}, diffusion_steps={diffusion_steps}"
+                        )
                     vc_target = self.s2mel.models['cfm'].inference(cat_condition,
                                                                    torch.LongTensor([cat_condition.size(1)]).to(
                                                                        cond.device),

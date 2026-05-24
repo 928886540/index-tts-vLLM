@@ -82,11 +82,11 @@ if __name__ == "__main__":
     os.makedirs("prompts",exist_ok=True)
     os.makedirs(os.path.join("prompts", "history"), exist_ok=True)
 
-    STREAM_TARGET_SEGMENT_TOKENS = 82
-    STREAM_HARD_SEGMENT_TOKENS = 92
-    STREAM_FIRST_SEGMENT_TOKENS = 42
-    STREAM_MIN_SEGMENT_TOKENS = 28
-    STREAM_DIFFUSION_STEPS = 12
+    STREAM_TARGET_SEGMENT_TOKENS = 72
+    STREAM_HARD_SEGMENT_TOKENS = 82
+    STREAM_FIRST_SEGMENT_TOKENS = 36
+    STREAM_MIN_SEGMENT_TOKENS = 24
+    STREAM_DIFFUSION_STEPS = 8
     AUDIO_HISTORY_PATH = os.path.join("prompts", "audio_history.json")
     AUDIO_HISTORY_DIR = os.path.join("prompts", "history")
     AUDIO_HISTORY_LIMIT = 30
