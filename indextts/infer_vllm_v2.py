@@ -197,8 +197,10 @@ class IndexTTS2:
         self.cache_s2mel_style = None
         self.cache_s2mel_prompt = None
         self.cache_spk_audio_prompt = None
+        self.cache_spk_audio_prompt_seconds = None
         self.cache_emo_cond = None
         self.cache_emo_audio_prompt = None
+        self.cache_emo_audio_prompt_seconds = None
         self.cache_mel = None
 
         self.speaker_dict = {}
@@ -281,8 +283,23 @@ class IndexTTS2:
         prefer_sentence_boundary = bool(generation_kwargs.pop("prefer_sentence_boundary", False))
         sentence_split_hard_max_tokens = generation_kwargs.pop("sentence_split_hard_max_tokens", None)
         sentence_split_min_tokens = int(generation_kwargs.pop("sentence_split_min_tokens", 0))
+        max_prompt_audio_seconds = generation_kwargs.pop("max_prompt_audio_seconds", None)
+        max_emo_audio_seconds = generation_kwargs.pop("max_emo_audio_seconds", max_prompt_audio_seconds)
+        if max_prompt_audio_seconds is not None:
+            max_prompt_audio_seconds = float(max_prompt_audio_seconds)
+        if max_emo_audio_seconds is not None:
+            max_emo_audio_seconds = float(max_emo_audio_seconds)
         if sentence_split_hard_max_tokens is not None:
             sentence_split_hard_max_tokens = int(sentence_split_hard_max_tokens)
+
+        def trim_audio_for_prompt(audio_data, sample_rate, max_seconds):
+            if max_seconds is None or max_seconds <= 0:
+                return audio_data
+            max_samples = int(sample_rate * max_seconds)
+            if max_samples <= 0 or len(audio_data) <= max_samples:
+                return audio_data
+            print(f">> trim reference audio from {len(audio_data) / sample_rate:.2f}s to {max_seconds:.2f}s")
+            return audio_data[:max_samples]
 
         def should_stop_generation():
             if stop_generation_callback is None:
@@ -315,9 +332,14 @@ class IndexTTS2:
             # assert emo_alpha == 1.0
 
         # 如果参考音频改变了，才需要重新生成, 提升速度
-        if self.cache_spk_cond is None or self.cache_spk_audio_prompt != spk_audio_prompt:
+        if (
+            self.cache_spk_cond is None
+            or self.cache_spk_audio_prompt != spk_audio_prompt
+            or self.cache_spk_audio_prompt_seconds != max_prompt_audio_seconds
+        ):
             self._set_gr_progress(0.05, "处理音色参考音频...")
             audio, sr = librosa.load(spk_audio_prompt)
+            audio = trim_audio_for_prompt(audio, sr, max_prompt_audio_seconds)
             audio = torch.tensor(audio).unsqueeze(0)
             audio_22k = torchaudio.transforms.Resample(sr, 22050)(audio)
             audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio)
@@ -348,6 +370,7 @@ class IndexTTS2:
             self.cache_s2mel_style = style
             self.cache_s2mel_prompt = prompt_condition
             self.cache_spk_audio_prompt = spk_audio_prompt
+            self.cache_spk_audio_prompt_seconds = max_prompt_audio_seconds
             self.cache_mel = ref_mel
         else:
             style = self.cache_s2mel_style
@@ -368,8 +391,13 @@ class IndexTTS2:
             emovec_mat = torch.sum(emovec_mat, 0)
             emovec_mat = emovec_mat.unsqueeze(0)
 
-        if self.cache_emo_cond is None or self.cache_emo_audio_prompt != emo_audio_prompt:
-            emo_audio, _ = librosa.load(emo_audio_prompt, sr=16000)
+        if (
+            self.cache_emo_cond is None
+            or self.cache_emo_audio_prompt != emo_audio_prompt
+            or self.cache_emo_audio_prompt_seconds != max_emo_audio_seconds
+        ):
+            emo_audio, emo_sr = librosa.load(emo_audio_prompt, sr=16000)
+            emo_audio = trim_audio_for_prompt(emo_audio, emo_sr, max_emo_audio_seconds)
             emo_inputs = self.extract_features(emo_audio, sampling_rate=16000, return_tensors="pt")
             emo_input_features = emo_inputs["input_features"]
             emo_attention_mask = emo_inputs["attention_mask"]
@@ -379,6 +407,7 @@ class IndexTTS2:
 
             self.cache_emo_cond = emo_cond_emb
             self.cache_emo_audio_prompt = emo_audio_prompt
+            self.cache_emo_audio_prompt_seconds = max_emo_audio_seconds
         else:
             emo_cond_emb = self.cache_emo_cond
 

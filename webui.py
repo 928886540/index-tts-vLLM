@@ -87,6 +87,7 @@ if __name__ == "__main__":
     STREAM_FIRST_SEGMENT_TOKENS = 36
     STREAM_MIN_SEGMENT_TOKENS = 24
     STREAM_DIFFUSION_STEPS = 8
+    STREAM_PROMPT_AUDIO_SECONDS = 8
     AUDIO_HISTORY_PATH = os.path.join("prompts", "audio_history.json")
     AUDIO_HISTORY_DIR = os.path.join("prompts", "history")
     AUDIO_HISTORY_LIMIT = 30
@@ -121,6 +122,8 @@ if __name__ == "__main__":
         cleaned = []
         seen = set()
         for record in records:
+            if record.get("saved_from") != "generation_prompt":
+                continue
             path = record.get("path") if isinstance(record, dict) else None
             if not path or path in seen or not os.path.exists(path):
                 continue
@@ -175,6 +178,7 @@ if __name__ == "__main__":
             "path": stable_path,
             "source": source_abs,
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "saved_from": "generation_prompt",
         })
         save_audio_history(records)
         return stable_path
@@ -237,6 +241,10 @@ if __name__ == "__main__":
         cancel_generation["value"] = False
         cancel_generation["task"] = None
         cancel_generation["loop"] = asyncio.get_running_loop()
+        stable_prompt = add_audio_history(prompt)
+        if stable_prompt:
+            prompt = stable_prompt
+        prompt_history_update = gr.update(choices=audio_history_choices(), value=prompt)
         output_path = None
         if not output_path:
             output_path = os.path.join("outputs", f"spk_{int(time.time())}.wav")
@@ -291,13 +299,13 @@ if __name__ == "__main__":
                 output = await infer_task
             except asyncio.CancelledError:
                 progress(1.0, desc="已停止生成")
-                yield gr.update(value=None), gr.update(value=None, visible=True)
+                yield gr.update(value=None), gr.update(value=None, visible=True), prompt_history_update
                 return
             finally:
                 if cancel_generation.get("task") is infer_task:
                     cancel_generation["task"] = None
                     cancel_generation["loop"] = None
-            yield gr.update(value=None), gr.update(value=output, visible=True)
+            yield gr.update(value=None), gr.update(value=output, visible=True), prompt_history_update
             return
 
         effective_segment_tokens, stream_hard_tokens, stream_first_tokens = get_stream_split_limits(requested_segment_tokens)
@@ -311,7 +319,7 @@ if __name__ == "__main__":
             0.01,
             desc=f"流式播放准备中，完整句优先，目标 {effective_segment_tokens} Token，保险上限 {stream_hard_tokens}",
         )
-        yield gr.update(value=None), gr.update(value=None, visible=True)
+        yield gr.update(value=None), gr.update(value=None, visible=True), prompt_history_update
 
         async def on_stream_chunk(wav, sampling_rate, idx, total):
             if cancel_generation["value"]:
@@ -336,6 +344,8 @@ if __name__ == "__main__":
                 verbose=cmd_args.verbose,
                 max_text_tokens_per_sentence=effective_segment_tokens,
                 diffusion_steps=STREAM_DIFFUSION_STEPS,
+                max_prompt_audio_seconds=STREAM_PROMPT_AUDIO_SECONDS,
+                max_emo_audio_seconds=STREAM_PROMPT_AUDIO_SECONDS,
                 prefer_sentence_boundary=True,
                 quick_streaming_tokens=stream_first_tokens,
                 sentence_split_hard_max_tokens=stream_hard_tokens,
@@ -351,7 +361,7 @@ if __name__ == "__main__":
                 try:
                     play_path = await asyncio.wait_for(play_queue.get(), timeout=0.2)
                     last_play_path["value"] = play_path
-                    yield gr.update(value=play_path), gr.update(value=None, visible=True)
+                    yield gr.update(value=play_path), gr.update(value=None, visible=True), prompt_history_update
                 except asyncio.TimeoutError:
                     continue
 
@@ -363,13 +373,13 @@ if __name__ == "__main__":
             while not play_queue.empty():
                 play_path = await play_queue.get()
                 last_play_path["value"] = play_path
-                yield gr.update(value=play_path), gr.update(value=None, visible=True)
+                yield gr.update(value=play_path), gr.update(value=None, visible=True), prompt_history_update
             if cancel_generation["value"] or final_path is None:
                 progress(1.0, desc="已停止生成")
-                yield gr.update(value=None), gr.update(value=None, visible=True)
+                yield gr.update(value=None), gr.update(value=None, visible=True), prompt_history_update
                 return
             progress(1.0, desc="生成完成")
-            yield gr.update(value=last_play_path["value"]), gr.update(value=final_path, visible=True)
+            yield gr.update(value=last_play_path["value"]), gr.update(value=final_path, visible=True), prompt_history_update
         except asyncio.CancelledError:
             cancel_generation["value"] = True
             if not infer_task.done():
@@ -381,13 +391,6 @@ if __name__ == "__main__":
             if cancel_generation.get("task") is infer_task:
                 cancel_generation["task"] = None
                 cancel_generation["loop"] = None
-
-    def update_prompt_audio(audio_path):
-        stable_path = add_audio_history(audio_path)
-        return (
-            gr.update(interactive=True),
-            gr.update(choices=audio_history_choices(), value=stable_path),
-        )
 
     def select_audio_history(audio_path):
         if not audio_path or not os.path.exists(audio_path):
@@ -1174,9 +1177,9 @@ if __name__ == "__main__":
             outputs=[segments_preview]
         )
 
-        prompt_audio.upload(update_prompt_audio,
+        prompt_audio.upload(enable_generation_from_prompt,
                             inputs=[prompt_audio],
-                            outputs=[gen_button, audio_history_dropdown])
+                            outputs=[gen_button])
 
         audio_history_dropdown.change(select_audio_history,
                             inputs=[audio_history_dropdown],
@@ -1190,7 +1193,7 @@ if __name__ == "__main__":
                                 max_text_tokens_per_segment,
                                 *advanced_params,
                         ],
-                        outputs=[hidden_stream_file, output_audio],
+                        outputs=[hidden_stream_file, output_audio, audio_history_dropdown],
                         js=STREAM_JS,
                         stream_every=0.05)
         stop_button.click(request_cancel, queue=False)
