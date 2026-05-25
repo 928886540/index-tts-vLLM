@@ -3,6 +3,8 @@ import sys
 import traceback
 import base64
 import socket
+import secrets
+import time
 
 now_dir = os.getcwd()
 
@@ -171,6 +173,15 @@ def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
 # clobber each other. Lock around inference only; the StreamingResponse
 # generator yields outside the lock.
 tts_stream_lock = asyncio.Lock()
+STREAM_JOBS: Dict[str, dict] = {}
+STREAM_JOB_TTL_SECONDS = 600
+
+
+def _prune_stream_jobs():
+    now = time.time()
+    for job_id, item in list(STREAM_JOBS.items()):
+        if item.get("expires_at", 0) < now:
+            STREAM_JOBS.pop(job_id, None)
 
 
 def _wav_streaming_header(sample_rate: int, channels: int = 1, bits: int = 16) -> bytes:
@@ -1282,6 +1293,41 @@ async def tts_cache_stream_post_endpoint(request: TTS_Request):
     return await tts_cache_stream_handle(req)
 
 
+@APP.post("/tts_stream_job")
+async def tts_stream_job_endpoint(request: TTS_Request):
+    """Create a short-lived GET URL for streaming a POST-sized TTS request."""
+    req = request.dict()
+    check_res = check_params(req)
+    if check_res is not None:
+        return check_res
+    resolve_res = _resolve_ref_audio(req)
+    if resolve_res is not None:
+        return resolve_res
+
+    _prune_stream_jobs()
+    job_id = secrets.token_urlsafe(18)
+    STREAM_JOBS[job_id] = {
+        "req": req,
+        "expires_at": time.time() + STREAM_JOB_TTL_SECONDS,
+    }
+    return JSONResponse(content={
+        "job_id": job_id,
+        "url": f"/tts_stream_job/{job_id}",
+        "expires_in": STREAM_JOB_TTL_SECONDS,
+    })
+
+
+@APP.get("/tts_stream_job/{job_id}")
+async def tts_stream_job_audio_endpoint(job_id: str):
+    """Stream audio for a short-lived job created by /tts_stream_job."""
+    _prune_stream_jobs()
+    item = STREAM_JOBS.get(job_id)
+    if not item:
+        return JSONResponse(status_code=404, content={"message": "stream job expired or not found"})
+    item["expires_at"] = time.time() + STREAM_JOB_TTL_SECONDS
+    return await tts_cache_stream_handle(dict(item["req"]))
+
+
 @APP.post("/tts_dialogue_stream")
 async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
     """Phase 2: multi-voice + emotion streaming for TAVO dialogue.
@@ -1345,6 +1391,7 @@ if __name__ == "__main__":
         print(f"  - GET/POST /tts                  (one-shot, returns full WAV)")
         print(f"  - GET/POST /tts_stream           (single-segment streaming, for TAVO regex)")
         print(f"  - GET/POST /tts_cache_stream     (single-segment streaming with file cache)")
+        print(f"  - POST/GET /tts_stream_job       (short URL streaming job for long TAVO text)")
         print(f"  - POST     /tts_dialogue_stream  (multi-voice + emotion streaming)")
         print(f"  - POST     /tts_dialogue_cache_stream (multi-voice streaming with file cache)")
         print(f"  - GET/POST /voices               (local voice library)")

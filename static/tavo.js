@@ -182,6 +182,33 @@
   function singleDeleteUrl(base, cfg, text) {
     return cleanBase(base) + "/cache_tts_single?" + singleParams(cfg, text).toString();
   }
+  function singleBody(cfg, text, force) {
+    return {
+      text: text,
+      ref_audio_path: cfg.defaultVoice,
+      emo_text: "",
+      emo_ref_audio_path: "",
+      emo_vec: [],
+      normalize_emo_vec: false,
+      top_p: cfg.topP,
+      top_k: cfg.topK,
+      temperature: cfg.temperature,
+      repetition_penalty: cfg.repetitionPenalty,
+      emo_alpha: cfg.emoAlpha,
+      bypass_cache: !!force
+    };
+  }
+  async function createSingleStreamJob(base, cfg, text, force) {
+    var res = await fetch(cleanBase(base) + "/tts_stream_job", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(singleBody(cfg, text, force))
+    });
+    if (!res.ok) throw new Error(await res.text());
+    var data = await res.json();
+    if (!data || !data.url) throw new Error("后端没有返回流式播放地址。");
+    return new URL(data.url, cleanBase(base) + "/").href;
+  }
 
   async function parseWithLlm(text, cfg, setStatus) {
     setStatus("AI 正在拆分角色和八情绪...");
@@ -368,7 +395,7 @@
           selectTrack(generatedTracks.length - 1, false);
           setStatus(res.headers.get("X-IndexTTS-Cache") === "HIT" ? "已读取缓存" : "生成完成");
         } else {
-          url = singleStreamUrl(base, cfg, messageText, force);
+          url = await createSingleStreamJob(base, cfg, messageText, force);
           generatedTracks.push({ url: url, cacheKey: "", deleteUrl: singleDeleteUrl(base, cfg, messageText), createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode, streaming: true });
           selectTrack(generatedTracks.length - 1, false);
           setStatus("正在连接流式音频...");
