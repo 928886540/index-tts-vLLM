@@ -158,7 +158,7 @@
   function formatTime(sec) { sec = Math.max(0, Number(sec || 0)); if (!isFinite(sec)) return "--:--"; return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0"); }
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/\r?\n/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
-  function singleStreamUrl(base, cfg, text, force) {
+  function singleParams(cfg, text) {
     var p = new URLSearchParams();
     p.set("text", text);
     p.set("ref_audio_path", cfg.defaultVoice);
@@ -169,8 +169,18 @@
     p.set("top_k", String(cfg.topK));
     p.set("temperature", String(cfg.temperature));
     p.set("repetition_penalty", String(cfg.repetitionPenalty));
-    if (force) p.set("_t", String(Date.now()));
+    return p;
+  }
+  function singleStreamUrl(base, cfg, text, force) {
+    var p = singleParams(cfg, text);
+    if (force) {
+      p.set("bypass_cache", "1");
+      p.set("_t", String(Date.now()));
+    }
     return cleanBase(base) + cfg.endpoint + "?" + p.toString();
+  }
+  function singleDeleteUrl(base, cfg, text) {
+    return cleanBase(base) + "/cache_tts_single?" + singleParams(cfg, text).toString();
   }
 
   async function parseWithLlm(text, cfg, setStatus) {
@@ -262,6 +272,8 @@
       }
       if (removed && removed.cacheKey) {
         fetch(cleanBase(cfg.apiBase) + "/cache/" + encodeURIComponent(removed.cacheKey), { method: "DELETE" }).catch(function () {});
+      } else if (removed && removed.deleteUrl) {
+        fetch(removed.deleteUrl, { method: "DELETE" }).catch(function () {});
       }
       currentTrackIndex = Math.min(currentTrackIndex, generatedTracks.length - 1);
       if (currentTrackIndex >= 0) {
@@ -357,7 +369,7 @@
           setStatus(res.headers.get("X-IndexTTS-Cache") === "HIT" ? "已读取缓存" : "生成完成");
         } else {
           url = singleStreamUrl(base, cfg, messageText, force);
-          generatedTracks.push({ url: url, cacheKey: "", createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode, streaming: true });
+          generatedTracks.push({ url: url, cacheKey: "", deleteUrl: singleDeleteUrl(base, cfg, messageText), createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode, streaming: true });
           selectTrack(generatedTracks.length - 1, false);
           setStatus("正在连接流式音频...");
         }

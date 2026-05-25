@@ -95,6 +95,7 @@ class TTS_Request(BaseModel):
     seed: int = -1
     parallel_infer: bool = True
     repetition_penalty: float = 10
+    bypass_cache: bool = False
 
 
 # Phase 2 dialogue request models.
@@ -462,7 +463,8 @@ async def tts_cache_stream_handle(req: dict):
 
     payload = _single_tts_cache_payload(req)
     cache_key = snapshot_cache.make_cache_key(payload)
-    cached_path = snapshot_cache.get_cached_audio(cache_key)
+    bypass_cache = bool(req.get("bypass_cache", False))
+    cached_path = None if bypass_cache else snapshot_cache.get_cached_audio(cache_key)
     if cached_path:
         return FileResponse(
             cached_path,
@@ -558,7 +560,10 @@ async def tts_cache_stream_handle(req: dict):
     return StreamingResponse(
         stream_generator(),
         media_type="audio/wav",
-        headers={"X-IndexTTS-Cache": "MISS", "X-IndexTTS-Cache-Key": cache_key},
+        headers={
+            "X-IndexTTS-Cache": "BYPASS" if bypass_cache else "MISS",
+            "X-IndexTTS-Cache-Key": cache_key,
+        },
     )
 
 
@@ -1112,6 +1117,52 @@ async def cache_delete_endpoint(key: str):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=400, content={"message": "cache delete failed", "Exception": str(e)})
+
+
+@APP.delete("/cache_tts_single")
+async def cache_delete_single_endpoint(
+    text: str = None,
+    ref_audio_path: str = None,
+    emo_text: str = None,
+    emo_ref_audio_path: str = None,
+    top_k: int = 30,
+    top_p: float = 0.8,
+    temperature: float = 0.8,
+    emo_alpha: float = 0.7,
+    normalize_emo_vec: bool = False,
+    repetition_penalty: float = 10,
+    bypass_cache: bool = False,
+):
+    """Delete one single-voice TTS snapshot using the same params as /tts_cache_stream."""
+    req = {
+        "text": text,
+        "emo_text": emo_text,
+        "ref_audio_path": ref_audio_path,
+        "emo_ref_audio_path": emo_ref_audio_path,
+        "top_k": top_k,
+        "top_p": top_p,
+        "temperature": temperature,
+        "emo_alpha": float(emo_alpha),
+        "emo_vec": [],
+        "normalize_emo_vec": normalize_emo_vec,
+        "repetition_penalty": float(repetition_penalty),
+        "bypass_cache": bypass_cache,
+    }
+    check_res = check_params(req)
+    if check_res is not None:
+        return check_res
+    resolve_res = _resolve_ref_audio(req)
+    if resolve_res is not None:
+        return resolve_res
+    try:
+        from indextts import snapshot_cache
+
+        cache_key = snapshot_cache.make_cache_key(_single_tts_cache_payload(req))
+        deleted = snapshot_cache.delete_cache(cache_key)
+        return JSONResponse(content={"deleted": deleted, "key": cache_key})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "cache delete single failed", "Exception": str(e)})
 
 
 @APP.get("/tts")
