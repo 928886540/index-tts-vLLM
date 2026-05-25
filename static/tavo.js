@@ -509,18 +509,30 @@
         }
         return;
       }
-      const text = extractTextForTts(findMessageText(msgEl));
-      if (!text) {
-        setCardState(card, 'error', '没有可朗读文本');
-        return;
-      }
-      await playForMessage(msgEl, text, card);
+      await loadMessageAudio(msgEl, card);
+    });
+
+    card.reloadBtn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      clearCardAudio(card);
+      setCardState(card, 'idle');
+      await loadMessageAudio(msgEl, card);
     });
 
     if (cfg.autoPlay) {
       // best-effort: schedule a click after DOM settles
       setTimeout(() => card.playBtn.click(), 200);
     }
+  }
+
+  async function loadMessageAudio(msgEl, card) {
+    const text = extractTextForTts(findMessageText(msgEl));
+    if (!text) {
+      setCardState(card, 'error', '没有可朗读文本');
+      return;
+    }
+    await playForMessage(msgEl, text, card);
   }
 
   function buildAudioCard() {
@@ -630,6 +642,32 @@
 
     meta.appendChild(chips);
 
+    const actions = document.createElement('div');
+    actions.className = '_itts_audio_actions';
+    Object.assign(actions.style, {
+      display: 'flex',
+      gap: '6px',
+      alignItems: 'center',
+    });
+
+    const reloadBtn = document.createElement('button');
+    reloadBtn.type = 'button';
+    reloadBtn.title = '重新载入这条音频';
+    reloadBtn.textContent = '↻';
+    Object.assign(reloadBtn.style, {
+      width: '24px',
+      height: '24px',
+      borderRadius: '50%',
+      border: '1px solid rgba(148, 163, 184, 0.28)',
+      background: 'rgba(30, 41, 59, 0.78)',
+      color: '#e5e7eb',
+      cursor: 'pointer',
+      lineHeight: '1',
+      padding: '0',
+    });
+    actions.appendChild(reloadBtn);
+    meta.appendChild(actions);
+
     const progressTrack = document.createElement('div');
     progressTrack.className = '_itts_progress_track';
     Object.assign(progressTrack.style, {
@@ -666,6 +704,7 @@
     const card = {
       root,
       playBtn: btn,
+      reloadBtn,
       title,
       status,
       preview,
