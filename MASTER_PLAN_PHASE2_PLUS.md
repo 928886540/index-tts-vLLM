@@ -139,11 +139,11 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 | 子任务 | 谁 | 文件 |
 |---|---|---|
 | 4A 系统提示词模板 | Codex | `TAVO_LLM_PROMPT_20260525.md` |
-| 4B [可选] 服务端代理 `/parse_text` | Claude | `indextts2_api.py` + 新模块 `indextts/llm_proxy.py` |
+| 4B [可选] 服务端代理 `/parse_text` | Codex | `indextts2_api.py` + `indextts/llm_proxy.py` | ✅ OpenAI-compatible |
 | 4C 客户端直调示例(放 tavo.js 里) | Codex | `static/tavo.js` | ✅ OpenAI-compatible |
 
 **默认策略:** 客户端直调(用户在浏览器里填 OpenAI/Claude API key 存 localStorage)。
-**可选策略:** 服务端代理(给不想前端管 key 的用户)。
+**可选策略:** 服务端代理(给浏览器/TAVO WebView 被第三方 CORS 拦截的用户；key 仍由浏览器提交，本地服务不保存)。
 
 **LLM 输出 schema:**
 ```json
@@ -209,7 +209,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 | `indextts2_api.py` | 已加 P1-P5 端点、CORS、static mount |
 | `static/tavo.js` | 已完成基础版: 单 JS、设置面板、LLM、音色、缓存、轻量卡 |
 | `static/test.html` | 已完成基础测试页 |
-| `indextts/llm_proxy.py` | 待做(P4B,可选) |
+| `indextts/llm_proxy.py` | 已完成(P4B,可选) |
 | 所有 `TAVO_*.md` / `MASTER_*.md` 文档 | Claude 维护 |
 | `TAVO_LLM_PROMPT_20260525.md` | 已完成(P4A) |
 
@@ -230,7 +230,7 @@ def cache_key(text: str, voice_path: str, emo_vec: list, emo_text: str,
 ```
 [已完成] P2A/P2B/P2C: voice_library + dialogue endpoint + voices API
 [已完成] P3A/P3B/P3C/P3E: snapshot_cache + cache endpoints + dialogue cache
-[已完成] P4C: 客户端 OpenAI-compatible LLM 解析配置
+[已完成] P4B/P4C: 服务端 `/parse_text` 代理 + 客户端 OpenAI-compatible LLM 解析配置
 [已完成] P5A/P5B/P5C/P5D: static route + tavo.js + settings + test.html
 [已完成] P5E/P6A 基础版: xiaomi 风格轻量音频卡、单全局 audio、懒加载卡片
 [已完成] 架构文档: 参考用户图，落成轻量实际版

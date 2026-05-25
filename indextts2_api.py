@@ -128,6 +128,16 @@ class Cache_Prune_Request(BaseModel):
     max_items: int = 5000
 
 
+class Parse_Text_Request(BaseModel):
+    text: str
+    endpoint: str
+    model: str
+    api_key: str
+    system_prompt: Optional[str] = None
+    temperature: float = 0.2
+    timeout: int = 60
+
+
 def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
     io_buffer = BytesIO()
     sf.write(io_buffer, data, rate, format="wav")
@@ -984,6 +994,33 @@ async def usage_append_endpoint(request: Usage_Log_Request):
         return JSONResponse(status_code=400, content={"message": "usage append failed", "Exception": str(e)})
 
 
+@APP.post("/parse_text")
+async def parse_text_endpoint(request: Parse_Text_Request):
+    """Optional server-side OpenAI-compatible LLM proxy for TAVO parsing.
+
+    This is CPU/network only. It does not load models or run TTS inference.
+    It exists mainly for browsers/TAVO webviews that cannot call third-party
+    LLM endpoints directly because of CORS.
+    """
+    try:
+        from indextts import llm_proxy
+
+        result = await asyncio.to_thread(
+            llm_proxy.parse_text_openai_compatible,
+            text=request.text,
+            endpoint=request.endpoint,
+            model=request.model,
+            api_key=request.api_key,
+            system_prompt=request.system_prompt,
+            temperature=request.temperature,
+            timeout=request.timeout,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "parse_text failed", "Exception": str(e)})
+
+
 @APP.get("/cache")
 async def cache_list_endpoint(limit: int = 200):
     """List local TTS snapshot cache metadata."""
@@ -1208,6 +1245,7 @@ if __name__ == "__main__":
         print(f"  - GET/POST /cache                (local TTS snapshot cache)")
         print(f"  - GET/POST /profiles             (optional local profile store)")
         print(f"  - GET/POST /usage                (optional local usage log)")
+        print(f"  - POST     /parse_text           (optional OpenAI-compatible LLM proxy)")
         print(f"  - GET      /static/tavo.js       (single-file TAVO bridge)")
         print(f"  - GET      /health               (liveness probe)")
         if host in ("127.0.0.1", "localhost"):

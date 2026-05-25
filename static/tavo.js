@@ -49,6 +49,7 @@
     llm: {
       enabled: false,
       provider: 'openai',         // openai-compatible endpoint for now
+      mode: 'client',             // client | server (/parse_text)
       endpoint: '',               // e.g. https://api.openai.com/v1/chat/completions
       apiKey: '',
       model: 'gpt-4o-mini',
@@ -258,6 +259,23 @@
       return [{ role: 'default', text: rawText }];
     }
     try {
+      if (cfg.llm.mode === 'server') {
+        const res = await fetch(apiUrl('/parse_text'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: rawText,
+            endpoint: cfg.llm.endpoint,
+            model: cfg.llm.model,
+            api_key: cfg.llm.apiKey,
+            system_prompt: cfg.llm.systemPrompt || defaultLlmPrompt(),
+            temperature: 0.2,
+          }),
+        });
+        if (!res.ok) throw new Error('/parse_text HTTP ' + res.status + ': ' + await res.text());
+        return cleanSegments(await res.json(), rawText);
+      }
+
       const res = await fetch(cfg.llm.endpoint, {
         method: 'POST',
         headers: {
@@ -279,17 +297,7 @@
         ? data.choices[0].message.content
         : JSON.stringify(data);
       const parsed = parseJsonObject(content);
-      const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
-      const cleaned = segments
-        .map(seg => ({
-          role: normalizeRole(seg.role),
-          text: String(seg.text || '').trim(),
-          emo_vec: sanitizeEmotionVector(seg.emo_vec),
-          emo_text: seg.emo_text ? String(seg.emo_text).trim() : undefined,
-          emo_alpha: sanitizeOptionalNumber(seg.emo_alpha, 0, 1),
-        }))
-        .filter(seg => seg.text);
-      return cleaned.length ? cleaned : [{ role: 'default', text: rawText }];
+      return cleanSegments(parsed, rawText);
     } catch (e) {
       console.warn('[IndexTTS_TAVO] LLM parse failed, falling back to single segment:', e);
       return [{ role: 'default', text: rawText }];
@@ -310,6 +318,20 @@
       '当情绪需要喘息、停顿、害怕、疲惫、亲密、愤怒等细节时，优先补充 emo_text。',
       '示例: {"segments":[{"role":"narrator","text":"雨声敲着窗。","emo_vec":[0.05,0,0,0,0.1,0,0.05,0.25]},{"role":"小明","text":"你怎么还不睡？","emo_text":"压低声音, 带着轻微喘息"}]}',
     ].join('\n');
+  }
+
+  function cleanSegments(data, rawText) {
+    const segments = Array.isArray(data && data.segments) ? data.segments : [];
+    const cleaned = segments
+      .map(seg => ({
+        role: normalizeRole(seg.role),
+        text: String(seg.text || '').trim(),
+        emo_vec: sanitizeEmotionVector(seg.emo_vec),
+        emo_text: seg.emo_text ? String(seg.emo_text).trim() : undefined,
+        emo_alpha: sanitizeOptionalNumber(seg.emo_alpha, 0, 1),
+      }))
+      .filter(seg => seg.text);
+    return cleaned.length ? cleaned : [{ role: 'default', text: rawText }];
   }
 
   function normalizeRole(role) {
@@ -1070,6 +1092,20 @@
     llmToggle.checked = !!cfg.llm.enabled;
     fieldRow('启用第三方 LLM 解析多角色/情绪', llmToggle);
 
+    const llmModeInput = document.createElement('select');
+    llmModeInput.style.cssText = 'width:100%;padding:4px 6px;background:#0d0d14;color:#eee;border:1px solid #333;border-radius:4px;font-size:12px;';
+    [
+      ['client', '浏览器直连第三方 API'],
+      ['server', '本地服务代理 /parse_text'],
+    ].forEach(([value, label]) => {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      llmModeInput.appendChild(opt);
+    });
+    llmModeInput.value = cfg.llm.mode || 'client';
+    fieldRow('LLM 调用方式', llmModeInput);
+
     const llmEndpointInput = textInput(cfg.llm.endpoint, 'https://api.openai.com/v1/chat/completions');
     fieldRow('LLM Endpoint(OpenAI-compatible)', llmEndpointInput);
 
@@ -1078,7 +1114,7 @@
 
     const llmKeyInput = textInput(cfg.llm.apiKey, 'sk-...');
     llmKeyInput.type = 'password';
-    fieldRow('LLM API Key(仅存浏览器 localStorage)', llmKeyInput);
+    fieldRow('LLM API Key(仅本地保存；代理模式会随请求转发)', llmKeyInput);
 
     const llmPromptInput = textAreaInput(cfg.llm.systemPrompt, defaultLlmPrompt(), 120);
     fieldRow('LLM System Prompt(可留空)', llmPromptInput);
@@ -1093,6 +1129,7 @@
       cfg.localRegex.rules = regexInput.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
       cfg.cache.enabled = cacheToggle.checked;
       cfg.llm.enabled = llmToggle.checked;
+      cfg.llm.mode = llmModeInput.value || 'client';
       cfg.llm.endpoint = llmEndpointInput.value.trim();
       cfg.llm.model = llmModelInput.value.trim();
       cfg.llm.apiKey = llmKeyInput.value.trim();

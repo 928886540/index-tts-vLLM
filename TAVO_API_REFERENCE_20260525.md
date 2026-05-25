@@ -439,6 +439,49 @@ Response:
 
 No GPU use.
 
+## LLM Parse Proxy
+
+### POST `/parse_text`
+
+Purpose: optional OpenAI-compatible server-side proxy for TAVO text parsing. This is useful when the browser or TAVO WebView cannot call a third-party LLM endpoint directly because of CORS.
+
+Request:
+
+```json
+{
+  "text": "雨声敲着窗。小明低声说：\"你怎么还不睡？\"",
+  "endpoint": "https://api.openai.com/v1/chat/completions",
+  "model": "gpt-4o-mini",
+  "api_key": "not saved by the server",
+  "system_prompt": "Use TAVO_LLM_PROMPT_20260525.md or the default prompt from tavo.js",
+  "temperature": 0.2,
+  "timeout": 60
+}
+```
+
+Response:
+
+```json
+{
+  "segments": [
+    {
+      "role": "narrator",
+      "text": "雨声敲着窗。",
+      "emo_vec": [0, 0, 0, 0, 0, 0, 0, 0.2]
+    },
+    {
+      "role": "小明",
+      "text": "你怎么还不睡？",
+      "emo_text": "压低声音，带轻微喘息"
+    }
+  ]
+}
+```
+
+GPU behavior: no IndexTTS inference. This endpoint only performs a network request to the configured third-party LLM.
+
+Security note: the API key is forwarded for that request only. `static/tavo.js` still keeps it in browser `localStorage`; the server proxy does not persist it.
+
 ## TAVO Config Example
 
 Browser `localStorage` key: `indextts_tavo_config`.
