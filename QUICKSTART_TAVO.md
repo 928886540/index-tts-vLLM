@@ -24,7 +24,7 @@ http://<lan-ip>:9880
 <script src="http://<lan-ip>:9880/static/tavo.js"></script>
 ```
 
-只需要这一条，不需要再手写其它初始化代码。脚本加载后，TAVO 页面里会出现 IndexTTS 设置入口。
+只需要这一条，不需要再手写其它初始化代码。脚本加载后，TAVO 页面里会出现 IndexTTS 设置入口。普通配置会优先保存到 TAVO 全局变量，浏览器 localStorage 作为回退；LLM API Key 只保存在当前浏览器本地，不写入 TAVO 变量或 Profile。
 
 ## 3. 推荐设置流程
 
@@ -116,7 +116,7 @@ API Key: your-api-key
 - 优先试 `浏览器直连第三方 API`，链路最短。
 - 如果浏览器或 TAVO WebView 被第三方接口 CORS 拦截，改用 `本地服务代理 /parse_text`。
 - 代理模式只负责把文本发给你配置的第三方 LLM 再返回 JSON，不会运行 TTS，也不会占用 GPU。
-- API Key 仍保存在浏览器 localStorage；代理模式下点击播放时会随本次请求转发给本地服务，本地服务不保存它。
+- API Key 仍只保存在当前浏览器本地 secret；代理模式下点击播放时会随本次请求转发给本地服务，本地服务不保存它。
 
 LLM 需要输出 `segments`，每个片段包含角色和文本，也可以包含情绪参数：
 

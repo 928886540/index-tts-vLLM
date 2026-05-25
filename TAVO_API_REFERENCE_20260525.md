@@ -24,7 +24,7 @@ Single-file TAVO browser bridge. TAVO only needs:
 <script src="http://192.168.x.x:9880/static/tavo.js"></script>
 ```
 
-The script stores settings in browser `localStorage` under `indextts_tavo_config`.
+The script stores non-secret settings in Tavo global variable `indextts_tavo_config` when the Tavo JS API is available, with browser `localStorage` fallback. The LLM API key stays in browser-local `indextts_tavo_secret` only.
 
 ### GET `/static/test.html`
 
@@ -484,7 +484,7 @@ Security note: the API key is forwarded for that request only. `static/tavo.js` 
 
 ## TAVO Config Example
 
-Browser `localStorage` key: `indextts_tavo_config`.
+Config storage: Tavo global variable `indextts_tavo_config` first, browser `localStorage` fallback. Secret storage: browser-local `indextts_tavo_secret` for `llm.apiKey` only.
 
 ```json
 {

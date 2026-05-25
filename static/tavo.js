@@ -5,7 +5,7 @@
  *
  * On load, this script:
  *   1. Boots a singleton on window.IndexTTS_TAVO
- *   2. Reads/writes config to localStorage under key "indextts_tavo_config"
+ *   2. Reads/writes config via Tavo global variables, with localStorage fallback
  *   3. Mounts a floating gear button → settings panel
  *   4. Sets up a MutationObserver on the configured chat container
  *   5. Injects a compact audio card into each message; click → TTS pipeline
@@ -38,6 +38,7 @@
   // Config & storage
   // -------------------------------------------------------------------------
   const STORAGE_KEY = 'indextts_tavo_config';
+  const SECRET_STORAGE_KEY = 'indextts_tavo_secret';
   const DEFAULTS = {
     apiBase: scriptOrigin(),      // e.g. http://192.168.1.100:9880
     chatSelector: '#chat',        // CSS selector for the chat container
@@ -78,19 +79,71 @@
   };
 
   function loadConfig() {
+    const fromTavo = loadConfigFromTavo();
+    const fromLocal = loadConfigFromLocalStorage();
+    const merged = mergeDeep(clonePlain(DEFAULTS), fromTavo || fromLocal || {});
+    const apiKey = loadLocalApiKey(fromLocal);
+    merged.llm = merged.llm || clonePlain(DEFAULTS.llm);
+    merged.llm.apiKey = apiKey;
+    return merged;
+  }
+
+  function loadConfigFromTavo() {
+    try {
+      if (!window.tavo || typeof window.tavo.get !== 'function') return null;
+      const stored = window.tavo.get(STORAGE_KEY, 'global');
+      if (!stored) return null;
+      return typeof stored === 'string' ? JSON.parse(stored) : clonePlain(stored);
+    } catch (e) {
+      console.warn('[IndexTTS_TAVO] Tavo config read failed:', e);
+      return null;
+    }
+  }
+
+  function loadConfigFromLocalStorage() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return clonePlain(DEFAULTS);
-      const parsed = JSON.parse(raw);
-      return mergeDeep(clonePlain(DEFAULTS), parsed);
+      return raw ? JSON.parse(raw) : null;
     } catch (e) {
-      console.warn('[IndexTTS_TAVO] config parse failed, using defaults:', e);
-      return clonePlain(DEFAULTS);
+      console.warn('[IndexTTS_TAVO] localStorage config parse failed:', e);
+      return null;
+    }
+  }
+
+  function loadLocalApiKey(localConfig) {
+    try {
+      const secretRaw = localStorage.getItem(SECRET_STORAGE_KEY);
+      if (secretRaw) {
+        const secret = JSON.parse(secretRaw);
+        if (secret && typeof secret.apiKey === 'string') return secret.apiKey;
+      }
+    } catch (_) {}
+    return localConfig && localConfig.llm && typeof localConfig.llm.apiKey === 'string'
+      ? localConfig.llm.apiKey
+      : '';
+  }
+
+  function publicConfig(cfg) {
+    const data = clonePlain(cfg);
+    if (data.llm) delete data.llm.apiKey;
+    return data;
+  }
+
+  function saveConfigToTavo(cfg) {
+    try {
+      if (!window.tavo || typeof window.tavo.set !== 'function') return;
+      window.tavo.set(STORAGE_KEY, publicConfig(cfg), 'global');
+    } catch (e) {
+      console.warn('[IndexTTS_TAVO] Tavo config save failed:', e);
     }
   }
 
   function saveConfig(cfg) {
+    saveConfigToTavo(cfg);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+    localStorage.setItem(SECRET_STORAGE_KEY, JSON.stringify({
+      apiKey: cfg.llm && cfg.llm.apiKey ? cfg.llm.apiKey : '',
+    }));
   }
 
   function mergeDeep(target, src) {
@@ -133,9 +186,7 @@
   }
 
   function configForProfile() {
-    const data = clonePlain(cfg);
-    if (data.llm) delete data.llm.apiKey;
-    return data;
+    return publicConfig(cfg);
   }
 
   async function fetchProfiles() {
