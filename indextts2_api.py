@@ -2,6 +2,7 @@ import os
 import sys
 import traceback
 import base64
+import socket
 
 now_dir = os.getcwd()
 
@@ -60,6 +61,21 @@ APP.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-IndexTTS-Cache", "X-IndexTTS-Cache-Key"],
 )
+@APP.get("/static/tavo.js")
+async def tavo_js_endpoint():
+    """Serve the injected TAVO bridge without browser/CDN caching."""
+    path = os.path.join("static", "tavo.js")
+    return FileResponse(
+        path,
+        media_type="text/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 if os.path.isdir("static"):
     APP.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -203,13 +219,18 @@ def _wav_file_header(data_bytes_len: int, sample_rate: int, channels: int = 1, b
 
 
 def _chunk_to_pcm_bytes(chunk_wav) -> bytes:
-    # chunk_wav: torch tensor on CPU, shape [channels, samples], float32 in
-    # roughly [-1, 1]. Convert to int16 mono PCM.
+    # Some IndexTTS paths return float audio in [-1, 1], while the vLLM path
+    # returns already-scaled int16 amplitude stored in a float tensor. Scaling
+    # the latter again causes hard clipping and audible crackle.
     if chunk_wav.dim() == 2:
         wav = chunk_wav[0] if chunk_wav.shape[0] == 1 else chunk_wav.mean(dim=0)
     else:
         wav = chunk_wav
-    wav_int16 = (wav.clamp(-1.0, 1.0) * 32767.0).to(torch.int16)
+    wav = wav.detach().cpu()
+    if wav.numel() and float(wav.abs().max()) > 2.0:
+        wav_int16 = wav.clamp(-32767.0, 32767.0).to(torch.int16)
+    else:
+        wav_int16 = (wav.clamp(-1.0, 1.0) * 32767.0).to(torch.int16)
     return wav_int16.numpy().tobytes()
 
 
@@ -284,8 +305,6 @@ def handle_control(command: str):
     elif command == "exit":
         os.kill(os.getpid(), signal.SIGTERM)
         exit(0)
-
-
 def check_params(req: dict):
     text: str = req.get("text", "")
     ref_audio_path: str = req.get("ref_audio_path", "")
@@ -865,6 +884,29 @@ async def health():
     return JSONResponse(content={"status": "ok"})
 
 
+@APP.get("/server_info")
+async def server_info():
+    """Return user-friendly service addresses for TAVO setup."""
+    lan_ip = "127.0.0.1"
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            lan_ip = sock.getsockname()[0]
+    except Exception:
+        try:
+            lan_ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            lan_ip = "127.0.0.1"
+    return JSONResponse(content={
+        "status": "ok",
+        "port": port,
+        "bind_addr": host,
+        "local_url": f"http://127.0.0.1:{port}",
+        "lan_url": f"http://{lan_ip}:{port}",
+        "script_url": f"http://{lan_ip}:{port}/static/tavo.js",
+    })
+
+
 @APP.get("/voices")
 async def voices_list_endpoint():
     """List the local voice library stored under prompts/library."""
@@ -875,6 +917,19 @@ async def voices_list_endpoint():
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=400, content={"message": "voices list failed", "Exception": str(e)})
+
+
+@APP.get("/voice_preview")
+async def voices_preview_endpoint(name: str):
+    """Preview a library voice by name or a direct local audio path."""
+    try:
+        path = _resolve_voice(name)
+        if not path:
+            return JSONResponse(status_code=404, content={"message": "voice not found", "name": name})
+        return FileResponse(path, media_type="audio/mpeg")
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "voice preview failed", "Exception": str(e)})
 
 
 @APP.post("/voices")
