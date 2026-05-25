@@ -13,3 +13,4 @@ examples/voice_10.wav filter=lfs diff=lfs merge=lfs -text
 examples/voice_12.wav filter=lfs diff=lfs merge=lfs -text
 examples/voice_07.wav filter=lfs diff=lfs merge=lfs -text
 examples/voice_11.wav filter=lfs diff=lfs merge=lfs -text
+Leon_api/ export-ignore
