@@ -28,7 +28,7 @@ TAVO 浏览器
         ├─ /tts_cache_stream        ✅ P3 单段快照 + 懒加载
         ├─ /tts_dialogue_cache_stream ✅ P3 多角色整段快照 + 懒加载
         ├─ /cache                   ✅ P3 缓存管理
-        ├─ /parse_text              ⚪ P4 (可选)服务端代调 LLM；当前先走客户端第三方 LLM
+        ├─ /parse_text              ✅ P4 可选 OpenAI-compatible LLM 代理
         ├─ /static/tavo.js          ✅ P5 自包含 JS
         └─ /health                  ✅ 已完成
 ```
