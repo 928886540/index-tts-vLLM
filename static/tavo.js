@@ -158,6 +158,20 @@
   function formatTime(sec) { sec = Math.max(0, Number(sec || 0)); if (!isFinite(sec)) return "--:--"; return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0"); }
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/\r?\n/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
+  function singleStreamUrl(base, cfg, text, force) {
+    var p = new URLSearchParams();
+    p.set("text", text);
+    p.set("ref_audio_path", cfg.defaultVoice);
+    p.set("emo_text", "");
+    p.set("emo_ref_audio_path", "");
+    p.set("emo_alpha", String(cfg.emoAlpha));
+    p.set("top_p", String(cfg.topP));
+    p.set("top_k", String(cfg.topK));
+    p.set("temperature", String(cfg.temperature));
+    p.set("repetition_penalty", String(cfg.repetitionPenalty));
+    if (force) p.set("_t", String(Date.now()));
+    return cleanBase(base) + cfg.endpoint + "?" + p.toString();
+  }
 
   async function parseWithLlm(text, cfg, setStatus) {
     setStatus("AI 正在拆分角色和八情绪...");
@@ -243,7 +257,7 @@
       if (currentTrackIndex < 0) return;
       var removed = generatedTracks.splice(currentTrackIndex, 1)[0];
       try { audio.pause(); } catch (_) {}
-      if (removed && removed.url) {
+      if (removed && removed.url && /^blob:/i.test(removed.url)) {
         try { URL.revokeObjectURL(removed.url); } catch (_) {}
       }
       if (removed && removed.cacheKey) {
@@ -325,26 +339,28 @@
       if (!messageText) { setError("当前消息没有可朗读正文。"); return; }
       if (!cfg.defaultVoice) { setError("请先点选一个音色卡片。"); return; }
       if (audio.src && !force) { if (audio.paused) await audio.play(); else audio.pause(); return; }
-      setPlayState("loading"); setStatus("正在生成音频...");
+      setPlayState("loading");
       try {
         var base = cleanBase(cfg.apiBase), body, url;
         if (cfg.mode === "ai8") {
+          setStatus("正在生成整段音频...");
           if (!cfg.llmEndpoint || !cfg.llmModel) throw new Error("AI 八情绪模式需要填写 LLM 接口地址和模型。");
           body = { segments: await parseWithLlm(messageText, cfg, setStatus), voices: parseRoleVoices(cfg.roleVoicesText, cfg.defaultVoice), interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha };
           url = base + cfg.dialogueEndpoint;
+          var res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error(await res.text());
+          var blob = await res.blob();
+          var objectUrl = URL.createObjectURL(blob);
+          currentCacheKey = res.headers.get("X-IndexTTS-Cache-Key") || "";
+          generatedTracks.push({ url: objectUrl, cacheKey: currentCacheKey, createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode });
+          selectTrack(generatedTracks.length - 1, false);
+          setStatus(res.headers.get("X-IndexTTS-Cache") === "HIT" ? "已读取缓存" : "生成完成");
         } else {
-          body = { text: messageText, ref_audio_path: cfg.defaultVoice, emo_text: "", emo_vec: [], normalize_emo_vec: false, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha };
-          url = base + cfg.endpoint;
+          url = singleStreamUrl(base, cfg, messageText, force);
+          generatedTracks.push({ url: url, cacheKey: "", createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode, streaming: true });
+          selectTrack(generatedTracks.length - 1, false);
+          setStatus("正在连接流式音频...");
         }
-        var res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        if (!res.ok) throw new Error(await res.text());
-        var blob = await res.blob();
-        var objectUrl = URL.createObjectURL(blob);
-        currentCacheKey = res.headers.get("X-IndexTTS-Cache-Key") || "";
-        if (force && currentTrackIndex >= 0) currentTrackIndex = generatedTracks.length - 1;
-        generatedTracks.push({ url: objectUrl, cacheKey: currentCacheKey, createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode });
-        selectTrack(generatedTracks.length - 1, false);
-        setStatus(res.headers.get("X-IndexTTS-Cache") === "HIT" ? "已读取缓存" : "生成完成");
         await audio.play();
       } catch (e) { setPlayState("idle"); setStatus("生成失败"); setError(e && e.message ? e.message : String(e)); }
     }
@@ -360,8 +376,11 @@
     on(first(panel, '[data-role="reload"]'), 'click', renderVoices);
     $all(panel, '.idx-mode').forEach(function (b) { b.addEventListener('click', async function () { cfg.mode = b.dataset.mode; syncUI(); await saveConfig(cfg); }); });
     on(audio, 'play', function () { setPlayState("playing"); setStatus("正在播放：" + shortName(cfg.defaultVoice)); });
+    on(audio, 'waiting', function () { setPlayState("loading"); setStatus("正在等待音频流..."); });
+    on(audio, 'canplay', function () { if (!audio.paused) { setPlayState("playing"); setStatus("正在播放：" + shortName(cfg.defaultVoice)); } });
     on(audio, 'pause', function () { setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); });
     on(audio, 'ended', function () { setPlayState("idle"); setStatus("播放完成"); });
+    on(audio, 'error', function () { setPlayState("idle"); setStatus("播放失败"); setError("音频流加载失败。请检查服务地址、音色和后端日志。"); });
     on(audio, 'loadedmetadata', function () { if (seek) seek.disabled = false; if (total) total.textContent = formatTime(audio.duration); });
     on(audio, 'timeupdate', function () { if (cur) cur.textContent = formatTime(audio.currentTime); if (total) total.textContent = audio.duration ? formatTime(audio.duration) : "--:--"; if (seek) seek.value = audio.duration ? String(Math.floor(audio.currentTime / audio.duration * 1000)) : "0"; });
     on(seek, 'input', function () { if (audio && audio.duration) audio.currentTime = Number(seek.value || 0) / 1000 * audio.duration; });
