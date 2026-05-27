@@ -1,0 +1,1 @@
+{"segments": [{"role": "我", "text": "我是测试。", "emo_vec": [0, 0, 0, 0, 0, 0, 0, 0.8]}], "voices": {"用户": "高圆圆", "default": "高圆圆"}, "interval_ms": 200, "top_p": 0.8, "top_k": 30, "temperature": 0.8, "repetition_penalty": 10, "emo_alpha": 0.7}

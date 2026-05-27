@@ -1,0 +1,9 @@
+{
+  "text": "她抬头看了我一眼，轻声说：\"今天天气真好。\" 我笑着回答：\"是啊，难得见你这么开心。\"",
+  "endpoint": "http://127.0.0.1:8317/v1",
+  "model": "渡鸦/grok-4.20-fast",
+  "api_key": "sk-ming",
+  "system_prompt": "把小说正文拆成 TTS 片段。旁白 role 固定 narrator，人物台词 role 用人物名。\n每段必须输出 emo_vec，长度 8，数值 0-1。不要输出 emo_text。\n只返回 JSON：{\"segments\":[{\"role\":\"narrator\",\"text\":\"...\",\"emo_vec\":[0,0,0,0,0,0,0,0.4]}]}",
+  "temperature": 0.2,
+  "timeout": 90
+}

@@ -1,0 +1,1 @@
+{"model":"渡鸦/grok-4.20-fast","messages":[{"role":"system","content":"只返回 JSON 对象，键为 hi，值为 1。"},{"role":"user","content":"hi"}],"temperature":0.2,"response_format":{"type":"json_object"},"stream":false}

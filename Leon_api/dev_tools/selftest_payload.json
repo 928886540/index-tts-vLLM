@@ -1,0 +1,11 @@
+{
+  "segments": [
+    {"role": "旁白", "text": "夜色已深，办公室只剩下了她。", "emo_vec": [0,0,0,0,0,0,0,0.8], "emo_alpha": 0.2},
+    {"role": "她", "text": "辛苦你了，这么晚还在。", "emo_vec": [0,0.4,0,0,0,0,0,0.5], "emo_alpha": 0.4},
+    {"role": "旁白", "text": "她抬头看了我一眼，眼角有泪。", "emo_vec": [0,0,0,0,0.4,0.3,0,0.4], "emo_alpha": 0.25},
+    {"role": "我", "text": "别难过了，事情会过去的。", "emo_vec": [0,0.2,0,0,0.3,0,0,0.5], "emo_alpha": 0.4}
+  ],
+  "voices": {"旁白": "旁白", "她": "高圆圆", "我": "霸道青年", "default": "高圆圆"},
+  "interval_ms": 400,
+  "top_p": 0.8, "top_k": 30, "temperature": 0.8, "repetition_penalty": 10, "emo_alpha": 0.4
+}

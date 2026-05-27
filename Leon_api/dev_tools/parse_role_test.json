@@ -1,0 +1,1 @@
+{"text": "林老师走进教室。\n\n「同学们早上好。」\n\n小雨笑着回答：「老师好！」", "endpoint": "http://127.0.0.1:8317/v1", "model": "渡鸦/grok-4.20-fast", "api_key": "sk-ming", "system_prompt": "把小说正文拆段，旁白用 role=\"旁白\"，台词用人物名。只返回 JSON: {\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"emo_vec\":[0,0,0,0,0,0,0,0.5]}]}", "temperature": 0.2, "timeout": 90}
