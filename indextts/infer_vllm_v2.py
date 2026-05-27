@@ -84,6 +84,13 @@ class IndexTTS2:
             tensor_parallel_size=1,
             dtype="auto",
             gpu_memory_utilization=gpu_memory_utilization,
+            # TTS is a single-stream workload — one request at a time.
+            # Without this, vLLM reserves KV cache for ~9x concurrency
+            # and squeezes s2mel/bigvgan on consumer GPUs.
+            max_num_seqs=1,
+            # TTS prompts are mostly unique; prefix cache lookups cost
+            # more than they save here.
+            enable_prefix_caching=False,
             # enforce_eager=True,
         )
         indextts_vllm = AsyncLLM.from_engine_args(engine_args)
@@ -340,6 +347,16 @@ class IndexTTS2:
             self._set_gr_progress(0.05, "处理音色参考音频...")
             audio, sr = librosa.load(spk_audio_prompt)
             audio = trim_audio_for_prompt(audio, sr, max_prompt_audio_seconds)
+            # Gentle level matching: only boost very quiet sources (so the
+            # speaker embedding extractor sees something in a sensible range),
+            # and tame sources whose mp3 decoder produced >1.0 overshoot.
+            # Sources already in a normal recording range are left untouched
+            # to preserve their natural timbre.
+            peak = float(np.abs(audio).max()) if audio.size else 0.0
+            if peak > 1e-3 and peak < 0.3:
+                audio = audio * (0.3 / peak)
+            elif peak > 1.0:
+                audio = audio * (0.95 / peak)
             audio = torch.tensor(audio).unsqueeze(0)
             audio_22k = torchaudio.transforms.Resample(sr, 22050)(audio)
             audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio)
@@ -398,6 +415,12 @@ class IndexTTS2:
         ):
             emo_audio, emo_sr = librosa.load(emo_audio_prompt, sr=16000)
             emo_audio = trim_audio_for_prompt(emo_audio, emo_sr, max_emo_audio_seconds)
+            # Same gentle level matching as for the speaker reference.
+            emo_peak = float(np.abs(emo_audio).max()) if emo_audio.size else 0.0
+            if emo_peak > 1e-3 and emo_peak < 0.3:
+                emo_audio = emo_audio * (0.3 / emo_peak)
+            elif emo_peak > 1.0:
+                emo_audio = emo_audio * (0.95 / emo_peak)
             emo_inputs = self.extract_features(emo_audio, sampling_rate=16000, return_tensors="pt")
             emo_input_features = emo_inputs["input_features"]
             emo_attention_mask = emo_inputs["attention_mask"]
@@ -561,6 +584,9 @@ class IndexTTS2:
                     S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
                     S_infer = S_infer.transpose(1, 2)
                     S_infer = S_infer + latent
+                    # Mel frames per code token. 1.72 is the ratio the s2mel
+                    # was trained at — diverging from it (we tried 2.0) tends
+                    # to produce unnatural prosody / rhythm artifacts.
                     target_lengths = (code_lens * 1.72).long()
 
                     cond = self.s2mel.models['length_regulator'](S_infer,
@@ -593,6 +619,24 @@ class IndexTTS2:
                     bigvgan_time += time.perf_counter() - m_start_time
                     wav = wav.squeeze(1)
 
+                # Smooth limiter: |x| ≤ 0.7 passes through unchanged; beyond
+                # that we soft-clip with a tanh knee so peaks land near ±1
+                # without forming the rapid ±0.99 alternation that hard
+                # peak-normalize produces (which is audible as crackle).
+                knee = 0.7
+                abs_wav = wav.abs()
+                over_mask = abs_wav > knee
+                if over_mask.any():
+                    sign = torch.sign(wav)
+                    soft = sign * (knee + (1.0 - knee) * torch.tanh((abs_wav - knee) / (1.0 - knee)))
+                    wav = torch.where(over_mask, soft, wav)
+                # Short linear fade in/out (~5ms) so concatenating chunks
+                # (multi-voice dialogue with silence padding) doesn't pop.
+                fade_len = min(int(sampling_rate * 0.005), wav.shape[-1] // 4)
+                if fade_len > 1:
+                    ramp = torch.linspace(0.0, 1.0, fade_len, device=wav.device, dtype=wav.dtype)
+                    wav[..., :fade_len] = wav[..., :fade_len] * ramp
+                    wav[..., -fade_len:] = wav[..., -fade_len:] * ramp.flip(0)
                 wav = torch.clamp(32767 * wav, -32767.0, 32767.0)
                 if should_stop_generation():
                     stopped = True

@@ -25,3 +25,42 @@
 - `code_snapshot/`：历史代码快照，只用于对照
 
 打包给用户时排除整个 `Leon_api/`。
+
+## 启动服务
+
+仓库目录：`D:\apiWorkSpace\index-tts2-vLLM`
+
+前台启动（占当前窗口）：
+
+```powershell
+. .\indextts2runtime\python.exe indextts2_api.py -a 0.0.0.0 -p 9880 --fp16 --cuda_kernel
+```
+
+后台启动（不占当前窗口）：
+
+```powershell
+Start-Process -FilePath "D:\apiWorkSpace\index-tts2-vLLM\indextts2runtime\python.exe" -ArgumentList "indextts2_api.py -a 0.0.0.0 -p 9880" -WorkingDirectory "D:\apiWorkSpace\index-tts2-vLLM"
+```
+
+## TAVO 正则接入
+
+正则里用最新版脚本：
+
+```html
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260525-fix5"></script>
+```
+
+## 访问地址
+
+当前 API 端口：`9880`
+
+- 局域网：`http://192.168.8.100:9880`
+- 域名隧道：`https://index-tts.928886540.xyz`
+
+Volink key 
+
+
+
+
+
+EpqGqHO2cD69b29593b9e0c2b9e78827c3c1fQF6ahNq

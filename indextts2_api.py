@@ -5,6 +5,47 @@ import base64
 import socket
 import secrets
 import time
+from collections import deque
+
+# ---------------------------------------------------------------------------
+# Stdout/stderr tee → in-memory ring buffer, exposed via /server_log/tail.
+# Installed before anything else so all subsequent print()s are captured.
+# vLLM spawn-workers run in subprocesses and DON'T inherit this tee, which
+# is fine — the buffer is meant for IndexTTS2 inference timings (RTF,
+# s2mel_time, bigvgan_time) which come from the main process.
+# ---------------------------------------------------------------------------
+LOG_BUFFER = deque(maxlen=1000)
+
+class _StdoutTee:
+    def __init__(self, real, label):
+        self._real = real
+        self._label = label
+        self._partial = ""
+    def write(self, s):
+        try:
+            self._real.write(s)
+        except Exception:
+            pass
+        try:
+            self._partial += s
+            while "\n" in self._partial:
+                line, self._partial = self._partial.split("\n", 1)
+                line = line.rstrip("\r")
+                if line:
+                    LOG_BUFFER.append({"ts": time.time(), "stream": self._label, "line": line})
+        except Exception:
+            pass
+    def flush(self):
+        try: self._real.flush()
+        except Exception: pass
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+try:
+    sys.stdout = _StdoutTee(sys.stdout, "stdout")
+    sys.stderr = _StdoutTee(sys.stderr, "stderr")
+except Exception:
+    pass
 
 now_dir = os.getcwd()
 
@@ -42,10 +83,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model_dir", type=str, default="./checkpoints", help="Model checkpoints directory")
 parser.add_argument("-a", "--bind_addr", type=str, default="127.0.0.1", help="default: 127.0.0.1")
 parser.add_argument("-p", "--port", type=int, default="9880", help="default: 9880")
-parser.add_argument("--fp16", action="store_true", default=False, help="Use FP16 for inference if available")
+parser.add_argument("--fp16", action="store_true", default=True, help="Use FP16 for inference (default: on)")
+parser.add_argument("--no_fp16", dest="fp16", action="store_false", help="Force FP32 inference")
 parser.add_argument("--use_deepspeed", action="store_true", default=False, help="Use Deepspeed to accelerate if available")
-parser.add_argument("--cuda_kernel", action="store_true", default=False, help="Use cuda kernel for inference if available")
-parser.add_argument("--no_qwen_emo", action="store_true", default=False, help="Disable Qwen_emotion, which can save about 2GB VRAM, but text emotion prompt will be no longer available.")
+parser.add_argument("--cuda_kernel", action="store_true", default=True, help="Use BigVGAN fused-activation CUDA kernel (default: on)")
+parser.add_argument("--no_cuda_kernel", dest="cuda_kernel", action="store_false", help="Disable BigVGAN CUDA kernel")
+parser.add_argument("--qwen_emo", action="store_true", default=False, help="Enable Qwen text-emotion model (loads ~2GB to GPU). Off by default; TAVO front-end uses emotion vectors and never calls this.")
+parser.add_argument("--no_qwen_emo", dest="qwen_emo", action="store_false", help="(legacy) Qwen is already off by default; this flag is a no-op kept for backward compatibility.")
 args = parser.parse_args()
 
 # device = args.device
@@ -168,6 +212,42 @@ def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
 # Only /tts_stream uses these. /tts is unchanged.
 # ---------------------------------------------------------------------------
 
+# Stream-tuned generation parameters mirrored from webui.py.
+# These are the values that produced RTF ~0.6 on the same RTX 3060 hardware.
+# diffusion_steps=8 (vs default 16) is the biggest single lever; short segment
+# tokens + 8s prompt cap keep cat_frames small so each diffusion step is cheap.
+STREAM_TARGET_SEGMENT_TOKENS = 72
+STREAM_HARD_SEGMENT_TOKENS = 82
+STREAM_FIRST_SEGMENT_TOKENS = 36
+STREAM_MIN_SEGMENT_TOKENS = 24
+STREAM_DIFFUSION_STEPS = 12
+STREAM_PROMPT_AUDIO_SECONDS = 8
+
+
+def _stream_split_limits(requested_segment_tokens: int = STREAM_TARGET_SEGMENT_TOKENS):
+    target_tokens = min(int(requested_segment_tokens), STREAM_TARGET_SEGMENT_TOKENS)
+    hard_tokens = min(
+        STREAM_HARD_SEGMENT_TOKENS,
+        max(target_tokens + 24, int(target_tokens * 1.35)),
+    )
+    first_tokens = min(STREAM_FIRST_SEGMENT_TOKENS, target_tokens)
+    return target_tokens, hard_tokens, first_tokens
+
+
+def _stream_infer_kwargs(requested_segment_tokens: int = STREAM_TARGET_SEGMENT_TOKENS) -> dict:
+    target_tokens, hard_tokens, first_tokens = _stream_split_limits(requested_segment_tokens)
+    return {
+        "max_text_tokens_per_sentence": target_tokens,
+        "diffusion_steps": STREAM_DIFFUSION_STEPS,
+        "max_prompt_audio_seconds": STREAM_PROMPT_AUDIO_SECONDS,
+        "max_emo_audio_seconds": STREAM_PROMPT_AUDIO_SECONDS,
+        "prefer_sentence_boundary": True,
+        "quick_streaming_tokens": first_tokens,
+        "sentence_split_hard_max_tokens": hard_tokens,
+        "sentence_split_min_tokens": STREAM_MIN_SEGMENT_TOKENS,
+    }
+
+
 # Serialize streaming inference: the underlying IndexTTS2 mutates shared
 # instance state (cache_spk_cond, etc.), so concurrent infer() calls would
 # clobber each other. Lock around inference only; the StreamingResponse
@@ -175,6 +255,259 @@ def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
 tts_stream_lock = asyncio.Lock()
 STREAM_JOBS: Dict[str, dict] = {}
 STREAM_JOB_TTL_SECONDS = 600
+
+
+# ---------------------------------------------------------------------------
+# Live streaming jobs keyed by cache_key (pub-sub buffer).
+# 设计目标：客户端断开/刷新不丢推理任务，回来 GET 同 cache_key 继续读。
+# - POST /tts_dialogue_stream_job 立即创建 LIVE_JOBS 条目 + 启动后台
+#   inference task，返回 cache_key 给客户端。客户端立即可写 tavo.set。
+# - GET /tts_dialogue_stream_job/{cache_key} 多消费者：从 buffer 0
+#   开始读，新 PCM 到达就 yield，结束后落盘 snapshot_cache。
+# - 完成后任务在 LIVE_JOBS 里再驻留 5 分钟方便晚到的客户端继续 stream；
+#   之后 GC。已落盘的内容用 /cache_audio/{key} 即可永久取回。
+# ---------------------------------------------------------------------------
+LIVE_JOBS: Dict[str, "_LiveStreamingJob"] = {}
+LIVE_JOB_LINGER_SECONDS = 300
+
+
+class _LiveStreamingJob:
+    def __init__(self, cache_key: str, sample_rate: int = 22050):
+        self.cache_key = cache_key
+        self.sample_rate = sample_rate
+        self.header = _wav_streaming_header(sample_rate, channels=1, bits=16)
+        self.pcm = bytearray()
+        self.finished = asyncio.Event()
+        self.error: Optional[str] = None
+        self.created_at = time.time()
+        # 为字幕用：每段 PCM 起始字节偏移 + 文本 + 角色 + 真实时长
+        self.segments_meta: List[dict] = []
+
+
+def _gc_live_job(cache_key: str, delay: float = LIVE_JOB_LINGER_SECONDS):
+    async def _go():
+        await asyncio.sleep(delay)
+        LIVE_JOBS.pop(cache_key, None)
+    try: asyncio.create_task(_go())
+    except Exception: pass
+
+
+async def _stream_from_live_job(job: "_LiveStreamingJob"):
+    """Multi-consumer streamer; reads job.pcm tail-poll, yields new bytes."""
+    yield job.header
+    offset = 0
+    while True:
+        if offset < len(job.pcm):
+            chunk = bytes(job.pcm[offset:])
+            yield chunk
+            offset = len(job.pcm)
+        if job.finished.is_set() and offset >= len(job.pcm):
+            return
+        await asyncio.sleep(0.05)
+
+
+def _make_complete_wav_bytes(pcm: bytes, sample_rate: int, channels: int = 1, bits: int = 16) -> bytes:
+    """Build a proper WAV with real size fields (so /cache_audio can serve
+    seekable, range-friendly audio)."""
+    byte_rate = sample_rate * channels * bits // 8
+    block_align = channels * bits // 8
+    data_size = len(pcm)
+    riff_size = 36 + data_size
+    header = (
+        b"RIFF"
+        + riff_size.to_bytes(4, "little")
+        + b"WAVE"
+        + b"fmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + channels.to_bytes(2, "little")
+        + sample_rate.to_bytes(4, "little")
+        + byte_rate.to_bytes(4, "little")
+        + block_align.to_bytes(2, "little")
+        + bits.to_bytes(2, "little")
+        + b"data"
+        + data_size.to_bytes(4, "little")
+    )
+    return header + pcm
+
+
+async def _prepare_dialogue_for_streaming(req: dict):
+    """Resolve voices, build cache_payload, compute cache_key.
+
+    Returns (prepared_dict, None) on success or (None, JSONResponse) on input error.
+    """
+    segments = req.get("segments") or []
+    voices = req.get("voices") or {}
+    if not segments:
+        return None, JSONResponse(status_code=400, content={"message": "segments is required"})
+    if not voices:
+        return None, JSONResponse(status_code=400, content={"message": "voices is required"})
+
+    from indextts.llm_proxy import _normalize_role
+    voices = {(_normalize_role(k) if k != "default" else "default"): v for k, v in voices.items()}
+
+    default_path = _resolve_voice(voices.get("default", ""))
+    role_voice_paths: Dict[str, str] = {}
+    unresolved_roles: List[str] = []
+    seen_roles = set()
+    for seg in segments:
+        role = _normalize_role(seg.get("role") or "")
+        if not role or role in seen_roles:
+            seen_roles.add(role)
+            continue
+        seen_roles.add(role)
+        path = _resolve_voice(voices.get(role, "")) or default_path
+        if not path:
+            unresolved_roles.append(role)
+        else:
+            role_voice_paths[role] = path
+    if unresolved_roles:
+        return None, JSONResponse(
+            status_code=400,
+            content={"message": "voices unresolved", "roles": unresolved_roles},
+        )
+
+    interval_ms = int(req.get("interval_ms", 350))
+    default_emo_alpha = float(req.get("emo_alpha", 0.7))
+    sampling_kwargs = {
+        "top_p": float(req.get("top_p", 0.8)),
+        "top_k": int(req.get("top_k", 30)),
+        "temperature": float(req.get("temperature", 0.8)),
+        "repetition_penalty": float(req.get("repetition_penalty", 10)),
+        **_stream_infer_kwargs(),
+    }
+    role_payload = {
+        role: {"path": path, "meta": _audio_file_meta(path)}
+        for role, path in sorted(role_voice_paths.items())
+    }
+    cache_payload = {
+        "kind": "tts_dialogue_stream_v1",
+        "segments": [
+            {
+                "role": (seg.get("role") or "").strip(),
+                "text": (seg.get("text") or "").strip(),
+                "emo_vec": seg.get("emo_vec") or None,
+                "emo_text": seg.get("emo_text") or None,
+                "emo_alpha": seg.get("emo_alpha"),
+            }
+            for seg in segments
+        ],
+        "voices": role_payload,
+        "default_voice": {"path": default_path, "meta": _audio_file_meta(default_path)} if default_path else None,
+        "interval_ms": interval_ms,
+        "emo_alpha": default_emo_alpha,
+        **sampling_kwargs,
+    }
+    from indextts import snapshot_cache
+    cache_key = snapshot_cache.make_cache_key(cache_payload)
+    return {
+        "segments": segments,
+        "role_voice_paths": role_voice_paths,
+        "default_path": default_path,
+        "sampling_kwargs": sampling_kwargs,
+        "interval_ms": interval_ms,
+        "default_emo_alpha": default_emo_alpha,
+        "cache_payload": cache_payload,
+        "cache_key": cache_key,
+    }, None
+
+
+async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dict):
+    """Background worker: runs dialogue inference, writes PCM to job.pcm,
+    saves the complete WAV to snapshot_cache on finish. Survives client
+    disconnects — no GET in flight is required."""
+    try:
+        async with tts_stream_lock:
+            from indextts.llm_proxy import _normalize_role
+            segments = prepared["segments"]
+            role_voice_paths = prepared["role_voice_paths"]
+            default_path = prepared["default_path"]
+            sampling_kwargs = prepared["sampling_kwargs"]
+            interval_ms = prepared["interval_ms"]
+            default_emo_alpha = prepared["default_emo_alpha"]
+
+            async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
+                pcm = _chunk_to_pcm_bytes(chunk_wav)
+                job.sample_rate = sr
+                job.pcm.extend(pcm)
+
+            for idx, seg in enumerate(segments):
+                role = _normalize_role(seg.get("role") or "")
+                text = (seg.get("text") or "").strip()
+                if not text:
+                    continue
+                voice_path = role_voice_paths.get(role) or default_path
+                if not voice_path:
+                    continue
+
+                emo_vec = seg.get("emo_vec") or None
+                emo_text_seg = seg.get("emo_text") or None
+                seg_alpha = seg.get("emo_alpha")
+                seg_alpha = float(seg_alpha) if seg_alpha is not None else default_emo_alpha
+                if role == "旁白":
+                    if isinstance(emo_vec, list) and len(emo_vec) == 8:
+                        scaled = [min(float(v) * 0.4, 0.3) for v in emo_vec[:7]]
+                        neu = max(float(emo_vec[7]) if len(emo_vec) > 7 else 0.6, 0.6)
+                        emo_vec = scaled + [neu]
+                    else:
+                        emo_vec = [0.0]*7 + [0.8]
+                    emo_text_seg = None
+                    seg_alpha = min(seg_alpha, 0.25)
+                use_emo_text_seg = False
+                if emo_vec:
+                    emo_text_seg = None
+                elif emo_text_seg:
+                    use_emo_text_seg = True
+
+                # 段间静音
+                if idx > 0 and interval_ms > 0:
+                    silence = _silence_pcm_bytes(job.sample_rate, interval_ms)
+                    job.pcm.extend(silence)
+
+                seg_start_offset = len(job.pcm)
+                await tts_pipeline.infer(
+                    spk_audio_prompt=voice_path,
+                    emo_audio_prompt=None,
+                    text=text,
+                    emo_text=emo_text_seg,
+                    use_emo_text=use_emo_text_seg,
+                    emo_alpha=seg_alpha,
+                    emo_vector=emo_vec,
+                    output_path=None,
+                    stream_chunk_callback=on_chunk,
+                    **sampling_kwargs,
+                )
+                seg_byte_count = len(job.pcm) - seg_start_offset
+                seg_duration = seg_byte_count / (job.sample_rate * 2) if job.sample_rate else 0.0
+                job.segments_meta.append({
+                    "idx": idx,
+                    "role": role,
+                    "text": text,
+                    "start_offset_bytes": seg_start_offset,
+                    "duration_s": seg_duration,
+                })
+
+        # Inference 完成 → 写完整 WAV 到 snapshot_cache，未来 /cache_audio/{key}
+        # 可直接给 FileResponse（含 Content-Length，移动端可 seek）。
+        try:
+            from indextts import snapshot_cache
+            wav_full = _make_complete_wav_bytes(bytes(job.pcm), job.sample_rate)
+            metadata = {
+                "kind": "tts_dialogue_stream_v1",
+                "segments_meta": job.segments_meta,
+                "sample_rate": job.sample_rate,
+                "duration_s": len(job.pcm) / (job.sample_rate * 2) if job.sample_rate else 0,
+            }
+            snapshot_cache.save_cached_audio(job.cache_key, wav_full, metadata)
+            snapshot_cache.prune_cache(max_items=5000)
+        except Exception:
+            traceback.print_exc()
+    except Exception as e:
+        job.error = str(e)
+        traceback.print_exc()
+    finally:
+        job.finished.set()
+        _gc_live_job(job.cache_key)
 
 
 def _prune_stream_jobs():
@@ -423,6 +756,7 @@ async def tts_stream_handle(req: dict):
                     repetition_penalty=float(req.get("repetition_penalty", 10)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
+                    **_stream_infer_kwargs(),
                 )
         except Exception as e:
             error_holder["exc"] = e
@@ -526,6 +860,7 @@ async def tts_cache_stream_handle(req: dict):
                     repetition_penalty=float(req.get("repetition_penalty", 10)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
+                    **_stream_infer_kwargs(),
                 )
         except Exception as e:
             error_holder["exc"] = e
@@ -598,13 +933,18 @@ async def tts_dialogue_stream_handle(req: dict):
     if not voices:
         return JSONResponse(status_code=400, content={"message": "voices is required"})
 
+    # Normalize voice-mapping keys so users can write either canonical or alias
+    # forms (e.g. "我=高圆圆", "用户=高圆圆", "narrator=Jok", "旁白=Jok").
+    from indextts.llm_proxy import _normalize_role
+    voices = {(_normalize_role(k) if k != "default" else "default"): v for k, v in voices.items()}
+
     # Pre-resolve every role -> voice path. Detect missing up-front.
     default_path = _resolve_voice(voices.get("default", ""))
     role_voice_paths: Dict[str, str] = {}
     unresolved_roles: List[str] = []
     seen_roles = set()
     for seg in segments:
-        role = (seg.get("role") or "").strip()
+        role = _normalize_role(seg.get("role") or "")
         if not role or role in seen_roles:
             seen_roles.add(role)
             continue
@@ -630,6 +970,7 @@ async def tts_dialogue_stream_handle(req: dict):
         "top_k": int(req.get("top_k", 30)),
         "temperature": float(req.get("temperature", 0.8)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
+        **_stream_infer_kwargs(),
     }
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=64)
@@ -644,7 +985,7 @@ async def tts_dialogue_stream_handle(req: dict):
         try:
             async with tts_stream_lock:
                 for idx, seg in enumerate(segments):
-                    role = (seg.get("role") or "").strip()
+                    role = _normalize_role(seg.get("role") or "")
                     text = (seg.get("text") or "").strip()
                     if not text:
                         continue
@@ -657,6 +998,16 @@ async def tts_dialogue_stream_handle(req: dict):
                     emo_text_seg = seg.get("emo_text") or None
                     seg_alpha = seg.get("emo_alpha")
                     seg_alpha = float(seg_alpha) if seg_alpha is not None else default_emo_alpha
+                    # 旁白 微情绪压制（同 tts_dialogue_cache_stream 逻辑）
+                    if role == "旁白":
+                        if isinstance(emo_vec, list) and len(emo_vec) == 8:
+                            scaled = [min(float(v) * 0.4, 0.3) for v in emo_vec[:7]]
+                            neu = max(float(emo_vec[7]) if len(emo_vec) > 7 else 0.6, 0.6)
+                            emo_vec = scaled + [neu]
+                        else:
+                            emo_vec = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8]
+                        emo_text_seg = None
+                        seg_alpha = min(seg_alpha, 0.25)
                     # emo_vec wins when both are present; matches the V26
                     # convention and the LLM-output schema we recommend.
                     if emo_vec:
@@ -722,12 +1073,17 @@ async def tts_dialogue_cache_stream_handle(req: dict):
     if not voices:
         return JSONResponse(status_code=400, content={"message": "voices is required"})
 
+    # Normalize voice-mapping keys so users can write either canonical or alias
+    # forms (e.g. "我=高圆圆", "用户=高圆圆", "narrator=Jok", "旁白=Jok").
+    from indextts.llm_proxy import _normalize_role
+    voices = {(_normalize_role(k) if k != "default" else "default"): v for k, v in voices.items()}
+
     default_path = _resolve_voice(voices.get("default", ""))
     role_voice_paths: Dict[str, str] = {}
     unresolved_roles: List[str] = []
     seen_roles = set()
     for seg in segments:
-        role = (seg.get("role") or "").strip()
+        role = _normalize_role(seg.get("role") or "")
         if not role or role in seen_roles:
             seen_roles.add(role)
             continue
@@ -755,6 +1111,7 @@ async def tts_dialogue_cache_stream_handle(req: dict):
         "top_k": int(req.get("top_k", 30)),
         "temperature": float(req.get("temperature", 0.8)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
+        **_stream_infer_kwargs(),
     }
     role_payload = {
         role: {"path": path, "meta": _audio_file_meta(path)}
@@ -803,7 +1160,7 @@ async def tts_dialogue_cache_stream_handle(req: dict):
         try:
             async with tts_stream_lock:
                 for idx, seg in enumerate(segments):
-                    role = (seg.get("role") or "").strip()
+                    role = _normalize_role(seg.get("role") or "")
                     text = (seg.get("text") or "").strip()
                     if not text:
                         continue
@@ -815,6 +1172,18 @@ async def tts_dialogue_cache_stream_handle(req: dict):
                     emo_text_seg = seg.get("emo_text") or None
                     seg_alpha = seg.get("emo_alpha")
                     seg_alpha = float(seg_alpha) if seg_alpha is not None else default_emo_alpha
+                    # 旁白：保留 LLM 给的情绪倾向，但每个非中性维度压到 ≤0.3，
+                    # 中性维度抬到 ≥0.6；alpha 也压到 0.25。
+                    # 让旁白有轻微情感波动但不至于做作。
+                    if role == "旁白":
+                        if isinstance(emo_vec, list) and len(emo_vec) == 8:
+                            scaled = [min(float(v) * 0.4, 0.3) for v in emo_vec[:7]]
+                            neu = max(float(emo_vec[7]) if len(emo_vec) > 7 else 0.6, 0.6)
+                            emo_vec = scaled + [neu]
+                        else:
+                            emo_vec = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8]
+                        emo_text_seg = None
+                        seg_alpha = min(seg_alpha, 0.25)
                     if emo_vec:
                         emo_text_seg = None
                         use_emo_text_seg = False
@@ -898,6 +1267,51 @@ async def control(command: str = None):
 async def health():
     """Lightweight liveness probe for TAVO clients / monitoring."""
     return JSONResponse(content={"status": "ok"})
+
+
+@APP.get("/cache_audio/{key}")
+async def cache_audio_by_key(key: str):
+    """Serve a cached audio blob directly by its snapshot cache key.
+
+    Used by the TAVO widget to restore historical generated tracks after
+    a page reload: the widget persists {cacheKey, voice, ...} via tavo.set,
+    and on next mount turns those keys into <audio src=/cache_audio/{key}>.
+    Returns a regular FileResponse with proper Content-Length so mobile
+    WebView audio elements can seek / replay.
+    """
+    try:
+        from indextts import snapshot_cache
+        path = snapshot_cache.get_cached_audio(key)
+        if not path or not os.path.exists(path):
+            return JSONResponse(status_code=404, content={"message": "cache miss", "key": key})
+        return FileResponse(
+            path,
+            media_type="audio/wav",
+            headers={"X-IndexTTS-Cache": "HIT", "X-IndexTTS-Cache-Key": key},
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "cache audio failed", "Exception": str(e)})
+
+
+@APP.get("/server_log/tail")
+async def server_log_tail(n: int = 100, since: float = 0.0, filter: Optional[str] = None):
+    """Return recent server-side stdout/stderr lines (for the debug overlay).
+
+    Args:
+        n: max number of lines to return (default 100).
+        since: only return lines newer than this UNIX timestamp.
+        filter: if set, only return lines whose text contains this substring
+                (case-insensitive). Useful for grabbing just RTF/timing lines.
+    """
+    items = list(LOG_BUFFER)
+    if since:
+        items = [e for e in items if e["ts"] > since]
+    if filter:
+        f = filter.lower()
+        items = [e for e in items if f in e["line"].lower()]
+    items = items[-max(1, min(n, len(LOG_BUFFER))):]
+    return JSONResponse(content={"lines": items, "now": time.time()})
 
 
 @APP.get("/server_info")
@@ -1328,6 +1742,125 @@ async def tts_stream_job_audio_endpoint(job_id: str):
     return await tts_cache_stream_handle(dict(item["req"]))
 
 
+@APP.post("/tts_dialogue_stream_job")
+async def tts_dialogue_stream_job_endpoint(request: TTS_Dialogue_Request):
+    """异步推理 + 流式可断线重连。
+
+    1) 用 payload 算出 cache_key
+    2) 若 snapshot_cache 已有 → cached=True，客户端直接走 /cache_audio/{key}
+    3) 若 LIVE_JOBS 已有同 cache_key 在跑 → 复用
+    4) 否则起后台 inference task → LIVE_JOBS 写 buffer，客户端 GET 同 URL
+       从 buffer 0 开始读，任何时候断开/重连都不丢
+    5) cache_key 立即随响应返回,前端可立刻写 tavo.set 永久持久化
+    """
+    req = request.dict()
+    prepared, err = await _prepare_dialogue_for_streaming(req)
+    if err is not None:
+        return err
+    cache_key = prepared["cache_key"]
+
+    from indextts import snapshot_cache
+    cached_path = snapshot_cache.get_cached_audio(cache_key)
+    if cached_path:
+        return JSONResponse(content={
+            "job_id": cache_key,
+            "cache_key": cache_key,
+            "url": f"/tts_dialogue_stream_job/{cache_key}",
+            "cache_url": f"/cache_audio/{cache_key}",
+            "expires_in": LIVE_JOB_LINGER_SECONDS,
+            "cached": True,
+            "live": False,
+        })
+
+    if cache_key in LIVE_JOBS:
+        return JSONResponse(content={
+            "job_id": cache_key,
+            "cache_key": cache_key,
+            "url": f"/tts_dialogue_stream_job/{cache_key}",
+            "cache_url": f"/cache_audio/{cache_key}",
+            "expires_in": LIVE_JOB_LINGER_SECONDS,
+            "cached": False,
+            "live": True,
+        })
+
+    job = _LiveStreamingJob(cache_key)
+    LIVE_JOBS[cache_key] = job
+    asyncio.create_task(_run_dialogue_inference_to_job(job, prepared))
+    return JSONResponse(content={
+        "job_id": cache_key,
+        "cache_key": cache_key,
+        "url": f"/tts_dialogue_stream_job/{cache_key}",
+        "cache_url": f"/cache_audio/{cache_key}",
+        "expires_in": LIVE_JOB_LINGER_SECONDS,
+        "cached": False,
+        "live": False,
+    })
+
+
+@APP.get("/tts_dialogue_stream_job/{job_id}")
+async def tts_dialogue_stream_job_audio_endpoint(job_id: str):
+    """从 cache_key 拉音频：磁盘缓存命中→FileResponse(可 seek)；
+    LIVE_JOBS 命中→StreamingResponse(buffer 从头读)；都没有→404。"""
+    cache_key = job_id
+    from indextts import snapshot_cache
+    cached_path = snapshot_cache.get_cached_audio(cache_key)
+    if cached_path:
+        return FileResponse(
+            cached_path,
+            media_type="audio/wav",
+            headers={"X-IndexTTS-Cache": "HIT", "X-IndexTTS-Cache-Key": cache_key},
+        )
+    job = LIVE_JOBS.get(cache_key)
+    if job:
+        return StreamingResponse(
+            _stream_from_live_job(job),
+            media_type="audio/wav",
+            headers={"X-IndexTTS-Cache": "LIVE", "X-IndexTTS-Cache-Key": cache_key},
+        )
+    return JSONResponse(status_code=404, content={"message": "job missing or expired", "cache_key": cache_key})
+
+
+@APP.get("/tts_dialogue_job_status/{cache_key}")
+async def tts_dialogue_job_status_endpoint(cache_key: str):
+    """轮询作业状态：done/running/failed/missing。前端字幕/进度用。
+
+    优先级:LIVE_JOBS(运行中) → snapshot 磁盘(完成且 metadata 有 segments_meta) → missing。
+    """
+    job = LIVE_JOBS.get(cache_key)
+    if job:
+        state = "failed" if job.error else ("done" if job.finished.is_set() else "running")
+        return JSONResponse(content={
+            "state": state,
+            "cache_key": cache_key,
+            "pcm_bytes": len(job.pcm),
+            "segments_done": len(job.segments_meta),
+            "segments_meta": job.segments_meta,
+            "sample_rate": job.sample_rate,
+            "error": job.error,
+        })
+    from indextts import snapshot_cache
+    import json as _json
+    cached_path = snapshot_cache.get_cached_audio(cache_key)
+    if cached_path:
+        _, json_path = snapshot_cache.cache_paths(cache_key)
+        meta = {}
+        try:
+            with open(json_path, "r", encoding="utf-8") as fp:
+                meta = _json.load(fp)
+        except Exception:
+            meta = {}
+        params = meta.get("params") if isinstance(meta.get("params"), dict) else meta
+        segments_meta = params.get("segments_meta") or meta.get("segments_meta") or []
+        sample_rate = params.get("sample_rate") or meta.get("sample_rate") or 22050
+        return JSONResponse(content={
+            "state": "done", "cache_key": cache_key,
+            "cache_url": f"/cache_audio/{cache_key}",
+            "segments_meta": segments_meta,
+            "sample_rate": sample_rate,
+        })
+    return JSONResponse(status_code=404, content={"state": "missing", "cache_key": cache_key})
+
+
 @APP.post("/tts_dialogue_stream")
 async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
     """Phase 2: multi-voice + emotion streaming for TAVO dialogue.
@@ -1381,7 +1914,7 @@ if __name__ == "__main__":
         is_fp16=args.fp16,
         # use_deepspeed=args.use_deepspeed,
         use_cuda_kernel=args.cuda_kernel,
-        use_qwen_emo=not args.no_qwen_emo,
+        use_qwen_emo=args.qwen_emo,
     )
     try:
         if host == "None":

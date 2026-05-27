@@ -7,50 +7,75 @@ from typing import Optional
 VOICE_LIB_DIR = "prompts/library"
 VOICE_LIB_EXTS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
 
-_INVALID_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+_INVALID_NAME_CHARS = re.compile(r'[\\:*?"<>|\x00-\x1f]')
+_INVALID_COMPONENT_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
 def safe_voice_name(name: str) -> str:
-    """Return a Windows-safe voice filename stem capped at 60 chars."""
-    cleaned = _INVALID_NAME_CHARS.sub("", (name or "").strip())
-    return cleaned[:60]
+    """Return a library-safe voice identifier capped at 80 chars.
+
+    允许 "/" 作为子目录分隔符(如 "男声/陈宇")。每段(由 / 分隔)各自做 windows 文件名
+    清洗,并禁止 ".." 越级。"""
+    raw = (name or "").strip().strip("/")
+    if not raw:
+        return ""
+    cleaned = _INVALID_NAME_CHARS.sub("", raw)
+    parts = [p for p in cleaned.split("/") if p and p != "." and p != ".."]
+    cleaned_parts = [_INVALID_COMPONENT_CHARS.sub("", p) for p in parts]
+    cleaned_parts = [p for p in cleaned_parts if p]
+    joined = "/".join(cleaned_parts)
+    return joined[:80]
 
 
 def list_voices() -> list[dict]:
-    """List saved voices with name, relative path, extension, and byte size."""
+    """List saved voices recursively, walking sub-directories.
+
+    name: 相对 library 的不带扩展名路径，如 "男声/陈宇" 或 "高圆圆"。
+    path: 仓库内相对路径，给 `_resolve_voice` 使用。
+    subdir: "男声" / "女声" / "旁白" 这类一级子目录,方便前端分组显示。
+    """
     library_dir = Path(VOICE_LIB_DIR)
     if not library_dir.is_dir():
         return []
 
     items = []
-    for path in library_dir.iterdir():
+    for path in library_dir.rglob("*"):
         if not path.is_file():
             continue
-
         ext = path.suffix.lower()
         if ext not in VOICE_LIB_EXTS:
             continue
-
         try:
             size_bytes = path.stat().st_size
         except OSError:
             continue
-
+        rel = path.relative_to(library_dir)
+        rel_posix = rel.as_posix()
+        name = rel.with_suffix("").as_posix()  # 子目录前缀作为 name 一部分
+        subdir = rel.parts[0] if len(rel.parts) > 1 else ""
         items.append(
             {
-                "name": path.stem,
+                "name": name,
                 "path": _format_voice_path(path),
                 "ext": ext,
                 "size_bytes": size_bytes,
+                "subdir": subdir,
             }
         )
 
-    items.sort(key=lambda item: (item["name"].lower(), item["name"], item["ext"]))
+    items.sort(key=lambda item: (item.get("subdir", ""), item["name"].lower(), item["name"], item["ext"]))
     return items
 
 
 def get_voice_path(name: str) -> Optional[str]:
-    """Return a saved voice path by name, or None when it does not exist."""
+    """Return a saved voice path by name (with or without subdir prefix), or None.
+
+    支持三种写法:
+      "高圆圆"          → library/高圆圆.{wav,mp3,...} 任一存在的即取
+      "男声/陈宇"      → library/男声/陈宇.{ext}
+      "library/.../x"  → 直接当相对路径解释
+    无前缀写法找不到时,会递归扫所有子目录找 stem 同名的文件。
+    """
     safe = safe_voice_name(name)
     if not safe:
         return None
@@ -130,20 +155,40 @@ def _voice_path(name: str, ext: str) -> Path:
 
 
 def _find_voice_path(safe_name: str) -> Optional[Path]:
+    """按 safe_name 找文件,支持带子目录的写法。
+
+    优先级:
+      1) 直接路径 + 各扩展名: library/{safe_name}{ext}
+      2) 整库递归找文件名匹配(忽略大小写)
+      3) 整库递归按 stem 匹配(用户输无前缀名时兜底)
+    """
     library_dir = Path(VOICE_LIB_DIR)
+    if not library_dir.is_dir():
+        return None
+
+    # 1) 直接路径
     for ext in VOICE_LIB_EXTS:
         path = library_dir / f"{safe_name}{ext}"
         if path.is_file():
             return path
 
-    if not library_dir.is_dir():
-        return None
-
+    # 2) 忽略大小写的全路径匹配
+    target_lower = (safe_name + "").lower()
     for ext in VOICE_LIB_EXTS:
-        target_name = f"{safe_name}{ext}".lower()
-        for path in library_dir.iterdir():
-            if path.is_file() and path.name.lower() == target_name:
-                return path
+        wanted = (safe_name + ext).lower()
+        for p in library_dir.rglob("*" + ext):
+            if p.is_file() and p.relative_to(library_dir).as_posix().lower() == wanted:
+                return p
+
+    # 3) stem 匹配(无前缀)
+    base = safe_name.rsplit("/", 1)[-1]
+    for p in library_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in VOICE_LIB_EXTS and p.stem == base:
+            return p
+        if p.suffix.lower() in VOICE_LIB_EXTS and p.stem.lower() == base.lower():
+            return p
 
     return None
 

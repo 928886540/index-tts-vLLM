@@ -14,6 +14,11 @@ from typing import Any
 
 _FENCE_RE = re.compile(r"```[ \t]*(?:json)?[ \t]*\r?\n?(.*?)```", re.IGNORECASE | re.DOTALL)
 _NARRATOR_ALIASES = {"旁白", "叙述", "正文", "narrator"}
+_NARRATOR_CANONICAL = "旁白"
+# 第二人称小说里「你」常代指读者/玩家角色，说话时跟「我」「用户」是同一个人。
+# 统一规范成「我」，这样 role-voice 映射写 `我=X` 或 `用户=X` 都能命中。
+_USER_ALIASES = {"我", "你", "用户", "user", "me", "you"}
+_USER_CANONICAL = "我"
 
 
 def parse_text_openai_compatible(
@@ -37,6 +42,10 @@ def parse_text_openai_compatible(
         "temperature": temperature,
         "messages": messages,
         "response_format": {"type": "json_object"},
+        # Some OpenAI-compatible proxies default to SSE streaming when this
+        # field is omitted. We use urllib + a single read(), so force a
+        # non-streaming response.
+        "stream": False,
     }
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
@@ -211,10 +220,13 @@ def _normalize_segment(item: Any) -> dict[str, Any] | None:
 
 
 def _normalize_role(value: Any) -> str:
-    role = str(value).strip() if value is not None else "narrator"
-    if role.lower() in _NARRATOR_ALIASES:
-        return "narrator"
-    return role or "narrator"
+    role = str(value).strip() if value is not None else _NARRATOR_CANONICAL
+    lowered = role.lower()
+    if lowered in _NARRATOR_ALIASES:
+        return _NARRATOR_CANONICAL
+    if lowered in _USER_ALIASES:
+        return _USER_CANONICAL
+    return role or _NARRATOR_CANONICAL
 
 
 def _normalize_emo_vec(value: Any) -> list[float] | None:
