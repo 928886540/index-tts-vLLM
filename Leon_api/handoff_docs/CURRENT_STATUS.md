@@ -1,6 +1,15 @@
-# IndexTTS × TAVO 当前进度交接（2026-05-27 凌晨）
+# IndexTTS × TAVO 当前进度交接（2026-05-27 下午刷新）
 
 > 这一份覆盖了 2026-05-25 → 2026-05-27 这两轮重写。旧版本(只到 fix3)请看 `archive/20260525/`。
+>
+> **最近一次 git 状态(2026-05-27 14:04 后)**
+> - `20719b0` 开发工具，参考音频 —— 把 `Leon_api/dev_tools/`、`Leon_api/screenshots/`、`prompts/library/{男声,女声,情绪,...}/` 等 105 个文件正式 commit 入仓
+> - `41f1754` 现有bug set页面过长。实现流式播放 —— 本文档对应的那次大重写(后端 LIVE_JOBS / 前端真流式 + 字幕 + 持久化)
+> - 工作树目前只剩 `Leon_api/dev_tools/restart_test.{err,log}` 未提交(纯运行日志,可丢)
+>
+> **遗留物 / 下次接手第一时间清掉:**
+> - 根目录 `.codex_dispatch_voice_library.log`(4015 行,误提交,应进 `.gitignore` 并 `git rm --cached`)
+> - `static/tavo (2).js`(445 行,Windows 资源管理器复制时生成的副本,删掉)
 
 ## TL;DR
 
@@ -20,7 +29,8 @@ cd D:\apiWorkSpace\index-tts2-vLLM
 ```
 
 参数默认即 `--fp16 --cuda_kernel` 且 **不加载 Qwen 情绪模型**(`--qwen_emo` 显式打开才会用 Qwen)。
-当前服务最近一次自测启动 PID: **5508**(2026-05-27 02:24)。
+
+> 凌晨那次自测的 PID 5508 已经过时,接手时先 `Get-Process python` 或 `netstat -ano | findstr :9880` 确认服务是否还在,不在就重启。
 
 ---
 
@@ -253,7 +263,7 @@ WAV 校验
 - Voice 分页只支持 `page_size=100&page=N`(不是 `limit`+`offset`)
 - **balance/credits 端点没找到**(/v1/balance 等都 404),没法编程查余额
 
-**已落盘 31 个:**
+**已落盘 31 个(已随 `20719b0` 入仓):**
 - `prompts/library/男声/*.wav` × 10(高冷领导 / 温柔男友 / 忧郁少年 / 专业播报 / 睿智老爹 / 翩翩公子 / 邻家男孩 / 儒雅青年 等)
 - `prompts/library/女声/*.wav` × 10(暖心外婆 / 魅惑女神 / 热销达人 / 访谈主持 / 宝岛甜心 / 温柔女神 / 冰山美人 / 卡通女孩 / 甜蜜恋人 / 魅力女生)
 - `prompts/library/AD学姐.wav`、`Jok.wav`(替换原 mp3,peak normalize 0.85)
@@ -386,6 +396,7 @@ WAV 校验
   装一下:`.\indextts2runtime\python.exe -m pip install ninja`
 - AsyncLLM.__del__ 在退出时打 `TypeError: 'NoneType' object is not callable`,vLLM 自身的
   cleanup 顺序问题,不影响功能
+- 仓库根目录有一个误提交的 `.codex_dispatch_voice_library.log`(4015 行 codex 调度日志),`static/` 下有一个 `tavo (2).js` 副本文件 —— 都是 `20719b0` 顺带带进来的,接手时清掉并把 log 加进 `.gitignore`。
 
 ---
 

@@ -1884,3 +1884,1781 @@ INFO:     103.151.172.72:0 - "GET /voices HTTP/1.1" 200 OK
 INFO:     103.151.172.72:0 - "GET /cache_audio/51f0156c8b0b2fbbf0db46a1b51e2dcbcd935140 HTTP/1.1" 206 Partial Content
 INFO:     103.151.172.72:0 - "GET /tts_dialogue_job_status/51f0156c8b0b2fbbf0db46a1b51e2dcbcd935140 HTTP/1.1" 200 OK
 INFO:     103.151.172.72:0 - "GET /tts_dialogue_job_status/51f0156c8b0b2fbbf0db46a1b51e2dcbcd935140 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/51f0156c8b0b2fbbf0db46a1b51e2dcbcd935140 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "OPTIONS /parse_text HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "POST /parse_text HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "OPTIONS /tts_dialogue_stream_job HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "POST /tts_dialogue_stream_job HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_stream_job/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=78, semantic_codes=528, target_frames=908, cat_frames=1161, diffusion_steps=12
+torch.Size([1, 232448])
+>> chunk 1/1: text_tokens=78, audio=10.54s, elapsed=6.16s, RTF=0.58
+>> gpt_gen_time: 4.20 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 1.25 seconds
+>> bigvgan_time: 0.44 seconds
+>> Total inference time: 6.70 seconds
+>> Generated audio length: 10.54 seconds
+>> RTF: 0.6356
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=40, semantic_codes=240, target_frames=412, cat_frames=665, diffusion_steps=12
+torch.Size([1, 105472])
+>> chunk 1/1: text_tokens=40, audio=4.78s, elapsed=2.79s, RTF=0.58
+>> gpt_gen_time: 1.78 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.68 seconds
+>> bigvgan_time: 0.20 seconds
+>> Total inference time: 2.79 seconds
+>> Generated audio length: 4.78 seconds
+>> RTF: 0.5838
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=77, semantic_codes=441, target_frames=758, cat_frames=1011, diffusion_steps=12
+torch.Size([1, 194048])
+>> chunk 1/1: text_tokens=77, audio=8.80s, elapsed=4.80s, RTF=0.55
+>> gpt_gen_time: 3.16 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.06 seconds
+>> bigvgan_time: 0.36 seconds
+>> Total inference time: 4.80 seconds
+>> Generated audio length: 8.80 seconds
+>> RTF: 0.5455
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=48, semantic_codes=279, target_frames=479, cat_frames=732, diffusion_steps=12
+torch.Size([1, 122624])
+>> chunk 1/1: text_tokens=48, audio=5.56s, elapsed=3.10s, RTF=0.56
+>> gpt_gen_time: 1.99 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.74 seconds
+>> bigvgan_time: 0.23 seconds
+>> Total inference time: 3.11 seconds
+>> Generated audio length: 5.56 seconds
+>> RTF: 0.5584
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=34, semantic_codes=142, target_frames=244, cat_frames=919, diffusion_steps=12
+torch.Size([1, 62464])
+>> chunk 1/1: text_tokens=34, audio=2.83s, elapsed=2.46s, RTF=0.87
+>> gpt_gen_time: 1.23 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.92 seconds
+>> bigvgan_time: 0.15 seconds
+>> Total inference time: 2.74 seconds
+>> Generated audio length: 2.83 seconds
+>> RTF: 0.9684
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=46, semantic_codes=264, target_frames=454, cat_frames=707, diffusion_steps=12
+torch.Size([1, 116224])
+>> chunk 1/1: text_tokens=46, audio=5.27s, elapsed=2.98s, RTF=0.57
+>> gpt_gen_time: 1.88 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.73 seconds
+>> bigvgan_time: 0.22 seconds
+>> Total inference time: 3.15 seconds
+>> Generated audio length: 5.27 seconds
+>> RTF: 0.5977
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=63, semantic_codes=391, target_frames=672, cat_frames=925, diffusion_steps=12
+torch.Size([1, 172032])
+>> chunk 1/1: text_tokens=63, audio=7.80s, elapsed=4.19s, RTF=0.54
+>> gpt_gen_time: 2.71 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 0.97 seconds
+>> bigvgan_time: 0.32 seconds
+>> Total inference time: 4.19 seconds
+>> Generated audio length: 7.80 seconds
+>> RTF: 0.5373
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=43, semantic_codes=253, target_frames=435, cat_frames=688, diffusion_steps=12
+torch.Size([1, 111360])
+>> chunk 1/1: text_tokens=43, audio=5.05s, elapsed=2.89s, RTF=0.57
+>> gpt_gen_time: 1.83 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.72 seconds
+>> bigvgan_time: 0.20 seconds
+>> Total inference time: 2.89 seconds
+>> Generated audio length: 5.05 seconds
+>> RTF: 0.5729
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=51, semantic_codes=325, target_frames=559, cat_frames=812, diffusion_steps=12
+torch.Size([1, 143104])
+>> chunk 1/1: text_tokens=51, audio=6.49s, elapsed=3.88s, RTF=0.60
+>> gpt_gen_time: 2.57 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.87 seconds
+>> bigvgan_time: 0.26 seconds
+>> Total inference time: 3.88 seconds
+>> Generated audio length: 6.49 seconds
+>> RTF: 0.5980
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=53, semantic_codes=314, target_frames=540, cat_frames=793, diffusion_steps=12
+torch.Size([1, 138240])
+>> chunk 1/1: text_tokens=53, audio=6.27s, elapsed=3.87s, RTF=0.62
+>> gpt_gen_time: 2.60 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.85 seconds
+>> bigvgan_time: 0.26 seconds
+>> Total inference time: 3.88 seconds
+>> Generated audio length: 6.27 seconds
+>> RTF: 0.6184
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=42, semantic_codes=256, target_frames=440, cat_frames=693, diffusion_steps=12
+torch.Size([1, 112640])
+>> chunk 1/1: text_tokens=42, audio=5.11s, elapsed=2.92s, RTF=0.57
+>> gpt_gen_time: 1.85 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.72 seconds
+>> bigvgan_time: 0.21 seconds
+>> Total inference time: 2.92 seconds
+>> Generated audio length: 5.11 seconds
+>> RTF: 0.5721
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/2: text_tokens=48, semantic_codes=280, target_frames=481, cat_frames=734, diffusion_steps=12
+torch.Size([1, 123136])
+>> chunk 1/2: text_tokens=48, audio=5.58s, elapsed=3.12s, RTF=0.56
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 2/2: text_tokens=58, semantic_codes=312, target_frames=536, cat_frames=789, diffusion_steps=12
+torch.Size([1, 137216])
+>> chunk 2/2: text_tokens=58, audio=6.22s, elapsed=3.50s, RTF=0.56
+>> gpt_gen_time: 4.20 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 1.61 seconds
+>> bigvgan_time: 0.49 seconds
+>> Total inference time: 6.62 seconds
+>> Generated audio length: 12.01 seconds
+>> RTF: 0.5516
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=46, semantic_codes=253, target_frames=435, cat_frames=688, diffusion_steps=12
+torch.Size([1, 111360])
+>> chunk 1/1: text_tokens=46, audio=5.05s, elapsed=2.89s, RTF=0.57
+>> gpt_gen_time: 1.83 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.72 seconds
+>> bigvgan_time: 0.21 seconds
+>> Total inference time: 2.90 seconds
+>> Generated audio length: 5.05 seconds
+>> RTF: 0.5738
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/2: text_tokens=77, semantic_codes=394, target_frames=677, cat_frames=930, diffusion_steps=12
+torch.Size([1, 173312])
+>> chunk 1/2: text_tokens=77, audio=7.86s, elapsed=4.31s, RTF=0.55
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 2/2: text_tokens=32, semantic_codes=183, target_frames=314, cat_frames=567, diffusion_steps=12
+torch.Size([1, 80384])
+>> chunk 2/2: text_tokens=32, audio=3.65s, elapsed=2.27s, RTF=0.62
+>> gpt_gen_time: 4.22 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 1.57 seconds
+>> bigvgan_time: 0.48 seconds
+>> Total inference time: 6.59 seconds
+>> Generated audio length: 11.71 seconds
+>> RTF: 0.5628
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=38, semantic_codes=216, target_frames=371, cat_frames=624, diffusion_steps=12
+torch.Size([1, 94976])
+>> chunk 1/1: text_tokens=38, audio=4.31s, elapsed=2.66s, RTF=0.62
+>> gpt_gen_time: 1.72 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.64 seconds
+>> bigvgan_time: 0.18 seconds
+>> Total inference time: 2.67 seconds
+>> Generated audio length: 4.31 seconds
+>> RTF: 0.6192
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 1/2: text_tokens=26, semantic_codes=141, target_frames=242, cat_frames=917, diffusion_steps=12
+torch.Size([1, 61952])
+>> chunk 1/2: text_tokens=26, audio=2.81s, elapsed=2.43s, RTF=0.87
+Use the specified emotion vector
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+>> s2mel input 2/2: text_tokens=20, semantic_codes=108, target_frames=185, cat_frames=860, diffusion_steps=12
+torch.Size([1, 47360])
+>> chunk 2/2: text_tokens=20, audio=2.15s, elapsed=2.22s, RTF=1.03
+>> gpt_gen_time: 2.41 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 1.74 seconds
+>> bigvgan_time: 0.28 seconds
+>> Total inference time: 4.95 seconds
+>> Generated audio length: 5.16 seconds
+>> RTF: 0.9599
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.172.35:0 - "GET /static/tavo.js?v=2026018878888 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /static/tavo.js?v=2026018878888 HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.172.35:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /static/tavo.js?v=2026018878888 HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/f38044c8bbe2ce7a31d61bece7f11e6898afe661 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/f38044c8bbe2ce7a31d61bece7f11e6898afe661 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.97:0 - "GET /static/tavo.js?v=2026018878888 HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /static/tavo.js?v=20260188788888 HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /static/tavo.js?v=20260188788888 HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.97:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /static/tavo.js?v=202601887888887 HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "GET /cache_audio/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.100:0 - "GET /tts_dialogue_job_status/56fe9055a704583ad5b3a61bedba484cd39db163 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/51f0156c8b0b2fbbf0db46a1b51e2dcbcd935140 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/51f0156c8b0b2fbbf0db46a1b51e2dcbcd935140 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/51f0156c8b0b2fbbf0db46a1b51e2dcbcd935140 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/f38044c8bbe2ce7a31d61bece7f11e6898afe661 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/f38044c8bbe2ce7a31d61bece7f11e6898afe661 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "OPTIONS /parse_text HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "POST /parse_text HTTP/1.1" 200 OK
+INFO:     103.151.173.100:0 - "OPTIONS /tts_dialogue_stream_job HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "POST /tts_dialogue_stream_job HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_stream_job/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/2: text_tokens=69, semantic_codes=373, target_frames=641, cat_frames=894, diffusion_steps=12
+torch.Size([1, 164096])
+>> chunk 1/2: text_tokens=69, audio=7.44s, elapsed=4.91s, RTF=0.66
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=21, semantic_codes=156, target_frames=268, cat_frames=521, diffusion_steps=12
+torch.Size([1, 68608])
+>> chunk 2/2: text_tokens=21, audio=3.11s, elapsed=2.17s, RTF=0.70
+>> gpt_gen_time: 4.88 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 1.50 seconds
+>> bigvgan_time: 0.42 seconds
+>> Total inference time: 7.57 seconds
+>> Generated audio length: 10.75 seconds
+>> RTF: 0.7040
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=55, semantic_codes=331, target_frames=569, cat_frames=822, diffusion_steps=12
+torch.Size([1, 145664])
+>> chunk 1/1: text_tokens=55, audio=6.61s, elapsed=3.99s, RTF=0.60
+>> gpt_gen_time: 2.77 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 0.77 seconds
+>> bigvgan_time: 0.27 seconds
+>> Total inference time: 3.99 seconds
+>> Generated audio length: 6.61 seconds
+>> RTF: 0.6046
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=38, semantic_codes=232, target_frames=399, cat_frames=652, diffusion_steps=12
+torch.Size([1, 102144])
+>> chunk 1/1: text_tokens=38, audio=4.63s, elapsed=2.68s, RTF=0.58
+>> gpt_gen_time: 1.74 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.61 seconds
+>> bigvgan_time: 0.19 seconds
+>> Total inference time: 2.69 seconds
+>> Generated audio length: 4.63 seconds
+>> RTF: 0.5799
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/3: text_tokens=50, semantic_codes=277, target_frames=476, cat_frames=729, diffusion_steps=12
+torch.Size([1, 121856])
+>> chunk 1/3: text_tokens=50, audio=5.53s, elapsed=3.07s, RTF=0.56
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 2/3: text_tokens=66, semantic_codes=363, target_frames=624, cat_frames=877, diffusion_steps=12
+torch.Size([1, 159744])
+>> chunk 2/3: text_tokens=66, audio=7.24s, elapsed=4.68s, RTF=0.65
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 3/3: text_tokens=23, semantic_codes=176, target_frames=302, cat_frames=555, diffusion_steps=12
+torch.Size([1, 77312])
+>> chunk 3/3: text_tokens=23, audio=3.51s, elapsed=2.21s, RTF=0.63
+>> gpt_gen_time: 5.98 seconds
+>> gpt_forward_time: 0.05 seconds
+>> s2mel_time: 2.89 seconds
+>> bigvgan_time: 0.66 seconds
+>> Total inference time: 9.97 seconds
+>> Generated audio length: 16.68 seconds
+>> RTF: 0.5978
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=26, semantic_codes=130, target_frames=223, cat_frames=784, diffusion_steps=12
+torch.Size([1, 57088])
+>> chunk 1/1: text_tokens=26, audio=2.59s, elapsed=2.36s, RTF=0.91
+>> gpt_gen_time: 1.36 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 0.73 seconds
+>> bigvgan_time: 0.14 seconds
+>> Total inference time: 2.64 seconds
+>> Generated audio length: 2.59 seconds
+>> RTF: 1.0210
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=34, semantic_codes=214, target_frames=368, cat_frames=621, diffusion_steps=12
+torch.Size([1, 94208])
+>> chunk 1/1: text_tokens=34, audio=4.27s, elapsed=2.54s, RTF=0.59
+>> gpt_gen_time: 1.59 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.65 seconds
+>> bigvgan_time: 0.18 seconds
+>> Total inference time: 2.70 seconds
+>> Generated audio length: 4.27 seconds
+>> RTF: 0.6317
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=77, semantic_codes=417, target_frames=717, cat_frames=970, diffusion_steps=12
+torch.Size([1, 183552])
+>> chunk 1/1: text_tokens=77, audio=8.32s, elapsed=4.41s, RTF=0.53
+>> gpt_gen_time: 2.93 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.93 seconds
+>> bigvgan_time: 0.35 seconds
+>> Total inference time: 4.41 seconds
+>> Generated audio length: 8.32 seconds
+>> RTF: 0.5303
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=5, semantic_codes=36, target_frames=61, cat_frames=622, diffusion_steps=12
+torch.Size([1, 15616])
+>> chunk 1/1: text_tokens=5, audio=0.71s, elapsed=2.04s, RTF=2.88
+>> gpt_gen_time: 1.34 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.55 seconds
+>> bigvgan_time: 0.06 seconds
+>> Total inference time: 2.26 seconds
+>> Generated audio length: 0.71 seconds
+>> RTF: 3.1880
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=55, semantic_codes=298, target_frames=512, cat_frames=765, diffusion_steps=12
+torch.Size([1, 131072])
+>> chunk 1/1: text_tokens=55, audio=5.94s, elapsed=3.37s, RTF=0.57
+>> gpt_gen_time: 2.27 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.70 seconds
+>> bigvgan_time: 0.23 seconds
+>> Total inference time: 3.53 seconds
+>> Generated audio length: 5.94 seconds
+>> RTF: 0.5940
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=7, semantic_codes=54, target_frames=92, cat_frames=345, diffusion_steps=12
+torch.Size([1, 23552])
+>> chunk 1/1: text_tokens=7, audio=1.07s, elapsed=2.54s, RTF=2.38
+>> gpt_gen_time: 1.32 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.07 seconds
+>> bigvgan_time: 0.11 seconds
+>> Total inference time: 2.54 seconds
+>> Generated audio length: 1.07 seconds
+>> RTF: 2.3823
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/2: text_tokens=63, semantic_codes=352, target_frames=605, cat_frames=858, diffusion_steps=12
+torch.Size([1, 154880])
+>> chunk 1/2: text_tokens=63, audio=7.02s, elapsed=3.67s, RTF=0.52
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 2/2: text_tokens=31, semantic_codes=177, target_frames=304, cat_frames=557, diffusion_steps=12
+torch.Size([1, 77824])
+>> chunk 2/2: text_tokens=31, audio=3.53s, elapsed=2.18s, RTF=0.62
+>> gpt_gen_time: 3.81 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 1.33 seconds
+>> bigvgan_time: 0.43 seconds
+>> Total inference time: 5.86 seconds
+>> Generated audio length: 10.75 seconds
+>> RTF: 0.5447
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=20, semantic_codes=117, target_frames=201, cat_frames=762, diffusion_steps=12
+torch.Size([1, 51456])
+>> chunk 1/1: text_tokens=20, audio=2.33s, elapsed=2.25s, RTF=0.96
+>> gpt_gen_time: 1.33 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 0.65 seconds
+>> bigvgan_time: 0.13 seconds
+>> Total inference time: 2.46 seconds
+>> Generated audio length: 2.33 seconds
+>> RTF: 1.0558
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 404 Not Found
+>> s2mel input 1/1: text_tokens=61, semantic_codes=346, target_frames=595, cat_frames=848, diffusion_steps=12
+torch.Size([1, 152320])
+>> chunk 1/1: text_tokens=61, audio=6.91s, elapsed=4.65s, RTF=0.67
+>> gpt_gen_time: 2.43 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.76 seconds
+>> bigvgan_time: 0.28 seconds
+>> Total inference time: 4.81 seconds
+>> Generated audio length: 6.91 seconds
+>> RTF: 0.6960
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=65, semantic_codes=366, target_frames=629, cat_frames=882, diffusion_steps=12
+torch.Size([1, 161024])
+>> chunk 1/2: text_tokens=65, audio=7.30s, elapsed=3.79s, RTF=0.52
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=40, semantic_codes=258, target_frames=443, cat_frames=696, diffusion_steps=12
+torch.Size([1, 113408])
+>> chunk 2/2: text_tokens=40, audio=5.14s, elapsed=2.86s, RTF=0.56
+>> gpt_gen_time: 4.39 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 1.46 seconds
+>> bigvgan_time: 0.50 seconds
+>> Total inference time: 6.66 seconds
+>> Generated audio length: 12.65 seconds
+>> RTF: 0.5268
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=46, semantic_codes=227, target_frames=390, cat_frames=951, diffusion_steps=12
+torch.Size([1, 99840])
+>> chunk 1/2: text_tokens=46, audio=4.53s, elapsed=4.30s, RTF=0.95
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=7, semantic_codes=51, target_frames=87, cat_frames=648, diffusion_steps=12
+torch.Size([1, 22272])
+>> chunk 2/2: text_tokens=7, audio=1.01s, elapsed=4.26s, RTF=4.22
+>> gpt_gen_time: 3.09 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 4.95 seconds
+>> bigvgan_time: 0.33 seconds
+>> Total inference time: 8.78 seconds
+>> Generated audio length: 5.74 seconds
+>> RTF: 1.5296
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=47, semantic_codes=271, target_frames=466, cat_frames=719, diffusion_steps=12
+torch.Size([1, 119296])
+>> chunk 1/1: text_tokens=47, audio=5.41s, elapsed=2.97s, RTF=0.55
+>> gpt_gen_time: 1.94 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.67 seconds
+>> bigvgan_time: 0.22 seconds
+>> Total inference time: 3.15 seconds
+>> Generated audio length: 5.41 seconds
+>> RTF: 0.5828
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=76, semantic_codes=399, target_frames=686, cat_frames=939, diffusion_steps=12
+torch.Size([1, 175616])
+>> chunk 1/2: text_tokens=76, audio=7.96s, elapsed=4.29s, RTF=0.54
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=37, semantic_codes=213, target_frames=366, cat_frames=619, diffusion_steps=12
+torch.Size([1, 93696])
+>> chunk 2/2: text_tokens=37, audio=4.25s, elapsed=3.78s, RTF=0.89
+>> gpt_gen_time: 4.46 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 2.79 seconds
+>> bigvgan_time: 0.51 seconds
+>> Total inference time: 8.08 seconds
+>> Generated audio length: 12.41 seconds
+>> RTF: 0.6508
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=78, semantic_codes=454, target_frames=780, cat_frames=1033, diffusion_steps=12
+torch.Size([1, 199680])
+>> chunk 1/1: text_tokens=78, audio=9.06s, elapsed=5.87s, RTF=0.65
+>> gpt_gen_time: 3.11 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 2.17 seconds
+>> bigvgan_time: 0.37 seconds
+>> Total inference time: 5.87 seconds
+>> Generated audio length: 9.06 seconds
+>> RTF: 0.6482
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=20, semantic_codes=99, target_frames=170, cat_frames=731, diffusion_steps=12
+torch.Size([1, 43520])
+>> chunk 1/1: text_tokens=20, audio=1.97s, elapsed=2.32s, RTF=1.17
+>> gpt_gen_time: 1.42 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.65 seconds
+>> bigvgan_time: 0.11 seconds
+>> Total inference time: 2.55 seconds
+>> Generated audio length: 1.97 seconds
+>> RTF: 1.2932
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=71, semantic_codes=393, target_frames=675, cat_frames=928, diffusion_steps=12
+torch.Size([1, 172800])
+>> chunk 1/1: text_tokens=71, audio=7.84s, elapsed=4.31s, RTF=0.55
+>> gpt_gen_time: 2.87 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.90 seconds
+>> bigvgan_time: 0.33 seconds
+>> Total inference time: 4.48 seconds
+>> Generated audio length: 7.84 seconds
+>> RTF: 0.5718
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=48, semantic_codes=290, target_frames=498, cat_frames=751, diffusion_steps=12
+torch.Size([1, 127488])
+>> chunk 1/1: text_tokens=48, audio=5.78s, elapsed=3.25s, RTF=0.56
+>> gpt_gen_time: 2.14 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.71 seconds
+>> bigvgan_time: 0.24 seconds
+>> Total inference time: 3.25 seconds
+>> Generated audio length: 5.78 seconds
+>> RTF: 0.5623
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=28, semantic_codes=153, target_frames=263, cat_frames=824, diffusion_steps=12
+torch.Size([1, 67328])
+>> chunk 1/1: text_tokens=28, audio=3.05s, elapsed=2.69s, RTF=0.88
+>> gpt_gen_time: 1.44 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.94 seconds
+>> bigvgan_time: 0.16 seconds
+>> Total inference time: 2.92 seconds
+>> Generated audio length: 3.05 seconds
+>> RTF: 0.9574
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=38, semantic_codes=216, target_frames=371, cat_frames=624, diffusion_steps=12
+torch.Size([1, 94976])
+>> chunk 1/1: text_tokens=38, audio=4.31s, elapsed=4.31s, RTF=1.00
+>> gpt_gen_time: 1.68 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 2.33 seconds
+>> bigvgan_time: 0.18 seconds
+>> Total inference time: 4.49 seconds
+>> Generated audio length: 4.31 seconds
+>> RTF: 1.0432
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=44, semantic_codes=197, target_frames=338, cat_frames=899, diffusion_steps=12
+torch.Size([1, 86528])
+>> chunk 1/1: text_tokens=44, audio=3.92s, elapsed=2.82s, RTF=0.72
+>> gpt_gen_time: 1.58 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.87 seconds
+>> bigvgan_time: 0.19 seconds
+>> Total inference time: 3.04 seconds
+>> Generated audio length: 3.92 seconds
+>> RTF: 0.7751
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=48, semantic_codes=273, target_frames=469, cat_frames=1030, diffusion_steps=12
+torch.Size([1, 120064])
+>> chunk 1/1: text_tokens=48, audio=5.45s, elapsed=3.44s, RTF=0.63
+>> gpt_gen_time: 2.04 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.00 seconds
+>> bigvgan_time: 0.26 seconds
+>> Total inference time: 3.45 seconds
+>> Generated audio length: 5.45 seconds
+>> RTF: 0.6330
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=34, semantic_codes=151, target_frames=259, cat_frames=820, diffusion_steps=12
+torch.Size([1, 66304])
+>> chunk 1/2: text_tokens=34, audio=3.01s, elapsed=2.72s, RTF=0.90
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=7, semantic_codes=45, target_frames=77, cat_frames=638, diffusion_steps=12
+torch.Size([1, 19712])
+>> chunk 2/2: text_tokens=7, audio=0.89s, elapsed=2.70s, RTF=3.02
+>> gpt_gen_time: 2.72 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 2.29 seconds
+>> bigvgan_time: 0.29 seconds
+>> Total inference time: 5.42 seconds
+>> Generated audio length: 4.10 seconds
+>> RTF: 1.3217
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=34, semantic_codes=198, target_frames=340, cat_frames=901, diffusion_steps=12
+torch.Size([1, 87040])
+>> chunk 1/2: text_tokens=34, audio=3.95s, elapsed=2.78s, RTF=0.70
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=16, semantic_codes=80, target_frames=137, cat_frames=698, diffusion_steps=12
+torch.Size([1, 35072])
+>> chunk 2/2: text_tokens=16, audio=1.59s, elapsed=2.20s, RTF=1.38
+>> gpt_gen_time: 3.00 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 1.53 seconds
+>> bigvgan_time: 0.33 seconds
+>> Total inference time: 4.99 seconds
+>> Generated audio length: 5.74 seconds
+>> RTF: 0.8692
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=31, semantic_codes=155, target_frames=266, cat_frames=827, diffusion_steps=12
+torch.Size([1, 68096])
+>> chunk 1/1: text_tokens=31, audio=3.09s, elapsed=2.82s, RTF=0.91
+>> gpt_gen_time: 1.52 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.05 seconds
+>> bigvgan_time: 0.15 seconds
+>> Total inference time: 2.82 seconds
+>> Generated audio length: 3.09 seconds
+>> RTF: 0.9132
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=59, semantic_codes=317, target_frames=545, cat_frames=1106, diffusion_steps=12
+torch.Size([1, 139520])
+>> chunk 1/1: text_tokens=59, audio=6.33s, elapsed=4.19s, RTF=0.66
+>> gpt_gen_time: 2.62 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.11 seconds
+>> bigvgan_time: 0.30 seconds
+>> Total inference time: 4.19 seconds
+>> Generated audio length: 6.33 seconds
+>> RTF: 0.6621
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=68, semantic_codes=372, target_frames=639, cat_frames=1200, diffusion_steps=12
+torch.Size([1, 163584])
+>> chunk 1/1: text_tokens=68, audio=7.42s, elapsed=4.43s, RTF=0.60
+>> gpt_gen_time: 2.72 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 1.19 seconds
+>> bigvgan_time: 0.34 seconds
+>> Total inference time: 4.44 seconds
+>> Generated audio length: 7.42 seconds
+>> RTF: 0.5978
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=30, semantic_codes=179, target_frames=307, cat_frames=868, diffusion_steps=12
+torch.Size([1, 78592])
+>> chunk 1/2: text_tokens=30, audio=3.56s, elapsed=2.65s, RTF=0.74
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=30, semantic_codes=146, target_frames=251, cat_frames=812, diffusion_steps=12
+torch.Size([1, 64256])
+>> chunk 2/2: text_tokens=30, audio=2.91s, elapsed=4.18s, RTF=1.43
+>> gpt_gen_time: 2.93 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 3.36 seconds
+>> bigvgan_time: 0.35 seconds
+>> Total inference time: 6.83 seconds
+>> Generated audio length: 6.68 seconds
+>> RTF: 1.0231
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=30, semantic_codes=169, target_frames=290, cat_frames=851, diffusion_steps=12
+torch.Size([1, 74240])
+>> chunk 1/2: text_tokens=30, audio=3.37s, elapsed=2.52s, RTF=0.75
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=35, semantic_codes=187, target_frames=321, cat_frames=882, diffusion_steps=12
+torch.Size([1, 82176])
+>> chunk 2/2: text_tokens=35, audio=3.73s, elapsed=2.63s, RTF=0.71
+>> gpt_gen_time: 3.00 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 1.60 seconds
+>> bigvgan_time: 0.36 seconds
+>> Total inference time: 5.16 seconds
+>> Generated audio length: 7.29 seconds
+>> RTF: 0.7074
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2026018878888877 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2028 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=AD%E5%AD%A6%E5%A7%90 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=AD%E5%AD%A6%E5%A7%90 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=AD%E5%AD%A6%E5%A7%90 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E6%97%81%E7%99%BD HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E6%97%81%E7%99%BD HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E9%A3%8E%E9%9F%B5%E5%B0%91%E5%A6%87_minimax HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E9%A3%8E%E9%9F%B5%E5%B0%91%E5%A6%87_minimax HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E5%96%98%E6%81%AF%2F%E9%A3%8E%E9%9F%B5%E5%B0%91%E5%A6%87%20%E5%96%98%E6%81%AF%E5%A3%B0 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E5%96%98%E6%81%AF%2F%E9%A3%8E%E9%9F%B5%E5%B0%91%E5%A6%87%20%E5%96%98%E6%81%AF%E5%A3%B0 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E5%A5%B3%E5%A3%B0%2F%E5%86%B0%E5%B1%B1%E7%BE%8E%E4%BA%BA HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E5%A5%B3%E5%A3%B0%2F%E5%86%B0%E5%B1%B1%E7%BE%8E%E4%BA%BA HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E5%A5%B3%E5%A3%B0%2F%E6%B8%A9%E6%9F%94%E5%A5%B3%E7%A5%9E HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E5%A5%B3%E5%A3%B0%2F%E6%B8%A9%E6%9F%94%E5%A5%B3%E7%A5%9E HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E5%A5%B3%E5%A3%B0%2F%E7%94%9C%E8%9C%9C%E6%81%8B%E4%BA%BA HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=%E5%A5%B3%E5%A3%B0%2F%E7%94%9C%E8%9C%9C%E6%81%8B%E4%BA%BA HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /voice_preview?name=AD%E5%AD%A6%E5%A7%90 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /static/tavo.js?v=2028 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "OPTIONS /parse_text HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.209:0 - "POST /parse_text HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "OPTIONS /tts_dialogue_stream_job HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "POST /tts_dialogue_stream_job HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_stream_job/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/2: text_tokens=69, semantic_codes=377, target_frames=648, cat_frames=901, diffusion_steps=12
+torch.Size([1, 165888])
+>> chunk 1/2: text_tokens=69, audio=7.52s, elapsed=4.56s, RTF=0.61
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=21, semantic_codes=152, target_frames=261, cat_frames=514, diffusion_steps=12
+torch.Size([1, 66816])
+>> chunk 2/2: text_tokens=21, audio=3.03s, elapsed=2.34s, RTF=0.77
+>> gpt_gen_time: 4.46 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 1.69 seconds
+>> bigvgan_time: 0.49 seconds
+>> Total inference time: 7.07 seconds
+>> Generated audio length: 10.75 seconds
+>> RTF: 0.6578
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=55, semantic_codes=318, target_frames=546, cat_frames=799, diffusion_steps=12
+torch.Size([1, 139776])
+>> chunk 1/1: text_tokens=55, audio=6.34s, elapsed=5.24s, RTF=0.83
+>> gpt_gen_time: 2.60 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 2.21 seconds
+>> bigvgan_time: 0.26 seconds
+>> Total inference time: 5.24 seconds
+>> Generated audio length: 6.34 seconds
+>> RTF: 0.8267
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=38, semantic_codes=233, target_frames=400, cat_frames=653, diffusion_steps=12
+torch.Size([1, 102400])
+>> chunk 1/1: text_tokens=38, audio=4.64s, elapsed=2.77s, RTF=0.60
+>> gpt_gen_time: 1.82 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.63 seconds
+>> bigvgan_time: 0.20 seconds
+>> Total inference time: 2.77 seconds
+>> Generated audio length: 4.64 seconds
+>> RTF: 0.5967
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/3: text_tokens=50, semantic_codes=287, target_frames=493, cat_frames=746, diffusion_steps=12
+torch.Size([1, 126208])
+>> chunk 1/3: text_tokens=50, audio=5.72s, elapsed=3.34s, RTF=0.58
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 2/3: text_tokens=66, semantic_codes=372, target_frames=639, cat_frames=892, diffusion_steps=12
+torch.Size([1, 163584])
+>> chunk 2/3: text_tokens=66, audio=7.42s, elapsed=4.15s, RTF=0.56
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 3/3: text_tokens=23, semantic_codes=165, target_frames=283, cat_frames=536, diffusion_steps=12
+torch.Size([1, 72448])
+>> chunk 3/3: text_tokens=23, audio=3.29s, elapsed=2.43s, RTF=0.74
+>> gpt_gen_time: 6.47 seconds
+>> gpt_forward_time: 0.05 seconds
+>> s2mel_time: 2.32 seconds
+>> bigvgan_time: 0.69 seconds
+>> Total inference time: 9.94 seconds
+>> Generated audio length: 16.83 seconds
+>> RTF: 0.5904
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=26, semantic_codes=127, target_frames=218, cat_frames=779, diffusion_steps=12
+torch.Size([1, 55808])
+>> chunk 1/1: text_tokens=26, audio=2.53s, elapsed=4.61s, RTF=1.82
+>> gpt_gen_time: 1.32 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 3.01 seconds
+>> bigvgan_time: 0.14 seconds
+>> Total inference time: 4.83 seconds
+>> Generated audio length: 2.53 seconds
+>> RTF: 1.9080
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=34, semantic_codes=227, target_frames=390, cat_frames=643, diffusion_steps=12
+torch.Size([1, 99840])
+>> chunk 1/1: text_tokens=34, audio=4.53s, elapsed=2.65s, RTF=0.59
+>> gpt_gen_time: 1.70 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.63 seconds
+>> bigvgan_time: 0.19 seconds
+>> Total inference time: 2.82 seconds
+>> Generated audio length: 4.53 seconds
+>> RTF: 0.6227
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=77, semantic_codes=408, target_frames=701, cat_frames=954, diffusion_steps=12
+torch.Size([1, 179456])
+>> chunk 1/1: text_tokens=77, audio=8.14s, elapsed=4.32s, RTF=0.53
+>> gpt_gen_time: 2.86 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.92 seconds
+>> bigvgan_time: 0.34 seconds
+>> Total inference time: 4.33 seconds
+>> Generated audio length: 8.14 seconds
+>> RTF: 0.5318
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=5, semantic_codes=24, target_frames=41, cat_frames=602, diffusion_steps=12
+torch.Size([1, 10496])
+>> chunk 1/1: text_tokens=5, audio=0.48s, elapsed=2.47s, RTF=5.19
+>> gpt_gen_time: 1.38 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.84 seconds
+>> bigvgan_time: 0.17 seconds
+>> Total inference time: 2.69 seconds
+>> Generated audio length: 0.48 seconds
+>> RTF: 5.6444
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=55, semantic_codes=310, target_frames=533, cat_frames=786, diffusion_steps=12
+torch.Size([1, 136448])
+>> chunk 1/1: text_tokens=55, audio=6.19s, elapsed=5.04s, RTF=0.81
+>> gpt_gen_time: 2.36 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 2.26 seconds
+>> bigvgan_time: 0.26 seconds
+>> Total inference time: 5.21 seconds
+>> Generated audio length: 6.19 seconds
+>> RTF: 0.8419
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=7, semantic_codes=96, target_frames=165, cat_frames=418, diffusion_steps=12
+torch.Size([1, 42240])
+>> chunk 1/1: text_tokens=7, audio=1.92s, elapsed=3.12s, RTF=1.63
+>> gpt_gen_time: 1.32 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.54 seconds
+>> bigvgan_time: 0.19 seconds
+>> Total inference time: 3.13 seconds
+>> Generated audio length: 1.92 seconds
+>> RTF: 1.6320
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/2: text_tokens=63, semantic_codes=336, target_frames=577, cat_frames=830, diffusion_steps=12
+torch.Size([1, 147712])
+>> chunk 1/2: text_tokens=63, audio=6.70s, elapsed=3.64s, RTF=0.54
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 2/2: text_tokens=31, semantic_codes=188, target_frames=323, cat_frames=576, diffusion_steps=12
+torch.Size([1, 82688])
+>> chunk 2/2: text_tokens=31, audio=3.75s, elapsed=2.24s, RTF=0.60
+>> gpt_gen_time: 3.84 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 1.30 seconds
+>> bigvgan_time: 0.43 seconds
+>> Total inference time: 5.89 seconds
+>> Generated audio length: 10.65 seconds
+>> RTF: 0.5527
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=24, semantic_codes=157, target_frames=270, cat_frames=523, diffusion_steps=12
+torch.Size([1, 69120])
+>> chunk 1/1: text_tokens=24, audio=3.13s, elapsed=2.24s, RTF=0.71
+>> gpt_gen_time: 1.48 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.52 seconds
+>> bigvgan_time: 0.14 seconds
+>> Total inference time: 2.24 seconds
+>> Generated audio length: 3.13 seconds
+>> RTF: 0.7151
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/2: text_tokens=58, semantic_codes=321, target_frames=552, cat_frames=805, diffusion_steps=12
+torch.Size([1, 141312])
+>> chunk 1/2: text_tokens=58, audio=6.41s, elapsed=7.51s, RTF=1.17
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 2/2: text_tokens=27, semantic_codes=157, target_frames=270, cat_frames=523, diffusion_steps=12
+torch.Size([1, 69120])
+>> chunk 2/2: text_tokens=27, audio=3.13s, elapsed=2.09s, RTF=0.67
+>> gpt_gen_time: 3.83 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 4.76 seconds
+>> bigvgan_time: 0.75 seconds
+>> Total inference time: 9.61 seconds
+>> Generated audio length: 9.74 seconds
+>> RTF: 0.9862
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+>> s2mel input 1/1: text_tokens=20, semantic_codes=117, target_frames=201, cat_frames=762, diffusion_steps=12
+torch.Size([1, 51456])
+>> chunk 1/1: text_tokens=20, audio=2.33s, elapsed=2.24s, RTF=0.96
+>> gpt_gen_time: 1.32 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.65 seconds
+>> bigvgan_time: 0.12 seconds
+>> Total inference time: 2.46 seconds
+>> Generated audio length: 2.33 seconds
+>> RTF: 1.0535
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+>> s2mel input 1/1: text_tokens=61, semantic_codes=347, target_frames=596, cat_frames=849, diffusion_steps=12
+torch.Size([1, 152576])
+>> chunk 1/1: text_tokens=61, audio=6.92s, elapsed=3.68s, RTF=0.53
+>> gpt_gen_time: 2.41 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.79 seconds
+>> bigvgan_time: 0.28 seconds
+>> Total inference time: 3.84 seconds
+>> Generated audio length: 6.92 seconds
+>> RTF: 0.5542
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.209:0 - "GET /tts_dialogue_job_status/117e2ba7130c995f3fb709f2dc2d7af214ce8718 HTTP/1.1" 200 OK
+INFO:     103.151.173.209:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+>> s2mel input 1/2: text_tokens=65, semantic_codes=374, target_frames=643, cat_frames=896, diffusion_steps=12
+torch.Size([1, 164608])
+>> chunk 1/2: text_tokens=65, audio=7.47s, elapsed=7.43s, RTF=0.99
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=40, semantic_codes=212, target_frames=364, cat_frames=617, diffusion_steps=12
+torch.Size([1, 93184])
+>> chunk 2/2: text_tokens=40, audio=4.23s, elapsed=2.50s, RTF=0.59
+>> gpt_gen_time: 4.19 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 4.96 seconds
+>> bigvgan_time: 0.47 seconds
+>> Total inference time: 9.93 seconds
+>> Generated audio length: 11.89 seconds
+>> RTF: 0.8351
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=46, semantic_codes=240, target_frames=412, cat_frames=973, diffusion_steps=12
+torch.Size([1, 105472])
+>> chunk 1/2: text_tokens=46, audio=4.78s, elapsed=3.12s, RTF=0.65
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=7, semantic_codes=44, target_frames=75, cat_frames=636, diffusion_steps=12
+torch.Size([1, 19200])
+>> chunk 2/2: text_tokens=7, audio=0.87s, elapsed=2.32s, RTF=2.67
+>> gpt_gen_time: 3.10 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 1.77 seconds
+>> bigvgan_time: 0.35 seconds
+>> Total inference time: 5.66 seconds
+>> Generated audio length: 5.85 seconds
+>> RTF: 0.9671
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=47, semantic_codes=282, target_frames=485, cat_frames=738, diffusion_steps=12
+torch.Size([1, 124160])
+>> chunk 1/1: text_tokens=47, audio=5.63s, elapsed=3.16s, RTF=0.56
+>> gpt_gen_time: 2.07 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.68 seconds
+>> bigvgan_time: 0.24 seconds
+>> Total inference time: 3.32 seconds
+>> Generated audio length: 5.63 seconds
+>> RTF: 0.5899
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=76, semantic_codes=407, target_frames=700, cat_frames=953, diffusion_steps=12
+torch.Size([1, 179200])
+>> chunk 1/2: text_tokens=76, audio=8.13s, elapsed=4.30s, RTF=0.53
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=37, semantic_codes=194, target_frames=333, cat_frames=586, diffusion_steps=12
+torch.Size([1, 85248])
+>> chunk 2/2: text_tokens=37, audio=3.87s, elapsed=2.39s, RTF=0.62
+>> gpt_gen_time: 4.41 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 1.47 seconds
+>> bigvgan_time: 0.50 seconds
+>> Total inference time: 6.71 seconds
+>> Generated audio length: 12.19 seconds
+>> RTF: 0.5499
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=78, semantic_codes=394, target_frames=677, cat_frames=930, diffusion_steps=12
+torch.Size([1, 173312])
+>> chunk 1/1: text_tokens=78, audio=7.86s, elapsed=4.45s, RTF=0.57
+>> gpt_gen_time: 3.01 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.91 seconds
+>> bigvgan_time: 0.33 seconds
+>> Total inference time: 4.46 seconds
+>> Generated audio length: 7.86 seconds
+>> RTF: 0.5673
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=20, semantic_codes=114, target_frames=196, cat_frames=757, diffusion_steps=12
+torch.Size([1, 50176])
+>> chunk 1/1: text_tokens=20, audio=2.28s, elapsed=2.25s, RTF=0.99
+>> gpt_gen_time: 1.33 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.66 seconds
+>> bigvgan_time: 0.13 seconds
+>> Total inference time: 2.47 seconds
+>> Generated audio length: 2.28 seconds
+>> RTF: 1.0861
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=71, semantic_codes=415, target_frames=713, cat_frames=966, diffusion_steps=12
+torch.Size([1, 182528])
+>> chunk 1/1: text_tokens=71, audio=8.28s, elapsed=4.36s, RTF=0.53
+>> gpt_gen_time: 2.83 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.96 seconds
+>> bigvgan_time: 0.34 seconds
+>> Total inference time: 4.52 seconds
+>> Generated audio length: 8.28 seconds
+>> RTF: 0.5461
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=48, semantic_codes=258, target_frames=443, cat_frames=696, diffusion_steps=12
+torch.Size([1, 113408])
+>> chunk 1/1: text_tokens=48, audio=5.14s, elapsed=3.98s, RTF=0.77
+>> gpt_gen_time: 1.87 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.76 seconds
+>> bigvgan_time: 0.21 seconds
+>> Total inference time: 3.99 seconds
+>> Generated audio length: 5.14 seconds
+>> RTF: 0.7750
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=71, semantic_codes=381, target_frames=655, cat_frames=908, diffusion_steps=12
+torch.Size([1, 167680])
+>> chunk 1/1: text_tokens=71, audio=7.60s, elapsed=5.42s, RTF=0.71
+>> gpt_gen_time: 2.61 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 2.30 seconds
+>> bigvgan_time: 0.32 seconds
+>> Total inference time: 5.42 seconds
+>> Generated audio length: 7.60 seconds
+>> RTF: 0.7126
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=28, semantic_codes=142, target_frames=244, cat_frames=805, diffusion_steps=12
+torch.Size([1, 62464])
+>> chunk 1/1: text_tokens=28, audio=2.83s, elapsed=2.38s, RTF=0.84
+>> gpt_gen_time: 1.33 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.76 seconds
+>> bigvgan_time: 0.15 seconds
+>> Total inference time: 2.60 seconds
+>> Generated audio length: 2.83 seconds
+>> RTF: 0.9186
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=38, semantic_codes=209, target_frames=359, cat_frames=612, diffusion_steps=12
+torch.Size([1, 91904])
+>> chunk 1/1: text_tokens=38, audio=4.17s, elapsed=2.45s, RTF=0.59
+>> gpt_gen_time: 1.56 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.58 seconds
+>> bigvgan_time: 0.17 seconds
+>> Total inference time: 2.61 seconds
+>> Generated audio length: 4.17 seconds
+>> RTF: 0.6263
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=45, semantic_codes=249, target_frames=428, cat_frames=681, diffusion_steps=12
+torch.Size([1, 109568])
+>> chunk 1/1: text_tokens=45, audio=4.97s, elapsed=2.95s, RTF=0.59
+>> gpt_gen_time: 1.96 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 0.65 seconds
+>> bigvgan_time: 0.21 seconds
+>> Total inference time: 2.95 seconds
+>> Generated audio length: 4.97 seconds
+>> RTF: 0.5944
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=38, semantic_codes=230, target_frames=395, cat_frames=648, diffusion_steps=12
+torch.Size([1, 101120])
+>> chunk 1/1: text_tokens=38, audio=4.59s, elapsed=2.93s, RTF=0.64
+>> gpt_gen_time: 1.72 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.89 seconds
+>> bigvgan_time: 0.19 seconds
+>> Total inference time: 2.94 seconds
+>> Generated audio length: 4.59 seconds
+>> RTF: 0.6402
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=71, semantic_codes=364, target_frames=626, cat_frames=879, diffusion_steps=12
+torch.Size([1, 160256])
+>> chunk 1/1: text_tokens=71, audio=7.27s, elapsed=5.15s, RTF=0.71
+>> gpt_gen_time: 2.50 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 2.17 seconds
+>> bigvgan_time: 0.30 seconds
+>> Total inference time: 5.15 seconds
+>> Generated audio length: 7.27 seconds
+>> RTF: 0.7090
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=44, semantic_codes=195, target_frames=335, cat_frames=896, diffusion_steps=12
+torch.Size([1, 85760])
+>> chunk 1/1: text_tokens=44, audio=3.89s, elapsed=2.66s, RTF=0.68
+>> gpt_gen_time: 1.51 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.78 seconds
+>> bigvgan_time: 0.19 seconds
+>> Total inference time: 2.90 seconds
+>> Generated audio length: 3.89 seconds
+>> RTF: 0.7446
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=53, semantic_codes=307, target_frames=528, cat_frames=781, diffusion_steps=12
+torch.Size([1, 135168])
+>> chunk 1/1: text_tokens=53, audio=6.13s, elapsed=3.39s, RTF=0.55
+>> gpt_gen_time: 2.18 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.78 seconds
+>> bigvgan_time: 0.26 seconds
+>> Total inference time: 3.55 seconds
+>> Generated audio length: 6.13 seconds
+>> RTF: 0.5783
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=44, semantic_codes=237, target_frames=407, cat_frames=660, diffusion_steps=12
+torch.Size([1, 104192])
+>> chunk 1/1: text_tokens=44, audio=4.73s, elapsed=3.89s, RTF=0.82
+>> gpt_gen_time: 1.73 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 1.84 seconds
+>> bigvgan_time: 0.19 seconds
+>> Total inference time: 3.89 seconds
+>> Generated audio length: 4.73 seconds
+>> RTF: 0.8232
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=48, semantic_codes=262, target_frames=450, cat_frames=1011, diffusion_steps=12
+torch.Size([1, 115200])
+>> chunk 1/1: text_tokens=48, audio=5.22s, elapsed=5.15s, RTF=0.99
+>> gpt_gen_time: 1.94 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 2.77 seconds
+>> bigvgan_time: 0.24 seconds
+>> Total inference time: 5.37 seconds
+>> Generated audio length: 5.22 seconds
+>> RTF: 1.0280
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=19, semantic_codes=120, target_frames=206, cat_frames=459, diffusion_steps=12
+torch.Size([1, 52736])
+>> chunk 1/1: text_tokens=19, audio=2.39s, elapsed=2.00s, RTF=0.83
+>> gpt_gen_time: 1.33 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.46 seconds
+>> bigvgan_time: 0.13 seconds
+>> Total inference time: 2.16 seconds
+>> Generated audio length: 2.39 seconds
+>> RTF: 0.9030
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=70, semantic_codes=400, target_frames=688, cat_frames=941, diffusion_steps=12
+torch.Size([1, 176128])
+>> chunk 1/1: text_tokens=70, audio=7.99s, elapsed=4.50s, RTF=0.56
+>> gpt_gen_time: 3.07 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.90 seconds
+>> bigvgan_time: 0.33 seconds
+>> Total inference time: 4.50 seconds
+>> Generated audio length: 7.99 seconds
+>> RTF: 0.5635
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=80, semantic_codes=434, target_frames=746, cat_frames=999, diffusion_steps=12
+torch.Size([1, 190976])
+>> chunk 1/1: text_tokens=80, audio=8.66s, elapsed=4.74s, RTF=0.55
+>> gpt_gen_time: 3.15 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.00 seconds
+>> bigvgan_time: 0.37 seconds
+>> Total inference time: 4.75 seconds
+>> Generated audio length: 8.66 seconds
+>> RTF: 0.5481
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=34, semantic_codes=177, target_frames=304, cat_frames=865, diffusion_steps=12
+torch.Size([1, 77824])
+>> chunk 1/2: text_tokens=34, audio=3.53s, elapsed=6.60s, RTF=1.87
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=7, semantic_codes=57, target_frames=98, cat_frames=659, diffusion_steps=12
+torch.Size([1, 25088])
+>> chunk 2/2: text_tokens=7, audio=1.14s, elapsed=2.12s, RTF=1.86
+>> gpt_gen_time: 2.88 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 5.36 seconds
+>> bigvgan_time: 0.30 seconds
+>> Total inference time: 8.97 seconds
+>> Generated audio length: 4.87 seconds
+>> RTF: 1.8429
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=28, semantic_codes=158, target_frames=271, cat_frames=524, diffusion_steps=12
+torch.Size([1, 69376])
+>> chunk 1/1: text_tokens=28, audio=3.15s, elapsed=2.15s, RTF=0.68
+>> gpt_gen_time: 1.37 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.53 seconds
+>> bigvgan_time: 0.14 seconds
+>> Total inference time: 2.31 seconds
+>> Generated audio length: 3.15 seconds
+>> RTF: 0.7327
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=78, semantic_codes=472, target_frames=811, cat_frames=1064, diffusion_steps=12
+torch.Size([1, 207616])
+>> chunk 1/2: text_tokens=78, audio=9.42s, elapsed=5.21s, RTF=0.55
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=53, semantic_codes=291, target_frames=500, cat_frames=753, diffusion_steps=12
+torch.Size([1, 128000])
+>> chunk 2/2: text_tokens=53, audio=5.80s, elapsed=6.75s, RTF=1.16
+>> gpt_gen_time: 5.72 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 5.04 seconds
+>> bigvgan_time: 0.82 seconds
+>> Total inference time: 11.97 seconds
+>> Generated audio length: 15.42 seconds
+>> RTF: 0.7760
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=65, semantic_codes=346, target_frames=595, cat_frames=848, diffusion_steps=12
+torch.Size([1, 152320])
+>> chunk 1/1: text_tokens=65, audio=6.91s, elapsed=3.86s, RTF=0.56
+>> gpt_gen_time: 2.57 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.82 seconds
+>> bigvgan_time: 0.28 seconds
+>> Total inference time: 3.86 seconds
+>> Generated audio length: 6.91 seconds
+>> RTF: 0.5592
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=34, semantic_codes=183, target_frames=314, cat_frames=875, diffusion_steps=12
+torch.Size([1, 80384])
+>> chunk 1/2: text_tokens=34, audio=3.65s, elapsed=2.62s, RTF=0.72
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=16, semantic_codes=87, target_frames=149, cat_frames=710, diffusion_steps=12
+torch.Size([1, 38144])
+>> chunk 2/2: text_tokens=16, audio=1.73s, elapsed=2.49s, RTF=1.44
+>> gpt_gen_time: 2.83 seconds
+>> gpt_forward_time: 0.04 seconds
+>> s2mel_time: 1.74 seconds
+>> bigvgan_time: 0.33 seconds
+>> Total inference time: 5.33 seconds
+>> Generated audio length: 5.58 seconds
+>> RTF: 0.9560
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=45, semantic_codes=257, target_frames=442, cat_frames=695, diffusion_steps=12
+torch.Size([1, 113152])
+>> chunk 1/1: text_tokens=45, audio=5.13s, elapsed=3.10s, RTF=0.60
+>> gpt_gen_time: 1.99 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.76 seconds
+>> bigvgan_time: 0.21 seconds
+>> Total inference time: 3.30 seconds
+>> Generated audio length: 5.13 seconds
+>> RTF: 0.6422
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=63, semantic_codes=373, target_frames=641, cat_frames=894, diffusion_steps=12
+torch.Size([1, 164096])
+>> chunk 1/1: text_tokens=63, audio=7.44s, elapsed=3.92s, RTF=0.53
+>> gpt_gen_time: 2.60 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.82 seconds
+>> bigvgan_time: 0.30 seconds
+>> Total inference time: 3.92 seconds
+>> Generated audio length: 7.44 seconds
+>> RTF: 0.5270
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=31, semantic_codes=128, target_frames=220, cat_frames=781, diffusion_steps=12
+torch.Size([1, 56320])
+>> chunk 1/1: text_tokens=31, audio=2.55s, elapsed=2.37s, RTF=0.93
+>> gpt_gen_time: 1.33 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.75 seconds
+>> bigvgan_time: 0.14 seconds
+>> Total inference time: 2.59 seconds
+>> Generated audio length: 2.55 seconds
+>> RTF: 1.0154
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=66, semantic_codes=389, target_frames=669, cat_frames=922, diffusion_steps=12
+torch.Size([1, 171264])
+>> chunk 1/1: text_tokens=66, audio=7.77s, elapsed=4.22s, RTF=0.54
+>> gpt_gen_time: 2.78 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.90 seconds
+>> bigvgan_time: 0.32 seconds
+>> Total inference time: 4.38 seconds
+>> Generated audio length: 7.77 seconds
+>> RTF: 0.5638
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=59, semantic_codes=353, target_frames=607, cat_frames=860, diffusion_steps=12
+torch.Size([1, 155392])
+>> chunk 1/1: text_tokens=59, audio=7.05s, elapsed=4.64s, RTF=0.66
+>> gpt_gen_time: 2.51 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 1.68 seconds
+>> bigvgan_time: 0.29 seconds
+>> Total inference time: 4.65 seconds
+>> Generated audio length: 7.05 seconds
+>> RTF: 0.6602
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=59, semantic_codes=285, target_frames=490, cat_frames=1051, diffusion_steps=12
+torch.Size([1, 125440])
+>> chunk 1/1: text_tokens=59, audio=5.69s, elapsed=4.85s, RTF=0.85
+>> gpt_gen_time: 2.12 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 2.25 seconds
+>> bigvgan_time: 0.26 seconds
+>> Total inference time: 5.07 seconds
+>> Generated audio length: 5.69 seconds
+>> RTF: 0.8919
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=55, semantic_codes=309, target_frames=531, cat_frames=784, diffusion_steps=12
+torch.Size([1, 135936])
+>> chunk 1/1: text_tokens=55, audio=6.16s, elapsed=3.51s, RTF=0.57
+>> gpt_gen_time: 2.31 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 0.79 seconds
+>> bigvgan_time: 0.25 seconds
+>> Total inference time: 3.68 seconds
+>> Generated audio length: 6.16 seconds
+>> RTF: 0.5966
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=58, semantic_codes=367, target_frames=631, cat_frames=884, diffusion_steps=12
+torch.Size([1, 161536])
+>> chunk 1/1: text_tokens=58, audio=7.33s, elapsed=3.87s, RTF=0.53
+>> gpt_gen_time: 2.57 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 0.81 seconds
+>> bigvgan_time: 0.31 seconds
+>> Total inference time: 3.88 seconds
+>> Generated audio length: 7.33 seconds
+>> RTF: 0.5293
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=68, semantic_codes=366, target_frames=629, cat_frames=1190, diffusion_steps=12
+torch.Size([1, 161024])
+>> chunk 1/1: text_tokens=68, audio=7.30s, elapsed=4.29s, RTF=0.59
+>> gpt_gen_time: 2.56 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 1.14 seconds
+>> bigvgan_time: 0.33 seconds
+>> Total inference time: 4.52 seconds
+>> Generated audio length: 7.30 seconds
+>> RTF: 0.6196
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=80, semantic_codes=466, target_frames=801, cat_frames=1054, diffusion_steps=12
+torch.Size([1, 205056])
+>> chunk 1/1: text_tokens=80, audio=9.30s, elapsed=7.45s, RTF=0.80
+>> gpt_gen_time: 3.24 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 3.59 seconds
+>> bigvgan_time: 0.39 seconds
+>> Total inference time: 7.60 seconds
+>> Generated audio length: 9.30 seconds
+>> RTF: 0.8178
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=65, semantic_codes=387, target_frames=665, cat_frames=918, diffusion_steps=12
+torch.Size([1, 170240])
+>> chunk 1/1: text_tokens=65, audio=7.72s, elapsed=4.15s, RTF=0.54
+>> gpt_gen_time: 2.76 seconds
+>> gpt_forward_time: 0.01 seconds
+>> s2mel_time: 0.89 seconds
+>> bigvgan_time: 0.32 seconds
+>> Total inference time: 4.16 seconds
+>> Generated audio length: 7.72 seconds
+>> RTF: 0.5390
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=30, semantic_codes=166, target_frames=285, cat_frames=846, diffusion_steps=12
+torch.Size([1, 72960])
+>> chunk 1/2: text_tokens=30, audio=3.31s, elapsed=2.41s, RTF=0.73
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=30, semantic_codes=141, target_frames=242, cat_frames=803, diffusion_steps=12
+torch.Size([1, 61952])
+>> chunk 2/2: text_tokens=30, audio=2.81s, elapsed=2.65s, RTF=0.94
+>> gpt_gen_time: 2.67 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 1.83 seconds
+>> bigvgan_time: 0.32 seconds
+>> Total inference time: 5.28 seconds
+>> Generated audio length: 6.32 seconds
+>> RTF: 0.8360
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/1: text_tokens=40, semantic_codes=233, target_frames=400, cat_frames=653, diffusion_steps=12
+torch.Size([1, 102400])
+>> chunk 1/1: text_tokens=40, audio=4.64s, elapsed=2.87s, RTF=0.62
+>> gpt_gen_time: 1.72 seconds
+>> gpt_forward_time: 0.02 seconds
+>> s2mel_time: 0.83 seconds
+>> bigvgan_time: 0.19 seconds
+>> Total inference time: 3.03 seconds
+>> Generated audio length: 4.64 seconds
+>> RTF: 0.6526
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=65, semantic_codes=358, target_frames=615, cat_frames=868, diffusion_steps=12
+torch.Size([1, 157440])
+>> chunk 1/2: text_tokens=65, audio=7.14s, elapsed=3.76s, RTF=0.53
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=25, semantic_codes=148, target_frames=254, cat_frames=507, diffusion_steps=12
+torch.Size([1, 65024])
+>> chunk 2/2: text_tokens=25, audio=2.95s, elapsed=2.05s, RTF=0.70
+>> gpt_gen_time: 3.83 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 1.31 seconds
+>> bigvgan_time: 0.46 seconds
+>> Total inference time: 5.82 seconds
+>> Generated audio length: 10.29 seconds
+>> RTF: 0.5654
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/2: text_tokens=30, semantic_codes=183, target_frames=314, cat_frames=875, diffusion_steps=12
+torch.Size([1, 80384])
+>> chunk 1/2: text_tokens=30, audio=3.65s, elapsed=2.78s, RTF=0.76
+Use the specified emotion vector
+>> s2mel input 2/2: text_tokens=35, semantic_codes=163, target_frames=280, cat_frames=841, diffusion_steps=12
+torch.Size([1, 71680])
+>> chunk 2/2: text_tokens=35, audio=3.25s, elapsed=2.99s, RTF=0.92
+>> gpt_gen_time: 2.78 seconds
+>> gpt_forward_time: 0.03 seconds
+>> s2mel_time: 2.41 seconds
+>> bigvgan_time: 0.34 seconds
+>> Total inference time: 6.02 seconds
+>> Generated audio length: 7.10 seconds
+>> RTF: 0.8486
+INFO:     103.151.173.98:0 - "GET /static/tavo.js?v=2028 HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /static/tavo.js?v=2028 HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /static/tavo.js?v=20288 HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voice_preview?name=%E6%97%81%E7%99%BD HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "GET /voice_preview?name=%E7%94%9C%E5%A6%B9 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "GET /voice_preview?name=%E7%94%9C%E5%A6%B9 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "GET /voice_preview?name=%E6%97%A5%E6%97%A5%E6%96%B0%2F%E7%94%9C%E8%9C%9C%E5%A5%B6%E7%8B%97 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "GET /voice_preview?name=%E6%97%A5%E6%97%A5%E6%96%B0%2F%E7%94%9C%E8%9C%9C%E5%A5%B6%E7%8B%97 HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "OPTIONS /tts_stream_job HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "POST /tts_stream_job HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "POST /tts_stream_job HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /tts_stream_job/WIjN3yxEnFBXEgvmwSeIjVLV HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.98:0 - "GET /tts_stream_job/sSL2f9lldjBwEd26E8VKQw-R HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/93: text_tokens=44, semantic_codes=388, target_frames=667, cat_frames=1247, diffusion_steps=12
+torch.Size([1, 170752])
+>> chunk 1/93: text_tokens=44, audio=7.74s, elapsed=6.92s, RTF=0.89
+Use the specified emotion vector
+>> s2mel input 2/93: text_tokens=64, semantic_codes=390, target_frames=670, cat_frames=1250, diffusion_steps=12
+torch.Size([1, 171520])
+>> chunk 2/93: text_tokens=64, audio=7.78s, elapsed=4.60s, RTF=0.59
+Use the specified emotion vector
+INFO:     103.151.173.98:0 - "GET /tts_stream_job/WIjN3yxEnFBXEgvmwSeIjVLV HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.98:0 - "GET /cache_audio/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 206 Partial Content
+INFO:     103.151.173.98:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /tts_stream_job/WIjN3yxEnFBXEgvmwSeIjVLV HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+>> s2mel input 1/93: text_tokens=44, semantic_codes=336, target_frames=577, cat_frames=1157, diffusion_steps=12
+torch.Size([1, 147712])
+>> chunk 1/93: text_tokens=44, audio=6.70s, elapsed=6.78s, RTF=1.01
+Use the specified emotion vector
+INFO:     103.151.173.98:0 - "GET /tts_stream_job/sSL2f9lldjBwEd26E8VKQw-R HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.98:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /tts_stream_job/sSL2f9lldjBwEd26E8VKQw-R HTTP/1.1" 200 OK
+>> start inference...
+Use the specified emotion vector
+INFO:     103.151.173.98:0 - "GET /tts_dialogue_job_status/21fd2ca1c4cd7e27ce674f2e6076148e2f870e3d HTTP/1.1" 200 OK
+INFO:     127.0.0.1:11845 - "GET /static/tavo.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:11845 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:11845 - "GET / HTTP/1.1" 404 Not Found
+INFO:     103.151.173.98:0 - "GET /static/tavo.js?v=20288 HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     103.151.173.98:0 - "GET /voices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:14005 - "HEAD / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:14149 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:14150 - "GET /server_info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:14151 - "HEAD /control HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:14273 - "GET /control HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:14273 - "GET /favicon.ico HTTP/1.1" 404 Not Found
