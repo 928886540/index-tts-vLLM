@@ -674,6 +674,7 @@
     var playbackRate = Math.max(0.85, Math.min(1.25, Number(hooks.playbackRate || 1) || 1));
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) throw new Error("浏览器不支持 Web Audio API");
+    hooks.onStateChange && hooks.onStateChange("connecting");
     // 优先复用 user-gesture 里 prime 出来的 ctx；没有再 new 一个（桌面/file://
     // 这种没经过 gesture 的场景也能跑）。
     var ctx = PRIMED_CTX || new AC();
@@ -701,6 +702,7 @@
     try { res = await fetch(streamUrl); }
     catch (e) { throw new Error("[step:fetch] " + (e && e.message ? e.message : e)); }
     if (!res.ok) throw new Error("[step:fetch] HTTP " + res.status + " " + (await res.text().catch(function(){return"";})));
+    hooks.onStateChange && hooks.onStateChange("connected");
 
     // 试 ReadableStream 真流式；如果 WebView 不支持 (常见于 iOS 老版 / 部分
     // Android WebView)，退回 arrayBuffer 全下载后整段解码播。
@@ -767,14 +769,15 @@
       dataOff = findDataOffset(pending);
     }
     if (hooks.debug) hooks.debug("WAV header parsed: sr=" + sampleRate + " ch=" + channels + " bits=" + bitsPerSample);
+    hooks.onStateChange && hooks.onStateChange("waiting_pcm");
     var pcm = pending.slice(dataOff);
     pending = null;
 
-    var startAt = ctx.currentTime + 0.12;
+    var startAt = ctx.currentTime + 0.06;
     var nextAt = startAt;
     var started = false;
     var bytesPerSec = sampleRate * channels * 2;
-    var flushBytes = Math.max(2048, Math.floor(bytesPerSec * 0.5));
+    var flushBytes = Math.max(4096, Math.floor(bytesPerSec * 0.18));
 
     async function ensureAudioContextRunning(step) {
       try {
@@ -818,9 +821,6 @@
       var first = pcm.slice(0, flushBytes);
       await schedulePcm(first);
       pcm = pcm.slice(flushBytes);
-    } else if (pcm.length >= 2 * channels) {
-      await schedulePcm(pcm);
-      pcm = new Uint8Array(0);
     }
 
     while (true) {
@@ -841,6 +841,15 @@
         var nb = new Uint8Array(pcm.length + r.value.length);
         nb.set(pcm); nb.set(r.value, pcm.length); pcm = nb;
       }
+      if (!started && pcm.length >= 2 * channels) {
+        var firstChunkBytes = pcm.length >= flushBytes ? flushBytes : pcm.length - (pcm.length % (2 * channels));
+        if (firstChunkBytes > 0) {
+          hooks.onStateChange && hooks.onStateChange("first_pcm");
+          var firstSlice = pcm.slice(0, firstChunkBytes);
+          pcm = pcm.slice(firstChunkBytes);
+          await schedulePcm(firstSlice);
+        }
+      }
       while (pcm.length >= flushBytes) {
         var slice = pcm.slice(0, flushBytes);
         pcm = pcm.slice(flushBytes);
@@ -849,6 +858,7 @@
     }
     if (pcm && pcm.length >= 2 * channels) await schedulePcm(pcm);
     pcm = null;
+    if (!started) throw new Error("[step:noAudio] 后端没有返回可播放音频");
 
     var totalDur = Math.max(0, nextAt - startAt);
     var msUntilEnd = Math.max(0, (nextAt - ctx.currentTime) * 1000);
@@ -1187,11 +1197,20 @@
       debugLog("❌ " + label + " audio.play() reject: " + err, "#f99");
       setStatus(fallbackStatus || "请点播放继续");
     }
+    function friendlyPlaybackError(err) {
+      var msg = String((err && err.message) || err || "");
+      if (/noAudio|没有返回可播放音频/i.test(msg)) return "后端没有返回音频，请重新生成一次。";
+      if (/fetch|network|Load failed|Failed to fetch/i.test(msg)) return "连接音频流失败，请检查服务是否在线。";
+      if (/decodeAudioData|WAV|wavHeader|data 段/i.test(msg)) return "音频流格式异常，请重新生成一次。";
+      if (/resume|AudioContext/i.test(msg)) return "浏览器没有放行音频播放，请点一次播放按钮重试。";
+      return msg.replace(/\[step:[^\]]+\]\s*/g, "") || "播放失败，请重新生成一次。";
+    }
     function setPlayState(state) { if (play) { play.dataset.state = state; play.innerHTML = playIcon(state); play.disabled = state === "loading"; } if (cover) cover.dataset.playing = state === "playing" ? "1" : "0"; }
     function updateTrackButtons() {
+      var track = currentTrack();
       if (prev) prev.disabled = currentTrackIndex <= 0;
       if (next) next.disabled = currentTrackIndex < 0 || currentTrackIndex >= generatedTracks.length - 1;
-      if (del) del.disabled = currentTrackIndex < 0 || !audio.src;
+      if (del) del.disabled = currentTrackIndex < 0 || !(track && (track.url || track.cacheUrl || track.streamUrl || track.cacheKey));
     }
     function selectTrack(index, autoplay) {
       if (index < 0 || index >= generatedTracks.length) return;
@@ -1220,7 +1239,13 @@
         // 强制重新加载 metadata,避免浏览器复用上次缓存的 duration/seekable
         try { audio.load(); } catch (_) {}
         if (seek) { seek.disabled = false; }
-        setStatus((autoplay ? "正在播放" : "已选择") + "：第 " + String(index + 1) + " 首");
+        if (autoplay) {
+          setStatus("正在加载音频…");
+          showTrackNotice(track, "正在加载音频…", "马上开始播放");
+        } else {
+          setStatus("已选择第 " + String(index + 1) + " 首");
+          showTrackNotice(track, "音频已就绪", "点播放开始");
+        }
         updateTrackButtons();
         if (autoplay) audio.play().catch(function (err) { handleAudioPlayReject("element", err, "请点播放继续"); });
         return;
@@ -1243,6 +1268,11 @@
       if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === track) {
         updateTrackButtons();
         if (track.webAudioPlaying && !opts.forceElement) return true;
+        if (opts.deferElement) {
+          setStatus("音频已保存，可重播");
+          showTrackNotice(track, "音频已保存", "点播放可重播");
+          return true;
+        }
         try {
           var currentSrc = audio.currentSrc || audio.src || "";
           if (currentSrc !== track.cacheUrl) {
@@ -1284,7 +1314,7 @@
                 });
               }
               if (j && j.state === "done") {
-                attachCacheAudio(trackEntry, { forceElement: false });
+                attachCacheAudio(trackEntry, { forceElement: false, deferElement: isMobileUA() && !!trackEntry.streamUrl });
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
                 done = true;
@@ -1933,7 +1963,11 @@
       }
       // 兼容旧逻辑（无卡片 + audio.src 残留时）
       if (audio.src && !force && generatedTracks.length === 0) {
-        if (audio.paused) { setAudioPlaybackRate(); await audio.play(); } else audio.pause(); return;
+        if (audio.paused) {
+          setAudioPlaybackRate();
+          await audio.play().catch(function(e){ handleAudioPlayReject("element", e, "请点播放继续"); });
+        } else audio.pause();
+        return;
       }
 
       // ★ Bug 修复:点 ▶ / 🎵 第一时间 push 占位卡片,让用户立刻看见一张
@@ -2031,7 +2065,8 @@
             setAudioPlaybackRate();
             trackEntry.url = cacheUrl;
             trackEntry.pendingBlob = false;
-            setStatus("命中缓存，开始播放");
+            setStatus("已有音频，正在播放");
+            showTrackNotice(trackEntry, "已有音频", "正在加载播放器");
             setPlayState("loading");
             audio.play().catch(function (err) { handleAudioPlayReject("cache", err, "点播放继续"); });
             return;
@@ -2039,20 +2074,38 @@
           // 没缓存 → 走流式（移动 Web Audio / 桌面 <audio src>）。后端是异步
           // job，断线重连不丢；同时 GET 完成后会自动落盘到 snapshot_cache。
           if (isMobileUA()) {
-            setStatus("流式播放(Web Audio)");
+            setStatus("等待首段音频…");
+            showTrackNotice(trackEntry, "等待首段音频…", "正在合成，声音出来前不要切走");
             debugLog("📱 检测到手机 UA, 用 Web Audio API 真流式", "#ffd479");
             currentCacheKey = jobInfo.cacheKey;
             setPlayState("loading");
             var webAudioStartedAt = 0;
+            var waitStartedAt = Date.now();
+            var firstAudioTimer = setInterval(function () {
+              if (trackEntry.webAudioPlaying) return;
+              var sec = Math.max(1, Math.floor((Date.now() - waitStartedAt) / 1000));
+              setStatus("等待首段音频 " + sec + "s…");
+              showTrackNotice(trackEntry, "等待首段音频 " + sec + "s…", "正在合成，声音出来前不要切走");
+            }, 1000);
             pollCacheUpgrade(trackEntry, "mobile snapshot");
             try {
               await streamWavViaWebAudio(streamUrl, {
                 playbackRate: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25),
                 onStateChange: function (state) {
-                  if (state === "playing") {
+                  if (state === "connecting") {
+                    setStatus("正在连接音频…");
+                    showTrackNotice(trackEntry, "正在连接音频…", "等待后端开始返回声音");
+                  } else if (state === "connected" || state === "waiting_pcm") {
+                    setStatus("等待首段音频…");
+                    showTrackNotice(trackEntry, "等待首段音频…", "正在合成第一段");
+                  } else if (state === "first_pcm") {
+                    setStatus("收到音频，准备起播…");
+                    showTrackNotice(trackEntry, "收到音频", "马上开始播放");
+                  } else if (state === "playing") {
+                    if (firstAudioTimer) { clearInterval(firstAudioTimer); firstAudioTimer = null; }
                     trackEntry.webAudioPlaying = true;
                     setPlayState("playing");
-                    setStatus("流式播放中");
+                    setStatus("正在播放");
                     setError("");
                     debugLog("▶️ Web Audio 首块已起播", "#9f9");
                     webAudioStartedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -2061,10 +2114,12 @@
                       return ((((typeof performance !== "undefined" ? performance.now() : Date.now()) - webAudioStartedAt) / 1000) * clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25));
                     });
                   } else if (state === "ended") {
+                    if (firstAudioTimer) { clearInterval(firstAudioTimer); firstAudioTimer = null; }
                     trackEntry.webAudioPlaying = false;
-                    if (trackEntry.cacheReady) attachCacheAudio(trackEntry, { forceElement: true });
+                    if (trackEntry.cacheReady) attachCacheAudio(trackEntry, { deferElement: true });
                     setPlayState("idle");
-                    setStatus(trackEntry.cacheReady ? "播放完成（再点播放重播 / 拖进度条）" : "播放完成，等待缓存落盘…");
+                    setStatus(trackEntry.cacheReady ? "播放完成，音频已保存" : "播放完成，正在保存音频…");
+                    showTrackNotice(trackEntry, trackEntry.cacheReady ? "播放完成" : "播放完成，正在保存音频…", trackEntry.cacheReady ? "点播放可重播" : "稍等片刻后可重播");
                     debugLog("⏹ Web Audio 流式播完", "#9f9");
                     stopServerLogPolling();
                     stopSubtitle();
@@ -2074,13 +2129,16 @@
                 debug: function (text) { debugLog("[wa] " + text, "#9ff"); }
               });
             } catch (e) {
-              setPlayState("idle"); setStatus("流式播放失败");
-              setError(e && e.message ? e.message : String(e));
+              if (firstAudioTimer) { clearInterval(firstAudioTimer); firstAudioTimer = null; }
+              var friendly = friendlyPlaybackError(e);
+              setPlayState("idle"); setStatus("播放失败");
+              setError(friendly);
+              showTrackNotice(trackEntry, "播放失败", friendly);
               debugLog("❌ Web Audio 流式异常: " + (e && e.message ? e.message : e), "#f99");
               stopServerLogPolling();
-              throw e;
+              return;
             }
-            if (trackEntry.cacheReady) attachCacheAudio(trackEntry, { forceElement: true });
+            if (trackEntry.cacheReady) attachCacheAudio(trackEntry, { deferElement: true });
             return;
           } else {
             // 桌面端 chunked WAV 给 <audio> 元素直接播。
@@ -2163,11 +2221,11 @@
     on(first(panel, '[data-role="reload"]'), 'click', renderVoices);
     $all(panel, '.idx-mode').forEach(function (b) { b.addEventListener('click', async function () { readFields(); cfg.mode = b.dataset.mode; syncUI(); await saveConfig(cfg, characterId); }); });
     on(audio, 'play', function () {
-      setPlayState("playing"); setStatus("正在播放：" + shortName(cfg.defaultVoice));
+      var t = currentTrack();
+      setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(t));
       // 系统媒体面板基础信息(后台/锁屏可见,可控制播放/上下首)
       try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
       // 桌面 / <audio> 路径的字幕：当前 track 是 ai8 且有 segments 时启动
-      var t = currentTrackIndex >= 0 ? generatedTracks[currentTrackIndex] : null;
       if (t && t.mode === "ai8") {
         if (t.segments && t.segments.length) {
           startSubtitle(t, function () { return audio.currentTime || 0; });
@@ -2203,17 +2261,10 @@
       if (!audio.paused) {
         setPlayState("playing");
         // 多音色模式下当前播放的音色不固定,不要写 cfg.defaultVoice
-        var label;
-        if (cfg.mode === "ai8") {
-          label = (context && context.characterName) || "多音色";
-        } else {
-          var t = generatedTracks[currentTrackIndex];
-          label = (t && t.voice) || shortName(cfg.defaultVoice);
-        }
-        setStatus("正在播放：" + label);
+        setStatus("正在播放：" + trackPlaybackLabel(currentTrack()));
       }
     });
-    on(audio, 'playing', function () { setError(""); setPlayState("playing"); });
+    on(audio, 'playing', function () { setError(""); setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(currentTrack())); });
     on(audio, 'pause', function () { setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); stopSubtitle(); });
     on(audio, 'ended', function () { setPlayState("idle"); setStatus("播放完成"); stopSubtitle(); });
     on(audio, 'error', function () {

@@ -295,9 +295,9 @@ def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
 # tokens + 8s prompt cap keep cat_frames small so each diffusion step is cheap.
 STREAM_TARGET_SEGMENT_TOKENS = 72
 STREAM_HARD_SEGMENT_TOKENS = 82
-STREAM_FIRST_SEGMENT_TOKENS = 36
+STREAM_FIRST_SEGMENT_TOKENS = 24
 STREAM_MIN_SEGMENT_TOKENS = 24
-STREAM_DIFFUSION_STEPS = 12
+STREAM_DIFFUSION_STEPS = 8
 STREAM_PROMPT_AUDIO_SECONDS = 8
 
 
