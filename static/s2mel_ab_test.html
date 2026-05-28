@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>s2mel A/B Test</title>
+  <style>
+    *{box-sizing:border-box;letter-spacing:0}
+    :root{--bg:#101216;--panel:#171b22;--line:#2a3240;--text:#edf1f7;--muted:#9ca8b8;--accent:#5cc8a7;--warn:#e4b14b;--bad:#d66a73}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+    button,input,select,textarea{font:inherit}
+    .shell{max-width:1380px;margin:0 auto;padding:16px;display:grid;grid-template-columns:390px minmax(0,1fr);gap:14px}
+    .side{height:calc(100vh - 32px);position:sticky;top:16px;overflow:auto;padding-right:2px}
+    .panel{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:14px;margin-bottom:12px}
+    h1{font-size:18px;margin:0 0 10px}
+    h2{font-size:14px;margin:0 0 10px;color:#dfe7f2}
+    label{display:block;font-size:12px;color:var(--muted);margin:10px 0 5px}
+    input,select,textarea{width:100%;border:1px solid var(--line);background:#0d0f14;color:var(--text);border-radius:7px;padding:8px 9px;outline:none}
+    textarea{min-height:160px;resize:vertical}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .row4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    button{border:1px solid var(--line);border-radius:7px;padding:8px 11px;background:#222a35;color:var(--text);cursor:pointer}
+    button.primary{background:var(--accent);border-color:#8ee1ca;color:#062019;font-weight:700}
+    button.warn{background:#4a3b1f;border-color:#775d2e;color:#ffe7a8}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .status{white-space:pre-wrap;color:var(--muted);font-size:12px;margin-top:10px}
+    .variants{display:grid;gap:8px}
+    .variant{border:1px solid var(--line);background:#12161d;border-radius:8px;padding:10px}
+    .variant-top{display:grid;grid-template-columns:1fr 62px 62px 62px 62px;gap:6px;align-items:end}
+    .variant-top label{margin-top:0}
+    .main{min-width:0}
+    .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+    .toolbar .meta{color:var(--muted);font-size:12px}
+    .results{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+    .card{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:12px;min-height:230px}
+    .card.running{border-color:#4a6d82}
+    .card.done{border-color:#356653}
+    .card.failed{border-color:#743942}
+    .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px}
+    .sample-name{font-weight:800}
+    .pill{display:inline-flex;align-items:center;min-height:22px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted)}
+    .pill.done{color:#b9f1dc;border-color:#386653}
+    .pill.failed{color:#ffd1d6;border-color:#7d3d45}
+    audio{width:100%;margin:9px 0}
+    .metrics{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px}
+    .metric{border:1px solid #252d39;border-radius:7px;padding:6px;background:#11151b}
+    .metric b{display:block;font-size:11px;color:var(--muted);font-weight:500}
+    .metric span{font-variant-numeric:tabular-nums}
+    .scores{display:flex;gap:5px;margin-top:10px}
+    .scores button{width:34px;height:32px;padding:0}
+    .scores button.selected{background:var(--accent);color:#061b15}
+    .notes{margin-top:8px;min-height:58px}
+    .config{margin-top:8px;font-size:12px;color:var(--muted);white-space:pre-wrap}
+    .hidden-config{filter:blur(4px);user-select:none}
+    @media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:auto;position:static}.variant-top{grid-template-columns:1fr 1fr}.results{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <aside class="side">
+      <section class="panel">
+        <h1>s2mel A/B Test</h1>
+        <div class="row">
+          <div>
+            <label for="voice">音色</label>
+            <select id="voice"></select>
+          </div>
+          <div>
+            <label for="role">角色名</label>
+            <input id="role" value="测试">
+          </div>
+        </div>
+        <label for="text">固定测试文本</label>
+        <textarea id="text">她放慢语速，声音压得很低：「我想听听这个档位，到底会不会少一点情绪。」</textarea>
+        <div class="row">
+          <div>
+            <label for="emoStyle">情绪参考</label>
+            <select id="emoStyle"></select>
+          </div>
+          <div>
+            <label for="blind">盲听</label>
+            <select id="blind">
+              <option value="1">隐藏参数</option>
+              <option value="0">显示参数</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="runAll" type="button">开始盲测</button>
+          <button id="runSelected" type="button">全部档位</button>
+          <button class="warn" id="clear" type="button">清空结果</button>
+        </div>
+        <div class="status" id="status"></div>
+      </section>
+
+      <section class="panel">
+        <h2>测试档位</h2>
+        <div class="variants" id="variants"></div>
+      </section>
+    </aside>
+
+    <section class="main">
+      <div class="toolbar">
+        <div>
+          <h1>结果</h1>
+          <div class="meta" id="summary">等待测试</div>
+        </div>
+        <button id="reveal" type="button">显示/隐藏参数</button>
+      </div>
+      <div class="results" id="results"></div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+      var STORE = "indextts_s2mel_ab_results_v1";
+      var DEFAULT_VARIANTS = [
+        {enabled:true,id:"current_quality",name:"当前质量",mode:"expressive",steps:8,cfg:0.70,prompt:8,seg:72},
+        {enabled:true,id:"current_balanced",name:"当前平衡",mode:"balanced",steps:6,cfg:0.70,prompt:8,seg:56},
+        {enabled:true,id:"mid_cfg",name:"中间实验",mode:"balanced",steps:5,cfg:0.50,prompt:6,seg:56},
+        {enabled:true,id:"fast_cfg",name:"极速实验",mode:"fast",steps:4,cfg:0.35,prompt:6,seg:48},
+        {enabled:false,id:"fast_nocfg",name:"无CFG实验",mode:"fast",steps:4,cfg:0.00,prompt:6,seg:48}
+      ];
+      var state = {variants: DEFAULT_VARIANTS.slice(), results: [], reveal:false, running:false};
+      var els = {
+        voice: document.getElementById("voice"),
+        role: document.getElementById("role"),
+        text: document.getElementById("text"),
+        emoStyle: document.getElementById("emoStyle"),
+        blind: document.getElementById("blind"),
+        variants: document.getElementById("variants"),
+        results: document.getElementById("results"),
+        status: document.getElementById("status"),
+        summary: document.getElementById("summary")
+      };
+      function loadStore(){try{return JSON.parse(localStorage.getItem(STORE)||"{}")||{}}catch(_){return{}}}
+      function saveStore(){localStorage.setItem(STORE, JSON.stringify({results:state.results, variants:state.variants}))}
+      function fmt(n,d){return Number.isFinite(Number(n)) ? Number(n).toFixed(d == null ? 2 : d) : "-"}
+      function setStatus(s){els.status.textContent=s||""}
+      function optionText(v){return v.name + (v.subdir ? " [" + v.subdir + "]" : "")}
+      function esc(s){return String(s == null ? "" : s).replace(/[&<>"']/g,function(c){return({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]})}
+      async function fetchJson(url, opts){
+        var r = await fetch(url, opts || {});
+        var j = await r.json().catch(function(){return{}});
+        if(!r.ok) throw new Error(j.message || j.detail || r.statusText);
+        return j;
+      }
+      async function loadVoices(){
+        var data = await fetchJson("/voices");
+        var voices = data.voices || [];
+        function fill(select, filterFn, emptyLabel){
+          select.innerHTML = "";
+          var none = document.createElement("option");
+          none.value = "";
+          none.textContent = emptyLabel;
+          select.appendChild(none);
+          voices.filter(filterFn).forEach(function(v){
+            var o = document.createElement("option");
+            o.value = v.name;
+            o.textContent = optionText(v);
+            select.appendChild(o);
+          });
+        }
+        fill(els.voice, function(v){return v.subdir === "女声" || v.subdir === "男声" || !v.subdir}, "选择音色");
+        fill(els.emoStyle, function(v){return v.subdir === "情绪" || v.subdir === "声腔" || v.subdir === "喘息"}, "不使用情绪参考");
+        if ([].some.call(els.voice.options, function(o){return o.value === "女声/风韵少妇"})) els.voice.value = "女声/风韵少妇";
+      }
+      function renderVariants(){
+        els.variants.innerHTML = "";
+        state.variants.forEach(function(v, idx){
+          var node = document.createElement("div");
+          node.className = "variant";
+          node.innerHTML = '<div class="variant-top">' +
+            '<label><input type="checkbox" data-k="enabled"> 启用<br><input data-k="name"></label>' +
+            '<label>steps<input type="number" min="2" max="16" data-k="steps"></label>' +
+            '<label>cfg<input type="number" min="0" max="1.2" step="0.05" data-k="cfg"></label>' +
+            '<label>prompt<input type="number" min="2" max="12" step="1" data-k="prompt"></label>' +
+            '<label>tokens<input type="number" min="8" max="120" data-k="seg"></label>' +
+            '</div>';
+          Array.prototype.forEach.call(node.querySelectorAll("[data-k]"), function(input){
+            var key = input.getAttribute("data-k");
+            if (input.type === "checkbox") input.checked = !!v[key];
+            else input.value = v[key];
+            input.addEventListener("input", function(){
+              if (input.type === "checkbox") v[key] = input.checked;
+              else if (key === "name") v[key] = input.value;
+              else v[key] = Number(input.value);
+              saveStore();
+            });
+          });
+          els.variants.appendChild(node);
+        });
+      }
+      function renderResults(){
+        els.results.innerHTML = "";
+        var done = state.results.filter(function(r){return r.state === "done"}).length;
+        els.summary.textContent = state.results.length ? ("完成 " + done + " / " + state.results.length) : "等待测试";
+        state.results.forEach(function(r, idx){
+          var metrics = r.metrics || {};
+          var card = document.createElement("div");
+          card.className = "card " + (r.state || "pending");
+          var sample = "样本 " + String.fromCharCode(65 + idx);
+          var config = r.variant ? [
+            r.variant.name,
+            "mode=" + r.variant.mode,
+            "steps=" + r.variant.steps,
+            "cfg=" + r.variant.cfg,
+            "prompt=" + r.variant.prompt + "s",
+            "tokens=" + r.variant.seg
+          ].join("  ") : "";
+          var error = r.error || (metrics && metrics.error) || "";
+          var audio = r.cache_url ? '<audio controls preload="metadata" src="' + esc(r.cache_url) + '?v=' + encodeURIComponent(r.cache_key || "") + '"></audio>' : "";
+          card.innerHTML = '<div class="card-head"><div><div class="sample-name">' + esc(sample) + '</div><div class="config ' + (!state.reveal && els.blind.value === "1" ? "hidden-config" : "") + '">' + esc(config) + '</div></div><span class="pill ' + esc(r.state || "") + '">' + esc(r.state || "pending") + '</span></div>' +
+            audio +
+            (error ? '<div class="config">错误：' + esc(error) + '</div>' : '') +
+            '<div class="metrics">' +
+            '<div class="metric"><b>RTF</b><span>' + fmt(metrics.rtf, 3) + '</span></div>' +
+            '<div class="metric"><b>首包</b><span>' + fmt(metrics.first_pcm_s, 2) + 's</span></div>' +
+            '<div class="metric"><b>总耗时</b><span>' + fmt(metrics.total_wall_s, 2) + 's</span></div>' +
+            '<div class="metric"><b>音频</b><span>' + fmt(metrics.audio_duration_s, 2) + 's</span></div>' +
+            '<div class="metric"><b>steps</b><span>' + (metrics.diffusion_steps || "-") + '</span></div>' +
+            '<div class="metric"><b>cfg</b><span>' + fmt(metrics.s2mel_cfg_rate, 2) + '</span></div>' +
+            '</div>' +
+            '<div class="scores" data-score-row></div>' +
+            '<textarea class="notes" placeholder="听感备注：情绪、气声、机械感、尾音、清晰度"></textarea>';
+          var row = card.querySelector("[data-score-row]");
+          for (var s = 1; s <= 5; s++) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.textContent = String(s);
+            if (r.score === s) b.className = "selected";
+            b.addEventListener("click", function(score, res){return function(){
+              res.score = score;
+              saveStore();
+              renderResults();
+            }}(s, r));
+            row.appendChild(b);
+          }
+          var notes = card.querySelector(".notes");
+          notes.value = r.notes || "";
+          notes.addEventListener("input", function(res){return function(){res.notes=this.value;saveStore()}}(r));
+          els.results.appendChild(card);
+        });
+      }
+      function buildPayload(variant){
+        var text = els.text.value.trim();
+        var role = els.role.value.trim() || "测试";
+        var seg = {role: role, text: text, emo_vec: [0,0,0,0,0,0,0,0.8]};
+        if (els.emoStyle.value) {
+          seg.style_ref = els.emoStyle.value;
+          seg.style_alpha = 0.65;
+        }
+        var voices = {};
+        voices[role] = els.voice.value;
+        voices.default = els.voice.value;
+        return {
+          segments: [seg],
+          voices: voices,
+          performance_mode: variant.mode,
+          diffusion_steps: variant.steps,
+          s2mel_cfg_rate: variant.cfg,
+          prompt_audio_seconds: variant.prompt,
+          segment_tokens: variant.seg,
+          interval_ms: 200,
+          bypass_cache: true,
+          cache_nonce: variant.id + "-" + Date.now() + "-" + Math.random().toString(36).slice(2)
+        };
+      }
+      async function runVariant(variant, idx){
+        var result = {id: variant.id + "-" + Date.now(), variant: Object.assign({}, variant), state: "starting", score: null, notes: ""};
+        state.results.push(result);
+        renderResults();
+        var payload = buildPayload(variant);
+        var job = await fetchJson("/tts_dialogue_stream_job", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(payload)
+        });
+        result.cache_key = job.cache_key;
+        result.cache_url = job.cache_url;
+        result.state = job.cached ? "done" : "running";
+        renderResults();
+        if (!job.cached) {
+          for (;;) {
+            await new Promise(function(resolve){setTimeout(resolve, 1200)});
+            var status = await fetchJson("/tts_dialogue_job_status/" + encodeURIComponent(job.cache_key));
+            result.state = status.state;
+            result.metrics = status.metrics || result.metrics;
+            result.cache_url = status.cache_url || result.cache_url;
+            renderResults();
+            if (status.state === "done" || status.state === "failed" || status.state === "missing") {
+              if (status.error) result.error = status.error;
+              break;
+            }
+          }
+        } else {
+          var cachedStatus = await fetchJson("/tts_dialogue_job_status/" + encodeURIComponent(job.cache_key)).catch(function(){return null});
+          if (cachedStatus && cachedStatus.metrics) result.metrics = cachedStatus.metrics;
+        }
+        saveStore();
+        renderResults();
+      }
+      async function runAll(includeDisabled){
+        if (state.running) return;
+        if (!els.voice.value) { setStatus("请先选择音色。"); return; }
+        if (!els.text.value.trim()) { setStatus("请先填写测试文本。"); return; }
+        state.running = true;
+        document.getElementById("runAll").disabled = true;
+        document.getElementById("runSelected").disabled = true;
+        var list = state.variants.filter(function(v){return includeDisabled || v.enabled});
+        try {
+          if (!list.length) { setStatus("没有启用的测试档位。"); return; }
+          setStatus("开始测试，共 " + list.length + " 个样本。");
+          for (var i = 0; i < list.length; i++) {
+            setStatus("正在生成 " + (i + 1) + " / " + list.length + "：" + list[i].name);
+            await runVariant(list[i], i);
+          }
+          setStatus("测试完成。先盲听打分，再显示参数对比。");
+        } catch (e) {
+          setStatus("测试失败：" + e.message);
+        } finally {
+          state.running = false;
+          document.getElementById("runAll").disabled = false;
+          document.getElementById("runSelected").disabled = false;
+        }
+      }
+      document.getElementById("runAll").addEventListener("click", function(){runAll(false)});
+      document.getElementById("runSelected").addEventListener("click", function(){runAll(true)});
+      document.getElementById("clear").addEventListener("click", function(){state.results=[];saveStore();renderResults();setStatus("结果已清空。")});
+      document.getElementById("reveal").addEventListener("click", function(){state.reveal=!state.reveal;renderResults()});
+      els.blind.addEventListener("change", renderResults);
+      var saved = loadStore();
+      if (Array.isArray(saved.variants) && saved.variants.length) state.variants = saved.variants;
+      if (Array.isArray(saved.results)) state.results = saved.results;
+      renderVariants();
+      renderResults();
+      loadVoices().catch(function(e){setStatus("加载音色失败：" + e.message)});
+    })();
+  </script>
+</body>
+</html>

@@ -305,6 +305,7 @@ class IndexTTS2:
             generation_kwargs.pop("max_text_tokens_per_segment", max_text_tokens_per_sentence)
         )
         diffusion_steps = int(generation_kwargs.pop("diffusion_steps", 16))
+        s2mel_cfg_rate = float(generation_kwargs.pop("s2mel_cfg_rate", 0.7))
         stream_chunk_callback = generation_kwargs.pop("stream_chunk_callback", None)
         stop_generation_callback = generation_kwargs.pop("stop_generation_callback", None)
         quick_streaming_tokens = int(generation_kwargs.pop("quick_streaming_tokens", 0))
@@ -604,7 +605,7 @@ class IndexTTS2:
                     with torch.no_grad():
                         with torch.amp.autocast(text_tokens.device.type, enabled=dtype is not None, dtype=dtype):
                             m_start_time = time.perf_counter()
-                            inference_cfg_rate = 0.7
+                            inference_cfg_rate = s2mel_cfg_rate
                             local_latent = self.s2mel.models['gpt_layer'](latent)
                             S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
                             S_infer = S_infer.transpose(1, 2)
@@ -623,7 +624,8 @@ class IndexTTS2:
                                     f">> s2mel input {seg_idx + 1}/{len(sentences)}: "
                                     f"text_tokens={len(sent)}, semantic_codes={int(code_lens[0])}, "
                                     f"target_frames={int(target_lengths[0])}, "
-                                    f"cat_frames={cat_condition.size(1)}, diffusion_steps={diffusion_steps}"
+                                    f"cat_frames={cat_condition.size(1)}, diffusion_steps={diffusion_steps}, "
+                                    f"s2mel_cfg_rate={inference_cfg_rate:.2f}"
                                 )
                             vc_target = self.s2mel.models['cfm'].inference(
                                 cat_condition,

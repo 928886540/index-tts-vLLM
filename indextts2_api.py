@@ -213,6 +213,10 @@ class TTS_Request(BaseModel):
     parallel_infer: bool = True
     repetition_penalty: float = 10
     bypass_cache: bool = False
+    diffusion_steps: Optional[int] = None
+    prompt_audio_seconds: Optional[float] = None
+    segment_tokens: Optional[int] = None
+    s2mel_cfg_rate: Optional[float] = None
 
 
 # Phase 2 dialogue request models.
@@ -246,6 +250,12 @@ class TTS_Dialogue_Request(BaseModel):
     temperature: float = 0.8
     repetition_penalty: float = 10
     emo_alpha: float = 0.7  # default if a segment doesn't override
+    diffusion_steps: Optional[int] = None
+    prompt_audio_seconds: Optional[float] = None
+    segment_tokens: Optional[int] = None
+    s2mel_cfg_rate: Optional[float] = None
+    bypass_cache: bool = False
+    cache_nonce: Optional[str] = None
 
 
 class Voice_Save_Request(BaseModel):
@@ -355,6 +365,41 @@ def _stream_infer_kwargs(requested_segment_tokens: int = None, performance_mode:
         "sentence_split_min_tokens": min_tokens,
         "performance_mode": settings["mode"],
     }
+
+
+def _clamp_float(value, default: float, min_value: float, max_value: float) -> float:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(min_value, min(max_value, value))
+
+
+def _clamp_int(value, default: int, min_value: int, max_value: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(min_value, min(max_value, value))
+
+
+def _apply_s2mel_test_overrides(req: dict, sampling_kwargs: dict) -> dict:
+    """Apply optional AB-test-only s2mel knobs without changing defaults."""
+    if req.get("diffusion_steps") is not None:
+        sampling_kwargs["diffusion_steps"] = _clamp_int(req.get("diffusion_steps"), sampling_kwargs.get("diffusion_steps", 6), 2, 16)
+    if req.get("prompt_audio_seconds") is not None:
+        prompt_seconds = _clamp_float(req.get("prompt_audio_seconds"), sampling_kwargs.get("max_prompt_audio_seconds", 8), 2.0, 12.0)
+        sampling_kwargs["max_prompt_audio_seconds"] = prompt_seconds
+        sampling_kwargs["max_emo_audio_seconds"] = prompt_seconds
+    if req.get("segment_tokens") is not None:
+        target_tokens = _clamp_int(req.get("segment_tokens"), sampling_kwargs.get("max_text_tokens_per_sentence", 56), 8, 120)
+        sampling_kwargs["max_text_tokens_per_sentence"] = target_tokens
+        sampling_kwargs["quick_streaming_tokens"] = min(sampling_kwargs.get("quick_streaming_tokens", target_tokens), target_tokens)
+        sampling_kwargs["sentence_split_min_tokens"] = min(sampling_kwargs.get("sentence_split_min_tokens", target_tokens), target_tokens)
+        sampling_kwargs["sentence_split_hard_max_tokens"] = max(target_tokens, min(140, target_tokens + 16))
+    if req.get("s2mel_cfg_rate") is not None:
+        sampling_kwargs["s2mel_cfg_rate"] = _clamp_float(req.get("s2mel_cfg_rate"), 0.7, 0.0, 1.2)
+    return sampling_kwargs
 
 
 # Serialize streaming inference: the underlying IndexTTS2 mutates shared
@@ -501,6 +546,7 @@ async def _prepare_dialogue_for_streaming(req: dict):
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
+    sampling_kwargs = _apply_s2mel_test_overrides(req, sampling_kwargs)
     role_payload = {
         role: {"path": path, "meta": _audio_file_meta(path)}
         for role, path in sorted(role_voice_paths.items())
@@ -524,6 +570,9 @@ async def _prepare_dialogue_for_streaming(req: dict):
         "emo_alpha": default_emo_alpha,
         **sampling_kwargs,
     }
+    cache_nonce = str(req.get("cache_nonce") or "").strip()
+    if cache_nonce:
+        cache_payload["cache_nonce"] = cache_nonce
     from indextts import snapshot_cache
     cache_key = snapshot_cache.make_cache_key(cache_payload)
     return {
@@ -561,6 +610,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             job.metrics["segments_total"] = len([s for s in segments if (s.get("text") or "").strip()])
             job.metrics["performance_mode"] = sampling_kwargs.get("performance_mode")
             job.metrics["diffusion_steps"] = sampling_kwargs.get("diffusion_steps")
+            job.metrics["s2mel_cfg_rate"] = sampling_kwargs.get("s2mel_cfg_rate", 0.7)
+            job.metrics["prompt_audio_seconds"] = sampling_kwargs.get("max_prompt_audio_seconds")
+            job.metrics["segment_tokens"] = sampling_kwargs.get("max_text_tokens_per_sentence")
 
             async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
                 if job.cancelled:
@@ -944,6 +996,7 @@ async def tts_handle(req: dict):
             temperature=req["temperature"],
             repetition_penalty=req["repetition_penalty"],
             output_path=None,
+            **_apply_s2mel_test_overrides(req, {}),
         )
         return Response(pack_wav(BytesIO(), wav_data, sampling_rate).getvalue(), media_type=f"audio/wav")
     except Exception as e:
@@ -1006,7 +1059,7 @@ async def tts_stream_handle(req: dict):
                     repetition_penalty=float(req.get("repetition_penalty", 10)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
-                    **_stream_infer_kwargs(),
+                    **_apply_s2mel_test_overrides(req, _stream_infer_kwargs()),
                 )
         except Exception as e:
             error_holder["exc"] = e
@@ -1110,7 +1163,7 @@ async def tts_cache_stream_handle(req: dict):
                     repetition_penalty=float(req.get("repetition_penalty", 10)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
-                    **_stream_infer_kwargs(),
+                    **_apply_s2mel_test_overrides(req, _stream_infer_kwargs()),
                 )
         except Exception as e:
             error_holder["exc"] = e
@@ -1223,6 +1276,7 @@ async def tts_dialogue_stream_handle(req: dict):
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
+    sampling_kwargs = _apply_s2mel_test_overrides(req, sampling_kwargs)
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=64)
     SENTINEL = object()
@@ -1373,6 +1427,7 @@ async def tts_dialogue_cache_stream_handle(req: dict):
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
+    sampling_kwargs = _apply_s2mel_test_overrides(req, sampling_kwargs)
     role_payload = {
         role: {"path": path, "meta": _audio_file_meta(path)}
         for role, path in sorted(role_voice_paths.items())
@@ -1396,6 +1451,9 @@ async def tts_dialogue_cache_stream_handle(req: dict):
         "emo_alpha": default_emo_alpha,
         **sampling_kwargs,
     }
+    cache_nonce = str(req.get("cache_nonce") or "").strip()
+    if cache_nonce:
+        cache_payload["cache_nonce"] = cache_nonce
     cache_key = snapshot_cache.make_cache_key(cache_payload)
     cached_path = snapshot_cache.get_cached_audio(cache_key)
     if cached_path:
@@ -2099,10 +2157,11 @@ async def tts_dialogue_stream_job_endpoint(request: TTS_Dialogue_Request):
     if err is not None:
         return err
     cache_key = prepared["cache_key"]
+    bypass_cache = bool(req.get("bypass_cache", False))
 
     from indextts import snapshot_cache
     cached_path = snapshot_cache.get_cached_audio(cache_key)
-    if cached_path:
+    if cached_path and not bypass_cache:
         return JSONResponse(content={
             "job_id": cache_key,
             "cache_key": cache_key,
