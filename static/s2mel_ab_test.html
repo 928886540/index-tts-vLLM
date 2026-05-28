@@ -27,7 +27,7 @@
     .status{white-space:pre-wrap;color:var(--muted);font-size:12px;margin-top:10px}
     .variants{display:grid;gap:8px}
     .variant{border:1px solid var(--line);background:#12161d;border-radius:8px;padding:10px}
-    .variant-top{display:grid;grid-template-columns:1fr 62px 62px 62px 62px;gap:6px;align-items:end}
+    .variant-top{display:grid;grid-template-columns:1fr 58px 58px 58px 58px 58px;gap:6px;align-items:end}
     .variant-top label{margin-top:0}
     .main{min-width:0}
     .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
@@ -115,13 +115,13 @@
   <script>
     (function () {
       "use strict";
-      var STORE = "indextts_s2mel_ab_results_v1";
+      var STORE = "indextts_s2mel_ab_results_v2";
       var DEFAULT_VARIANTS = [
-        {enabled:true,id:"current_quality",name:"当前质量",mode:"expressive",steps:8,cfg:0.70,prompt:8,seg:72},
-        {enabled:true,id:"current_balanced",name:"当前平衡",mode:"balanced",steps:6,cfg:0.70,prompt:8,seg:56},
-        {enabled:true,id:"mid_cfg",name:"中间实验",mode:"balanced",steps:5,cfg:0.50,prompt:6,seg:56},
-        {enabled:true,id:"fast_cfg",name:"极速实验",mode:"fast",steps:4,cfg:0.35,prompt:6,seg:48},
-        {enabled:false,id:"fast_nocfg",name:"无CFG实验",mode:"fast",steps:4,cfg:0.00,prompt:6,seg:48}
+        {enabled:true,id:"quality_floor",name:"质量基准",mode:"expressive",steps:8,cfg:0.70,prompt:8,seg:72,first:24},
+        {enabled:true,id:"balanced_clean",name:"平衡无噪",mode:"balanced",steps:8,cfg:0.70,prompt:6,seg:56,first:16},
+        {enabled:true,id:"fast_first",name:"首包优先",mode:"fast",steps:8,cfg:0.70,prompt:6,seg:48,first:12},
+        {enabled:true,id:"cfg_060",name:"CFG 0.60",mode:"expressive",steps:8,cfg:0.60,prompt:8,seg:72,first:24},
+        {enabled:false,id:"prompt6_quality",name:"质量短参考",mode:"expressive",steps:8,cfg:0.70,prompt:6,seg:72,first:18}
       ];
       var state = {variants: DEFAULT_VARIANTS.slice(), results: [], reveal:false, running:false};
       var els = {
@@ -178,6 +178,7 @@
             '<label>cfg<input type="number" min="0" max="1.2" step="0.05" data-k="cfg"></label>' +
             '<label>prompt<input type="number" min="2" max="12" step="1" data-k="prompt"></label>' +
             '<label>tokens<input type="number" min="8" max="120" data-k="seg"></label>' +
+            '<label>first<input type="number" min="4" max="72" data-k="first"></label>' +
             '</div>';
           Array.prototype.forEach.call(node.querySelectorAll("[data-k]"), function(input){
             var key = input.getAttribute("data-k");
@@ -208,7 +209,8 @@
             "steps=" + r.variant.steps,
             "cfg=" + r.variant.cfg,
             "prompt=" + r.variant.prompt + "s",
-            "tokens=" + r.variant.seg
+            "tokens=" + r.variant.seg,
+            "first=" + (r.variant.first || "-")
           ].join("  ") : "";
           var error = r.error || (metrics && metrics.error) || "";
           var audio = r.cache_url ? '<audio controls preload="metadata" src="' + esc(r.cache_url) + '?v=' + encodeURIComponent(r.cache_key || "") + '"></audio>' : "";
@@ -222,6 +224,11 @@
             '<div class="metric"><b>音频</b><span>' + fmt(metrics.audio_duration_s, 2) + 's</span></div>' +
             '<div class="metric"><b>steps</b><span>' + (metrics.diffusion_steps || "-") + '</span></div>' +
             '<div class="metric"><b>cfg</b><span>' + fmt(metrics.s2mel_cfg_rate, 2) + '</span></div>' +
+            '<div class="metric"><b>首段</b><span>' + (metrics.first_tokens || "-") + '</span></div>' +
+            '<div class="metric"><b>全程RTF</b><span>' + fmt(metrics.wall_rtf, 3) + '</span></div>' +
+            '<div class="metric"><b>s2mel</b><span>' + fmt(metrics.s2mel_s, 2) + 's</span></div>' +
+            '<div class="metric"><b>BigVGAN</b><span>' + fmt(metrics.bigvgan_s, 2) + 's</span></div>' +
+            '<div class="metric"><b>条件</b><span>' + fmt(metrics.condition_s, 2) + 's</span></div>' +
             '</div>' +
             '<div class="scores" data-score-row></div>' +
             '<textarea class="notes" placeholder="听感备注：情绪、气声、机械感、尾音、清晰度"></textarea>';
@@ -263,6 +270,7 @@
           s2mel_cfg_rate: variant.cfg,
           prompt_audio_seconds: variant.prompt,
           segment_tokens: variant.seg,
+          first_tokens: variant.first,
           interval_ms: 200,
           bypass_cache: true,
           cache_nonce: variant.id + "-" + Date.now() + "-" + Math.random().toString(36).slice(2)

@@ -216,6 +216,7 @@ class TTS_Request(BaseModel):
     diffusion_steps: Optional[int] = None
     prompt_audio_seconds: Optional[float] = None
     segment_tokens: Optional[int] = None
+    first_tokens: Optional[int] = None
     s2mel_cfg_rate: Optional[float] = None
 
 
@@ -253,6 +254,7 @@ class TTS_Dialogue_Request(BaseModel):
     diffusion_steps: Optional[int] = None
     prompt_audio_seconds: Optional[float] = None
     segment_tokens: Optional[int] = None
+    first_tokens: Optional[int] = None
     s2mel_cfg_rate: Optional[float] = None
     bypass_cache: bool = False
     cache_nonce: Optional[str] = None
@@ -298,7 +300,7 @@ def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
 
 # ---------------------------------------------------------------------------
 # Streaming helpers (Phase 1: single-segment streaming for TAVO regex use).
-# Only /tts_stream uses these. /tts is unchanged.
+# Streaming and test endpoints use these generation defaults.
 # ---------------------------------------------------------------------------
 
 # Stream-tuned generation parameters mirrored from webui.py.
@@ -315,18 +317,18 @@ STREAM_MODE_SETTINGS = {
     "fast": {
         "target_tokens": 48,
         "hard_tokens": 56,
-        "first_tokens": 16,
+        "first_tokens": 12,
         "min_tokens": 12,
-        "diffusion_steps": 4,
+        "diffusion_steps": 8,
         "prompt_audio_seconds": 6,
     },
     "balanced": {
         "target_tokens": 56,
         "hard_tokens": 72,
-        "first_tokens": 18,
+        "first_tokens": 16,
         "min_tokens": 16,
-        "diffusion_steps": 6,
-        "prompt_audio_seconds": 8,
+        "diffusion_steps": 8,
+        "prompt_audio_seconds": 6,
     },
     "expressive": {
         "target_tokens": STREAM_TARGET_SEGMENT_TOKENS,
@@ -384,7 +386,7 @@ def _clamp_int(value, default: int, min_value: int, max_value: int) -> int:
 
 
 def _apply_s2mel_test_overrides(req: dict, sampling_kwargs: dict) -> dict:
-    """Apply optional AB-test-only s2mel knobs without changing defaults."""
+    """Apply optional generation knobs without changing defaults."""
     if req.get("diffusion_steps") is not None:
         sampling_kwargs["diffusion_steps"] = _clamp_int(req.get("diffusion_steps"), sampling_kwargs.get("diffusion_steps", 6), 2, 16)
     if req.get("prompt_audio_seconds") is not None:
@@ -397,6 +399,12 @@ def _apply_s2mel_test_overrides(req: dict, sampling_kwargs: dict) -> dict:
         sampling_kwargs["quick_streaming_tokens"] = min(sampling_kwargs.get("quick_streaming_tokens", target_tokens), target_tokens)
         sampling_kwargs["sentence_split_min_tokens"] = min(sampling_kwargs.get("sentence_split_min_tokens", target_tokens), target_tokens)
         sampling_kwargs["sentence_split_hard_max_tokens"] = max(target_tokens, min(140, target_tokens + 16))
+    first_tokens_value = req.get("first_tokens")
+    if first_tokens_value is None:
+        first_tokens_value = req.get("quick_streaming_tokens")
+    if first_tokens_value is not None:
+        target_tokens = int(sampling_kwargs.get("max_text_tokens_per_sentence", 56))
+        sampling_kwargs["quick_streaming_tokens"] = _clamp_int(first_tokens_value, sampling_kwargs.get("quick_streaming_tokens", 16), 4, target_tokens)
     if req.get("s2mel_cfg_rate") is not None:
         sampling_kwargs["s2mel_cfg_rate"] = _clamp_float(req.get("s2mel_cfg_rate"), 0.7, 0.0, 1.2)
     return sampling_kwargs
@@ -449,6 +457,15 @@ class _LiveStreamingJob:
             "audio_duration_s": 0.0,
             "rtf": None,
             "cache_write_s": None,
+            "segments_wall_s": 0.0,
+            "wall_rtf": None,
+            "gpt_gen_s": 0.0,
+            "gpt_forward_s": 0.0,
+            "s2mel_s": 0.0,
+            "bigvgan_s": 0.0,
+            "spk_condition_s": 0.0,
+            "emo_condition_s": 0.0,
+            "condition_s": 0.0,
             "segments": [],
         }
 
@@ -613,6 +630,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             job.metrics["s2mel_cfg_rate"] = sampling_kwargs.get("s2mel_cfg_rate", 0.7)
             job.metrics["prompt_audio_seconds"] = sampling_kwargs.get("max_prompt_audio_seconds")
             job.metrics["segment_tokens"] = sampling_kwargs.get("max_text_tokens_per_sentence")
+            job.metrics["first_tokens"] = sampling_kwargs.get("quick_streaming_tokens")
 
             async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
                 if job.cancelled:
@@ -680,6 +698,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     stream_chunk_callback=on_chunk,
                     **sampling_kwargs,
                 )
+                infer_stats = dict(getattr(tts_pipeline, "last_infer_stats", {}) or {})
                 if job.cancelled:
                     job.metrics["state"] = "cancelled"
                     return
@@ -697,6 +716,17 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     "rtf": round(seg_rtf, 3) if seg_rtf is not None else None,
                     "pcm_bytes": seg_byte_count,
                     "uses_style_audio": bool(style_audio),
+                    "spk_cache_hit": bool(infer_stats.get("spk_cache_hit")),
+                    "emo_cache_hit": bool(infer_stats.get("emo_cache_hit")),
+                    "spk_condition_s": float(infer_stats.get("spk_condition_s") or 0.0),
+                    "emo_condition_s": float(infer_stats.get("emo_condition_s") or 0.0),
+                    "gpt_gen_s": float(infer_stats.get("gpt_gen_s") or 0.0),
+                    "gpt_forward_s": float(infer_stats.get("gpt_forward_s") or 0.0),
+                    "s2mel_s": float(infer_stats.get("s2mel_s") or 0.0),
+                    "bigvgan_s": float(infer_stats.get("bigvgan_s") or 0.0),
+                    "infer_rtf": infer_stats.get("rtf"),
+                    "sentence_count": infer_stats.get("sentence_count"),
+                    "text_token_count": infer_stats.get("text_token_count"),
                 }
                 job.segments_meta.append({
                     "idx": idx,
@@ -712,9 +742,13 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                 })
                 job.metrics["segments"].append(seg_metric)
                 job.metrics["segments_done"] = len(job.segments_meta)
+                for stage_key in ("gpt_gen_s", "gpt_forward_s", "s2mel_s", "bigvgan_s", "spk_condition_s", "emo_condition_s"):
+                    job.metrics[stage_key] = round(sum(float(s.get(stage_key) or 0.0) for s in job.metrics["segments"]), 3)
+                job.metrics["condition_s"] = round(float(job.metrics["spk_condition_s"] or 0.0) + float(job.metrics["emo_condition_s"] or 0.0), 3)
                 job.metrics["audio_duration_s"] = round(len(job.pcm) / (job.sample_rate * 2), 3) if job.sample_rate else 0.0
                 total_audio = float(job.metrics["audio_duration_s"] or 0.0)
                 total_wall = sum(float(s.get("wall_s") or 0.0) for s in job.metrics["segments"])
+                job.metrics["segments_wall_s"] = round(total_wall, 3)
                 job.metrics["rtf"] = round(total_wall / total_audio, 3) if total_audio > 0 else None
 
         # Inference 完成 → 写完整 WAV 到 snapshot_cache，未来 /cache_audio/{key}
@@ -730,7 +764,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             job.metrics["audio_duration_s"] = round(audio_duration, 3)
             job.metrics["total_wall_s"] = round(time.perf_counter() - job._perf_created, 3)
             total_segment_wall = sum(float(s.get("wall_s") or 0.0) for s in job.metrics["segments"])
+            job.metrics["segments_wall_s"] = round(total_segment_wall, 3)
             job.metrics["rtf"] = round(total_segment_wall / audio_duration, 3) if audio_duration > 0 else None
+            job.metrics["wall_rtf"] = round(float(job.metrics["total_wall_s"] or 0.0) / audio_duration, 3) if audio_duration > 0 else None
             job.metrics["state"] = "saving"
             metadata = {
                 "kind": "tts_dialogue_stream_v1",

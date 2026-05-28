@@ -4,6 +4,7 @@ import random
 import re
 import socket
 import time
+from collections import OrderedDict
 from subprocess import CalledProcessError
 import traceback
 from typing import List
@@ -230,6 +231,11 @@ class IndexTTS2:
         self.cache_emo_audio_prompt = None
         self.cache_emo_audio_prompt_seconds = None
         self.cache_mel = None
+        self.spk_condition_cache = OrderedDict()
+        self.emo_condition_cache = OrderedDict()
+        self.spk_condition_cache_max_items = int(os.getenv("INDEXTTS_SPK_COND_CACHE_ITEMS", "8"))
+        self.emo_condition_cache_max_items = int(os.getenv("INDEXTTS_EMO_COND_CACHE_ITEMS", "16"))
+        self.last_infer_stats = {}
 
         self.speaker_dict = {}
         self.gr_progress = None
@@ -293,6 +299,31 @@ class IndexTTS2:
 
         return emo_vector
 
+    def _reference_cache_key(self, audio_path, max_seconds):
+        try:
+            abs_path = os.path.abspath(audio_path)
+            stat = os.stat(abs_path)
+            file_sig = (stat.st_mtime_ns, stat.st_size)
+        except Exception:
+            abs_path = str(audio_path)
+            file_sig = (None, None)
+        seconds = None if max_seconds is None else round(float(max_seconds), 3)
+        return (abs_path, seconds, file_sig)
+
+    @staticmethod
+    def _lru_get(cache, key):
+        if key not in cache:
+            return None
+        cache.move_to_end(key)
+        return cache[key]
+
+    @staticmethod
+    def _lru_put(cache, key, value, max_items):
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > max(1, int(max_items)):
+            cache.popitem(last=False)
+
     async def infer(self, spk_audio_prompt, text, output_path,
               emo_audio_prompt=None, emo_alpha=1.0,
               emo_vector=None,
@@ -320,6 +351,18 @@ class IndexTTS2:
             max_emo_audio_seconds = float(max_emo_audio_seconds)
         if sentence_split_hard_max_tokens is not None:
             sentence_split_hard_max_tokens = int(sentence_split_hard_max_tokens)
+        self.last_infer_stats = {
+            "spk_cache_hit": False,
+            "emo_cache_hit": False,
+            "spk_condition_s": 0.0,
+            "emo_condition_s": 0.0,
+            "spk_cache_size": len(self.spk_condition_cache),
+            "emo_cache_size": len(self.emo_condition_cache),
+            "quick_streaming_tokens": quick_streaming_tokens,
+            "max_text_tokens_per_sentence": max_text_tokens_per_sentence,
+            "diffusion_steps": diffusion_steps,
+            "s2mel_cfg_rate": s2mel_cfg_rate,
+        }
 
         def trim_audio_for_prompt(audio_data, sample_rate, max_seconds):
             if max_seconds is None or max_seconds <= 0:
@@ -360,12 +403,10 @@ class IndexTTS2:
             emo_alpha = 1.0
             # assert emo_alpha == 1.0
 
-        # 如果参考音频改变了，才需要重新生成, 提升速度
-        if (
-            self.cache_spk_cond is None
-            or self.cache_spk_audio_prompt != spk_audio_prompt
-            or self.cache_spk_audio_prompt_seconds != max_prompt_audio_seconds
-        ):
+        spk_cache_key = self._reference_cache_key(spk_audio_prompt, max_prompt_audio_seconds)
+        spk_cached = self._lru_get(self.spk_condition_cache, spk_cache_key)
+        if spk_cached is None:
+            spk_condition_started = time.perf_counter()
             self._set_gr_progress(0.05, "处理音色参考音频...")
             audio, sr = librosa.load(spk_audio_prompt)
             audio = trim_audio_for_prompt(audio, sr, max_prompt_audio_seconds)
@@ -404,6 +445,14 @@ class IndexTTS2:
                                                                      ylens=ref_target_lengths,
                                                                      n_quantizers=3,
                                                                      f0=None)[0]
+            self._lru_put(
+                self.spk_condition_cache,
+                spk_cache_key,
+                (spk_cond_emb, style, prompt_condition, ref_mel),
+                self.spk_condition_cache_max_items,
+            )
+            self.last_infer_stats["spk_condition_s"] = round(time.perf_counter() - spk_condition_started, 3)
+            self.last_infer_stats["spk_cache_hit"] = False
 
             self.cache_spk_cond = spk_cond_emb
             self.cache_s2mel_style = style
@@ -412,10 +461,14 @@ class IndexTTS2:
             self.cache_spk_audio_prompt_seconds = max_prompt_audio_seconds
             self.cache_mel = ref_mel
         else:
-            style = self.cache_s2mel_style
-            prompt_condition = self.cache_s2mel_prompt
-            spk_cond_emb = self.cache_spk_cond
-            ref_mel = self.cache_mel
+            spk_cond_emb, style, prompt_condition, ref_mel = spk_cached
+            self.last_infer_stats["spk_cache_hit"] = True
+        self.last_infer_stats["spk_cache_size"] = len(self.spk_condition_cache)
+        print(
+            f">> speaker condition cache "
+            f"{'hit' if self.last_infer_stats['spk_cache_hit'] else 'miss'} "
+            f"({len(self.spk_condition_cache)}/{self.spk_condition_cache_max_items})"
+        )
 
         if emo_vector is not None:
             weight_vector = torch.tensor(emo_vector).to(self.device)
@@ -430,11 +483,10 @@ class IndexTTS2:
             emovec_mat = torch.sum(emovec_mat, 0)
             emovec_mat = emovec_mat.unsqueeze(0)
 
-        if (
-            self.cache_emo_cond is None
-            or self.cache_emo_audio_prompt != emo_audio_prompt
-            or self.cache_emo_audio_prompt_seconds != max_emo_audio_seconds
-        ):
+        emo_cache_key = self._reference_cache_key(emo_audio_prompt, max_emo_audio_seconds)
+        emo_cached = self._lru_get(self.emo_condition_cache, emo_cache_key)
+        if emo_cached is None:
+            emo_condition_started = time.perf_counter()
             emo_audio, emo_sr = librosa.load(emo_audio_prompt, sr=16000)
             emo_audio = trim_audio_for_prompt(emo_audio, emo_sr, max_emo_audio_seconds)
             # Same gentle level matching as for the speaker reference.
@@ -449,12 +501,27 @@ class IndexTTS2:
             emo_input_features = emo_input_features.to(self.device)
             emo_attention_mask = emo_attention_mask.to(self.device)
             emo_cond_emb = self.get_emb(emo_input_features, emo_attention_mask)
+            self._lru_put(
+                self.emo_condition_cache,
+                emo_cache_key,
+                emo_cond_emb,
+                self.emo_condition_cache_max_items,
+            )
+            self.last_infer_stats["emo_condition_s"] = round(time.perf_counter() - emo_condition_started, 3)
+            self.last_infer_stats["emo_cache_hit"] = False
 
             self.cache_emo_cond = emo_cond_emb
             self.cache_emo_audio_prompt = emo_audio_prompt
             self.cache_emo_audio_prompt_seconds = max_emo_audio_seconds
         else:
-            emo_cond_emb = self.cache_emo_cond
+            emo_cond_emb = emo_cached
+            self.last_infer_stats["emo_cache_hit"] = True
+        self.last_infer_stats["emo_cache_size"] = len(self.emo_condition_cache)
+        print(
+            f">> emotion condition cache "
+            f"{'hit' if self.last_infer_stats['emo_cache_hit'] else 'miss'} "
+            f"({len(self.emo_condition_cache)}/{self.emo_condition_cache_max_items})"
+        )
 
         self._set_gr_progress(0.10, "文本分句...")
         text_tokens_list = self.tokenizer.tokenize(text)
@@ -472,6 +539,8 @@ class IndexTTS2:
                 max_text_tokens_per_sentence,
                 quick_streaming_tokens=quick_streaming_tokens,
             )
+        self.last_infer_stats["text_token_count"] = len(text_tokens_list)
+        self.last_infer_stats["sentence_count"] = len(sentences)
         total_segments = max(1, len(sentences))
         self._set_gr_progress(0.12, f"共 {len(sentences)} 段，开始合成...")
         if verbose:
@@ -716,6 +785,15 @@ class IndexTTS2:
         print(f">> Total inference time: {end_time - start_time:.2f} seconds")
         print(f">> Generated audio length: {wav_length:.2f} seconds")
         print(f">> RTF: {(end_time - start_time) / wav_length:.4f}")
+        self.last_infer_stats.update({
+            "gpt_gen_s": round(gpt_gen_time, 3),
+            "gpt_forward_s": round(gpt_forward_time, 3),
+            "s2mel_s": round(s2mel_time, 3),
+            "bigvgan_s": round(bigvgan_time, 3),
+            "total_infer_s": round(end_time - start_time, 3),
+            "audio_length_s": round(wav_length, 3),
+            "rtf": round((end_time - start_time) / wav_length, 4) if wav_length > 0 else None,
+        })
 
         # save audio
         self._set_gr_progress(0.96, "保存音频...")
