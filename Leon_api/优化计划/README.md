@@ -21,6 +21,13 @@
 - 启动日志显示 `Failed to load custom CUDA kernel for BigVGAN. Falling back to torch.`，进一步查到根因是 `where cl` 找不到 MSVC `cl.exe`，需要安装/修复 Visual Studio Build Tools 或把 `VC\Tools\MSVC\...\bin\Hostx64\x64` 加入启动 PATH。
 - `/tts_dialogue_job_status` 在推理期间出现超时，说明当前后台任务仍会阻塞 FastAPI 事件循环；需要把同步推理移到独立 worker/thread/process，状态接口不能被推理卡住。
 
+### 2026-05-28 事件循环阻塞修复实测
+
+- 将 `s2mel + BigVGAN + limiter + CPU copy` 放进 worker thread 后，推理期间 `/tts_dialogue_job_status` 可持续返回。
+- 同一类短文本测试里，状态轮询延迟大多为 3-8ms，峰值约 454ms，不再出现 10-30s 超时。
+- 这次修复解决的是“前端像卡死/弱网秒失败”的服务响应问题，不直接解决 RTF。
+- 当前 RTF 仍高，实测约 15-16；日志显示 `s2mel_time=47.67s`、`bigvgan_time=16.43s`，下一步仍要优先处理 BigVGAN CUDA kernel 和 s2mel 性能。
+
 ## 第二阶段：流式播放体验
 
 - 明确卡片状态：`pending`、`live`、`buffering`、`saved`、`failed`。

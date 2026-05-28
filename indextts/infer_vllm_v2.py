@@ -1,4 +1,5 @@
 import os
+import asyncio
 import random
 import re
 import time
@@ -576,76 +577,77 @@ class IndexTTS2:
                     print(">> generation stopped by user request")
                     break
 
-                dtype = None
-                with torch.amp.autocast(text_tokens.device.type, enabled=dtype is not None, dtype=dtype):
-                    m_start_time = time.perf_counter()
-                    inference_cfg_rate = 0.7
-                    latent = self.s2mel.models['gpt_layer'](latent)
-                    S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
-                    S_infer = S_infer.transpose(1, 2)
-                    S_infer = S_infer + latent
-                    # Mel frames per code token. 1.72 is the ratio the s2mel
-                    # was trained at — diverging from it (we tried 2.0) tends
-                    # to produce unnatural prosody / rhythm artifacts.
-                    target_lengths = (code_lens * 1.72).long()
+                def _run_s2mel_bigvgan_chunk():
+                    local_s2mel_time = 0.0
+                    local_bigvgan_time = 0.0
+                    dtype = None
+                    with torch.no_grad():
+                        with torch.amp.autocast(text_tokens.device.type, enabled=dtype is not None, dtype=dtype):
+                            m_start_time = time.perf_counter()
+                            inference_cfg_rate = 0.7
+                            local_latent = self.s2mel.models['gpt_layer'](latent)
+                            S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
+                            S_infer = S_infer.transpose(1, 2)
+                            S_infer = S_infer + local_latent
+                            target_lengths = (code_lens * 1.72).long()
 
-                    cond = self.s2mel.models['length_regulator'](S_infer,
-                                                                 ylens=target_lengths,
-                                                                 n_quantizers=3,
-                                                                 f0=None)[0]
-                    cat_condition = torch.cat([prompt_condition, cond], dim=1)
-                    if stream_chunk_callback is not None or verbose:
-                        print(
-                            f">> s2mel input {seg_idx + 1}/{len(sentences)}: "
-                            f"text_tokens={len(sent)}, semantic_codes={int(code_lens[0])}, "
-                            f"target_frames={int(target_lengths[0])}, "
-                            f"cat_frames={cat_condition.size(1)}, diffusion_steps={diffusion_steps}"
-                        )
-                    vc_target = self.s2mel.models['cfm'].inference(cat_condition,
-                                                                   torch.LongTensor([cat_condition.size(1)]).to(
-                                                                       cond.device),
-                                                                   ref_mel, style, None, diffusion_steps,
-                                                                   inference_cfg_rate=inference_cfg_rate)
-                    vc_target = vc_target[:, :, ref_mel.size(-1):]
-                    s2mel_time += time.perf_counter() - m_start_time
-                    if should_stop_generation():
-                        stopped = True
-                        print(">> generation stopped by user request")
-                        break
+                            cond = self.s2mel.models['length_regulator'](
+                                S_infer,
+                                ylens=target_lengths,
+                                n_quantizers=3,
+                                f0=None,
+                            )[0]
+                            cat_condition = torch.cat([prompt_condition, cond], dim=1)
+                            if stream_chunk_callback is not None or verbose:
+                                print(
+                                    f">> s2mel input {seg_idx + 1}/{len(sentences)}: "
+                                    f"text_tokens={len(sent)}, semantic_codes={int(code_lens[0])}, "
+                                    f"target_frames={int(target_lengths[0])}, "
+                                    f"cat_frames={cat_condition.size(1)}, diffusion_steps={diffusion_steps}"
+                                )
+                            vc_target = self.s2mel.models['cfm'].inference(
+                                cat_condition,
+                                torch.LongTensor([cat_condition.size(1)]).to(cond.device),
+                                ref_mel,
+                                style,
+                                None,
+                                diffusion_steps,
+                                inference_cfg_rate=inference_cfg_rate,
+                            )
+                            vc_target = vc_target[:, :, ref_mel.size(-1):]
+                            local_s2mel_time = time.perf_counter() - m_start_time
 
-                    m_start_time = time.perf_counter()
-                    wav = self.bigvgan(vc_target.float()).squeeze().unsqueeze(0)
-                    print(wav.shape)
-                    bigvgan_time += time.perf_counter() - m_start_time
-                    wav = wav.squeeze(1)
+                            m_start_time = time.perf_counter()
+                            wav = self.bigvgan(vc_target.float()).squeeze().unsqueeze(0)
+                            print(wav.shape)
+                            local_bigvgan_time = time.perf_counter() - m_start_time
+                            wav = wav.squeeze(1)
 
-                # Smooth limiter: |x| ≤ 0.7 passes through unchanged; beyond
-                # that we soft-clip with a tanh knee so peaks land near ±1
-                # without forming the rapid ±0.99 alternation that hard
-                # peak-normalize produces (which is audible as crackle).
-                knee = 0.7
-                abs_wav = wav.abs()
-                over_mask = abs_wav > knee
-                if over_mask.any():
-                    sign = torch.sign(wav)
-                    soft = sign * (knee + (1.0 - knee) * torch.tanh((abs_wav - knee) / (1.0 - knee)))
-                    wav = torch.where(over_mask, soft, wav)
-                # Short linear fade in/out (~5ms) so concatenating chunks
-                # (multi-voice dialogue with silence padding) doesn't pop.
-                fade_len = min(int(sampling_rate * 0.005), wav.shape[-1] // 4)
-                if fade_len > 1:
-                    ramp = torch.linspace(0.0, 1.0, fade_len, device=wav.device, dtype=wav.dtype)
-                    wav[..., :fade_len] = wav[..., :fade_len] * ramp
-                    wav[..., -fade_len:] = wav[..., -fade_len:] * ramp.flip(0)
-                wav = torch.clamp(32767 * wav, -32767.0, 32767.0)
+                        knee = 0.7
+                        abs_wav = wav.abs()
+                        over_mask = abs_wav > knee
+                        if over_mask.any():
+                            sign = torch.sign(wav)
+                            soft = sign * (knee + (1.0 - knee) * torch.tanh((abs_wav - knee) / (1.0 - knee)))
+                            wav = torch.where(over_mask, soft, wav)
+                        fade_len = min(int(sampling_rate * 0.005), wav.shape[-1] // 4)
+                        if fade_len > 1:
+                            ramp = torch.linspace(0.0, 1.0, fade_len, device=wav.device, dtype=wav.dtype)
+                            wav[..., :fade_len] = wav[..., :fade_len] * ramp
+                            wav[..., -fade_len:] = wav[..., -fade_len:] * ramp.flip(0)
+                        wav = torch.clamp(32767 * wav, -32767.0, 32767.0)
+                        return wav.cpu(), local_s2mel_time, local_bigvgan_time
+
+                chunk_wav, chunk_s2mel_time, chunk_bigvgan_time = await asyncio.to_thread(_run_s2mel_bigvgan_chunk)
+                s2mel_time += chunk_s2mel_time
+                bigvgan_time += chunk_bigvgan_time
                 if should_stop_generation():
                     stopped = True
                     print(">> generation stopped by user request")
                     break
                 if verbose:
-                    print(f"wav shape: {wav.shape}", "min:", wav.min(), "max:", wav.max())
-                # wavs.append(wav[:, :-512])
-                chunk_wav = wav.cpu()
+                    print(f"wav shape: {chunk_wav.shape}", "min:", chunk_wav.min(), "max:", chunk_wav.max())
+                # wavs.append(chunk_wav[:, :-512])
                 wavs.append(chunk_wav)  # to cpu before saving
                 chunk_audio_length = chunk_wav.shape[-1] / sampling_rate
                 chunk_elapsed = time.perf_counter() - segment_start_time
