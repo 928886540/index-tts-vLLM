@@ -10,7 +10,7 @@
   var GLOBAL_CONFIG_FIELDS = [
     "apiBase", "mode", "endpoint", "dialogueEndpoint", "parseEndpoint",
     "llmEndpoint", "llmModel", "llmApiKey",
-    "intervalMs", "topP", "topK", "temperature", "repetitionPenalty", "emoAlpha", "speedFactor"
+    "intervalMs", "topP", "topK", "temperature", "repetitionPenalty", "emoAlpha", "speedFactor", "qualityMode"
   ];
   var RESERVED_ROLES = ["旁白", "用户"];  // 这两个常驻不可删；具体人物用原名或 defaultVoice
   function voiceForRoleNames(list, names) {
@@ -159,7 +159,8 @@
     temperature: 0.8,
     repetitionPenalty: 10,
     emoAlpha: 0.7,
-    speedFactor: 1.08
+    speedFactor: 1.08,
+    qualityMode: "balanced"
   };
 
   function $(root, sel) { return root && root.querySelector ? root.querySelector(sel) : null; }
@@ -444,6 +445,8 @@
           total_wall_s: t.metrics.total_wall_s,
           audio_duration_s: t.metrics.audio_duration_s,
           rtf: t.metrics.rtf,
+          performance_mode: t.metrics.performance_mode,
+          diffusion_steps: t.metrics.diffusion_steps,
           segments_total: t.metrics.segments_total,
           segments_done: t.metrics.segments_done
         } : null,
@@ -1187,6 +1190,7 @@
             + '<label class="idx-field"><span class="idx-label">LLM 模型</span><input class="idx-input" data-field="llmModel" placeholder="渡鸦/grok-4.20-fast"></label>'
             + '<label class="idx-field"><span class="idx-label">LLM Key</span><input class="idx-input" type="password" data-field="llmApiKey" placeholder="sk-..."></label>'
             + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.08"></label>'
+            + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速</option><option value="balanced">平衡</option><option value="expressive">表现</option></select></label>'
           + '</div></details>'
         + '</div>'
         + '<div class="idx-actions"><button class="idx-btn" type="button" data-role="save">保存</button></div>'
@@ -1438,6 +1442,7 @@
       var rtf = num(metrics.rtf);
       var done = num(metrics.segments_done);
       var all = num(metrics.segments_total);
+      if (metrics.performance_mode) parts.push("档位 " + String(metrics.performance_mode));
       if (first != null) parts.push("首音 " + first.toFixed(1) + "s");
       if (rtf != null) parts.push("RTF " + rtf.toFixed(2));
       if (dur != null && dur > 0) parts.push("音频 " + dur.toFixed(1) + "s");
@@ -1855,6 +1860,8 @@
       cfg.apiBase = String(getField("apiBase", cfg.apiBase || scriptOrigin())).trim() || scriptOrigin();
       cfg.intervalMs = Number(getField("intervalMs", cfg.intervalMs || 50) || 50);
       cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.08), 1.08, 0.85, 1.25);
+      cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "balanced") || "balanced").trim();
+      if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
       try { audio.playbackRate = cfg.speedFactor; } catch (_) {}
       // cfg.roleVoiceList 由 renderRoleList 实时维护(addRoleRow/setRowVoice 等),
       // 这里把行里的角色名/音色同步抓一遍(防止用户没失焦就保存)。
@@ -1880,6 +1887,7 @@
       setField("llmEndpoint", cfg.llmEndpoint || "");
       setField("llmApiKey", cfg.llmApiKey || "");
       setField("speedFactor", cfg.speedFactor || 1.08);
+      setField("qualityMode", cfg.qualityMode || "balanced");
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
       renderRoleList();
       // AI 八情绪 设置只在该模式下显示；单音色配置反之
@@ -2504,7 +2512,7 @@
           showTrackNotice(placeholder, "开始合成 " + segments.length + " 段…", roleSummary);
           var voicesMap = rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice);
           debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
-          body = { segments: segments, voices: voicesMap, interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25) };
+          body = { segments: segments, voices: voicesMap, performance_mode: cfg.qualityMode || "balanced", interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25) };
           var ttsStart = Date.now();
           var jobInfo;
           var ttsTimer = setInterval(function () {

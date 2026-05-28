@@ -238,6 +238,7 @@ class TTS_Dialogue_Request(BaseModel):
     segments: List[TTS_Segment]
     # role -> voice library name OR direct file path
     voices: Dict[str, str]
+    performance_mode: str = "balanced"
     interval_ms: int = 350
     top_p: float = 0.8
     top_k: int = 30
@@ -299,29 +300,59 @@ STREAM_FIRST_SEGMENT_TOKENS = 24
 STREAM_MIN_SEGMENT_TOKENS = 24
 STREAM_DIFFUSION_STEPS = 8
 STREAM_PROMPT_AUDIO_SECONDS = 8
+STREAM_MODE_SETTINGS = {
+    "fast": {
+        "target_tokens": 48,
+        "hard_tokens": 56,
+        "first_tokens": 16,
+        "min_tokens": 12,
+        "diffusion_steps": 4,
+        "prompt_audio_seconds": 6,
+    },
+    "balanced": {
+        "target_tokens": 56,
+        "hard_tokens": 72,
+        "first_tokens": 18,
+        "min_tokens": 16,
+        "diffusion_steps": 6,
+        "prompt_audio_seconds": 8,
+    },
+    "expressive": {
+        "target_tokens": STREAM_TARGET_SEGMENT_TOKENS,
+        "hard_tokens": STREAM_HARD_SEGMENT_TOKENS,
+        "first_tokens": STREAM_FIRST_SEGMENT_TOKENS,
+        "min_tokens": STREAM_MIN_SEGMENT_TOKENS,
+        "diffusion_steps": STREAM_DIFFUSION_STEPS,
+        "prompt_audio_seconds": STREAM_PROMPT_AUDIO_SECONDS,
+    },
+}
 
 
-def _stream_split_limits(requested_segment_tokens: int = STREAM_TARGET_SEGMENT_TOKENS):
-    target_tokens = min(int(requested_segment_tokens), STREAM_TARGET_SEGMENT_TOKENS)
-    hard_tokens = min(
-        STREAM_HARD_SEGMENT_TOKENS,
-        max(target_tokens + 24, int(target_tokens * 1.35)),
-    )
-    first_tokens = min(STREAM_FIRST_SEGMENT_TOKENS, target_tokens)
-    return target_tokens, hard_tokens, first_tokens
+def _stream_mode_settings(mode: str = "balanced") -> dict:
+    mode = str(mode or "balanced").strip().lower()
+    if mode not in STREAM_MODE_SETTINGS:
+        mode = "balanced"
+    return dict(STREAM_MODE_SETTINGS[mode], mode=mode)
 
 
-def _stream_infer_kwargs(requested_segment_tokens: int = STREAM_TARGET_SEGMENT_TOKENS) -> dict:
-    target_tokens, hard_tokens, first_tokens = _stream_split_limits(requested_segment_tokens)
+def _stream_infer_kwargs(requested_segment_tokens: int = None, performance_mode: str = "balanced") -> dict:
+    settings = _stream_mode_settings(performance_mode)
+    target_tokens = int(requested_segment_tokens or settings["target_tokens"])
+    target_tokens = max(8, min(target_tokens, STREAM_TARGET_SEGMENT_TOKENS))
+    hard_tokens = int(settings["hard_tokens"])
+    first_tokens = min(int(settings["first_tokens"]), target_tokens)
+    min_tokens = min(int(settings["min_tokens"]), target_tokens)
+    prompt_seconds = int(settings["prompt_audio_seconds"])
     return {
         "max_text_tokens_per_sentence": target_tokens,
-        "diffusion_steps": STREAM_DIFFUSION_STEPS,
-        "max_prompt_audio_seconds": STREAM_PROMPT_AUDIO_SECONDS,
-        "max_emo_audio_seconds": STREAM_PROMPT_AUDIO_SECONDS,
+        "diffusion_steps": int(settings["diffusion_steps"]),
+        "max_prompt_audio_seconds": prompt_seconds,
+        "max_emo_audio_seconds": prompt_seconds,
         "prefer_sentence_boundary": True,
         "quick_streaming_tokens": first_tokens,
         "sentence_split_hard_max_tokens": hard_tokens,
-        "sentence_split_min_tokens": STREAM_MIN_SEGMENT_TOKENS,
+        "sentence_split_min_tokens": min_tokens,
+        "performance_mode": settings["mode"],
     }
 
 
@@ -460,12 +491,13 @@ async def _prepare_dialogue_for_streaming(req: dict):
 
     interval_ms = int(req.get("interval_ms", 350))
     default_emo_alpha = float(req.get("emo_alpha", 0.7))
+    performance_mode = str(req.get("performance_mode") or "balanced").strip().lower()
     sampling_kwargs = {
         "top_p": float(req.get("top_p", 0.8)),
         "top_k": int(req.get("top_k", 30)),
         "temperature": float(req.get("temperature", 0.8)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
-        **_stream_infer_kwargs(),
+        **_stream_infer_kwargs(performance_mode=performance_mode),
     }
     role_payload = {
         role: {"path": path, "meta": _audio_file_meta(path)}
@@ -522,6 +554,8 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             interval_ms = prepared["interval_ms"]
             default_emo_alpha = prepared["default_emo_alpha"]
             job.metrics["segments_total"] = len([s for s in segments if (s.get("text") or "").strip()])
+            job.metrics["performance_mode"] = sampling_kwargs.get("performance_mode")
+            job.metrics["diffusion_steps"] = sampling_kwargs.get("diffusion_steps")
 
             async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
                 pcm = _chunk_to_pcm_bytes(chunk_wav)
@@ -1165,12 +1199,13 @@ async def tts_dialogue_stream_handle(req: dict):
 
     interval_ms = int(req.get("interval_ms", 350))
     default_emo_alpha = float(req.get("emo_alpha", 0.7))
+    performance_mode = str(req.get("performance_mode") or "balanced").strip().lower()
     sampling_kwargs = {
         "top_p": float(req.get("top_p", 0.8)),
         "top_k": int(req.get("top_k", 30)),
         "temperature": float(req.get("temperature", 0.8)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
-        **_stream_infer_kwargs(),
+        **_stream_infer_kwargs(performance_mode=performance_mode),
     }
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=64)
@@ -1314,12 +1349,13 @@ async def tts_dialogue_cache_stream_handle(req: dict):
 
     interval_ms = int(req.get("interval_ms", 350))
     default_emo_alpha = float(req.get("emo_alpha", 0.7))
+    performance_mode = str(req.get("performance_mode") or "balanced").strip().lower()
     sampling_kwargs = {
         "top_p": float(req.get("top_p", 0.8)),
         "top_k": int(req.get("top_k", 30)),
         "temperature": float(req.get("temperature", 0.8)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
-        **_stream_infer_kwargs(),
+        **_stream_infer_kwargs(performance_mode=performance_mode),
     }
     role_payload = {
         role: {"path": path, "meta": _audio_file_meta(path)}

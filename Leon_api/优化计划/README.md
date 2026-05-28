@@ -28,6 +28,15 @@
 - 这次修复解决的是“前端像卡死/弱网秒失败”的服务响应问题，不直接解决 RTF。
 - 当前 RTF 仍高，实测约 15-16；日志显示 `s2mel_time=47.67s`、`bigvgan_time=16.43s`，下一步仍要优先处理 BigVGAN CUDA kernel 和 s2mel 性能。
 
+### 2026-05-28 合成档位实测
+
+- 新增 `fast / balanced / expressive` 三档，分别使用 diffusion steps 4 / 6 / 8。
+- `fast`：first PCM 34.3s，RTF 10.84，总耗时 52.7s。
+- `balanced`：first PCM 40.8s，RTF 12.28，总耗时 61.7s。
+- `expressive`：first PCM 38.9s，RTF 12.00，总耗时 67.0s。
+- 状态轮询仍可持续返回，平均几十毫秒以内；三档均未复现状态接口长时间超时。
+- 这些指标只能说明速度趋势，音质/情绪保真需要人工听感 A/B；后续默认档位暂定为 `balanced`。
+
 ## 第二阶段：流式播放体验
 
 - 明确卡片状态：`pending`、`live`、`buffering`、`saved`、`failed`。
