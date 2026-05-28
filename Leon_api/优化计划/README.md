@@ -37,6 +37,12 @@
 - 状态轮询仍可持续返回，平均几十毫秒以内；三档均未复现状态接口长时间超时。
 - 这些指标只能说明速度趋势，音质/情绪保真需要人工听感 A/B；后续默认档位暂定为 `balanced`。
 
+### 2026-05-28 诊断接口
+
+- 新增 `/diagnostics/perf`，用于查看 BigVGAN CUDA kernel、MSVC `cl.exe`、CUDA `nvcc`、FlashInfer 等运行环境状态。
+- 当前实测：`nvcc` 存在，`cl.exe` 不存在，`bigvgan_cuda_active=false`。
+- 当前实测：FlashInfer 未安装，但 GPT 侧耗时远低于 s2mel/BigVGAN，优先级低于修 BigVGAN kernel。
+
 ## 第二阶段：流式播放体验
 
 - 明确卡片状态：`pending`、`live`、`buffering`、`saved`、`failed`。

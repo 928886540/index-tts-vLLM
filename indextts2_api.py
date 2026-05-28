@@ -5,6 +5,7 @@ import base64
 import socket
 import secrets
 import time
+import shutil
 from collections import deque
 
 # ---------------------------------------------------------------------------
@@ -1520,6 +1521,44 @@ async def control(command: str = None):
 async def health():
     """Lightweight liveness probe for TAVO clients / monitoring."""
     return JSONResponse(content={"status": "ok"})
+
+
+@APP.get("/diagnostics/perf")
+async def perf_diagnostics():
+    """Return runtime checks that explain common RTF bottlenecks."""
+    pipeline = globals().get("tts_pipeline")
+    cl_path = shutil.which("cl")
+    nvcc_path = shutil.which("nvcc")
+    flashinfer_available = False
+    flashinfer_error = None
+    try:
+        __import__("flashinfer")
+        flashinfer_available = True
+    except Exception as e:
+        flashinfer_error = str(e)
+
+    bigvgan_cuda_active = bool(getattr(pipeline, "use_cuda_kernel", False)) if pipeline is not None else False
+    hints = []
+    if args.cuda_kernel and not bigvgan_cuda_active:
+        if not cl_path:
+            hints.append("BigVGAN CUDA kernel requested but disabled because MSVC cl.exe is not visible in PATH.")
+        else:
+            hints.append("BigVGAN CUDA kernel requested but disabled; check startup traceback for compile failure.")
+    if not flashinfer_available:
+        hints.append("FlashInfer is not installed; vLLM top-k/top-p sampling uses PyTorch fallback.")
+
+    return JSONResponse(content={
+        "bigvgan_cuda_requested": bool(args.cuda_kernel),
+        "bigvgan_cuda_active": bigvgan_cuda_active,
+        "cl_path": cl_path,
+        "nvcc_path": nvcc_path,
+        "flashinfer_available": flashinfer_available,
+        "flashinfer_error": flashinfer_error,
+        "fp16": bool(args.fp16),
+        "qwen_emo": bool(args.qwen_emo),
+        "device": getattr(pipeline, "device", None) if pipeline is not None else None,
+        "hints": hints,
+    })
 
 
 @APP.get("/cache_audio/{key}")
