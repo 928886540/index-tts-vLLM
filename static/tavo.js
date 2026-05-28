@@ -256,7 +256,7 @@
       ".idx-info{flex:1;min-width:0;padding-right:48px}.idx-title-row{display:flex;align-items:center;gap:8px;min-width:0}.idx-name{font-size:18px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-format{flex:0 0 auto;border:1px solid rgba(206,170,230,.34);background:rgba(206,170,230,.12);color:#d9b7f0;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800}.idx-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-gear{position:absolute;right:14px;top:14px;width:40px;height:40px;border-radius:50%;border:1px solid rgba(206,170,230,.30);background:rgba(20,14,28,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#eee7f4;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2;transition:background .15s,transform .12s}.idx-gear:active{transform:scale(.92)}.idx-gear svg{width:18px;height:18px;fill:currentColor}@media(hover:hover){.idx-gear:hover{background:rgba(60,38,80,.65)}}",
       ".idx-seek-wrap{margin:14px 0 0;background:transparent;border:0;border-radius:0;padding:0}.idx-seek{width:100%;height:24px;margin:0;accent-color:#c88ee9;cursor:pointer}.idx-time{display:flex;justify-content:space-between;font-size:12px;color:rgba(238,231,244,.68);font-variant-numeric:tabular-nums;margin-top:4px}",
       ".idx-subtitle{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:18px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.50) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;max-height:240px;min-height:160px;overflow-y:auto;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.45;font-weight:500;transition:color .25s,font-size .2s,font-weight .2s,letter-spacing .2s,padding .2s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:17px;font-weight:700;letter-spacing:.5px;padding:10px 8px}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.6;max-width:92%;padding:18px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:16px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85;transition:width .2s,height .2s,opacity .2s}.idx-sub-row.is-current .idx-sub-avatar{width:32px;height:32px;opacity:1}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:block;word-break:break-word;max-width:100%}",
-      ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:currentColor}.idx-ctrl-sm{width:44px;height:44px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
+      ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:currentColor}.idx-ctrl-sm{width:44px;height:44px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px}.idx-ctrl-main[data-state='loading'] svg{animation:idx-spin .9s linear infinite}@keyframes idx-spin{to{transform:rotate(360deg)}}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
       ".idx-meta{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:12px}.idx-pill{font-size:11px;color:rgba(238,231,244,.75);background:rgba(255,255,255,.06);border:1px solid rgba(206,170,230,.14);border-radius:999px;padding:4px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".idx-panel{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:1}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
       ".idx-section-title{font-size:12px;font-weight:700;color:#d9b7f0;margin:12px 0 7px}.idx-voices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.idx-voice{min-height:58px;border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}.idx-voice:before{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,#c890e8,#d8a7ff);opacity:.30}.idx-voice strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-voice span{display:block;margin-top:4px;font-size:11px;color:rgba(238,231,244,.56)}.idx-voice.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.12)}",
@@ -428,10 +428,15 @@
     // 只挑能跨会话持久化的字段；blob URL 重启就失效，丢掉。
     // segments 也存下来,字幕重进页面后才有时间轴显示。
     var lite = (tracks || []).map(function (t) {
+      var state = String((t && t.state) || "").trim();
+      if (state !== "pending" && state !== "live" && state !== "saved" && state !== "failed") {
+        state = (t && (t.cacheReady || t.fromHistory || t.status === "ready")) ? "saved" : ((t && (t.streamUrl || t.streaming || t.status === "running" || t.pendingBlob)) ? "live" : "pending");
+      }
       return {
         cacheKey: t.cacheKey || "",
         voice: t.voice || "",
         mode: t.mode || "",
+        state: state,
         createdAt: t.createdAt || Date.now(),
         voicesMap: t.voicesMap || null,
         segments: (t.segments || []).map(function (s) {
@@ -443,6 +448,7 @@
     try { localStorage.setItem(key, JSON.stringify(lite)); } catch (_) {}
   }
   function playIcon(state) { return state === "playing" ? '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; }
+  function loadingIcon() { return '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10h-3a7 7 0 1 1-7-7V2z"/></svg>'; }
   function gearIcon() { return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65-2-3.46-2.49 1a7 7 0 0 0-1.69-.98L14 2h-4l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.07.64-.07.98s.03.66.07.98l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98L10 22h4l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46-2.11-1.65z"/></svg>'; }
   function formatTime(sec) { sec = Math.max(0, Number(sec || 0)); if (!isFinite(sec)) return "--:--"; return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0"); }
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/[\r\n,，;；]+/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
@@ -686,6 +692,81 @@
       output.connect(ctx.destination);
     }
     var activeSources = [];
+    var reader = null;
+    var stopped = false;
+    var stopReason = "";
+    var endTimer = null;
+    var started = false;
+    var nextAt = 0;
+    var playbackStartCtxTime = null;
+    var readEnded = false;
+    var bufferTimer = null;
+    var bufferingState = false;
+    var scheduledSpans = [];
+    var scheduledAudioSec = 0;
+    function getPlaybackTimeSec() {
+      if (!started || !scheduledSpans.length) return 0;
+      var now = 0;
+      try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
+      for (var i = 0; i < scheduledSpans.length; i++) {
+        var sp = scheduledSpans[i];
+        if (now < sp.start) return sp.audioStart;
+        if (now >= sp.start && now <= sp.end) return sp.audioStart + ((now - sp.start) * playbackRate);
+      }
+      return scheduledSpans[scheduledSpans.length - 1].audioEnd;
+    }
+    function armEndedWatcher() {
+      if (endTimer) { try { clearInterval(endTimer); } catch (_) {} endTimer = null; }
+      if (bufferTimer) { try { clearInterval(bufferTimer); } catch (_) {} bufferTimer = null; }
+      endTimer = setInterval(function () {
+        if (stopped) {
+          try { clearInterval(endTimer); } catch (_) {}
+          endTimer = null;
+          return;
+        }
+        var now = 0;
+        try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
+        // 用 AudioContext 时钟判断结束；WebView 暂停/弱网卡住时 currentTime 不会乱跑。
+        if (nextAt && now + 0.03 >= nextAt) {
+          try { clearInterval(endTimer); } catch (_) {}
+          endTimer = null;
+          hooks.onStateChange && hooks.onStateChange("ended");
+        }
+      }, 120);
+    }
+    function armBufferWatcher() {
+      if (bufferTimer) return;
+      bufferTimer = setInterval(function () {
+        if (stopped || readEnded || !started) return;
+        var now = 0;
+        try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
+        var ahead = nextAt - now;
+        if (ahead <= 0.04 && !bufferingState) {
+          bufferingState = true;
+          hooks.onStateChange && hooks.onStateChange("buffering");
+        } else if (bufferingState && ahead >= 0.18) {
+          bufferingState = false;
+          hooks.onStateChange && hooks.onStateChange("resumed");
+        }
+      }, 120);
+    }
+    function makeAbortError(reason) {
+      var e = new Error(reason || "播放已停止");
+      e.name = "AbortError";
+      return e;
+    }
+    function stopWebAudio(reason) {
+      stopped = true;
+      stopReason = reason || "播放已停止";
+      if (endTimer) { try { clearInterval(endTimer); } catch (_) {} endTimer = null; }
+      if (bufferTimer) { try { clearInterval(bufferTimer); } catch (_) {} bufferTimer = null; }
+      activeSources.slice().forEach(function (node) { try { node.stop(0); } catch (_) {} });
+      if (reader && typeof reader.cancel === "function") {
+        try { reader.cancel(stopReason).catch(function () {}); } catch (_) {}
+      }
+      hooks.onStateChange && hooks.onStateChange("stopped");
+    }
+    if (hooks.onController) hooks.onController({ stop: stopWebAudio, getTimeSec: getPlaybackTimeSec });
     function connectNode(node) {
       node.connect(output || ctx.destination);
     }
@@ -707,7 +788,6 @@
     // 试 ReadableStream 真流式；如果 WebView 不支持 (常见于 iOS 老版 / 部分
     // Android WebView)，退回 arrayBuffer 全下载后整段解码播。
     var canStream = !!(res.body && typeof res.body.getReader === "function");
-    var reader = null;
     if (canStream) {
       try { reader = res.body.getReader(); }
       catch (e) { canStream = false; hooks.debug && hooks.debug("getReader 抛异常, 退回 arrayBuffer: " + (e && e.message ? e.message : e)); }
@@ -728,11 +808,17 @@
         try { src.playbackRate.value = playbackRate; } catch (_) {}
         connectNode(src);
         keepSource(src);
-        src.start(0);
+        var fallbackStartAt = ctx.currentTime + 0.03;
+        var dur = audioBuf.duration / playbackRate;
+        playbackStartCtxTime = fallbackStartAt;
+        nextAt = fallbackStartAt + dur;
+        scheduledSpans.push({ start: fallbackStartAt, end: nextAt, audioStart: 0, audioEnd: audioBuf.duration });
+        scheduledAudioSec = audioBuf.duration;
+        started = true;
+        src.start(fallbackStartAt);
       } catch (e) { throw new Error("[step:bufferSource.start] " + (e && e.message ? e.message : e)); }
       hooks.onStateChange && hooks.onStateChange("playing");
-      var dur = audioBuf.duration / playbackRate;
-      setTimeout(function () { hooks.onStateChange && hooks.onStateChange("ended"); }, dur * 1000 + 200);
+      armEndedWatcher();
       return { ctx: ctx, duration: dur, mode: "buffered" };
     }
 
@@ -744,6 +830,7 @@
     }
     async function pullMore() {
       try {
+        if (stopped) throw makeAbortError(stopReason);
         var r = await reader.read();
         if (r.done) return false;
         appendPending(r.value);
@@ -757,7 +844,10 @@
       return -1;
     }
 
-    while (pending.length < 44) { if (!(await pullMore())) throw new Error("[step:wavHeader] WAV 头未到先断流"); }
+    while (pending.length < 44) {
+      if (stopped) throw makeAbortError(stopReason);
+      if (!(await pullMore())) throw new Error("[step:wavHeader] WAV 头未到先断流");
+    }
     var hv = new DataView(pending.buffer, pending.byteOffset, pending.byteLength);
     var channels = hv.getUint16(22, true);
     var sampleRate = hv.getUint32(24, true);
@@ -774,10 +864,20 @@
     pending = null;
 
     var startAt = ctx.currentTime + 0.06;
-    var nextAt = startAt;
-    var started = false;
+    nextAt = startAt;
+    started = false;
+    playbackStartCtxTime = null;
     var bytesPerSec = sampleRate * channels * 2;
-    var flushBytes = Math.max(4096, Math.floor(bytesPerSec * 0.18));
+    var blockAlign = Math.max(2 * channels, 2);
+    var flushBytes = Math.max(8192, Math.floor(bytesPerSec * 0.35));
+    flushBytes = flushBytes - (flushBytes % blockAlign);
+    if (flushBytes < blockAlign) flushBytes = blockAlign;
+    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * 0.65));
+    startBufferBytes = startBufferBytes - (startBufferBytes % blockAlign);
+    if (startBufferBytes < flushBytes) startBufferBytes = flushBytes;
+    var interrupted = false;
+    startAt = ctx.currentTime + 0.12;
+    nextAt = startAt;
 
     async function ensureAudioContextRunning(step) {
       try {
@@ -793,6 +893,7 @@
     async function schedulePcm(bytes) {
       if (bytes.length < 2 * channels) return;
       try {
+        if (stopped) throw makeAbortError(stopReason);
         await ensureAudioContextRunning("schedulePcm");
         var samples = Math.floor(bytes.length / (2 * channels));
         var aBuf = ctx.createBuffer(channels, samples, sampleRate);
@@ -808,64 +909,86 @@
         try { src.playbackRate.value = playbackRate; } catch (_) {}
         connectNode(src);
         keepSource(src);
-        var t = Math.max(nextAt, ctx.currentTime + 0.005);
+        var t = Math.max(nextAt, ctx.currentTime + 0.02);
         src.start(t);
-        nextAt = t + (aBuf.duration / playbackRate);
-        if (!started) { started = true; hooks.onStateChange && hooks.onStateChange("playing"); }
+        var realDur = aBuf.duration / playbackRate;
+        var audioStart = scheduledAudioSec;
+        var audioEnd = audioStart + aBuf.duration;
+        nextAt = t + realDur;
+        scheduledSpans.push({ start: t, end: nextAt, audioStart: audioStart, audioEnd: audioEnd });
+        scheduledAudioSec = audioEnd;
+        if (!started) {
+          playbackStartCtxTime = t;
+          started = true;
+          hooks.onStateChange && hooks.onStateChange("playing");
+          armBufferWatcher();
+        } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.18) {
+          bufferingState = false;
+          hooks.onStateChange && hooks.onStateChange("resumed");
+        }
       } catch (e) {
         throw new Error("[step:schedulePcm] " + (e && e.message ? e.message : e));
       }
     }
 
-    if (pcm.length >= flushBytes) {
-      var first = pcm.slice(0, flushBytes);
-      await schedulePcm(first);
-      pcm = pcm.slice(flushBytes);
+    function alignedLength(n) {
+      n = Math.max(0, Math.floor(n || 0));
+      return n - (n % blockAlign);
+    }
+    async function scheduleStartIfReady(force) {
+      if (started || !pcm) return false;
+      var needBytes = force ? blockAlign : startBufferBytes;
+      if (pcm.length < needBytes) return false;
+      var firstChunkBytes = force ? alignedLength(pcm.length) : alignedLength(Math.min(pcm.length, Math.max(startBufferBytes, flushBytes)));
+      if (firstChunkBytes <= 0) return false;
+      hooks.onStateChange && hooks.onStateChange("first_pcm");
+      var firstSlice = pcm.slice(0, firstChunkBytes);
+      pcm = pcm.slice(firstChunkBytes);
+      await schedulePcm(firstSlice);
+      return true;
     }
 
     while (true) {
       var r;
       try { r = await reader.read(); }
       catch (e) {
+        if (stopped) throw makeAbortError(stopReason);
         if (started) {
           // 已经起播了。流被切到后台/导航等中断算正常退出，不要弹 UI 错误，
           // 已经调度进 AudioContext 的 buffer 会自然播完。
-          hooks.debug && hooks.debug("流中断但已起播, 容忍: " + (e && e.message ? e.message : e));
+          interrupted = true;
+          readEnded = true;
+          hooks.onStateChange && hooks.onStateChange("interrupted");
+          hooks.debug && hooks.debug("流中断但已起播，转后台保存: " + (e && e.message ? e.message : e));
           break;
         }
         hooks.onError && hooks.onError(e);
         throw new Error("[step:reader.read.loop] " + (e && e.message ? e.message : e));
       }
-      if (r.done) break;
+      if (r.done) { readEnded = true; break; }
       if (r.value && r.value.length) {
         var nb = new Uint8Array(pcm.length + r.value.length);
         nb.set(pcm); nb.set(r.value, pcm.length); pcm = nb;
       }
-      if (!started && pcm.length >= 2 * channels) {
-        var firstChunkBytes = pcm.length >= flushBytes ? flushBytes : pcm.length - (pcm.length % (2 * channels));
-        if (firstChunkBytes > 0) {
-          hooks.onStateChange && hooks.onStateChange("first_pcm");
-          var firstSlice = pcm.slice(0, firstChunkBytes);
-          pcm = pcm.slice(firstChunkBytes);
-          await schedulePcm(firstSlice);
-        }
-      }
-      while (pcm.length >= flushBytes) {
+      await scheduleStartIfReady(false);
+      while (started && pcm.length >= flushBytes) {
         var slice = pcm.slice(0, flushBytes);
         pcm = pcm.slice(flushBytes);
         await schedulePcm(slice);
       }
     }
-    if (pcm && pcm.length >= 2 * channels) await schedulePcm(pcm);
+    if (!started) await scheduleStartIfReady(true);
+    if (pcm && pcm.length >= blockAlign) {
+      var remainLen = alignedLength(pcm.length);
+      if (remainLen > 0) await schedulePcm(pcm.slice(0, remainLen));
+    }
     pcm = null;
     if (!started) throw new Error("[step:noAudio] 后端没有返回可播放音频");
+    if (stopped) return { ctx: ctx, duration: Math.max(0, nextAt - startAt), mode: "streaming", stopped: true, interrupted: interrupted };
 
     var totalDur = Math.max(0, nextAt - startAt);
-    var msUntilEnd = Math.max(0, (nextAt - ctx.currentTime) * 1000);
-    setTimeout(function () {
-      hooks.onStateChange && hooks.onStateChange("ended");
-    }, msUntilEnd + 150);
-    return { ctx: ctx, duration: totalDur, mode: "streaming" };
+    armEndedWatcher();
+    return { ctx: ctx, duration: totalDur, mode: "streaming", interrupted: interrupted };
   }
 
   async function parseWithLlm(text, cfg, setStatus, context) {
@@ -1105,6 +1228,9 @@
     var generatedTracks = [];
     var currentTrackIndex = -1;
     var currentCacheKey = "";
+    var webAudioController = null;
+    var webAudioPlayToken = 0;
+    var webAudioProgressTimer = null;
 
     if (!panel) throw new Error("TAVO player missing settings panel");
     removeLegacyGlobalGear();
@@ -1182,6 +1308,29 @@
     function setAudioPlaybackRate() {
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
     }
+    function startElementAudioFrom(track, startSec) {
+      if (!track || !trackPlayableUrl(track)) return false;
+      stopWebAudioPlayback("switch");
+      var url = trackPlayableUrl(track);
+      if ((audio.currentSrc || audio.src || "") !== url) {
+        audio.src = url;
+        try { audio.load(); } catch (_) {}
+      }
+      setAudioPlaybackRate();
+      if (seek) seek.disabled = false;
+      if (startSec != null && isFinite(Number(startSec))) {
+        var target = Math.max(0, Number(startSec));
+        try {
+          if (isFinite(audio.duration) && audio.duration > 0) target = Math.min(target, Math.max(0, audio.duration - 0.05));
+          audio.currentTime = target;
+        } catch (_) {}
+      }
+      setStatus("正在加载音频…");
+      showTrackNotice(track, "正在加载音频…", shouldUseElementForSavedTrack(track) ? "已加载音频，支持拖动" : "马上开始播放");
+      setPlayState("loading");
+      audio.play().catch(function (err) { handleAudioPlayReject("element", err, "请点播放继续"); });
+      return true;
+    }
     function isUnsupportedPlayError(err) {
       var name = err && err.name ? String(err.name) : "";
       var msg = err && err.message ? String(err.message) : String(err || "");
@@ -1200,40 +1349,317 @@
     function friendlyPlaybackError(err) {
       var msg = String((err && err.message) || err || "");
       if (/noAudio|没有返回可播放音频/i.test(msg)) return "后端没有返回音频，请重新生成一次。";
-      if (/fetch|network|Load failed|Failed to fetch/i.test(msg)) return "连接音频流失败，请检查服务是否在线。";
+      if (/fetch|network|Load failed|Failed to fetch/i.test(msg)) return "连接音频流失败。弱网下请稍后重试；如果持续失败，再检查服务地址和后端日志。";
       if (/decodeAudioData|WAV|wavHeader|data 段/i.test(msg)) return "音频流格式异常，请重新生成一次。";
       if (/resume|AudioContext/i.test(msg)) return "浏览器没有放行音频播放，请点一次播放按钮重试。";
       return msg.replace(/\[step:[^\]]+\]\s*/g, "") || "播放失败，请重新生成一次。";
     }
-    function setPlayState(state) { if (play) { play.dataset.state = state; play.innerHTML = playIcon(state); play.disabled = state === "loading"; } if (cover) cover.dataset.playing = state === "playing" ? "1" : "0"; }
+    function setPlayState(state) { if (play) { play.dataset.state = state; play.innerHTML = state === "loading" ? loadingIcon() : playIcon(state); play.disabled = false; } if (cover) cover.dataset.playing = state === "playing" ? "1" : "0"; }
     function updateTrackButtons() {
       var track = currentTrack();
       if (prev) prev.disabled = currentTrackIndex <= 0;
       if (next) next.disabled = currentTrackIndex < 0 || currentTrackIndex >= generatedTracks.length - 1;
       if (del) del.disabled = currentTrackIndex < 0 || !(track && (track.url || track.cacheUrl || track.streamUrl || track.cacheKey));
     }
+    function clearWebAudioProgressTimer() {
+      if (webAudioProgressTimer) {
+        try { clearInterval(webAudioProgressTimer); } catch (_) {}
+        webAudioProgressTimer = null;
+      }
+    }
+    function clearElementAudioSrc() {
+      try { audio.pause(); } catch (_) {}
+      try { audio.removeAttribute("src"); audio.load(); } catch (_) {}
+    }
+    function setTrackState(track, state) {
+      if (!track) return "";
+      state = state || "pending";
+      track.state = state;
+      if (state === "saved") {
+        track.status = "ready";
+        track.pendingBlob = false;
+        track.streaming = false;
+        if (track.cacheUrl || track.fromHistory) track.cacheReady = true;
+      } else if (state === "live") {
+        track.status = "running";
+        track.pendingBlob = true;
+        track.streaming = true;
+      } else if (state === "failed") {
+        track.status = "failed";
+        track.pendingBlob = false;
+        track.streaming = false;
+      } else {
+        track.status = "pending";
+        track.pendingBlob = true;
+      }
+      return state;
+    }
+    function trackState(track) {
+      if (!track) return "pending";
+      var s = String(track.state || "").trim();
+      if (s === "pending" || s === "live" || s === "saved" || s === "failed") return s;
+      if (track.status === "failed") return setTrackState(track, "failed");
+      if (track.cacheReady || track.fromHistory || track.status === "ready" || (track.url && !track.streaming && !track.pendingBlob)) return setTrackState(track, "saved");
+      if (track.streamUrl || track.streaming || track.status === "running" || track.pendingBlob) return setTrackState(track, "live");
+      return setTrackState(track, "pending");
+    }
+    function isSavedTrack(track) { return trackState(track) === "saved"; }
+    function isLiveTrack(track) { return trackState(track) === "live"; }
+    function trackPlayableUrl(track) {
+      if (!track) return "";
+      if (isSavedTrack(track)) return track.url || track.cacheUrl || track.streamUrl || "";
+      if (isLiveTrack(track)) return track.streamUrl || track.url || "";
+      return track.url || "";
+    }
+    function shouldUseWebAudioForLiveTrack(track) {
+      return !!(isMobileUA() && track && track.mode === "ai8" && isLiveTrack(track) && track.streamUrl);
+    }
+    function shouldUseElementForSavedTrack(track) {
+      return isSavedTrack(track);
+    }
+    function savedTrackLabel(track) {
+      return shouldUseElementForSavedTrack(track) ? "音频已保存" : "音频已就绪";
+    }
+    async function askPlaySavedTrack(track) {
+      if (!track || track.savePromptAsked || currentTrack() !== track || !isSavedTrack(track)) return;
+      track.savePromptAsked = true;
+      var choice = null;
+      try {
+        if (window.tavo && tavo.utils && typeof tavo.utils.select === "function") {
+          choice = await tavo.utils.select([
+            { value: "play", label: "直接播放", description: "切到已保存音频，支持拖动进度条" },
+            { value: "wait", label: "继续等待", description: "保持当前流式播放，不切换" }
+          ], "音频已保存，是否直接播放？", "play");
+        } else if (typeof window.confirm === "function") {
+          choice = window.confirm("音频已保存，是否直接播放已保存音频？") ? "play" : "wait";
+        }
+      } catch (e) {
+        debugLog("⚠️ 保存音频弹窗失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
+      if (choice !== "play" || currentTrack() !== track || !isSavedTrack(track)) return;
+      var resumeSec = 0;
+      try {
+        if (webAudioController && typeof webAudioController.getTimeSec === "function") resumeSec = webAudioController.getTimeSec();
+        else if (track.lastWebAudioSec != null) resumeSec = Number(track.lastWebAudioSec) || 0;
+      } catch (_) { resumeSec = 0; }
+      stopWebAudioPlayback("switch");
+      startElementAudioFrom(track, resumeSec);
+    }
+    function isNetworkStreamError(err) {
+      var msg = String((err && err.message) || err || "");
+      if (/\[step:fetch\]\s+HTTP\s+\d+/i.test(msg)) return false;
+      return /\[step:(fetch|reader\.read|reader\.read\.loop)\]|Load failed|Failed to fetch|NetworkError|network/i.test(msg);
+    }
+    function markWebAudioStopped(track) {
+      generatedTracks.forEach(function (t) { if (t) t.webAudioPlaying = false; });
+      if (track) track.webAudioPlaying = false;
+    }
+    function stopWebAudioPlayback(reason) {
+      webAudioPlayToken++;
+      if (webAudioController && typeof webAudioController.stop === "function") {
+        try { webAudioController.stop(reason || "停止播放"); } catch (_) {}
+      }
+      webAudioController = null;
+      clearWebAudioProgressTimer();
+      markWebAudioStopped(currentTrack());
+      stopSubtitle();
+      if (reason && reason !== "switch" && reason !== "replace" && reason !== "silent") {
+        setPlayState("idle");
+        setStatus(reason === "pause" ? "已暂停" : "播放已停止");
+      }
+    }
+    function startWebAudioProgress(token, startedAt, playbackRate, track) {
+      clearWebAudioProgressTimer();
+      webAudioProgressTimer = setInterval(function () {
+        if (token !== webAudioPlayToken) { clearWebAudioProgressTimer(); return; }
+        var sec = 0;
+        try {
+          if (webAudioController && typeof webAudioController.getTimeSec === "function") sec = webAudioController.getTimeSec();
+          else {
+            var now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+            sec = Math.max(0, ((now - startedAt) / 1000) * playbackRate);
+          }
+        } catch (_) { sec = 0; }
+        if (cur) cur.textContent = formatTime(sec);
+        if (track) track.lastWebAudioSec = sec;
+      }, 250);
+    }
+    async function playTrackViaWebAudio(track, url, opts) {
+      opts = opts || {};
+      if (!track || !url) return false;
+      stopWebAudioPlayback("replace");
+      var token = ++webAudioPlayToken;
+      var playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25);
+      var startedAt = 0;
+      var waitStartedAt = Date.now();
+      var waitTimer = null;
+      function stopWaitTimer() {
+        if (waitTimer) { try { clearInterval(waitTimer); } catch (_) {} waitTimer = null; }
+      }
+      track.webAudioPlaying = false;
+      track.streamInterrupted = false;
+      clearElementAudioSrc();
+      if (seek) { seek.disabled = true; seek.value = "0"; }
+      if (cur) cur.textContent = "00:00";
+      if (total) total.textContent = "--:--";
+      setError("");
+      setPlayState("loading");
+      setStatus(opts.connectingStatus || "正在连接音频…");
+      showTrackNotice(track, opts.noticeTitle || "正在连接音频…", opts.noticeDetail || "等待后端返回声音");
+      waitTimer = setInterval(function () {
+        if (token !== webAudioPlayToken) { stopWaitTimer(); return; }
+        if (track.webAudioPlaying) return;
+        var sec = Math.max(1, Math.floor((Date.now() - waitStartedAt) / 1000));
+        setStatus("等待首段音频 " + sec + "s…");
+        showTrackNotice(track, "等待首段音频 " + sec + "s…", opts.waitDetail || "弱网或后端合成较慢");
+      }, 1000);
+      try {
+        await streamWavViaWebAudio(url, {
+          playbackRate: playbackRate,
+          onController: function (controller) {
+            if (token === webAudioPlayToken) webAudioController = controller;
+          },
+          onStateChange: function (state) {
+            if (token !== webAudioPlayToken) return;
+            if (state === "connecting") {
+              setStatus("正在连接音频…");
+              showTrackNotice(track, "正在连接音频…", "弱网下可能需要多等几秒");
+            } else if (state === "connected" || state === "waiting_pcm") {
+              setStatus("等待首段音频…");
+              showTrackNotice(track, "等待首段音频…", opts.waitDetail || "后端正在合成第一段");
+            } else if (state === "first_pcm") {
+              setStatus("收到音频，正在缓冲…");
+              showTrackNotice(track, "收到音频", "缓冲一小段后起播");
+            } else if (state === "playing") {
+              stopWaitTimer();
+              track.webAudioPlaying = true;
+              setPlayState("playing");
+              setStatus("正在播放：" + trackPlaybackLabel(track));
+              setError("");
+              debugLog("▶️ Web Audio 首块已起播", "#9f9");
+              startedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
+              startWebAudioProgress(token, startedAt, playbackRate, track);
+              startSubtitle(track, function () {
+                if (webAudioController && typeof webAudioController.getTimeSec === "function") return webAudioController.getTimeSec();
+                return ((((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt) / 1000) * playbackRate);
+              });
+            } else if (state === "buffering") {
+              track.savePromptWanted = true;
+              setPlayState("loading");
+              setStatus("网络缓冲中…");
+              showTrackNotice(track, "网络缓冲中…", "歌词会停在当前播放位置");
+            } else if (state === "resumed") {
+              setPlayState("playing");
+              setStatus("正在播放：" + trackPlaybackLabel(track));
+            } else if (state === "interrupted") {
+              stopWaitTimer();
+              track.streamInterrupted = true;
+              track.savePromptWanted = true;
+              setStatus("网络不稳，转后台保存…");
+              showTrackNotice(track, "网络不稳，转后台保存…", "合成任务还在跑，保存后会询问是否直接播放");
+              if (isSavedTrack(track)) {
+                askPlaySavedTrack(track).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
+              } else if (track.cacheKey) {
+                pollCacheUpgrade(track, "weak-net snapshot");
+              }
+            } else if (state === "stopped") {
+              stopWaitTimer();
+              markWebAudioStopped(track);
+              clearWebAudioProgressTimer();
+            } else if (state === "ended") {
+              stopWaitTimer();
+              markWebAudioStopped(track);
+              webAudioController = null;
+              clearWebAudioProgressTimer();
+              setPlayState("idle");
+              stopSubtitle();
+              if (track.streamInterrupted && !isSavedTrack(track)) {
+                setStatus("网络中断，等待音频保存…");
+                showTrackNotice(track, "网络中断，等待音频保存…", "保存完成后会询问是否直接播放");
+              } else {
+                var saved = shouldUseElementForSavedTrack(track);
+                setStatus(saved ? "播放完成，音频已保存" : "播放完成，等待音频保存…");
+                showTrackNotice(track, "播放完成", saved ? "点播放可重播" : "正在后台保存");
+              }
+            }
+          },
+          onError: function (e) { debugLog("❌ Web Audio 错误: " + (e && e.message ? e.message : e), "#f99"); },
+          debug: function (text) { debugLog("[wa] " + text, "#9ff"); }
+        });
+        return true;
+      } catch (e) {
+        stopWaitTimer();
+        if (token !== webAudioPlayToken) return false;
+        var msg = String((e && e.message) || e || "");
+        markWebAudioStopped(track);
+        webAudioController = null;
+        clearWebAudioProgressTimer();
+        stopSubtitle();
+        if ((e && e.name === "AbortError") || /播放已停止|停止播放/i.test(msg)) {
+          setPlayState("idle");
+          return false;
+        }
+        if (isNetworkStreamError(e) && track.cacheKey) {
+          track.streamInterrupted = true;
+          track.savePromptWanted = true;
+          setPlayState("idle");
+          setError("");
+          if (shouldUseElementForSavedTrack(track)) {
+            setStatus("网络不稳，音频已保存");
+            showTrackNotice(track, "网络不稳，音频已保存", "正在询问是否直接播放");
+            askPlaySavedTrack(track).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
+          } else {
+            setTrackState(track, "live");
+            setStatus("网络不稳，后台合成中…");
+            showTrackNotice(track, "网络不稳，后台合成中…", "这张音频不会丢，保存后会询问是否直接播放");
+            pollCacheUpgrade(track, "weak-net snapshot");
+          }
+          debugLog("⚠️ Web Audio 连接中断，保留 cacheKey 等待落盘: " + msg, "#fc9");
+          return false;
+        }
+        var friendly = friendlyPlaybackError(e);
+        setPlayState("idle");
+        setStatus("播放失败");
+        setError(friendly);
+        showTrackNotice(track, "播放失败", friendly);
+        debugLog("❌ Web Audio 流式异常: " + msg, "#f99");
+        return false;
+      }
+    }
     function selectTrack(index, autoplay) {
       if (index < 0 || index >= generatedTracks.length) return;
       var track = generatedTracks[index];
       currentTrackIndex = index;
       currentCacheKey = track.cacheKey || "";
+      var state = trackState(track);
       // 切卡前先清掉旧 audio 状态(防止旧的 currentTime/duration 串到新卡片)
       try { audio.pause(); } catch (_) {}
+      stopWebAudioPlayback("switch");
       stopSubtitle();
       hideSubtitlePanel();
-      // 三种 URL 来源优先级：(a) track.url 已经是 blob/可用 URL；
-      // (b) track.cacheUrl（历史恢复出来的 /cache_audio/{key}）；
-      // (c) track.streamUrl（mobile 流式刚跑完还没拿到 blob 时）。
-      var srcUrl = track.url || track.cacheUrl || "";
-      if (!srcUrl && track.streamUrl) {
-        srcUrl = track.streamUrl;
-      }
-      debugLog("🎯 selectTrack idx=" + index + " urlSource=" + (track.url ? "blob" : track.cacheUrl ? "cacheUrl" : track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
+      var srcUrl = trackPlayableUrl(track);
+      debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
       // 统一先重置进度条/时间显示
       if (seek) { seek.value = "0"; }
       if (cur) cur.textContent = "00:00";
       if (total) total.textContent = "--:--";
       if (srcUrl) {
+        if (shouldUseWebAudioForLiveTrack(track)) {
+          clearElementAudioSrc();
+          if (seek) { seek.disabled = true; seek.value = "0"; }
+          if (cur) cur.textContent = "00:00";
+          if (total) total.textContent = "--:--";
+          if (autoplay) {
+            setStatus("等待首段音频…");
+            showTrackNotice(track, "等待首段音频…", "正在连接流式音频");
+            playTrackViaWebAudio(track, srcUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在连接流式音频", waitDetail: "正在合成第一段" });
+          } else {
+            setStatus("已选择第 " + String(index + 1) + " 首");
+            showTrackNotice(track, "流式生成中", "点播放继续等待");
+          }
+          updateTrackButtons();
+          return;
+        }
         audio.src = srcUrl;
         setAudioPlaybackRate();
         // 强制重新加载 metadata,避免浏览器复用上次缓存的 duration/seekable
@@ -1241,10 +1667,10 @@
         if (seek) { seek.disabled = false; }
         if (autoplay) {
           setStatus("正在加载音频…");
-          showTrackNotice(track, "正在加载音频…", "马上开始播放");
+          showTrackNotice(track, "正在加载音频…", shouldUseElementForSavedTrack(track) ? "已加载音频，支持拖动" : "马上开始播放");
         } else {
           setStatus("已选择第 " + String(index + 1) + " 首");
-          showTrackNotice(track, "音频已就绪", "点播放开始");
+          showTrackNotice(track, savedTrackLabel(track), shouldUseElementForSavedTrack(track) ? "点播放开始，可拖动进度条" : "点播放开始");
         }
         updateTrackButtons();
         if (autoplay) audio.play().catch(function (err) { handleAudioPlayReject("element", err, "请点播放继续"); });
@@ -1253,18 +1679,23 @@
       // 都没有 URL —— 该 track 是占位
       try { audio.removeAttribute('src'); audio.load(); } catch (_) {}
       if (seek) { seek.disabled = true; }
-      showTrackNotice(track, track.noticeTitle || ("第 " + String(index + 1) + " 首尚未就绪"), track.noticeDetail || "生成完成后会自动显示歌词");
-      setStatus(track.noticeTitle || ("第 " + String(index + 1) + " 首尚未就绪"));
+      if (state === "failed") {
+        showTrackNotice(track, "生成失败", track.error || "请重新生成一次");
+        setStatus("生成失败");
+      } else if (state === "live") {
+        showTrackNotice(track, "流式生成中", "等待音频保存或继续播放");
+        setStatus("流式生成中");
+      } else {
+        showTrackNotice(track, track.noticeTitle || ("第 " + String(index + 1) + " 首尚未就绪"), track.noticeDetail || "生成完成后会自动显示歌词");
+        setStatus(track.noticeTitle || ("第 " + String(index + 1) + " 首尚未就绪"));
+      }
       updateTrackButtons();
     }
     function attachCacheAudio(track, opts) {
       opts = opts || {};
       if (!track || !track.cacheUrl) return false;
       track.url = track.cacheUrl;
-      track.pendingBlob = false;
-      track.status = "ready";
-      track.streaming = false;
-      track.cacheReady = true;
+      setTrackState(track, "saved");
       if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === track) {
         updateTrackButtons();
         if (track.webAudioPlaying && !opts.forceElement) return true;
@@ -1295,7 +1726,7 @@
       return true;
     }
     function pollCacheUpgrade(trackEntry, label) {
-      if (!trackEntry || !trackEntry.cacheKey || trackEntry.cachePollStarted || trackEntry.cacheReady) return;
+      if (!trackEntry || !trackEntry.cacheKey || trackEntry.cachePollStarted || isSavedTrack(trackEntry)) return;
       trackEntry.cachePollStarted = true;
       label = label || "snapshot";
       (async function () {
@@ -1314,13 +1745,17 @@
                 });
               }
               if (j && j.state === "done") {
-                attachCacheAudio(trackEntry, { forceElement: false, deferElement: isMobileUA() && !!trackEntry.streamUrl });
+                var shouldAskPlaySaved = currentTrack() === trackEntry && !!(trackEntry.savePromptWanted || trackEntry.streamInterrupted);
+                setTrackState(trackEntry, "saved");
+                attachCacheAudio(trackEntry, { forceElement: false, deferElement: trackEntry.webAudioPlaying });
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
+                if (shouldAskPlaySaved) askPlaySavedTrack(trackEntry).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
                 done = true;
                 break;
               }
               if (j && j.state === "failed") {
+                setTrackState(trackEntry, "failed");
                 debugLog("❌ 服务端推理失败: " + (j.error || ""), "#f99");
                 break;
               }
@@ -1330,7 +1765,7 @@
           }
           await new Promise(function(r){ setTimeout(r, 1000); });
         }
-        if (!done && !trackEntry.cacheReady) {
+        if (!done && !isSavedTrack(trackEntry)) {
           trackEntry.cachePollStarted = false;
           debugLog("⚠️ " + label + " 等待落盘超时，cacheKey=" + trackEntry.cacheKey, "#fc9");
         }
@@ -1340,6 +1775,7 @@
       if (currentTrackIndex < 0) return;
       var removed = generatedTracks.splice(currentTrackIndex, 1)[0];
       try { audio.pause(); } catch (_) {}
+      stopWebAudioPlayback("switch");
       if (removed && removed.url && /^blob:/i.test(removed.url)) {
         try { URL.revokeObjectURL(removed.url); } catch (_) {}
       }
@@ -1600,8 +2036,8 @@
             { src: artSrc, sizes: "512x512", type: artType },
           ],
         });
-        ms.setActionHandler('play',  function () { try { audio.play().catch(function(){}); } catch (_) {} });
-        ms.setActionHandler('pause', function () { try { audio.pause(); } catch (_) {} });
+        ms.setActionHandler('play',  function () { try { generate(false).catch(function(){}); } catch (_) {} });
+        ms.setActionHandler('pause', function () { try { if (currentTrack() && currentTrack().webAudioPlaying) stopWebAudioPlayback("pause"); else audio.pause(); } catch (_) {} });
         ms.setActionHandler('previoustrack', function () { try { selectTrack(currentTrackIndex - 1, true); } catch (_) {} });
         ms.setActionHandler('nexttrack',     function () { try { selectTrack(currentTrackIndex + 1, true); } catch (_) {} });
         try {
@@ -1951,13 +2387,35 @@
       // 已有卡片时，播放按钮只做"播放/暂停/选当前卡片"，不生成新音频。
       // 新建必须点 + 号（force=true 才走下面的 generate 流程）。
       if (!force && generatedTracks.length > 0) {
+        if (currentTrackIndex < 0) currentTrackIndex = generatedTracks.length - 1;
+        var existingTrack = currentTrack();
+        if (existingTrack && existingTrack.webAudioPlaying) {
+          stopWebAudioPlayback("pause");
+          return;
+        }
+        if (shouldUseElementForSavedTrack(existingTrack)) {
+          var existingUrl = trackPlayableUrl(existingTrack);
+          var audioUrl = audio.currentSrc || audio.src || "";
+          if (existingUrl && audioUrl !== existingUrl) {
+            startElementAudioFrom(existingTrack, 0);
+          } else if (audio.src) {
+            if (audio.paused) { setAudioPlaybackRate(); await audio.play().catch(function(e){ handleAudioPlayReject("element", e, "请点播放继续"); }); }
+            else audio.pause();
+          } else {
+            startElementAudioFrom(existingTrack, 0);
+          }
+          return;
+        }
+        if (shouldUseWebAudioForLiveTrack(existingTrack)) {
+          await playTrackViaWebAudio(existingTrack, trackPlayableUrl(existingTrack), { noticeTitle: "等待首段音频…", noticeDetail: "正在连接流式音频", waitDetail: "正在合成第一段" });
+          return;
+        }
         if (audio.src) {
           if (audio.paused) { setAudioPlaybackRate(); await audio.play().catch(function(e){ handleAudioPlayReject("element", e, "请点播放继续"); }); }
           else audio.pause();
           return;
         }
         // 没 src 但有卡片 → 选当前卡片，让 selectTrack 决定 URL 来源
-        if (currentTrackIndex < 0) currentTrackIndex = generatedTracks.length - 1;
         selectTrack(currentTrackIndex, true);
         return;
       }
@@ -1984,6 +2442,7 @@
           voice: cfg.defaultVoice,
           mode: cfg.mode,
           segments: [],
+          state: "pending",
           status: "pending",
           pendingBlob: true,
         };
@@ -2046,8 +2505,7 @@
           trackEntry.cacheKey = jobInfo.cacheKey;
           trackEntry.segments = segments;
           trackEntry.voicesMap = voicesMap;
-          trackEntry.pendingBlob = !jobInfo.cached;
-          trackEntry.status = jobInfo.cached ? "ready" : "running";
+          setTrackState(trackEntry, jobInfo.cached ? "saved" : "live");
           if (!placeholder) {
             // 防御性:正常路径下 placeholder 一定有,这里兜底
             generatedTracks.push(trackEntry);
@@ -2058,17 +2516,15 @@
             saveTracksForMessage(messageId, generatedTracks).catch(function(){});
             debugLog("💾 立即写 tavo.set cacheKey=" + jobInfo.cacheKey, "#9ff");
           }
-          // 如果服务端早就有这条音频的缓存，直接走 audio.src 不流式
+          // 如果服务端早就有这条音频的缓存，走完整音频播放器；这是可拖动进度条的路径。
           if (jobInfo.cached && cacheUrl) {
-            debugLog("⚡ 命中服务端缓存，直接 audio.src 播放", "#9f9");
-            audio.src = cacheUrl;
-            setAudioPlaybackRate();
             trackEntry.url = cacheUrl;
-            trackEntry.pendingBlob = false;
+            setTrackState(trackEntry, "saved");
             setStatus("已有音频，正在播放");
-            showTrackNotice(trackEntry, "已有音频", "正在加载播放器");
+            showTrackNotice(trackEntry, "已有音频", "已加载音频，支持拖动");
             setPlayState("loading");
-            audio.play().catch(function (err) { handleAudioPlayReject("cache", err, "点播放继续"); });
+            debugLog("⚡ 命中服务端缓存，直接 audio.src 播放", "#9f9");
+            startElementAudioFrom(trackEntry, 0);
             return;
           }
           // 没缓存 → 走流式（移动 Web Audio / 桌面 <audio src>）。后端是异步
@@ -2079,66 +2535,10 @@
             debugLog("📱 检测到手机 UA, 用 Web Audio API 真流式", "#ffd479");
             currentCacheKey = jobInfo.cacheKey;
             setPlayState("loading");
-            var webAudioStartedAt = 0;
-            var waitStartedAt = Date.now();
-            var firstAudioTimer = setInterval(function () {
-              if (trackEntry.webAudioPlaying) return;
-              var sec = Math.max(1, Math.floor((Date.now() - waitStartedAt) / 1000));
-              setStatus("等待首段音频 " + sec + "s…");
-              showTrackNotice(trackEntry, "等待首段音频 " + sec + "s…", "正在合成，声音出来前不要切走");
-            }, 1000);
             pollCacheUpgrade(trackEntry, "mobile snapshot");
-            try {
-              await streamWavViaWebAudio(streamUrl, {
-                playbackRate: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25),
-                onStateChange: function (state) {
-                  if (state === "connecting") {
-                    setStatus("正在连接音频…");
-                    showTrackNotice(trackEntry, "正在连接音频…", "等待后端开始返回声音");
-                  } else if (state === "connected" || state === "waiting_pcm") {
-                    setStatus("等待首段音频…");
-                    showTrackNotice(trackEntry, "等待首段音频…", "正在合成第一段");
-                  } else if (state === "first_pcm") {
-                    setStatus("收到音频，准备起播…");
-                    showTrackNotice(trackEntry, "收到音频", "马上开始播放");
-                  } else if (state === "playing") {
-                    if (firstAudioTimer) { clearInterval(firstAudioTimer); firstAudioTimer = null; }
-                    trackEntry.webAudioPlaying = true;
-                    setPlayState("playing");
-                    setStatus("正在播放");
-                    setError("");
-                    debugLog("▶️ Web Audio 首块已起播", "#9f9");
-                    webAudioStartedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
-                    // 启动字幕
-                    startSubtitle(trackEntry, function () {
-                      return ((((typeof performance !== "undefined" ? performance.now() : Date.now()) - webAudioStartedAt) / 1000) * clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25));
-                    });
-                  } else if (state === "ended") {
-                    if (firstAudioTimer) { clearInterval(firstAudioTimer); firstAudioTimer = null; }
-                    trackEntry.webAudioPlaying = false;
-                    if (trackEntry.cacheReady) attachCacheAudio(trackEntry, { deferElement: true });
-                    setPlayState("idle");
-                    setStatus(trackEntry.cacheReady ? "播放完成，音频已保存" : "播放完成，正在保存音频…");
-                    showTrackNotice(trackEntry, trackEntry.cacheReady ? "播放完成" : "播放完成，正在保存音频…", trackEntry.cacheReady ? "点播放可重播" : "稍等片刻后可重播");
-                    debugLog("⏹ Web Audio 流式播完", "#9f9");
-                    stopServerLogPolling();
-                    stopSubtitle();
-                  }
-                },
-                onError: function (e) { debugLog("❌ Web Audio 错误: " + (e && e.message ? e.message : e), "#f99"); },
-                debug: function (text) { debugLog("[wa] " + text, "#9ff"); }
-              });
-            } catch (e) {
-              if (firstAudioTimer) { clearInterval(firstAudioTimer); firstAudioTimer = null; }
-              var friendly = friendlyPlaybackError(e);
-              setPlayState("idle"); setStatus("播放失败");
-              setError(friendly);
-              showTrackNotice(trackEntry, "播放失败", friendly);
-              debugLog("❌ Web Audio 流式异常: " + (e && e.message ? e.message : e), "#f99");
-              stopServerLogPolling();
-              return;
-            }
-            if (trackEntry.cacheReady) attachCacheAudio(trackEntry, { deferElement: true });
+            await playTrackViaWebAudio(trackEntry, streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，声音出来前不要切走", waitDetail: "正在合成第一段" });
+            if (isSavedTrack(trackEntry)) attachCacheAudio(trackEntry, { deferElement: true });
+            stopServerLogPolling();
             return;
           } else {
             // 桌面端 chunked WAV 给 <audio> 元素直接播。
@@ -2158,7 +2558,7 @@
           }
         } else {
           url = await createSingleStreamJob(base, cfg, messageText, force);
-          generatedTracks.push({ url: url, cacheKey: "", deleteUrl: singleDeleteUrl(base, cfg, messageText), createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode, streaming: true });
+          generatedTracks.push({ url: url, cacheKey: "", deleteUrl: singleDeleteUrl(base, cfg, messageText), createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode, state: "live", status: "running", pendingBlob: true, streaming: true });
           selectTrack(generatedTracks.length - 1, false);
           setStatus("正在连接流式音频...");
         }
@@ -2255,7 +2655,12 @@
         }
       }
     });
-    on(audio, 'waiting', function () { setPlayState("loading"); setStatus("正在等待音频流..."); });
+    on(audio, 'waiting', function () {
+      var t = currentTrack();
+      setPlayState("loading");
+      setStatus(shouldUseElementForSavedTrack(t) ? "缓冲中…" : "正在等待音频流…");
+      if (t) showTrackNotice(t, shouldUseElementForSavedTrack(t) ? "缓冲中…" : "正在等待音频流…", "歌词会停在当前播放位置");
+    });
     on(audio, 'canplay', function () {
       setError("");
       if (!audio.paused) {
@@ -2269,8 +2674,9 @@
     on(audio, 'ended', function () { setPlayState("idle"); setStatus("播放完成"); stopSubtitle(); });
     on(audio, 'error', function () {
       var active = currentTrack();
-      if (active && (active.webAudioPlaying || (isMobileUA() && active.cacheReady && active.streamUrl))) {
+      if (active && (active.webAudioPlaying || shouldUseWebAudioForLiveTrack(active))) {
         debugLog("⚠️ 忽略 audio 元素错误：当前手机链路使用 Web Audio，src=" + (audio.currentSrc || audio.src || ""), "#fc9");
+        setError("");
         return;
       }
       var detail = "";
@@ -2304,17 +2710,23 @@
         if (!saved || !saved.length) return;
         var base = cleanBase(cfg.apiBase);
         saved.forEach(function (t) {
-          generatedTracks.push({
+          var savedState = t.state === "live" ? "live" : (t.state === "failed" ? "failed" : "saved");
+          var restored = {
             url: null,                 // 用到时由 selectTrack 通过 cacheKey 拉
             cacheKey: t.cacheKey,
             cacheUrl: base + "/cache_audio/" + encodeURIComponent(t.cacheKey),
+            streamUrl: base + "/tts_dialogue_stream_job/" + encodeURIComponent(t.cacheKey),
             createdAt: t.createdAt || Date.now(),
             voice: t.voice || cfg.defaultVoice,
             mode: t.mode || "ai8",
             voicesMap: t.voicesMap || null,
             segments: Array.isArray(t.segments) ? t.segments : [],
-            fromHistory: true
-          });
+            fromHistory: savedState === "saved",
+            state: savedState
+          };
+          setTrackState(restored, savedState);
+          generatedTracks.push(restored);
+          if (savedState === "live") pollCacheUpgrade(restored, "restored live snapshot");
         });
         currentTrackIndex = generatedTracks.length - 1;
         updateTrackButtons();
