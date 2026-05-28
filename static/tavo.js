@@ -2108,6 +2108,9 @@
       }
       if (currentTrack() === track || !track) showSubtitleNotice(titleText, detailText);
     }
+    function hasActiveSubtitleRows(track) {
+      return !!(activeSubtitle && activeSubtitle.track === track && subBox && first(subBox, '.idx-sub-row'));
+    }
 
     // 拆碎长文本成约 12-22 字的小段(歌词风格,一行可读)。
     // 1) 按句末标点切; 2) 还长就按逗号切; 3) 还长按 20 字硬切;
@@ -2134,6 +2137,7 @@
     }
 
     var activeSubtitle = null;
+    var seekProgrammaticUpdate = false;
     function clearSubtitleDom() { if (subBox) subBox.innerHTML = ""; }
     function stopSubtitle() {
       if (!activeSubtitle) return;
@@ -2258,6 +2262,7 @@
       if (!segs.length) { showSubtitleNotice("暂无歌词", "音频可播放，但没有拿到分段字幕"); return; }
       var gap = (Number(cfg.intervalMs || 350) / 1000);
       var timeline = [];
+      var lastIdx = -1;
       function rebuild(metaList) {
         var t = 0;
         timeline = [];
@@ -2283,9 +2288,9 @@
           t += segDur + gap;
         }
         renderSubtitleRows(timeline, !metaList);
+        if (metaList) lastIdx = -1;
       }
       rebuild();
-      var lastIdx = -1;
       var state = { tickHandle: null, pollHandle: null, track: trackEntry };
       activeSubtitle = state;
       state.tickHandle = setInterval(function () {
@@ -2883,7 +2888,7 @@
       var label = waitingLabelForTrack(t);
       setPlayState("loading");
       setStatus(label);
-      if (t) showTrackNotice(t, label, "歌词会停在当前播放位置");
+      if (t && !hasActiveSubtitleRows(t)) showTrackNotice(t, label, "歌词会停在当前播放位置");
     });
     on(audio, 'canplay', function () {
       setError("");
@@ -2923,8 +2928,22 @@
     on(audio, 'seeking', function () { debugLog("⏩ seeking → " + audio.currentTime.toFixed(2), "#9ff"); });
     on(audio, 'seeked',  function () { debugLog("✅ seeked  → " + audio.currentTime.toFixed(2), "#9ff"); });
     on(audio, 'stalled', function () { debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2), "#fc9"); });
-    on(audio, 'timeupdate', function () { if (cur) cur.textContent = formatTime(audio.currentTime); if (total) total.textContent = audio.duration ? formatTime(audio.duration) : "--:--"; if (seek) seek.value = audio.duration ? String(Math.floor(audio.currentTime / audio.duration * 1000)) : "0"; });
-    on(seek, 'input', function () { if (audio && audio.duration) audio.currentTime = Number(seek.value || 0) / 1000 * audio.duration; });
+    on(audio, 'timeupdate', function () {
+      var dur = Number(audio.duration);
+      var hasDur = isFinite(dur) && dur > 0;
+      if (cur) cur.textContent = formatTime(audio.currentTime);
+      if (total) total.textContent = hasDur ? formatTime(dur) : "--:--";
+      if (seek) {
+        seekProgrammaticUpdate = true;
+        seek.value = hasDur ? String(Math.floor((audio.currentTime || 0) / dur * 1000)) : "0";
+        setTimeout(function () { seekProgrammaticUpdate = false; }, 0);
+      }
+    });
+    on(seek, 'input', function () {
+      if (seekProgrammaticUpdate) return;
+      var dur = Number(audio && audio.duration);
+      if (audio && isFinite(dur) && dur > 0) audio.currentTime = Number(seek.value || 0) / 1000 * dur;
+    });
 
     updateTrackButtons();
     syncUI(); renderVoices().catch(function (e) { setStatus("音色列表读取失败，仍可打开设置"); setError(e && e.message ? e.message : String(e)); });

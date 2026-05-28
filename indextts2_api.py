@@ -91,6 +91,9 @@ parser.add_argument("--cuda_kernel", action="store_true", default=True, help="Us
 parser.add_argument("--no_cuda_kernel", dest="cuda_kernel", action="store_false", help="Disable BigVGAN CUDA kernel")
 parser.add_argument("--qwen_emo", action="store_true", default=False, help="Enable Qwen text-emotion model (loads ~2GB to GPU). Off by default; TAVO front-end uses emotion vectors and never calls this.")
 parser.add_argument("--no_qwen_emo", dest="qwen_emo", action="store_false", help="(legacy) Qwen is already off by default; this flag is a no-op kept for backward compatibility.")
+parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=float(os.getenv("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION", "0.18")), help="vLLM GPU memory reservation ratio. Lower is safer on 12GB GPUs.")
+parser.add_argument("--vllm_enforce_eager", action="store_true", default=os.getenv("INDEXTTS_VLLM_ENFORCE_EAGER", "1") != "0", help="Disable vLLM CUDA graph capture for lower memory pressure (default: on).")
+parser.add_argument("--no_vllm_enforce_eager", dest="vllm_enforce_eager", action="store_false", help="Allow vLLM CUDA graph capture for potentially faster GPT generation.")
 args = parser.parse_args()
 
 # device = args.device
@@ -320,7 +323,7 @@ STREAM_MODE_SETTINGS = {
         "first_tokens": 12,
         "min_tokens": 12,
         "diffusion_steps": 8,
-        "prompt_audio_seconds": 6,
+        "prompt_audio_seconds": 8,
     },
     "balanced": {
         "target_tokens": 56,
@@ -328,7 +331,7 @@ STREAM_MODE_SETTINGS = {
         "first_tokens": 16,
         "min_tokens": 16,
         "diffusion_steps": 8,
-        "prompt_audio_seconds": 6,
+        "prompt_audio_seconds": 8,
     },
     "expressive": {
         "target_tokens": STREAM_TARGET_SEGMENT_TOKENS,
@@ -1670,6 +1673,60 @@ async def perf_diagnostics():
     })
 
 
+@APP.get("/diagnostics/resource")
+async def resource_diagnostics():
+    """Return lightweight memory/cache state for 12GB GPU stability checks."""
+    pipeline = globals().get("tts_pipeline")
+    torch_cuda = {}
+    if torch.cuda.is_available():
+        try:
+            torch_cuda = {
+                "allocated_mb": round(torch.cuda.memory_allocated() / 1024 / 1024, 1),
+                "reserved_mb": round(torch.cuda.memory_reserved() / 1024 / 1024, 1),
+                "max_allocated_mb": round(torch.cuda.max_memory_allocated() / 1024 / 1024, 1),
+                "max_reserved_mb": round(torch.cuda.max_memory_reserved() / 1024 / 1024, 1),
+            }
+        except Exception as e:
+            torch_cuda = {"error": str(e)}
+    return JSONResponse(content={
+        "vllm_gpu_memory_utilization": float(args.vllm_gpu_memory_utilization),
+        "vllm_enforce_eager": bool(args.vllm_enforce_eager),
+        "fp16": bool(args.fp16),
+        "qwen_emo": bool(args.qwen_emo),
+        "live_jobs": len(LIVE_JOBS),
+        "stream_jobs": len(STREAM_JOBS),
+        "spk_condition_cache": {
+            "size": len(getattr(pipeline, "spk_condition_cache", {}) or {}) if pipeline is not None else 0,
+            "max": getattr(pipeline, "spk_condition_cache_max_items", None) if pipeline is not None else None,
+        },
+        "emo_condition_cache": {
+            "size": len(getattr(pipeline, "emo_condition_cache", {}) or {}) if pipeline is not None else 0,
+            "max": getattr(pipeline, "emo_condition_cache_max_items", None) if pipeline is not None else None,
+        },
+        "torch_cuda": torch_cuda,
+    })
+
+
+@APP.post("/diagnostics/clear_runtime_cache")
+async def clear_runtime_cache():
+    """Clear non-model runtime caches without unloading model weights."""
+    pipeline = globals().get("tts_pipeline")
+    cleared = {}
+    if pipeline is not None:
+        for attr in ("spk_condition_cache", "emo_condition_cache"):
+            cache = getattr(pipeline, attr, None)
+            if hasattr(cache, "clear"):
+                cleared[attr] = len(cache)
+                cache.clear()
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        except Exception:
+            pass
+    return JSONResponse(content={"cleared": cleared})
+
+
 @APP.get("/cache_audio/{key}")
 async def cache_audio_by_key(key: str):
     """Serve a cached audio blob directly by its snapshot cache key.
@@ -2380,6 +2437,8 @@ if __name__ == "__main__":
         # use_deepspeed=args.use_deepspeed,
         use_cuda_kernel=args.cuda_kernel,
         use_qwen_emo=args.qwen_emo,
+        gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+        vllm_enforce_eager=args.vllm_enforce_eager,
     )
     try:
         if host == "None":

@@ -61,7 +61,7 @@ def _pick_vllm_rpc_port():
 
 class IndexTTS2:
     def __init__(
-        self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None, use_cuda_kernel=None, gpu_memory_utilization=0.25, use_qwen_emo=True, **kwargs
+        self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None, use_cuda_kernel=None, gpu_memory_utilization=0.18, vllm_enforce_eager=True, use_qwen_emo=True, **kwargs
     ):
         """
         Args:
@@ -100,6 +100,7 @@ class IndexTTS2:
         vllm_dir = os.path.join(model_dir, "gpt")
         vllm_rpc_port = _pick_vllm_rpc_port()
         print(f">> vLLM data_parallel_rpc_port: {vllm_rpc_port}")
+        print(f">> vLLM gpu_memory_utilization={gpu_memory_utilization}, enforce_eager={vllm_enforce_eager}")
         engine_args = AsyncEngineArgs(
             model=vllm_dir,
             tensor_parallel_size=1,
@@ -113,7 +114,7 @@ class IndexTTS2:
             # TTS prompts are mostly unique; prefix cache lookups cost
             # more than they save here.
             enable_prefix_caching=False,
-            # enforce_eager=True,
+            enforce_eager=bool(vllm_enforce_eager),
         )
         indextts_vllm = AsyncLLM.from_engine_args(engine_args)
 
@@ -233,8 +234,8 @@ class IndexTTS2:
         self.cache_mel = None
         self.spk_condition_cache = OrderedDict()
         self.emo_condition_cache = OrderedDict()
-        self.spk_condition_cache_max_items = int(os.getenv("INDEXTTS_SPK_COND_CACHE_ITEMS", "8"))
-        self.emo_condition_cache_max_items = int(os.getenv("INDEXTTS_EMO_COND_CACHE_ITEMS", "16"))
+        self.spk_condition_cache_max_items = int(os.getenv("INDEXTTS_SPK_COND_CACHE_ITEMS", "4"))
+        self.emo_condition_cache_max_items = int(os.getenv("INDEXTTS_EMO_COND_CACHE_ITEMS", "8"))
         self.last_infer_stats = {}
 
         self.speaker_dict = {}
