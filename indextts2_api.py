@@ -357,8 +357,22 @@ class _LiveStreamingJob:
         self.finished = asyncio.Event()
         self.error: Optional[str] = None
         self.created_at = time.time()
+        self._perf_created = time.perf_counter()
         # 为字幕用：每段 PCM 起始字节偏移 + 文本 + 角色 + 真实时长
         self.segments_meta: List[dict] = []
+        self.metrics: Dict[str, object] = {
+            "created_at": self.created_at,
+            "state": "pending",
+            "segments_total": 0,
+            "segments_done": 0,
+            "lock_wait_s": None,
+            "first_pcm_s": None,
+            "total_wall_s": None,
+            "audio_duration_s": 0.0,
+            "rtf": None,
+            "cache_write_s": None,
+            "segments": [],
+        }
 
 
 def _gc_live_job(cache_key: str, delay: float = LIVE_JOB_LINGER_SECONDS):
@@ -494,8 +508,12 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
     """Background worker: runs dialogue inference, writes PCM to job.pcm,
     saves the complete WAV to snapshot_cache on finish. Survives client
     disconnects — no GET in flight is required."""
+    lock_wait_started = time.perf_counter()
+    job.metrics["state"] = "queued"
     try:
         async with tts_stream_lock:
+            job.metrics["state"] = "running"
+            job.metrics["lock_wait_s"] = round(time.perf_counter() - lock_wait_started, 3)
             from indextts.llm_proxy import _normalize_role
             segments = prepared["segments"]
             role_voice_paths = prepared["role_voice_paths"]
@@ -503,11 +521,14 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             sampling_kwargs = prepared["sampling_kwargs"]
             interval_ms = prepared["interval_ms"]
             default_emo_alpha = prepared["default_emo_alpha"]
+            job.metrics["segments_total"] = len([s for s in segments if (s.get("text") or "").strip()])
 
             async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
                 pcm = _chunk_to_pcm_bytes(chunk_wav)
                 job.sample_rate = sr
                 job.pcm.extend(pcm)
+                if pcm and job.metrics.get("first_pcm_s") is None:
+                    job.metrics["first_pcm_s"] = round(time.perf_counter() - job._perf_created, 3)
 
             for idx, seg in enumerate(segments):
                 role = _normalize_role(seg.get("role") or "")
@@ -550,6 +571,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     job.pcm.extend(silence)
 
                 seg_start_offset = len(job.pcm)
+                seg_started = time.perf_counter()
                 await tts_pipeline.infer(
                     spk_audio_prompt=voice_path,
                     emo_audio_prompt=style_audio,
@@ -562,8 +584,21 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     stream_chunk_callback=on_chunk,
                     **sampling_kwargs,
                 )
+                seg_wall = time.perf_counter() - seg_started
                 seg_byte_count = len(job.pcm) - seg_start_offset
                 seg_duration = seg_byte_count / (job.sample_rate * 2) if job.sample_rate else 0.0
+                seg_rtf = (seg_wall / seg_duration) if seg_duration > 0 else None
+                seg_metric = {
+                    "idx": idx,
+                    "role": role,
+                    "style": _segment_style_name(seg) or "neutral",
+                    "text_len": len(text),
+                    "wall_s": round(seg_wall, 3),
+                    "duration_s": round(seg_duration, 3),
+                    "rtf": round(seg_rtf, 3) if seg_rtf is not None else None,
+                    "pcm_bytes": seg_byte_count,
+                    "uses_style_audio": bool(style_audio),
+                }
                 job.segments_meta.append({
                     "idx": idx,
                     "role": role,
@@ -573,25 +608,49 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     "style_audio": style_audio,
                     "start_offset_bytes": seg_start_offset,
                     "duration_s": seg_duration,
+                    "rtf": seg_metric["rtf"],
+                    "wall_s": seg_metric["wall_s"],
                 })
+                job.metrics["segments"].append(seg_metric)
+                job.metrics["segments_done"] = len(job.segments_meta)
+                job.metrics["audio_duration_s"] = round(len(job.pcm) / (job.sample_rate * 2), 3) if job.sample_rate else 0.0
+                total_audio = float(job.metrics["audio_duration_s"] or 0.0)
+                total_wall = sum(float(s.get("wall_s") or 0.0) for s in job.metrics["segments"])
+                job.metrics["rtf"] = round(total_wall / total_audio, 3) if total_audio > 0 else None
 
         # Inference 完成 → 写完整 WAV 到 snapshot_cache，未来 /cache_audio/{key}
         # 可直接给 FileResponse（含 Content-Length，移动端可 seek）。
         try:
             from indextts import snapshot_cache
+            cache_write_started = time.perf_counter()
             wav_full = _make_complete_wav_bytes(bytes(job.pcm), job.sample_rate)
+            audio_duration = len(job.pcm) / (job.sample_rate * 2) if job.sample_rate else 0
+            job.metrics["audio_duration_s"] = round(audio_duration, 3)
+            job.metrics["total_wall_s"] = round(time.perf_counter() - job._perf_created, 3)
+            total_segment_wall = sum(float(s.get("wall_s") or 0.0) for s in job.metrics["segments"])
+            job.metrics["rtf"] = round(total_segment_wall / audio_duration, 3) if audio_duration > 0 else None
+            job.metrics["state"] = "saving"
             metadata = {
                 "kind": "tts_dialogue_stream_v1",
                 "segments_meta": job.segments_meta,
                 "sample_rate": job.sample_rate,
-                "duration_s": len(job.pcm) / (job.sample_rate * 2) if job.sample_rate else 0,
+                "duration_s": audio_duration,
             }
             snapshot_cache.save_cached_audio(job.cache_key, wav_full, metadata)
+            job.metrics["cache_write_s"] = round(time.perf_counter() - cache_write_started, 3)
+            job.metrics["state"] = "done"
+            _, json_path = snapshot_cache.cache_paths(job.cache_key)
+            saved_metadata = snapshot_cache._read_metadata(json_path)
+            saved_metadata["metrics"] = job.metrics
+            snapshot_cache._write_json_atomic(json_path, saved_metadata)
             snapshot_cache.prune_cache(max_items=5000)
         except Exception:
             traceback.print_exc()
     except Exception as e:
         job.error = str(e)
+        job.metrics["state"] = "failed"
+        job.metrics["error"] = str(e)
+        job.metrics["total_wall_s"] = round(time.perf_counter() - job._perf_created, 3)
         traceback.print_exc()
     finally:
         job.finished.set()
@@ -2024,6 +2083,7 @@ async def tts_dialogue_job_status_endpoint(cache_key: str):
             "segments_done": len(job.segments_meta),
             "segments_meta": job.segments_meta,
             "sample_rate": job.sample_rate,
+            "metrics": job.metrics,
             "error": job.error,
         })
     from indextts import snapshot_cache
@@ -2040,11 +2100,15 @@ async def tts_dialogue_job_status_endpoint(cache_key: str):
         params = meta.get("params") if isinstance(meta.get("params"), dict) else meta
         segments_meta = params.get("segments_meta") or meta.get("segments_meta") or []
         sample_rate = params.get("sample_rate") or meta.get("sample_rate") or 22050
+        metrics = params.get("metrics") or meta.get("metrics") or {}
+        duration_s = params.get("duration_s") or meta.get("duration_s")
         return JSONResponse(content={
             "state": "done", "cache_key": cache_key,
             "cache_url": f"/cache_audio/{cache_key}",
             "segments_meta": segments_meta,
             "sample_rate": sample_rate,
+            "duration_s": duration_s,
+            "metrics": metrics,
         })
     return JSONResponse(status_code=404, content={"state": "missing", "cache_key": cache_key})
 

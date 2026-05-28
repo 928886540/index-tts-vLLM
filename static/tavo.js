@@ -439,6 +439,14 @@
         state: state,
         createdAt: t.createdAt || Date.now(),
         voicesMap: t.voicesMap || null,
+        metrics: t.metrics ? {
+          first_pcm_s: t.metrics.first_pcm_s,
+          total_wall_s: t.metrics.total_wall_s,
+          audio_duration_s: t.metrics.audio_duration_s,
+          rtf: t.metrics.rtf,
+          segments_total: t.metrics.segments_total,
+          segments_done: t.metrics.segments_done
+        } : null,
         segments: (t.segments || []).map(function (s) {
           return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
         }),
@@ -1420,6 +1428,23 @@
     function savedTrackLabel(track) {
       return shouldUseElementForSavedTrack(track) ? "音频已保存" : "音频已就绪";
     }
+    function formatJobMetrics(metrics) {
+      if (!metrics) return "";
+      function num(v) { v = Number(v); return isFinite(v) ? v : null; }
+      var parts = [];
+      var first = num(metrics.first_pcm_s);
+      var total = num(metrics.total_wall_s);
+      var dur = num(metrics.audio_duration_s);
+      var rtf = num(metrics.rtf);
+      var done = num(metrics.segments_done);
+      var all = num(metrics.segments_total);
+      if (first != null) parts.push("首音 " + first.toFixed(1) + "s");
+      if (rtf != null) parts.push("RTF " + rtf.toFixed(2));
+      if (dur != null && dur > 0) parts.push("音频 " + dur.toFixed(1) + "s");
+      if (total != null) parts.push("总耗时 " + total.toFixed(1) + "s");
+      if (done != null && all != null && all > 0) parts.push("段 " + done + "/" + all);
+      return parts.join(" · ");
+    }
     async function askPlaySavedTrack(track) {
       if (!track || track.savePromptAsked || currentTrack() !== track || !isSavedTrack(track)) return;
       track.savePromptAsked = true;
@@ -1701,7 +1726,7 @@
         if (track.webAudioPlaying && !opts.forceElement) return true;
         if (opts.deferElement) {
           setStatus("音频已保存，可重播");
-          showTrackNotice(track, "音频已保存", "点播放可重播");
+          showTrackNotice(track, "音频已保存", formatJobMetrics(track.metrics) || "点播放可重播");
           return true;
         }
         try {
@@ -1736,6 +1761,9 @@
             var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(trackEntry.cacheKey), { cache: "no-store" });
             if (st.ok) {
               var j = await st.json();
+              if (j && j.metrics) {
+                trackEntry.metrics = j.metrics;
+              }
               if (j && j.cache_url) {
                 trackEntry.cacheUrl = new URL(j.cache_url, cleanBase(cfg.apiBase) + "/").href;
               }
@@ -1750,6 +1778,8 @@
                 attachCacheAudio(trackEntry, { forceElement: false, deferElement: trackEntry.webAudioPlaying });
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
+                var metricsLine = formatJobMetrics(trackEntry.metrics);
+                if (metricsLine) debugLog("📊 " + label + " 指标: " + metricsLine, "#9ff");
                 if (shouldAskPlaySaved) askPlaySavedTrack(trackEntry).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
                 done = true;
                 break;
@@ -2720,6 +2750,7 @@
             voice: t.voice || cfg.defaultVoice,
             mode: t.mode || "ai8",
             voicesMap: t.voicesMap || null,
+            metrics: t.metrics || null,
             segments: Array.isArray(t.segments) ? t.segments : [],
             fromHistory: savedState === "saved",
             state: savedState
