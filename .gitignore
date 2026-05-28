@@ -35,3 +35,7 @@ desktop.ini
 /outputs/
 /prompts/audio_history.json
 /prompts/history/
+
+# Local Leon_api runtime logs.
+/Leon_api/dev_tools/*.log
+/Leon_api/dev_tools/*.err
