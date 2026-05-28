@@ -275,6 +275,6 @@ def _prepare_inputs(
             max_num_scheduled_tokens)
 
 GPUModelRunner._prepare_inputs = _prepare_inputs
-print("✅  GPUModelRunner._prepare_inputs Patched")
+print("[OK] GPUModelRunner._prepare_inputs Patched")
 
 

@@ -110,20 +110,57 @@ function Initialize-ApiEnvironment {
     $env:HF_HOME = Join-Path $Root "checkpoints"
     $env:PATH = $scriptsPath + ";" + $env:PATH
 
-    $vsPath = "C:\Program Files\Microsoft Visual Studio\2022\Community"
-    $msvcRoot = Join-Path $vsPath "VC\Tools\MSVC"
+    $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+    $vsInstallPath = $null
+    if (Test-Path $vswhere) {
+        $vsInstallPath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+    }
+
+    if ([string]::IsNullOrWhiteSpace($vsInstallPath)) {
+        $candidateRoots = @(
+            "C:\Program Files\Microsoft Visual Studio\2022\Community",
+            "C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+        )
+        $vsInstallPath = $candidateRoots | Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+
+    if ([string]::IsNullOrWhiteSpace($vsInstallPath)) {
+        Write-Step "MSVC not found; BigVGAN CUDA kernel may fall back to torch."
+        return
+    }
+
+    $vsDevCmd = Join-Path $vsInstallPath "Common7\Tools\VsDevCmd.bat"
+    if (Test-Path $vsDevCmd) {
+        $cmd = "`"$vsDevCmd`" -arch=x64 -host_arch=x64 >nul && set"
+        $envLines = & cmd.exe /s /c $cmd
+        foreach ($line in $envLines) {
+            $idx = $line.IndexOf("=")
+            if ($idx -gt 0) {
+                $name = $line.Substring(0, $idx)
+                $value = $line.Substring($idx + 1)
+                Set-Item -Path ("Env:" + $name) -Value $value
+            }
+        }
+        Write-Step "MSVC environment loaded: $vsInstallPath"
+        return
+    }
+
+    $msvcRoot = Join-Path $vsInstallPath "VC\Tools\MSVC"
     $msvc = Get-ChildItem $msvcRoot -Directory -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending |
         Select-Object -First 1
-
     if ($null -ne $msvc) {
         $msvcBin = Join-Path $msvc.FullName "bin\Hostx64\x64"
         $env:PATH = $env:PATH + ";" + $msvcBin
-        Write-Step "MSVC found: $($msvc.Name)"
+        Write-Step "MSVC bin loaded: $($msvc.Name)"
+        return
     }
-    else {
-        Write-Step "MSVC not found; BigVGAN CUDA kernel may fall back to torch."
-    }
+
+    Write-Step "MSVC install found, but no x64 compiler path was detected."
 }
 
 function Start-ApiProcess {
