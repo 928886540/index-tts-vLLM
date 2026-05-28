@@ -2,6 +2,7 @@ import os
 import asyncio
 import random
 import re
+import socket
 import time
 from subprocess import CalledProcessError
 import traceback
@@ -39,6 +40,22 @@ from indextts.s2mel.modules.campplus.DTDNN import CAMPPlus
 from indextts.s2mel.modules.audio import mel_spectrogram
 
 import torch.nn.functional as F
+
+
+def _pick_vllm_rpc_port():
+    configured = os.getenv("INDEXTTS_VLLM_RPC_PORT", "").strip()
+    if configured:
+        try:
+            port = int(configured)
+            if 1 <= port <= 65535:
+                return port
+        except ValueError:
+            pass
+        print(f">> Invalid INDEXTTS_VLLM_RPC_PORT={configured!r}; choosing a free port.")
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 class IndexTTS2:
@@ -80,11 +97,14 @@ class IndexTTS2:
         from vllm.v1.engine.async_llm import AsyncLLM
 
         vllm_dir = os.path.join(model_dir, "gpt")
+        vllm_rpc_port = _pick_vllm_rpc_port()
+        print(f">> vLLM data_parallel_rpc_port: {vllm_rpc_port}")
         engine_args = AsyncEngineArgs(
             model=vllm_dir,
             tensor_parallel_size=1,
             dtype="auto",
             gpu_memory_utilization=gpu_memory_utilization,
+            data_parallel_rpc_port=vllm_rpc_port,
             # TTS is a single-stream workload — one request at a time.
             # Without this, vLLM reserves KV cache for ~9x concurrency
             # and squeezes s2mel/bigvgan on consumer GPUs.

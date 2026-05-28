@@ -267,7 +267,11 @@
       ".idx-roles{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}.idx-role-row{display:grid;grid-template-columns:96px 1fr 28px;gap:6px;align-items:center}.idx-role-name{min-width:0;border:1px solid rgba(206,170,230,.16);background:#0b0810;color:#eee7f4;border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;outline:none}.idx-voice-btn{min-width:0;border:1px solid rgba(206,170,230,.20);background:rgba(206,170,230,.08);color:#eee7f4;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit}.idx-voice-btn:hover{background:rgba(206,170,230,.16)}.idx-role-del{width:28px;height:28px;border:1px solid rgba(255,120,145,.28);background:rgba(120,38,52,.22);color:#ffd5dd;border-radius:8px;cursor:pointer;font-size:14px;line-height:1;font-family:inherit}.idx-role-lock{width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:rgba(238,231,244,.45);font-size:13px;user-select:none;cursor:default}.idx-add-role{margin-top:4px;width:100%;border:1px dashed rgba(206,170,230,.30);background:transparent;color:#d9b7f0;padding:8px;border-radius:9px;cursor:pointer;font-size:12px;font-family:inherit}.idx-add-role:hover{background:rgba(206,170,230,.06)}.idx-llm-details{margin-top:10px;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:rgba(255,255,255,.03);overflow:hidden}.idx-llm-details>summary{list-style:none;cursor:pointer;padding:9px 12px;font-size:12px;font-weight:700;color:#d9b7f0;display:flex;align-items:center;justify-content:space-between;user-select:none}.idx-llm-details>summary::-webkit-details-marker{display:none}.idx-llm-details>summary::after{content:'▾';font-size:10px;color:rgba(238,231,244,.55);transition:transform .2s}.idx-llm-details[open]>summary::after{transform:rotate(180deg)}.idx-llm-details>.idx-grid{padding:8px 12px 12px;border-top:1px solid rgba(206,170,230,.12)}",
       // 音色选择器弹窗
       ".idx-picker{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;box-shadow:0 -8px 32px rgba(0,0,0,.45);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;min-height:0}.idx-picker::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-picker-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(206,170,230,.18);margin-bottom:8px}.idx-picker-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-picker-close{border:0;background:transparent;color:#eee7f4;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}.idx-picker-tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;flex-wrap:wrap}.idx-picker-tab{flex:0 0 auto;border:1px solid rgba(206,170,230,.16);background:rgba(255,255,255,.04);color:#eee7f4;border-radius:999px;padding:5px 11px;cursor:pointer;font-size:11px;font-family:inherit;white-space:nowrap}.idx-picker-tab.is-active{border-color:#c890e8;background:rgba(200,144,232,.20);color:#fff}.idx-picker-search{margin-bottom:8px}.idx-picker-grid{flex:1 1 auto;min-height:200px;max-height:50vh;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-content:start;padding:2px}.idx-picker-item{min-height:54px;border:1px solid rgba(206,170,230,.16);border-radius:10px;background:rgba(255,255,255,.05);color:#eee7f4;text-align:left;padding:8px 8px 8px 12px;cursor:pointer;font-family:inherit;font-size:12px;line-height:1.35;display:flex;align-items:center;gap:6px;justify-content:space-between;transition:background .15s,border-color .15s}.idx-picker-item:hover{background:rgba(206,170,230,.14);border-color:rgba(206,170,230,.34)}.idx-picker-item.is-playing{border-color:#c890e8;background:rgba(200,144,232,.18);box-shadow:0 0 0 1px rgba(200,144,232,.22) inset}.idx-picker-item-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}.idx-picker-item-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}.idx-picker-item-sub{font-size:10px;color:rgba(238,231,244,.55);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-picker-apply{flex:0 0 auto;width:30px;height:30px;border-radius:50%;border:1px solid rgba(200,144,232,.45);background:rgba(200,144,232,.18);color:#fff;cursor:pointer;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:inherit;padding:0;line-height:1}.idx-picker-apply:hover{background:#c890e8;color:#170e20;border-color:#c890e8;transform:scale(1.05)}.idx-picker-apply:active{transform:scale(.95)}.idx-picker-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding-top:8px;border-top:1px solid rgba(206,170,230,.14);color:rgba(238,231,244,.72);font-size:11px}.idx-picker-pager button{border:1px solid rgba(206,170,230,.20);background:rgba(255,255,255,.06);color:#eee7f4;border-radius:7px;padding:3px 10px;cursor:pointer;font-family:inherit;font-size:11px}.idx-picker-pager button:disabled{opacity:.4;cursor:not-allowed}",
-      "@media(max-width:520px){.idx-card{padding:14px;border-radius:16px}.idx-panel{border-radius:16px}.idx-controls{gap:10px}.idx-ctrl-sm{width:40px;height:40px}.idx-ctrl-main{width:62px;height:62px}.idx-ctrl-add,.idx-ctrl-delete{width:44px;height:44px}.idx-grid{grid-template-columns:1fr}.idx-voices{grid-template-columns:1fr 1fr}.idx-role-row{grid-template-columns:84px 1fr 26px}.idx-picker-grid{grid-template-columns:1fr 1fr}}"
+      ".idx-card audio{display:none!important}.idx-info{padding-right:104px}.idx-card-counter{position:absolute;right:60px;top:18px;min-width:44px;height:30px;padding:0 9px;border:1px solid rgba(206,170,230,.22);border-radius:999px;background:rgba(20,14,28,.46);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:2}.idx-gear svg{width:19px;height:19px;fill:none!important;stroke:currentColor}",
+      ".idx-seek{-webkit-appearance:none;appearance:none;height:30px;background:transparent;accent-color:auto}.idx-seek::-webkit-slider-runnable-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72));box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}.idx-seek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;margin-top:-6px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18),0 4px 12px rgba(0,0,0,.35)}.idx-seek::-moz-range-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72))}.idx-seek::-moz-range-thumb{width:18px;height:18px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18)}",
+      ".idx-panel{width:min(760px,calc(100vw - 24px));max-width:760px;max-height:calc(100vh - 24px);margin:auto;border-radius:18px;background:rgba(12,8,18,.985);scrollbar-width:none}.idx-panel::-webkit-scrollbar{display:none}.idx-panel-head{top:-14px}.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.idx-field{display:flex;flex-direction:column;gap:5px;min-width:0}.idx-field.idx-wide{grid-column:1/-1}.idx-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(206,170,230,.12)}",
+      ".idx-picker,.idx-picker-grid{scrollbar-width:none}.idx-picker::-webkit-scrollbar,.idx-picker-grid::-webkit-scrollbar,.idx-subtitle::-webkit-scrollbar{display:none}.idx-picker-item.is-selected{border-color:#d8a7ff;background:rgba(200,144,232,.20);box-shadow:0 0 0 1px rgba(216,167,255,.24) inset,0 0 18px rgba(200,144,232,.14)}.idx-picker-selected{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:#d8a7ff;color:#160d1f;font-size:12px;font-weight:900;display:none;align-items:center;justify-content:center}.idx-picker-item.is-selected .idx-picker-selected{display:flex}.idx-picker-wave{flex:0 0 auto;width:24px;height:18px;display:none;align-items:center;justify-content:center;gap:2px}.idx-picker-item.is-selected .idx-picker-wave,.idx-picker-item.is-playing .idx-picker-wave{display:flex}.idx-picker-wave i{width:3px;border-radius:999px;background:#d8a7ff;opacity:.85;animation:idx-wave .78s ease-in-out infinite}.idx-picker-wave i:nth-child(2){animation-delay:.12s}.idx-picker-wave i:nth-child(3){animation-delay:.24s}@keyframes idx-wave{0%,100%{height:5px;opacity:.45}50%{height:17px;opacity:1}}",
+      "@media(max-width:520px){.idx-card{padding:14px;border-radius:16px}.idx-info{padding-right:96px}.idx-card-counter{right:56px;top:16px}.idx-panel{width:calc(100vw - 16px);max-height:calc(100vh - 16px);border-radius:16px}.idx-controls{gap:10px}.idx-ctrl-sm{width:40px;height:40px}.idx-ctrl-main{width:62px;height:62px}.idx-ctrl-add,.idx-ctrl-delete{width:44px;height:44px}.idx-grid{grid-template-columns:1fr}.idx-voices{grid-template-columns:1fr 1fr}.idx-role-row{grid-template-columns:84px 1fr 26px}.idx-picker-grid{grid-template-columns:1fr 1fr}}"
     ].join("");
     document.head.appendChild(style);
   }
@@ -460,7 +464,7 @@
   }
   function playIcon(state) { return state === "playing" ? '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; }
   function loadingIcon() { return '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10h-3a7 7 0 1 1-7-7V2z"/></svg>'; }
-  function gearIcon() { return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65-2-3.46-2.49 1a7 7 0 0 0-1.69-.98L14 2h-4l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.07.64-.07.98s.03.66.07.98l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98L10 22h4l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46-2.11-1.65z"/></svg>'; }
+  function gearIcon() { return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2.2"/><circle cx="15" cy="17" r="2.2"/></svg>'; }
   function formatTime(sec) { sec = Math.max(0, Number(sec || 0)); if (!isFinite(sec)) return "--:--"; return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0"); }
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/[\r\n,，;；]+/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
@@ -529,7 +533,8 @@
       var diff = Math.abs(sourceNorm.length - joinedNorm.length);
       var tolerance = Math.max(12, Math.ceil(sourceNorm.length * 0.02));
       if (sourceTail !== joinedTail || diff > tolerance) {
-        throw new Error("LLM 拆分疑似明显缺字：原文约 " + sourceNorm.length + " 字，返回约 " + joinedNorm.length + " 字，差 " + diff + " 字。原文尾部=" + sourceTail + "；返回尾部=" + joinedTail);
+        debugLog("⚠️ LLM 覆盖差异：原文约 " + sourceNorm.length + " 字，返回约 " + joinedNorm.length + " 字，差 " + diff + " 字。原文尾部=" + sourceTail + "；返回尾部=" + joinedTail, "#fc9");
+        return;
       }
       debugLog("⚠️ LLM 覆盖校验发现轻微差异但已放行：原文约 " + sourceNorm.length + " 字，返回约 " + joinedNorm.length + " 字，差 " + diff + " 字。", "#fc9");
     }
@@ -537,7 +542,7 @@
     if (tail && segments && segments.length) {
       var last = segments[segments.length - 1];
       if ((last.role || "") !== "旁白") {
-        throw new Error("LLM 尾段角色错误：原文最后引号后还有旁白/动作描写，但最后一段 role=" + (last.role || "?") + "。尾部=" + tail.slice(0, 40));
+        debugLog("⚠️ LLM 尾段可能应为旁白：当前 role=" + (last.role || "?") + "，尾部=" + tail.slice(0, 40), "#fc9");
       }
     }
   }
@@ -1170,16 +1175,17 @@
     root.innerHTML = [
       '<div class="idx-card">',
       '  <button class="idx-gear" type="button" data-role="gear" aria-label="设置">' + gearIcon() + '</button>',
+      '  <div class="idx-card-counter" data-role="counter">0/0</div>',
       '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点播放</div></div></div>',
       '  <div class="idx-seek-wrap"><input class="idx-seek" data-role="seek" type="range" min="0" max="1000" value="0" disabled><div class="idx-time"><span data-role="current">00:00</span><span data-role="total">--:--</span></div></div>',
-      '  <div class="idx-subtitle idx-hidden" data-role="subtitle"></div>',
+      '  <div class="idx-subtitle" data-role="subtitle"><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点音符生成新的音频</span></div></div>',
       '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button><button class="idx-ctrl idx-ctrl-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
         + '<div class="idx-section-title">播放模式</div>'
         + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>不走 LLM，整段使用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>第三方 AI 拆旁白/人物并输出 style + emo_vec</span></button></div>'
         // 单音色模式专属 —— mode==="single" 时显示
-        + '<div class="idx-single-only"><div class="idx-section-title">音色库</div><div class="idx-default-voice"><button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择音色…</button></div></div>'
+        + '<div class="idx-single-only"><div class="idx-section-title">音色选择</div><div class="idx-default-voice"><button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择音色…</button></div></div>'
         // AI 八情绪专属 —— mode==="ai8" 时显示；切换不清空（输入值在 readFields 时已存入 cfg）
         + '<div class="idx-ai8-only">'
           + '<div class="idx-section-title">角色音色映射</div>'
@@ -1190,7 +1196,7 @@
             + '<label class="idx-field"><span class="idx-label">LLM 模型</span><input class="idx-input" data-field="llmModel" placeholder="渡鸦/grok-4.20-fast"></label>'
             + '<label class="idx-field"><span class="idx-label">LLM Key</span><input class="idx-input" type="password" data-field="llmApiKey" placeholder="sk-..."></label>'
             + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.08"></label>'
-            + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速</option><option value="balanced">平衡</option><option value="expressive">表现</option></select></label>'
+            + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速</option><option value="balanced">平衡</option><option value="expressive">质量</option></select></label>'
           + '</div></details>'
         + '</div>'
         + '<div class="idx-actions"><button class="idx-btn" type="button" data-role="save">保存</button></div>'
@@ -1217,6 +1223,7 @@
     var status = first(root, '[data-role="status"]', '.idx-status');
     var title = first(root, '[data-role="title"]', '.idx-name');
     var cover = first(root, '[data-role="cover"]', '.idx-cover');
+    var counter = first(root, '[data-role="counter"]', '.idx-card-counter');
     var err = first(root, '[data-role="error"]', '.idx-error');
     var seek = first(root, '[data-role="seek"]', '.idx-seek');
     var cur = first(root, '[data-role="current"]', '.idx-time span:first-child');
@@ -1291,7 +1298,21 @@
         });
       } catch (_) {}
     }
-    function setError(v) { if (err) { err.textContent = v || ""; err.classList.toggle("idx-hidden", !v); } }
+    function historyStatusText() {
+      var total = generatedTracks.length;
+      if (!total) return "历史音频 0 条";
+      var idx = currentTrackIndex >= 0 ? currentTrackIndex + 1 : total;
+      return "历史音频 " + total + " 条 · 当前 " + idx + "/" + total;
+    }
+    function updateTrackCounter() {
+      var total = generatedTracks.length;
+      var idx = total && currentTrackIndex >= 0 ? currentTrackIndex + 1 : 0;
+      if (counter) counter.textContent = idx + "/" + total;
+    }
+    function setError(v) {
+      if (err) { err.textContent = ""; err.classList.add("idx-hidden"); }
+      if (v) showTrackNotice(currentTrack(), "发生错误", String(v));
+    }
     function currentTrack() { return currentTrackIndex >= 0 ? generatedTracks[currentTrackIndex] : null; }
     function currentVoicesMap(track) {
       return (track && track.voicesMap) || rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice);
@@ -1301,10 +1322,15 @@
       role = String(role || "").trim();
       return (role && voices[role]) || voices.default || cfg.defaultVoice || "";
     }
+    function displayRoleName(role) {
+      role = String(role || "").trim();
+      if (role === "用户") return (context && context.userName) ? context.userName : "用户";
+      return role || "旁白";
+    }
     function playbackLabelForRole(role, track) {
       role = String(role || "").trim() || "多音色";
       var voice = voiceNameForRole(role, track);
-      return role + (voice ? " / " + shortName(voice) : "");
+      return displayRoleName(role) + (voice ? " / " + shortName(voice) : "");
     }
     function trackPlaybackLabel(track) {
       if (!track) return shortName(cfg.defaultVoice);
@@ -1371,7 +1397,8 @@
       var track = currentTrack();
       if (prev) prev.disabled = currentTrackIndex <= 0;
       if (next) next.disabled = currentTrackIndex < 0 || currentTrackIndex >= generatedTracks.length - 1;
-      if (del) del.disabled = currentTrackIndex < 0 || !(track && (track.url || track.cacheUrl || track.streamUrl || track.cacheKey));
+      if (del) del.disabled = currentTrackIndex < 0 || !track;
+      updateTrackCounter();
     }
     function clearWebAudioProgressTimer() {
       if (webAudioProgressTimer) {
@@ -1432,6 +1459,17 @@
     function savedTrackLabel(track) {
       return shouldUseElementForSavedTrack(track) ? "音频已保存" : "音频已就绪";
     }
+    function waitingLabelForTrack(track) {
+      if (shouldUseElementForSavedTrack(track)) return "缓冲中…";
+      if (track && track.mode === "single") return "正在生成单音色音频…";
+      return "正在等待音频…";
+    }
+    function qualityModeLabel(mode) {
+      mode = String(mode || "");
+      if (mode === "fast") return "极速";
+      if (mode === "expressive") return "质量";
+      return "平衡";
+    }
     function formatJobMetrics(metrics) {
       if (!metrics) return "";
       function num(v) { v = Number(v); return isFinite(v) ? v : null; }
@@ -1442,7 +1480,7 @@
       var rtf = num(metrics.rtf);
       var done = num(metrics.segments_done);
       var all = num(metrics.segments_total);
-      if (metrics.performance_mode) parts.push("档位 " + String(metrics.performance_mode));
+      if (metrics.performance_mode) parts.push("档位 " + qualityModeLabel(metrics.performance_mode));
       if (first != null) parts.push("首音 " + first.toFixed(1) + "s");
       if (rtf != null) parts.push("RTF " + rtf.toFixed(2));
       if (dur != null && dur > 0) parts.push("音频 " + dur.toFixed(1) + "s");
@@ -1656,7 +1694,37 @@
         return false;
       }
     }
-    function selectTrack(index, autoplay) {
+    async function refreshTrackFromStatus(track, label) {
+      if (!track || !track.cacheKey || track.deleted) return false;
+      try {
+        var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(track.cacheKey), { cache: "no-store" });
+        if (!st.ok) return false;
+        var j = await st.json();
+        if (j && j.metrics) track.metrics = j.metrics;
+        if (j && j.cache_url) track.cacheUrl = new URL(j.cache_url, cleanBase(cfg.apiBase) + "/").href;
+        if (j && Array.isArray(j.segments_meta) && j.segments_meta.length) {
+          track.segments = j.segments_meta.map(function (s) {
+            return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
+          });
+        }
+        if (j && j.state === "done") {
+          setTrackState(track, "saved");
+          attachCacheAudio(track, { deferElement: true });
+          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          debugLog("✅ " + (label || "track") + " 已保存，切换为历史音频", "#9f9");
+          return true;
+        }
+        if (j && j.state === "failed") {
+          track.error = j.error || "服务端生成失败";
+          setTrackState(track, "failed");
+          return true;
+        }
+      } catch (e) {
+        debugLog("⚠️ 检查历史音频状态失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
+      return false;
+    }
+    async function selectTrack(index, autoplay) {
       if (index < 0 || index >= generatedTracks.length) return;
       var track = generatedTracks[index];
       currentTrackIndex = index;
@@ -1667,12 +1735,19 @@
       stopWebAudioPlayback("switch");
       stopSubtitle();
       hideSubtitlePanel();
-      var srcUrl = trackPlayableUrl(track);
-      debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
+      var srcUrl = "";
       // 统一先重置进度条/时间显示
       if (seek) { seek.value = "0"; }
       if (cur) cur.textContent = "00:00";
       if (total) total.textContent = "--:--";
+      if (state === "live" && track.cacheKey && !track.deleted) {
+        setStatus("检查历史音频…");
+        showTrackNotice(track, "检查历史音频…", "如果已保存，会直接切到可拖动音频");
+        await refreshTrackFromStatus(track, "select snapshot");
+        state = trackState(track);
+      }
+      srcUrl = trackPlayableUrl(track);
+      debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
       if (srcUrl) {
         if (shouldUseWebAudioForLiveTrack(track)) {
           clearElementAudioSrc();
@@ -1684,7 +1759,7 @@
             showTrackNotice(track, "等待首段音频…", "正在连接流式音频");
             playTrackViaWebAudio(track, srcUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在连接流式音频", waitDetail: "正在合成第一段" });
           } else {
-            setStatus("已选择第 " + String(index + 1) + " 首");
+            setStatus(historyStatusText());
             showTrackNotice(track, "流式生成中", "点播放继续等待");
           }
           updateTrackButtons();
@@ -1699,7 +1774,7 @@
           setStatus("正在加载音频…");
           showTrackNotice(track, "正在加载音频…", shouldUseElementForSavedTrack(track) ? "已加载音频，支持拖动" : "马上开始播放");
         } else {
-          setStatus("已选择第 " + String(index + 1) + " 首");
+          setStatus(historyStatusText());
           showTrackNotice(track, savedTrackLabel(track), shouldUseElementForSavedTrack(track) ? "点播放开始，可拖动进度条" : "点播放开始");
         }
         updateTrackButtons();
@@ -1714,10 +1789,10 @@
         setStatus("生成失败");
       } else if (state === "live") {
         showTrackNotice(track, "流式生成中", "等待音频保存或继续播放");
-        setStatus("流式生成中");
+        setStatus(historyStatusText());
       } else {
-        showTrackNotice(track, track.noticeTitle || ("第 " + String(index + 1) + " 首尚未就绪"), track.noticeDetail || "生成完成后会自动显示歌词");
-        setStatus(track.noticeTitle || ("第 " + String(index + 1) + " 首尚未就绪"));
+        showTrackNotice(track, track.noticeTitle || "音频尚未就绪", track.noticeDetail || "生成完成后会自动显示歌词");
+        setStatus(historyStatusText());
       }
       updateTrackButtons();
     }
@@ -1762,6 +1837,7 @@
       (async function () {
         var done = false;
         for (var i = 0; i < 240; i++) {
+          if (trackEntry.deleted) { done = true; break; }
           try {
             var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(trackEntry.cacheKey), { cache: "no-store" });
             if (st.ok) {
@@ -1800,25 +1876,54 @@
           }
           await new Promise(function(r){ setTimeout(r, 1000); });
         }
-        if (!done && !isSavedTrack(trackEntry)) {
+        if (!done && !trackEntry.deleted && !isSavedTrack(trackEntry)) {
           trackEntry.cachePollStarted = false;
           debugLog("⚠️ " + label + " 等待落盘超时，cacheKey=" + trackEntry.cacheKey, "#fc9");
         }
       })();
     }
-    function clearCurrentTrack() {
+    async function confirmDeleteTrack(track) {
+      if (!track) return false;
+      var label = generatedTracks.length ? ((currentTrackIndex + 1) + "/" + generatedTracks.length) : "当前音频";
+      try {
+        if (window.tavo && tavo.utils && typeof tavo.utils.select === "function") {
+          var choice = await tavo.utils.select([
+            { value: "cancel", label: "取消", description: "保留这条历史音频" },
+            { value: "delete", label: "确认删除", description: "删除当前卡片和关联缓存" }
+          ], "删除 " + label + "？", "cancel");
+          return choice === "delete";
+        }
+      } catch (e) {
+        debugLog("⚠️ 删除确认弹窗失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
+      return typeof window.confirm === "function" ? window.confirm("确认删除当前音频？这会删除历史记录和关联缓存。") : true;
+    }
+    async function deleteRemoteTrack(track) {
+      if (!track) return;
+      var base = cleanBase(cfg.apiBase);
+      try {
+        if (track.cacheKey) {
+          await fetch(base + "/tts_dialogue_stream_job/" + encodeURIComponent(track.cacheKey), { method: "DELETE" }).catch(function () {});
+          await fetch(base + "/cache/" + encodeURIComponent(track.cacheKey), { method: "DELETE" }).catch(function () {});
+        } else if (track.deleteUrl) {
+          await fetch(track.deleteUrl, { method: "DELETE" }).catch(function () {});
+        }
+      } catch (e) {
+        debugLog("⚠️ 删除服务端关联缓存失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
+    }
+    async function clearCurrentTrack() {
       if (currentTrackIndex < 0) return;
+      var target = currentTrack();
+      if (!await confirmDeleteTrack(target)) return;
       var removed = generatedTracks.splice(currentTrackIndex, 1)[0];
+      if (removed) removed.deleted = true;
       try { audio.pause(); } catch (_) {}
       stopWebAudioPlayback("switch");
       if (removed && removed.url && /^blob:/i.test(removed.url)) {
         try { URL.revokeObjectURL(removed.url); } catch (_) {}
       }
-      if (removed && removed.cacheKey) {
-        fetch(cleanBase(cfg.apiBase) + "/cache/" + encodeURIComponent(removed.cacheKey), { method: "DELETE" }).catch(function () {});
-      } else if (removed && removed.deleteUrl) {
-        fetch(removed.deleteUrl, { method: "DELETE" }).catch(function () {});
-      }
+      deleteRemoteTrack(removed).catch(function () {});
       // 删除后同步把变更写回 tavo.set，下次进页面就不会再看到这张卡片
       if (messageId) {
         saveTracksForMessage(messageId, generatedTracks).catch(function(){});
@@ -1826,7 +1931,7 @@
       }
       currentTrackIndex = Math.min(currentTrackIndex, generatedTracks.length - 1);
       if (currentTrackIndex >= 0) {
-        selectTrack(currentTrackIndex, false);
+        await selectTrack(currentTrackIndex, false);
       } else {
         audio.removeAttribute("src");
         audio.load();
@@ -1835,7 +1940,8 @@
         if (cur) cur.textContent = "00:00";
         if (total) total.textContent = "--:--";
         setPlayState("idle");
-        setStatus("没有可播放音频，点音符生成");
+        setStatus("历史音频 0 条");
+        showTrackNotice(null, "历史音频 0 条", "点音符生成新的音频");
         updateTrackButtons();
       }
     }
@@ -1920,16 +2026,38 @@
       $all(panel, '.idx-voice').forEach(function (b) { b.classList.toggle('is-active', b.dataset.voice === cfg.defaultVoice); });
     }
     var availableVoices = [];
+    function voiceCategoryRank(subdir) {
+      subdir = String(subdir || "");
+      if (subdir === "女声") return 0;
+      if (subdir === "男声") return 1;
+      if (subdir === "情绪") return 2;
+      if (subdir === "声腔") return 3;
+      if (subdir === "喘息") return 4;
+      if (!subdir) return 99;
+      return 50;
+    }
+    function sortVoices(list) {
+      return (list || []).slice().sort(function (a, b) {
+        var ra = voiceCategoryRank(a && a.subdir);
+        var rb = voiceCategoryRank(b && b.subdir);
+        if (ra !== rb) return ra - rb;
+        var sa = String((a && a.subdir) || "");
+        var sb = String((b && b.subdir) || "");
+        if (sa !== sb) return sa.localeCompare(sb, "zh-Hans-CN");
+        return String((a && a.name) || "").localeCompare(String((b && b.name) || ""), "zh-Hans-CN");
+      });
+    }
     async function renderVoices() {
-      setStatus("正在读取音频...");
+      setStatus("正在读取音色列表...");
       var voices = await listVoices(cfg.apiBase);
-      availableVoices = voices;
-      if (!cfg.defaultVoice && voices[0]) cfg.defaultVoice = voices[0].name;
+      availableVoices = sortVoices(voices);
+      if (!cfg.defaultVoice && availableVoices[0]) cfg.defaultVoice = availableVoices[0].name;
       // 旧 voicesBox grid 已经被"默认音色按钮"替代,这里只更新按钮文本
       var defBtn = first(panel, '[data-role="default-voice-btn"]');
       if (defBtn) defBtn.textContent = cfg.defaultVoice ? cfg.defaultVoice : "选择默认音色…";
       syncUI();
-      setStatus(voices.length ? "已读取 " + voices.length + " 条音频" : "没有找到音频");
+      setStatus(historyStatusText());
+      if (!generatedTracks.length) showTrackNotice(null, "历史音频 0 条", voices.length ? "已就绪，可生成新的音频" : "没有找到可用音色");
     }
     async function previewVoice() {
       if (!cfg.defaultVoice) return;
@@ -1943,7 +2071,7 @@
 
     // ───── 实时字幕控制器 ───── (按当前播放时间显示对应 segment 的角色头像+台词)
     var DEFAULT_AVATARS = {
-      narrator: cleanBase(cfg.apiBase || scriptOrigin()) + "/prompts/icon/common.png",
+      narrator: cleanBase(cfg.apiBase || scriptOrigin()) + "/prompts/icon/narrator-transparent.png",
       user:     'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1f3a5a"/><stop offset="1" stop-color="#0e1f33"/></linearGradient></defs><rect width="512" height="512" fill="url(#g)"/><text x="256" y="330" font-family="Microsoft YaHei,sans-serif" font-size="180" fill="#a5d4ff" text-anchor="middle" font-weight="bold">用</text></svg>'),
       character:'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a2240"/><stop offset="1" stop-color="#33152a"/></linearGradient></defs><rect width="512" height="512" fill="url(#g)"/><text x="256" y="330" font-family="Microsoft YaHei,sans-serif" font-size="180" fill="#ffd4e8" text-anchor="middle" font-weight="bold">人</text></svg>')
     };
@@ -1960,8 +2088,8 @@
       subBox.innerHTML = '<div class="idx-sub-notice"><strong>' + escapeHtml(titleText || "") + '</strong>' + (detailText ? '<span>' + escapeHtml(detailText) + '</span>' : '') + '</div>';
     }
     function hideSubtitlePanel() {
-      clearSubtitleDom();
-      if (subBox) subBox.classList.add('idx-hidden');
+      stopSubtitle();
+      showSubtitleNotice("未播放音频", historyStatusText());
     }
     function showTrackNotice(track, titleText, detailText) {
       if (track) {
@@ -2004,16 +2132,17 @@
       activeSubtitle = null;
     }
 
-    function renderSubtitleRows(timeline) {
+    function renderSubtitleRows(timeline, resetScroll) {
       if (!subBox) return;
       subBox.classList.remove('idx-hidden');
       // 头像不进歌词区(占空间)。说话人通过左上角 cover 切换体现。
       subBox.innerHTML = timeline.map(function (row, idx) {
         var text = String(row.text || "");
-        return '<div class="idx-sub-row" data-idx="' + idx + '" data-start="' + row.start.toFixed(3) + '" data-role-name="' + escapeHtml(row.role || "旁白") + '" title="点击跳转到这一句">'
+        return '<div class="idx-sub-row" data-idx="' + idx + '" data-start="' + row.start.toFixed(3) + '" data-role-name="' + escapeHtml(displayRoleName(row.role || "旁白")) + '" title="点击跳转到这一句">'
           + '<span class="idx-sub-text">' + escapeHtml(text) + '</span>'
           + '</div>';
       }).join("");
+      if (resetScroll) { try { subBox.scrollTop = 0; } catch (_) {} }
       $all(subBox, '.idx-sub-row').forEach(function (row) {
         on(row, 'click', function () {
           var startSec = parseFloat(row.dataset.start || "0");
@@ -2040,7 +2169,7 @@
             cover.style.backgroundSize = "cover";
             cover.style.backgroundPosition = "center";
           }
-          if (title) title.textContent = role;
+          if (title) title.textContent = displayRoleName(role);
         } catch (_) {}
       }
       if (role && (audio && !audio.paused || (currentTrack() && currentTrack().webAudioPlaying))) {
@@ -2076,8 +2205,8 @@
         });
         ms.setActionHandler('play',  function () { try { generate(false).catch(function(){}); } catch (_) {} });
         ms.setActionHandler('pause', function () { try { if (currentTrack() && currentTrack().webAudioPlaying) stopWebAudioPlayback("pause"); else audio.pause(); } catch (_) {} });
-        ms.setActionHandler('previoustrack', function () { try { selectTrack(currentTrackIndex - 1, true); } catch (_) {} });
-        ms.setActionHandler('nexttrack',     function () { try { selectTrack(currentTrackIndex + 1, true); } catch (_) {} });
+        ms.setActionHandler('previoustrack', function () { try { selectTrack(currentTrackIndex - 1, true).catch(function(){}); } catch (_) {} });
+        ms.setActionHandler('nexttrack',     function () { try { selectTrack(currentTrackIndex + 1, true).catch(function(){}); } catch (_) {} });
         try {
           if (audio && isFinite(audio.duration) && audio.duration > 0) {
             ms.setPositionState({
@@ -2109,14 +2238,14 @@
         var boxRect = subBox.getBoundingClientRect();
         var rowRect = cur.getBoundingClientRect();
         var offset = (rowRect.top + rowRect.height / 2) - (boxRect.top + boxRect.height / 2);
-        if (Math.abs(offset) > 1) subBox.scrollBy({ top: offset, behavior: 'smooth' });
+        if (Math.abs(offset) > 2) subBox.scrollTop = Math.max(0, subBox.scrollTop + offset);
       } catch (_) {}
     }
 
     function startSubtitle(trackEntry, getTimeSec) {
       stopSubtitle();
       var segs = (trackEntry && trackEntry.segments) || [];
-      if (!segs.length) { clearSubtitleDom(); if (subBox) subBox.classList.add('idx-hidden'); return; }
+      if (!segs.length) { showSubtitleNotice("暂无歌词", "音频可播放，但没有拿到分段字幕"); return; }
       var gap = (Number(cfg.intervalMs || 350) / 1000);
       var timeline = [];
       function rebuild(metaList) {
@@ -2143,7 +2272,7 @@
           }
           t += segDur + gap;
         }
-        renderSubtitleRows(timeline);
+        renderSubtitleRows(timeline, !metaList);
       }
       rebuild();
       var lastIdx = -1;
@@ -2303,7 +2432,11 @@
     function pickerSubdirs() {
       var set = {};
       (availableVoices || []).forEach(function (v) { set[v.subdir || ""] = true; });
-      return Object.keys(set).filter(function (s) { return !!s; }).sort();
+      return Object.keys(set).filter(function (s) { return !!s; }).sort(function (a, b) {
+        var ra = voiceCategoryRank(a), rb = voiceCategoryRank(b);
+        if (ra !== rb) return ra - rb;
+        return a.localeCompare(b, "zh-Hans-CN");
+      });
     }
     function renderPickerTabs() {
       if (!pickerTabsEl) return;
@@ -2362,13 +2495,19 @@
       if (pickerState.page > totalPages) pickerState.page = totalPages;
       var start = (pickerState.page - 1) * pickerState.pageSize;
       var page = filtered.slice(start, start + pickerState.pageSize);
+      var selectedVoice = "";
+      if (pickerState.rowIdx === -2) selectedVoice = cfg.defaultVoice || "";
+      else if (pickerState.rowIdx >= 0 && cfg.roleVoiceList && cfg.roleVoiceList[pickerState.rowIdx]) selectedVoice = cfg.roleVoiceList[pickerState.rowIdx].voice || "";
       pickerGridEl.innerHTML = page.map(function (v) {
         var sd = v.subdir || "";
-        return '<div class="idx-picker-item" data-voice="' + escapeHtml(v.name) + '" title="点击试听">'
+        var selected = v.name === selectedVoice;
+        return '<div class="idx-picker-item' + (selected ? ' is-selected' : '') + '" data-voice="' + escapeHtml(v.name) + '" title="点击试听">'
           + '<div class="idx-picker-item-info">'
             + '<span class="idx-picker-item-name">' + escapeHtml(v.name.split("/").pop()) + '</span>'
             + (sd ? '<span class="idx-picker-item-sub">' + escapeHtml(sd) + '</span>' : '')
           + '</div>'
+          + '<span class="idx-picker-wave" aria-hidden="true"><i></i><i></i><i></i></span>'
+          + '<span class="idx-picker-selected" aria-hidden="true">✓</span>'
           + '<button class="idx-picker-apply" type="button" data-action="apply" title="选用此音色" aria-label="选用">✓</button>'
           + '</div>';
       }).join("") || '<div style="grid-column:1/-1;padding:20px;text-align:center;color:rgba(238,231,244,.5);font-size:12px">没有匹配的音色</div>';
@@ -2418,6 +2557,17 @@
       }
     });
 
+    function pauseLiveTrack(track) {
+      if (!track) return;
+      track.pausedByUser = true;
+      try { audio.pause(); } catch (_) {}
+      stopWebAudioPlayback("pause");
+      setPlayState("idle");
+      if (track.cacheKey) pollCacheUpgrade(track, "paused snapshot");
+      setStatus("已暂停，后台继续保存");
+      showTrackNotice(track, "已暂停", track.cacheKey ? "合成还在后台进行，保存后可播放历史音频" : "已停止等待，点播放可继续");
+    }
+
     async function generate(force) {
       readFields(); await saveConfig(cfg, characterId); setError("");
       if (!messageText) { setError("当前消息没有可朗读正文。"); return; }
@@ -2429,6 +2579,18 @@
         var existingTrack = currentTrack();
         if (existingTrack && existingTrack.webAudioPlaying) {
           stopWebAudioPlayback("pause");
+          return;
+        }
+        if (existingTrack && existingTrack.pausedByUser && (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending")) {
+          existingTrack.pausedByUser = false;
+          setPlayState("loading");
+          setStatus("继续等待音频…");
+          showTrackNotice(existingTrack, "继续等待音频…", existingTrack.cacheKey ? "正在检查保存状态" : "正在等待生成任务返回");
+          if (existingTrack.cacheKey) pollCacheUpgrade(existingTrack, "resume snapshot");
+          return;
+        }
+        if (existingTrack && (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending") && play && play.dataset.state === "loading") {
+          pauseLiveTrack(existingTrack);
           return;
         }
         if (shouldUseElementForSavedTrack(existingTrack)) {
@@ -2454,7 +2616,7 @@
           return;
         }
         // 没 src 但有卡片 → 选当前卡片，让 selectTrack 决定 URL 来源
-        selectTrack(currentTrackIndex, true);
+        await selectTrack(currentTrackIndex, true);
         return;
       }
       // 兼容旧逻辑（无卡片 + audio.src 残留时）
@@ -2488,7 +2650,7 @@
         currentTrackIndex = generatedTracks.length - 1;
         // 关键:重置 audio.src / seek / 标题 到新卡片,否则旧 audio 还在播,UI 错位
         try { audio.pause(); } catch (_) {}
-        selectTrack(currentTrackIndex, false);
+        await selectTrack(currentTrackIndex, false);
         setStatus("准备生成…");
         showTrackNotice(placeholder, "准备生成…", "等待 LLM 分析文本");
         debugLog("🎵 立即 push 占位卡片(currentTrackIndex=" + currentTrackIndex + ")", "#9ff");
@@ -2506,6 +2668,7 @@
           debugLog("🎬 AI 八情绪生成开始 (text=" + messageText.length + " 字)", "#fff");
           startServerLogPolling(base);
           var segments = await parseWithLlm(messageText, cfg, setStatus, context);
+          if (placeholder && placeholder.deleted) throw Object.assign(new Error("生成已取消"), { name: "AbortError" });
           var roleCounts = {}; segments.forEach(function (s) { roleCounts[s.role] = (roleCounts[s.role] || 0) + 1; });
           var roleSummary = Object.keys(roleCounts).map(function (r) { return r + "×" + roleCounts[r]; }).join(", ");
           setStatus("开始合成 " + segments.length + " 段…");
@@ -2526,6 +2689,10 @@
             debugLog("🔗 cache_key=" + jobInfo.cacheKey + " cached=" + jobInfo.cached + " live=" + jobInfo.live, "#9f9");
           } finally {
             clearInterval(ttsTimer);
+          }
+          if (placeholder && placeholder.deleted) {
+            if (jobInfo && jobInfo.cacheKey) deleteRemoteTrack({ cacheKey: jobInfo.cacheKey }).catch(function () {});
+            throw Object.assign(new Error("生成已取消"), { name: "AbortError" });
           }
           var streamUrl = jobInfo.streamUrl;
           var cacheUrl = jobInfo.cacheUrl;
@@ -2553,6 +2720,13 @@
           if (messageId) {
             saveTracksForMessage(messageId, generatedTracks).catch(function(){});
             debugLog("💾 立即写 tavo.set cacheKey=" + jobInfo.cacheKey, "#9ff");
+          }
+          if (trackEntry.pausedByUser) {
+            setStatus("已暂停，后台保存中");
+            showTrackNotice(trackEntry, "已暂停", "合成还在后台进行，保存后会成为历史音频");
+            pollCacheUpgrade(trackEntry, "paused snapshot");
+            stopServerLogPolling();
+            return;
           }
           // 如果服务端早就有这条音频的缓存，走完整音频播放器；这是可拖动进度条的路径。
           if (jobInfo.cached && cacheUrl) {
@@ -2582,7 +2756,7 @@
             // 桌面端 chunked WAV 给 <audio> 元素直接播。
             trackEntry.url = streamUrl;
             trackEntry.streaming = true;
-            selectTrack(generatedTracks.length - 1, false);
+            await selectTrack(generatedTracks.length - 1, false);
             var totalSec = Math.floor((Date.now() - t0) / 1000);
             setStatus("流式播放 " + segments.length + " 段");
             debugLog("▶️ 启动音频播放, 截至此处用时 " + totalSec + "s", "#9f9");
@@ -2597,8 +2771,9 @@
         } else {
           url = await createSingleStreamJob(base, cfg, messageText, force);
           generatedTracks.push({ url: url, cacheKey: "", deleteUrl: singleDeleteUrl(base, cfg, messageText), createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode, state: "live", status: "running", pendingBlob: true, streaming: true });
-          selectTrack(generatedTracks.length - 1, false);
-          setStatus("正在连接流式音频...");
+          await selectTrack(generatedTracks.length - 1, false);
+          setStatus("正在生成单音色音频...");
+          showTrackNotice(currentTrack(), "正在生成单音色音频…", "声音出来后会自动播放");
         }
         setAudioPlaybackRate();
         await audio.play().catch(function (e) {
@@ -2643,9 +2818,9 @@
     on(add, 'touchstart', function () { primeAudioContext(); });
     on(play, 'click', function () { primeAudioContext(); generate(false); });
     on(add, 'click', function () { primeAudioContext(); generate(true); });
-    on(prev, 'click', function () { selectTrack(currentTrackIndex - 1, true); });
-    on(next, 'click', function () { selectTrack(currentTrackIndex + 1, true); });
-    on(del, 'click', clearCurrentTrack);
+    on(prev, 'click', function () { selectTrack(currentTrackIndex - 1, true).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(next, 'click', function () { selectTrack(currentTrackIndex + 1, true).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(del, 'click', function () { clearCurrentTrack().catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(first(panel, '[data-role="save"]'), 'click', async function () { readFields(); await saveConfig(cfg, characterId); syncUI(); closeDialog(panel); setStatus("设置已保存"); });
     // IME 组词期间不覆盖输入值（搜狗/微软拼音等）。事件委托到 panel 上，覆盖所有 data-field 输入。
     try {
@@ -2695,9 +2870,10 @@
     });
     on(audio, 'waiting', function () {
       var t = currentTrack();
+      var label = waitingLabelForTrack(t);
       setPlayState("loading");
-      setStatus(shouldUseElementForSavedTrack(t) ? "缓冲中…" : "正在等待音频流…");
-      if (t) showTrackNotice(t, shouldUseElementForSavedTrack(t) ? "缓冲中…" : "正在等待音频流…", "歌词会停在当前播放位置");
+      setStatus(label);
+      if (t) showTrackNotice(t, label, "歌词会停在当前播放位置");
     });
     on(audio, 'canplay', function () {
       setError("");
@@ -2769,7 +2945,8 @@
         });
         currentTrackIndex = generatedTracks.length - 1;
         updateTrackButtons();
-        setStatus("加载历史 " + generatedTracks.length + " 段");
+        setStatus(historyStatusText());
+        showTrackNotice(currentTrack(), historyStatusText(), "点播放继续，或用左右按钮切换历史音频");
         debugLog("📂 恢复历史 tracks: " + generatedTracks.length + " 段, 每张含 segments: " +
           generatedTracks.map(function(t){return (t.segments||[]).length;}).join(','), "#9ff");
       }).catch(function () {});

@@ -388,6 +388,7 @@ class _LiveStreamingJob:
         self.pcm = bytearray()
         self.finished = asyncio.Event()
         self.error: Optional[str] = None
+        self.cancelled = False
         self.created_at = time.time()
         self._perf_created = time.perf_counter()
         # 为字幕用：每段 PCM 起始字节偏移 + 文本 + 角色 + 真实时长
@@ -545,6 +546,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
     job.metrics["state"] = "queued"
     try:
         async with tts_stream_lock:
+            if job.cancelled:
+                job.metrics["state"] = "cancelled"
+                return
             job.metrics["state"] = "running"
             job.metrics["lock_wait_s"] = round(time.perf_counter() - lock_wait_started, 3)
             from indextts.llm_proxy import _normalize_role
@@ -559,6 +563,8 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             job.metrics["diffusion_steps"] = sampling_kwargs.get("diffusion_steps")
 
             async def on_chunk(chunk_wav, sr, seg_idx, total_segments):
+                if job.cancelled:
+                    return
                 pcm = _chunk_to_pcm_bytes(chunk_wav)
                 job.sample_rate = sr
                 job.pcm.extend(pcm)
@@ -566,6 +572,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     job.metrics["first_pcm_s"] = round(time.perf_counter() - job._perf_created, 3)
 
             for idx, seg in enumerate(segments):
+                if job.cancelled:
+                    job.metrics["state"] = "cancelled"
+                    return
                 role = _normalize_role(seg.get("role") or "")
                 text = (seg.get("text") or "").strip()
                 if not text:
@@ -619,6 +628,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     stream_chunk_callback=on_chunk,
                     **sampling_kwargs,
                 )
+                if job.cancelled:
+                    job.metrics["state"] = "cancelled"
+                    return
                 seg_wall = time.perf_counter() - seg_started
                 seg_byte_count = len(job.pcm) - seg_start_offset
                 seg_duration = seg_byte_count / (job.sample_rate * 2) if job.sample_rate else 0.0
@@ -656,6 +668,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
         # Inference 完成 → 写完整 WAV 到 snapshot_cache，未来 /cache_audio/{key}
         # 可直接给 FileResponse（含 Content-Length，移动端可 seek）。
         try:
+            if job.cancelled:
+                job.metrics["state"] = "cancelled"
+                return
             from indextts import snapshot_cache
             cache_write_started = time.perf_counter()
             wav_full = _make_complete_wav_bytes(bytes(job.pcm), job.sample_rate)
@@ -1858,8 +1873,13 @@ async def cache_delete_endpoint(key: str):
     try:
         from indextts import snapshot_cache
 
+        live_job = LIVE_JOBS.pop(key, None)
+        if live_job:
+            live_job.cancelled = True
+            live_job.metrics["state"] = "cancelled"
+            live_job.finished.set()
         deleted = snapshot_cache.delete_cache(key)
-        return JSONResponse(content={"deleted": deleted, "key": key})
+        return JSONResponse(content={"deleted": deleted, "cancelled_live": bool(live_job), "key": key})
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=400, content={"message": "cache delete failed", "Exception": str(e)})
@@ -2139,6 +2159,29 @@ async def tts_dialogue_stream_job_audio_endpoint(job_id: str):
             headers={"X-IndexTTS-Cache": "LIVE", "X-IndexTTS-Cache-Key": cache_key},
         )
     return JSONResponse(status_code=404, content={"message": "job missing or expired", "cache_key": cache_key})
+
+
+@APP.delete("/tts_dialogue_stream_job/{job_id}")
+async def tts_dialogue_stream_job_delete_endpoint(job_id: str):
+    """Cancel a live dialogue job and delete its saved snapshot if present."""
+    cache_key = job_id
+    try:
+        from indextts import snapshot_cache
+
+        live_job = LIVE_JOBS.pop(cache_key, None)
+        if live_job:
+            live_job.cancelled = True
+            live_job.metrics["state"] = "cancelled"
+            live_job.finished.set()
+        deleted = snapshot_cache.delete_cache(cache_key)
+        return JSONResponse(content={
+            "cancelled_live": bool(live_job),
+            "deleted": deleted,
+            "cache_key": cache_key,
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "dialogue job delete failed", "Exception": str(e), "cache_key": cache_key})
 
 
 @APP.get("/tts_dialogue_job_status/{cache_key}")
