@@ -18,7 +18,7 @@
 
 - 1 段短文本生成约 5.4s 音频，总推理约 145s，整体 RTF 约 26-28。
 - 日志显示 `s2mel_time=90.18s`、`bigvgan_time=30.60s`，主要瓶颈在后端推理，不是前端播放。
-- 启动日志显示 `Failed to load custom CUDA kernel for BigVGAN. Falling back to torch.`，需要优先修 BigVGAN CUDA kernel。
+- 启动日志显示 `Failed to load custom CUDA kernel for BigVGAN. Falling back to torch.`，进一步查到根因是 `where cl` 找不到 MSVC `cl.exe`，需要安装/修复 Visual Studio Build Tools 或把 `VC\Tools\MSVC\...\bin\Hostx64\x64` 加入启动 PATH。
 - `/tts_dialogue_job_status` 在推理期间出现超时，说明当前后台任务仍会阻塞 FastAPI 事件循环；需要把同步推理移到独立 worker/thread/process，状态接口不能被推理卡住。
 
 ## 第二阶段：流式播放体验
