@@ -4,28 +4,52 @@
   var script = document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v4";
   var CONFIG_KEY = "indextts_tavo_config_v3";
-  // 角色级配置:按 TAVO 角色 ID 隔离 defaultVoice + roleVoiceList,LLM/apiBase/mode 仍全局
+  var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
+  // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";
-  var RESERVED_ROLES = ["旁白", "用户", "角色"];  // 这三个常驻不可删
+  var GLOBAL_CONFIG_FIELDS = [
+    "apiBase", "mode", "endpoint", "dialogueEndpoint", "parseEndpoint",
+    "llmEndpoint", "llmModel", "llmApiKey",
+    "intervalMs", "topP", "topK", "temperature", "repetitionPenalty", "emoAlpha", "speedFactor"
+  ];
+  var RESERVED_ROLES = ["旁白", "用户"];  // 这两个常驻不可删；具体人物用原名或 defaultVoice
+  function voiceForRoleNames(list, names) {
+    list = (list && Array.isArray(list)) ? list : [];
+    names = names || [];
+    for (var i = 0; i < list.length; i++) {
+      var role = String((list[i] && list[i].role) || "").trim();
+      if (names.indexOf(role) >= 0) return String((list[i] && list[i].voice) || "");
+    }
+    return "";
+  }
   function normalizeRoleVoiceList(list) {
     list = (list && Array.isArray(list)) ? list.slice() : [];
-    // 头 3 行常驻,即使空也保留;补齐到 3 行
-    var reserved = list.slice(0, 3);
-    while (reserved.length < 3) reserved.push({ role: RESERVED_ROLES[reserved.length] || "", voice: "" });
+    function findVoice(names, fallbackIndex) {
+      var hit = voiceForRoleNames(list, names);
+      return hit || String((list[fallbackIndex] && list[fallbackIndex].voice) || "");
+    }
+    var reserved = [
+      { role: "旁白", voice: findVoice(["旁白", "narrator"], 0) },
+      { role: "用户", voice: findVoice(["用户", "你", "user", "我"], 1) },
+    ];
     // 后续行:去掉 role + voice 都空的(避免上次会话累积大量空行)
-    var extra = list.slice(3).filter(function (r) {
+    var extra = list.filter(function (r) {
       var role = String((r && r.role) || "").trim();
       var voice = String((r && r.voice) || "").trim();
+      if (role === "旁白" || role === "用户" || role === "角色" || role === "我") return false;
       return role || voice;
     });
     return reserved.concat(extra);
   }
   async function loadCharacterCfg(characterId) {
+    try { if (window.tavo && typeof tavo.get === "function") { var cs = await tavo.get(CHAR_SCOPE_CONFIG_KEY, "character"); if (cs) return cs; } } catch (_) {}
     if (!characterId) return null;
+    try { if (window.tavo && typeof tavo.get === "function") { var tv = await tavo.get(CHAR_KEY_PREFIX + characterId, "global"); if (tv) return tv; } } catch (_) {}
     try { var raw = localStorage.getItem(CHAR_KEY_PREFIX + characterId); if (raw) return JSON.parse(raw); } catch (_) {}
     return null;
   }
-  function saveCharacterCfg(characterId, partial) {
+  async function saveCharacterCfg(characterId, partial) {
+    try { if (window.tavo && typeof tavo.set === "function") await tavo.set(CHAR_SCOPE_CONFIG_KEY, partial || {}, "character"); } catch (_) {}
     if (!characterId) return;
     try { localStorage.setItem(CHAR_KEY_PREFIX + characterId, JSON.stringify(partial || {})); } catch (_) {}
   }
@@ -120,14 +144,12 @@
     parseEndpoint: "/parse_text",
     defaultVoice: "",
     // 新结构化角色映射 — 每条 {role, voice}。
-    // 旁白/用户/角色 三行常驻不可删,后端 llm_proxy 会把 "用户/我/你/user" 归一到 "我"。
-    // 用户可以「+ 添加角色」加 specific 角色名(明月/拉莲等),那些可删。
+    // 旁白/用户 两行常驻不可删；具体人物用原名或 defaultVoice。
     roleVoiceList: [
       { role: "旁白",   voice: "" },
       { role: "用户",   voice: "" },
-      { role: "角色",   voice: "" },
     ],
-    roleVoicesText: "旁白=\n用户=\n角色=",
+    roleVoicesText: "旁白=\n用户=",
     llmEndpoint: "http://127.0.0.1:8317/v1",
     llmModel: "渡鸦/grok-4.20-fast",
     llmApiKey: "",
@@ -136,7 +158,8 @@
     topK: 30,
     temperature: 0.8,
     repetitionPenalty: 10,
-    emoAlpha: 0.7
+    emoAlpha: 0.7,
+    speedFactor: 1.08
   };
 
   function $(root, sel) { return root && root.querySelector ? root.querySelector(sel) : null; }
@@ -144,6 +167,49 @@
   function first(root) { for (var i = 1; i < arguments.length; i++) { var el = $(root, arguments[i]); if (el) return el; } return null; }
   function on(el, ev, fn) { if (el) el.addEventListener(ev, fn); }
   function cleanBase(url) { return String(url || "").replace(/\/+$/, ""); }
+  function shortText(v, limit) {
+    v = String(v == null ? "" : v);
+    limit = limit || 1200;
+    return v.length > limit ? v.slice(0, limit) + "\n...(已截断, 共 " + v.length + " 字符)" : v;
+  }
+  function scriptSrcText() {
+    try { return script && script.src ? script.src : ""; } catch (_) { return ""; }
+  }
+  function localPageText() {
+    try { return location.href || ""; } catch (_) { return ""; }
+  }
+  function localNetworkHint(url) {
+    var host = "";
+    try { host = new URL(url, location.href).hostname; } catch (_) {}
+    if (/^(127\.0\.0\.1|localhost)$/i.test(host)) {
+      return "\n注意: 在手机/Tavo WebView 里 127.0.0.1/localhost 指手机自己,不是电脑。手机测试请把脚本/服务地址换成电脑局域网 IP,例如 http://192.168.8.100:9880。";
+    }
+    return "";
+  }
+  function formatNetworkError(label, url, err, extraLines) {
+    var raw = err && err.message ? err.message : String(err || "");
+    var name = err && err.name ? err.name : "Error";
+    var lines = [
+      label + " 请求没有到达后端。",
+      "请求 URL: " + url,
+      "浏览器错误: " + name + (raw ? ": " + raw : ""),
+      "当前页面: " + localPageText(),
+      "脚本来源: " + scriptSrcText()
+    ];
+    (extraLines || []).forEach(function (line) { if (line) lines.push(line); });
+    lines.push("常见原因: 手机访问不到电脑端口/防火墙拦截/地址不是局域网 IP/Tavo WebView 拦截 HTTP/CORS。");
+    return lines.join("\n") + localNetworkHint(url);
+  }
+  function formatHttpError(label, url, res, body, extraLines) {
+    var lines = [
+      label + " 后端返回错误。",
+      "请求 URL: " + url,
+      "HTTP: " + res.status + " " + (res.statusText || ""),
+    ];
+    (extraLines || []).forEach(function (line) { if (line) lines.push(line); });
+    lines.push("响应内容:\n" + shortText(body || "(空响应)"));
+    return lines.join("\n");
+  }
   function escapeHtml(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
   function shortName(v) { return String(v || "自动").split(/[\\/]/).pop().replace(/\.[a-z0-9]+$/i, "") || "自动"; }
 
@@ -189,7 +255,7 @@
       ".idx-top{display:flex;align-items:center;gap:12px;min-width:0}.idx-cover{width:56px;height:56px;flex:0 0 56px;border-radius:14px;background:#241a2c;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 10px 24px rgba(0,0,0,.34);display:flex;align-items:center;justify-content:center;color:#e9c8ff;font-size:18px;font-weight:800;background-size:cover;background-position:center}.idx-cover[data-playing='1']{animation:none}",
       ".idx-info{flex:1;min-width:0;padding-right:48px}.idx-title-row{display:flex;align-items:center;gap:8px;min-width:0}.idx-name{font-size:18px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-format{flex:0 0 auto;border:1px solid rgba(206,170,230,.34);background:rgba(206,170,230,.12);color:#d9b7f0;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800}.idx-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-gear{position:absolute;right:14px;top:14px;width:40px;height:40px;border-radius:50%;border:1px solid rgba(206,170,230,.30);background:rgba(20,14,28,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#eee7f4;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2;transition:background .15s,transform .12s}.idx-gear:active{transform:scale(.92)}.idx-gear svg{width:18px;height:18px;fill:currentColor}@media(hover:hover){.idx-gear:hover{background:rgba(60,38,80,.65)}}",
       ".idx-seek-wrap{margin:14px 0 0;background:transparent;border:0;border-radius:0;padding:0}.idx-seek{width:100%;height:24px;margin:0;accent-color:#c88ee9;cursor:pointer}.idx-time{display:flex;justify-content:space-between;font-size:12px;color:rgba(238,231,244,.68);font-variant-numeric:tabular-nums;margin-top:4px}",
-      ".idx-subtitle{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:18px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.50) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;max-height:240px;min-height:160px;overflow-y:auto;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.45;font-weight:500;transition:color .25s,font-size .2s,font-weight .2s,letter-spacing .2s,padding .2s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:17px;font-weight:700;letter-spacing:.5px;padding:10px 8px}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85;transition:width .2s,height .2s,opacity .2s}.idx-sub-row.is-current .idx-sub-avatar{width:32px;height:32px;opacity:1}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:block;word-break:break-word;max-width:100%}",
+      ".idx-subtitle{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:18px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.50) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;max-height:240px;min-height:160px;overflow-y:auto;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.45;font-weight:500;transition:color .25s,font-size .2s,font-weight .2s,letter-spacing .2s,padding .2s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:17px;font-weight:700;letter-spacing:.5px;padding:10px 8px}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.6;max-width:92%;padding:18px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:16px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85;transition:width .2s,height .2s,opacity .2s}.idx-sub-row.is-current .idx-sub-avatar{width:32px;height:32px;opacity:1}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:block;word-break:break-word;max-width:100%}",
       ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:currentColor}.idx-ctrl-sm{width:44px;height:44px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
       ".idx-meta{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:12px}.idx-pill{font-size:11px;color:rgba(238,231,244,.75);background:rgba(255,255,255,.06);border:1px solid rgba(206,170,230,.14);border-radius:999px;padding:4px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".idx-panel{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:1}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
@@ -209,7 +275,7 @@
     var saved = null;
     try { if (window.tavo && typeof tavo.get === "function") saved = await tavo.get(CONFIG_KEY, "global"); } catch (_) {}
     if (!saved) { try { saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null"); } catch (_) {} }
-    var cfg = Object.assign({}, DEFAULT_CONFIG, saved || {});
+    var cfg = Object.assign({}, DEFAULT_CONFIG, pickGlobalConfig(saved || {}));
     // 强制把 apiBase 锁死成本次加载脚本的来源 —— 用户换 LAN/外网/隧道 URL 时
     // 不会被 localStorage 里残留的旧 apiBase 拖累，所有请求一定打回脚本同源。
     cfg.apiBase = scriptOrigin();
@@ -223,6 +289,20 @@
     }
     return cfg;
   }
+  function pickGlobalConfig(cfg) {
+    var out = {};
+    if (!cfg || typeof cfg !== "object") return out;
+    GLOBAL_CONFIG_FIELDS.forEach(function (key) {
+      if (cfg[key] !== undefined) out[key] = cfg[key];
+    });
+    return out;
+  }
+  function pickCharacterConfig(cfg) {
+    return {
+      defaultVoice: cfg.defaultVoice || "",
+      roleVoiceList: normalizeRoleVoiceList(cfg.roleVoiceList || []),
+    };
+  }
   // 把旧 textarea 文本(每行/逗号分隔的 role=voice)转成结构化数组
   function parseRoleVoiceText(text) {
     var out = [];
@@ -231,8 +311,8 @@
       if (m) out.push({ role: m[1].trim(), voice: m[2].trim() });
     });
     return out.length ? out : [
-      { role: "我",   voice: "" },
-      { role: "明月", voice: "" },
+      { role: "旁白", voice: "" },
+      { role: "用户", voice: "" },
     ];
   }
   // 反向序列化:给老路径(parseRoleVoices)和后端 voices 字典提供数据
@@ -250,15 +330,12 @@
   async function saveConfig(cfg, characterId) {
     // 写入前 normalize 一次,杜绝脏数据回到 storage
     if (Array.isArray(cfg.roleVoiceList)) cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList);
-    // 全局只保存非角色字段(LLM 配置、apiBase、mode、emoAlpha 等)
-    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); } catch (_) {}
-    // 角色级:defaultVoice + roleVoiceList 单独写到 CHAR_KEY_PREFIX:<characterId>
-    if (characterId) {
-      saveCharacterCfg(characterId, {
-        defaultVoice: cfg.defaultVoice || "",
-        roleVoiceList: cfg.roleVoiceList || [],
-      });
-    }
+    // 全局只保存 LLM/api/mode/推理参数，不保存任何音色。
+    var globalCfg = pickGlobalConfig(cfg);
+    try { if (window.tavo && typeof tavo.set === "function") await tavo.set(CONFIG_KEY, globalCfg, "global"); } catch (_) {}
+    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(globalCfg)); } catch (_) {}
+    // 角色级: defaultVoice + roleVoiceList 写 TAVO character scope。
+    await saveCharacterCfg(characterId, pickCharacterConfig(cfg));
   }
   function pickAvatarUrl(obj) {
     if (!obj || typeof obj !== "object") return "";
@@ -281,6 +358,8 @@
     var characterName = "";
     var characterId = "";
     var messageId = "";
+    var userName = "";
+    var userAvatarUrl = "";
     try {
       if (window.tavo && tavo.message && typeof tavo.message.current === "function") {
         var msg = await tavo.message.current();
@@ -300,11 +379,28 @@
       }
     } catch (_) {}
     try {
+      if (window.tavo && tavo.chat && typeof tavo.chat.current === "function") {
+        var chat = await tavo.chat.current();
+        if (chat && chat.persona) {
+          userName = String(chat.persona.name || "").trim();
+          userAvatarUrl = userAvatarUrl || pickAvatarUrl(chat.persona);
+          if (chat.persona.id != null && window.tavo && tavo.persona && typeof tavo.persona.get === "function") {
+            var persona = await tavo.persona.get(chat.persona.id);
+            if (persona) {
+              userName = String(persona.name || userName || "").trim();
+              userAvatarUrl = userAvatarUrl || pickAvatarUrl(persona);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    try {
       if (!avatarUrl && window.tavo && tavo.character && typeof tavo.character.current === "function") avatarUrl = pickAvatarUrl(await tavo.character.current());
       if (!avatarUrl && window.tavo && tavo.role && typeof tavo.role.current === "function") avatarUrl = pickAvatarUrl(await tavo.role.current());
     } catch (_) {}
     if (!avatarUrl) avatarUrl = domAvatarUrl(script && script.parentElement);
     avatarUrl = normalizeTavoAssetUrl(avatarUrl);
+    userAvatarUrl = normalizeTavoAssetUrl(userAvatarUrl);
     if (!text && msgEl) {
       try {
         var clone = msgEl.cloneNode(true);
@@ -312,7 +408,7 @@
         text = clone.innerText || clone.textContent || "";
       } catch (_) { text = msgEl.innerText || msgEl.textContent || ""; }
     }
-    return { text: text.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/\[IndexTTS_TAVO_SCRIPT\]/g, "").trim(), avatarUrl: avatarUrl, characterName: characterName, characterId: characterId, messageId: messageId };
+    return { text: text.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/\[IndexTTS_TAVO_SCRIPT\]/g, "").trim(), avatarUrl: avatarUrl, characterName: characterName, characterId: characterId, messageId: messageId, userName: userName, userAvatarUrl: userAvatarUrl };
   }
   // 每条消息的播放历史持久化：key = "indextts_tracks_<messageId>"。
   // 只存可重建的元信息（cacheKey + voice + mode + createdAt），不存 blob。
@@ -321,6 +417,7 @@
   async function loadTracksForMessage(messageId) {
     if (!messageId) return [];
     var key = TRACKS_KEY_PREFIX + messageId;
+    try { if (window.tavo && typeof tavo.get === "function") { var cv = await tavo.get(key, "chat"); if (Array.isArray(cv)) return cv; } } catch (_) {}
     try { if (window.tavo && typeof tavo.get === "function") { var v = await tavo.get(key, "global"); if (Array.isArray(v)) return v; } } catch (_) {}
     try { var raw = localStorage.getItem(key); if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; } } catch (_) {}
     return [];
@@ -336,19 +433,132 @@
         voice: t.voice || "",
         mode: t.mode || "",
         createdAt: t.createdAt || Date.now(),
+        voicesMap: t.voicesMap || null,
         segments: (t.segments || []).map(function (s) {
-          return { role: s.role || "", text: s.text || "" };
+          return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
         }),
       };
     }).filter(function (t) { return !!t.cacheKey; });
+    try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); } catch (_) {}
     try { localStorage.setItem(key, JSON.stringify(lite)); } catch (_) {}
-    // tavo.set 写全局被反馈污染 TAVO 自身 set 变量,这里只保留 localStorage
   }
   function playIcon(state) { return state === "playing" ? '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; }
   function gearIcon() { return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65-2-3.46-2.49 1a7 7 0 0 0-1.69-.98L14 2h-4l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.07.64-.07.98s.03.66.07.98l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98L10 22h4l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46-2.11-1.65z"/></svg>'; }
   function formatTime(sec) { sec = Math.max(0, Number(sec || 0)); if (!isFinite(sec)) return "--:--"; return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0"); }
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/[\r\n,，;；]+/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
+  var STYLE_PRESETS = [
+    { id: "neutral", label: "普通/平静", alpha: 0.20 },
+    { id: "breath_soft", label: "轻微气声", alpha: 0.48 },
+    { id: "breath_heavy", label: "明显喘息", alpha: 0.74 },
+    { id: "intimate_breath", label: "亲密气声", alpha: 0.78 },
+    { id: "moan_soft", label: "低声短吟", alpha: 0.82 },
+    { id: "low_murmur", label: "压低呢喃", alpha: 0.58 },
+    { id: "whisper_soft", label: "温柔耳语", alpha: 0.50 },
+    { id: "shy_whisper", label: "害羞低语", alpha: 0.52 },
+    { id: "tense_breath", label: "紧张呼吸", alpha: 0.50 },
+    { id: "sob_soft", label: "委屈哽咽", alpha: 0.58 },
+    { id: "cry_soft", label: "哭腔", alpha: 0.60 },
+    { id: "tease_soft", label: "轻声撒娇", alpha: 0.52 },
+    { id: "laugh_soft", label: "慵懒轻笑", alpha: 0.48 },
+    { id: "gasp_surprise", label: "惊讶轻叹", alpha: 0.50 },
+    { id: "stage_warmup", label: "亲密初段/轻气声", alpha: 0.55 },
+    { id: "stage_rising", label: "升温段/呼吸变重", alpha: 0.76 },
+    { id: "stage_peak", label: "高强度段/短促声腔", alpha: 0.86 },
+    { id: "stage_afterglow", label: "余韵段/低声放松", alpha: 0.56 }
+  ];
+  function styleIdsText() { return STYLE_PRESETS.map(function (s) { return s.id + "=" + s.label + "(建议" + s.alpha + ")"; }).join(" / "); }
+  function normalizeStyleId(style) {
+    style = String(style || "neutral").trim();
+    var ok = STYLE_PRESETS.some(function (s) { return s.id === style; });
+    return ok ? style : "neutral";
+  }
+  function defaultStyleAlpha(style, cfg) {
+    style = normalizeStyleId(style);
+    var hit = STYLE_PRESETS.find(function (s) { return s.id === style; });
+    if (hit) return hit.alpha;
+    return Number(cfg.emoAlpha || 0.4);
+  }
+  function llmMaxTokensForText(text) {
+    return Math.min(12000, Math.max(4000, Math.ceil(String(text || "").length * 5)));
+  }
+  function normalizeCoverageText(value) {
+    return String(value || "")
+      .replace(/[\s\u3000]/g, "")
+      .replace(/[「」『』“”"‘’'（）()《》〈〉【】\[\]{}]/g, "")
+      .replace(/[，。！？；：、,.!?;:…—\-~～·]/g, "");
+  }
+  function tailNarrationAfterQuote(value) {
+    var text = String(value || "").trim();
+    var lastClose = Math.max(
+      text.lastIndexOf("」"),
+      text.lastIndexOf("』"),
+      text.lastIndexOf("”"),
+      text.lastIndexOf("\"")
+    );
+    if (lastClose < 0 || lastClose >= text.length - 1) return "";
+    var tail = text.slice(lastClose + 1).trim();
+    if (!tail || !/[\u4e00-\u9fffA-Za-z0-9]/.test(tail)) return "";
+    return tail;
+  }
+  function assertLlmSegmentsCoverSource(sourceText, segments) {
+    var sourceNorm = normalizeCoverageText(sourceText);
+    var joinedNorm = normalizeCoverageText((segments || []).map(function (s) { return s.text || ""; }).join(""));
+    if (!sourceNorm || !joinedNorm) return;
+    if (sourceNorm !== joinedNorm) {
+      var tailLen = Math.min(32, sourceNorm.length);
+      var sourceTail = sourceNorm.slice(-tailLen);
+      var joinedTail = joinedNorm.slice(-tailLen);
+      var diff = Math.abs(sourceNorm.length - joinedNorm.length);
+      var tolerance = Math.max(12, Math.ceil(sourceNorm.length * 0.02));
+      if (sourceTail !== joinedTail || diff > tolerance) {
+        throw new Error("LLM 拆分疑似明显缺字：原文约 " + sourceNorm.length + " 字，返回约 " + joinedNorm.length + " 字，差 " + diff + " 字。原文尾部=" + sourceTail + "；返回尾部=" + joinedTail);
+      }
+      debugLog("⚠️ LLM 覆盖校验发现轻微差异但已放行：原文约 " + sourceNorm.length + " 字，返回约 " + joinedNorm.length + " 字，差 " + diff + " 字。", "#fc9");
+    }
+    var tail = tailNarrationAfterQuote(sourceText);
+    if (tail && segments && segments.length) {
+      var last = segments[segments.length - 1];
+      if ((last.role || "") !== "旁白") {
+        throw new Error("LLM 尾段角色错误：原文最后引号后还有旁白/动作描写，但最后一段 role=" + (last.role || "?") + "。尾部=" + tail.slice(0, 40));
+      }
+    }
+  }
+  function escapeRegExpText(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  function quoteDepthAt(sourceText, idx) {
+    var depth = 0;
+    var asciiQuoteOpen = false;
+    var text = String(sourceText || "");
+    for (var i = 0; i < Math.max(0, idx); i++) {
+      var ch = text.charAt(i);
+      if (ch === "「" || ch === "『" || ch === "“") depth += 1;
+      else if (ch === "」" || ch === "』" || ch === "”") depth = Math.max(0, depth - 1);
+      else if (ch === '"') asciiQuoteOpen = !asciiQuoteOpen;
+    }
+    return depth + (asciiQuoteOpen ? 1 : 0);
+  }
+  function findSegmentTextInSource(sourceText, segmentText, fromIdx) {
+    var text = String(segmentText || "").trim();
+    if (!text) return -1;
+    var src = String(sourceText || "");
+    var idx = src.indexOf(text, Math.max(0, fromIdx || 0));
+    if (idx >= 0) return idx;
+    return src.indexOf(text);
+  }
+  function looksLikeNarrationSegment(text, role) {
+    var s = String(text || "").trim();
+    if (!s || /[「」『』“”"]/.test(s)) return false;
+    var verbs = "(低下|抬起|低头|抬头|看着|望着|看见|听见|感觉|走|站|坐|躺|靠|伸|抱|搂|抓|攥|咬|闭|睁|转|笑|哭|喘|颤|缩|贴|凑|伏|跪|垂|松|捂|揉|摸|按|亲|吻|加快|放慢|停下|开始|尖叫|叫|张开|流|滴|仰|扭|摇|晃|动|沉浸|起伏)";
+    if (new RegExp("^我" + verbs).test(s)) return true;
+    if (new RegExp("^[他她它]" + verbs).test(s)) return true;
+    role = String(role || "").trim();
+    if (role && role !== "旁白" && role !== "用户") {
+      return new RegExp("^" + escapeRegExpText(role) + verbs).test(s);
+    }
+    return false;
+  }
   function singleParams(cfg, text) {
     var p = new URLSearchParams();
     p.set("text", text);
@@ -428,6 +638,7 @@
   // 必须在 user gesture 里激活；后面经过 await saveConfig / await parseWithLlm
   // 之后才创建的 ctx 会停在 suspended，永远不出声。
   var PRIMED_CTX = null;
+  var PRIMED_UNLOCK_SOURCE = null;
   function primeAudioContext() {
     if (PRIMED_CTX) {
       try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
@@ -440,9 +651,14 @@
       // 立刻 resume + 播一段 1 帧静音解锁 iOS 音频通道
       try { ctx.resume(); } catch (_) {}
       try {
-        var b = ctx.createBuffer(1, 1, 22050);
+        var unlockRate = ctx.sampleRate || 44100;
+        var b = ctx.createBuffer(1, Math.max(1, Math.floor(unlockRate * 0.03)), unlockRate);
+        var ch = b.getChannelData(0);
+        if (ch && ch.length) ch[0] = 0.0005;
         var s = ctx.createBufferSource();
         s.buffer = b; s.connect(ctx.destination); s.start(0);
+        PRIMED_UNLOCK_SOURCE = s;
+        s.onended = function () { if (PRIMED_UNLOCK_SOURCE === s) PRIMED_UNLOCK_SOURCE = null; };
       } catch (_) {}
       PRIMED_CTX = ctx;
       return ctx;
@@ -452,9 +668,10 @@
   // 真流式播放：用 Web Audio API 直接拉 chunked-WAV 的 ReadableStream，
   // 解析 WAV 头后把 PCM 块逐段塞进 AudioContext。完全不走 <audio> 元素，
   // 因此不受手机浏览器 "Content-Length 未知就报错" 的限制。
-  // hooks: { onStateChange(state), onError(err), debug(text) }
+  // hooks: { onStateChange(state), onError(err), debug(text), playbackRate }
   async function streamWavViaWebAudio(streamUrl, hooks) {
     hooks = hooks || {};
+    var playbackRate = Math.max(0.85, Math.min(1.25, Number(hooks.playbackRate || 1) || 1));
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) throw new Error("浏览器不支持 Web Audio API");
     // 优先复用 user-gesture 里 prime 出来的 ctx；没有再 new 一个（桌面/file://
@@ -462,6 +679,23 @@
     var ctx = PRIMED_CTX || new AC();
     try { if (ctx.state === "suspended") await ctx.resume(); }
     catch (e) { throw new Error("[step:resume] " + (e && e.message ? e.message : e)); }
+    var output = ctx.createGain ? ctx.createGain() : null;
+    if (output) {
+      output.gain.value = 1;
+      output.connect(ctx.destination);
+    }
+    var activeSources = [];
+    function connectNode(node) {
+      node.connect(output || ctx.destination);
+    }
+    function keepSource(node) {
+      activeSources.push(node);
+      node.onended = function () {
+        var idx = activeSources.indexOf(node);
+        if (idx >= 0) activeSources.splice(idx, 1);
+      };
+    }
+    if (hooks.debug) hooks.debug("AudioContext state=" + ctx.state + " sr=" + ctx.sampleRate);
 
     var res;
     try { res = await fetch(streamUrl); }
@@ -489,11 +723,13 @@
       try {
         src = ctx.createBufferSource();
         src.buffer = audioBuf;
-        src.connect(ctx.destination);
+        try { src.playbackRate.value = playbackRate; } catch (_) {}
+        connectNode(src);
+        keepSource(src);
         src.start(0);
       } catch (e) { throw new Error("[step:bufferSource.start] " + (e && e.message ? e.message : e)); }
       hooks.onStateChange && hooks.onStateChange("playing");
-      var dur = audioBuf.duration;
+      var dur = audioBuf.duration / playbackRate;
       setTimeout(function () { hooks.onStateChange && hooks.onStateChange("ended"); }, dur * 1000 + 200);
       return { ctx: ctx, duration: dur, mode: "buffered" };
     }
@@ -540,9 +776,21 @@
     var bytesPerSec = sampleRate * channels * 2;
     var flushBytes = Math.max(2048, Math.floor(bytesPerSec * 0.5));
 
-    function schedulePcm(bytes) {
+    async function ensureAudioContextRunning(step) {
+      try {
+        if (ctx.state === "suspended") {
+          await ctx.resume();
+          hooks.debug && hooks.debug(step + " resume AudioContext -> " + ctx.state);
+        }
+      } catch (e) {
+        throw new Error("[step:" + step + ".resume] " + (e && e.message ? e.message : e));
+      }
+    }
+
+    async function schedulePcm(bytes) {
       if (bytes.length < 2 * channels) return;
       try {
+        await ensureAudioContextRunning("schedulePcm");
         var samples = Math.floor(bytes.length / (2 * channels));
         var aBuf = ctx.createBuffer(channels, samples, sampleRate);
         var view = new DataView(bytes.buffer, bytes.byteOffset, samples * 2 * channels);
@@ -554,10 +802,12 @@
         }
         var src = ctx.createBufferSource();
         src.buffer = aBuf;
-        src.connect(ctx.destination);
+        try { src.playbackRate.value = playbackRate; } catch (_) {}
+        connectNode(src);
+        keepSource(src);
         var t = Math.max(nextAt, ctx.currentTime + 0.005);
         src.start(t);
-        nextAt = t + aBuf.duration;
+        nextAt = t + (aBuf.duration / playbackRate);
         if (!started) { started = true; hooks.onStateChange && hooks.onStateChange("playing"); }
       } catch (e) {
         throw new Error("[step:schedulePcm] " + (e && e.message ? e.message : e));
@@ -566,10 +816,10 @@
 
     if (pcm.length >= flushBytes) {
       var first = pcm.slice(0, flushBytes);
-      schedulePcm(first);
+      await schedulePcm(first);
       pcm = pcm.slice(flushBytes);
     } else if (pcm.length >= 2 * channels) {
-      schedulePcm(pcm);
+      await schedulePcm(pcm);
       pcm = new Uint8Array(0);
     }
 
@@ -594,10 +844,10 @@
       while (pcm.length >= flushBytes) {
         var slice = pcm.slice(0, flushBytes);
         pcm = pcm.slice(flushBytes);
-        schedulePcm(slice);
+        await schedulePcm(slice);
       }
     }
-    if (pcm && pcm.length >= 2 * channels) schedulePcm(pcm);
+    if (pcm && pcm.length >= 2 * channels) await schedulePcm(pcm);
     pcm = null;
 
     var totalDur = Math.max(0, nextAt - startAt);
@@ -608,35 +858,62 @@
     return { ctx: ctx, duration: totalDur, mode: "streaming" };
   }
 
-  async function parseWithLlm(text, cfg, setStatus) {
+  async function parseWithLlm(text, cfg, setStatus, context) {
     var llmStart = Date.now();
     setStatus("步骤 1/3：连接 LLM…");
     debugLog("🤖 LLM 请求开始: model=" + cfg.llmModel + ", endpoint=" + cfg.llmEndpoint + ", textLen=" + text.length, "#ffd479");
     // 把当前角色映射的 role 名作为「已知角色」注入 prompt,让 LLM 输出的 role 字段
     // 跟前端 voicesMap 严格对齐(否则后端归一可能错位)。
-    var knownRoles = ((cfg.roleVoiceList || []).map(function (r) { return String(r.role || "").trim(); }).filter(function (r) { return r && r !== "角色"; }));
+    context = context || {};
+    var userName = String(context.userName || "").trim();
+    var currentCharacterName = String(context.characterName || "").trim();
+    var knownRoles = ((cfg.roleVoiceList || []).map(function (r) { return String(r.role || "").trim(); }).filter(function (r) { return r && r !== "角色" && r !== "我"; }));
     if (knownRoles.indexOf("旁白") < 0) knownRoles.unshift("旁白");
     if (knownRoles.indexOf("用户") < 0) knownRoles.splice(1, 0, "用户");
+    if (currentCharacterName && knownRoles.indexOf(currentCharacterName) < 0) knownRoles.push(currentCharacterName);
     var rolesHint = "已知角色名单(LLM 输出 role 字段必须从这里选,或者用剧情里出现的新人物名):\n  " + knownRoles.join(" / ") + "\n";
+    var userAliasHint = "用户身份名: " + (userName || "未读取到") + "。只有原文中的「你」以及这个用户身份名明确指向玩家/读者时，role 才写 \"用户\"。";
+    var characterHint = "当前角色名: " + (currentCharacterName || "未读取到") + "。原文第一人称「我」通常指当前角色或正在自述的人物，不要因为出现「我」就改成用户。";
     var prompt = [
       "你是中文小说→TTS 片段拆分器。只返回严格 JSON，不要任何解释，不要 ``` 代码块。",
       "",
       rolesHint,
+      userAliasHint,
+      characterHint,
       "输出格式：",
-      "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"emo_vec\":[a,h,f,d,s,l,u,n]}]}",
+      "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2,\"emo_vec\":[a,h,f,d,s,l,u,n]}]}",
       "",
       "拆段规则：",
-      "1. 旁白（叙述、动作描写、心理描写）→ role 固定为 \"旁白\"。",
-      "   正文里出现的「你」「我」如果是叙述句的主语（如「你松开右侧」「你抬头看了她一眼」），属于旁白，不要拆成台词。",
-      "   ⚠️ 旁白的 emo_vec 永远写 [0,0,0,0,0,0,0,1]（纯 neutral），emo_alpha 写 0.15。",
+      "1. 旁白（叙述、环境、动作描写、心理描写、无引号的第一人称自述）→ role 固定为 \"旁白\"。",
+      "   如果叙述句的主体是「你」或用户身份名（例如「你抬头」「白夜雨抱住她」「白夜雨说」且白夜雨是用户身份名），role 必须写 \"用户\"，不要写旁白。",
+      "   其他人物动作/心理描写即使能指向具体人物（例如「潘金莲低下头」「她笑了」「我低下头看着……」），只要不是直接说出口的话，都写 \"旁白\"，不要让角色认领旁白。",
+      "   ⚠️ 旁白的 style 永远写 neutral，style_alpha 写 0.15，emo_vec 永远写 [0,0,0,0,0,0,0,1]（纯 neutral）。",
       "       旁白是叙述者，本身没情绪，跟着剧情起伏会做作；后端也会强制覆盖成中性。",
       "   ⚠️ 旁白连续多个句子，要按句号/问号/感叹号/分号 拆成多个旁白 segments，每段≤2 句。",
       "       不要把整段旁白合并成一条 segment 偷懒。例：「她抬头看了我一眼。她哭了。」要拆成两条。",
       "2. 人物直接说出口的话 → role 用说话人的名字。",
-      "   - 如果说话人是「你」（第二人称代指读者/玩家）或「我」，role 统一写 \"用户\"（不写 \"你\"、不写 \"我\"）。",
+      "   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"（不写 \"你\"、不写用户身份名）。",
+      "   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。只有明确处在引号/对白里的「我……」才按说话人归属。",
       "   - 其他人物优先从「已知角色名单」里挑名字;名单外的新人物用原文里的名字（如「林老师」「兰绯」「她」）。",
-      "3. 「他说：」「她笑道：」「你居高临下地说道：」这种引导句留在 旁白，不要塞进台词。",
+      "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身是旁白；后面引号里的直接台词才按说话人分配。只有「你说道：」「用户名说道：」这种用户动作引导句可写 role=\"用户\"。",
       "4. text 是要朗读的原文片段，保留标点和语气词（啊、嗯、……）。",
+      "5. style 是段级声腔/呼吸参考，只能从这个枚举里选：" + styleIdsText(),
+      "   - 旁白、客观描写、普通对白 → neutral。",
+      "   - 只是轻微带气声/柔声 → breath_soft 或 whisper_soft。",
+      "   - 语义里有急促呼吸、压抑紧张 → tense_breath。",
+      "   - 明显呼吸加重但仍在说话 → breath_heavy。",
+      "   - 亲密、贴耳、黏连、短促气声 → intimate_breath，style_alpha 0.70-0.82。",
+      "   - 明显的「嗯、啊、唔、哈、呼、……」等短促气音/短吟，必须用 moan_soft 或 breath_heavy，不要写 neutral。",
+      "   - 委屈、哭腔、鼻音 → sob_soft 或 cry_soft。",
+      "   - 撒娇、轻笑、惊讶分别用 tease_soft / laugh_soft / gasp_surprise。",
+      "   - 如果文本明显呈现亲密互动的强度变化，用阶段型 style：stage_warmup=轻微升温；stage_rising=呼吸变重；stage_peak=最高强度的短促声腔；stage_afterglow=余韵/低声放松。",
+      "   - 普通对话优先 neutral；但带明显气音、短促反应、断续语气词的段落不要 neutral。",
+      "",
+      "完整性硬规则：",
+      "- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。",
+      "- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。",
+      "- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。",
+      "- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。",
       "",
       "emo_vec 是 8 维向量，必须严格按这个顺序：",
       "  [0]=angry 愤怒    [1]=happy 高兴    [2]=fear 恐惧     [3]=hate 反感",
@@ -657,22 +934,40 @@
       "每段可加 emo_alpha 字段（0.2-0.5），控制情绪强度：",
       "- 平静段写 0.2-0.3，正常对话 0.35-0.4，强烈情绪 0.45-0.5。",
       "- 不要超过 0.5，否则一定做作。",
+      "style_alpha 控制声腔参考强度：neutral=0.15-0.25；轻微 style=0.45-0.60；明显 breath/moan style=0.70-0.86。stage_peak 可写 0.82-0.88，但不要超过 0.9。",
       "",
       "示例输入：",
       "她低着头，眼角有泪。「对不起，我真的撑不住了。」",
-      "你叹了口气，把手放在她肩上：「别哭。」",
+      (userName ? userName : "你") + "叹了口气，把手放在她肩上：「别哭。」",
       "示例输出：",
       "{\"segments\":[",
-      "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"emo_vec\":[0,0,0,0,0.6,0.5,0,0.2]},",
-      "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"emo_vec\":[0,0,0.2,0,0.8,0.6,0,0]},",
-      "  {\"role\":\"旁白\",\"text\":\"你叹了口气，把手放在她肩上：\",\"emo_vec\":[0,0,0,0,0.3,0.3,0,0.6]},",
-      "  {\"role\":\"用户\",\"text\":\"别哭。\",\"emo_vec\":[0,0.2,0,0,0.3,0.2,0,0.5]}",
+      "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
+      "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.58,\"emo_vec\":[0,0,0.2,0,0.7,0.4,0,0]},",
+      "  {\"role\":\"用户\",\"text\":\"" + (userName ? userName : "你") + "叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
+      "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0,0.2,0,0,0.3,0.2,0,0.5]}",
       "]}"
     ].join("\n");
     setStatus("AI 分析中…");
-    var res = await fetch(cleanBase(cfg.apiBase) + cfg.parseEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: text, endpoint: cfg.llmEndpoint, model: cfg.llmModel, api_key: cfg.llmApiKey || "", system_prompt: prompt, temperature: 0.2, timeout: 90 }) });
-    if (!res.ok) throw new Error(await res.text());
-    var data = await res.json();
+    var maxTokens = llmMaxTokensForText(text);
+    var parseUrl = cleanBase(cfg.apiBase) + cfg.parseEndpoint;
+    var llmTarget = "LLM endpoint(后端访问): " + cfg.llmEndpoint;
+    debugLog("🔎 LLM 解析代理: parseUrl=" + parseUrl + ", " + llmTarget, "#ffd479");
+    var res;
+    try {
+      res = await fetch(parseUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: text, endpoint: cfg.llmEndpoint, model: cfg.llmModel, api_key: cfg.llmApiKey || "", system_prompt: prompt, temperature: 0.2, timeout: 90, max_tokens: maxTokens }) });
+    } catch (e) {
+      throw new Error(formatNetworkError("LLM 解析代理 /parse_text", parseUrl, e, [
+        llmTarget,
+        "说明: 这里失败的是浏览器到 IndexTTS 后端 /parse_text 的请求,还没进入 LLM 解析。"
+      ]));
+    }
+    if (!res.ok) throw new Error(formatHttpError("LLM 解析代理 /parse_text", parseUrl, res, await res.text(), [llmTarget]));
+    var data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error("LLM 解析代理 /parse_text 返回的不是合法 JSON。\n请求 URL: " + parseUrl + "\n" + llmTarget + "\n解析错误: " + (e && e.message ? e.message : e));
+    }
     if (!data || !Array.isArray(data.segments) || !data.segments.length) throw new Error("AI 没有返回可用片段");
     var llmSec = Math.floor((Date.now() - llmStart) / 1000);
     setStatus("拆分完成 " + data.segments.length + " 段");
@@ -680,10 +975,41 @@
     try {
       data.segments.forEach(function (s, i) {
         var ev = (s.emo_vec || []).map(function (v) { return Number(v).toFixed(2); }).join(",");
-        debugLog("  [" + i + "] role=" + (s.role || "?") + "  emo=[" + ev + "]" + (s.emo_alpha != null ? "  α=" + s.emo_alpha : "") + "  text=" + JSON.stringify(String(s.text || "").slice(0, 40)));
+        debugLog("  [raw " + i + "] role=" + (s.role || "?") + "  style=" + normalizeStyleId(s.style || s.style_ref) + (s.style_alpha != null ? "  sα=" + s.style_alpha : "") + "  emo=[" + ev + "]" + (s.emo_alpha != null ? "  α=" + s.emo_alpha : "") + "  text=" + JSON.stringify(String(s.text || "").slice(0, 40)));
       });
     } catch (_) {}
-    return data.segments.map(function (seg) { return { role: seg.role || "旁白", text: seg.text || "", emo_vec: seg.emo_vec || [0,0,0,0,0,0,0,0.35], emo_alpha: Number(seg.emo_alpha || cfg.emoAlpha || 0.4) }; }).filter(function (seg) { return seg.text.trim(); });
+    var sourceSearchOffset = 0;
+    var normalizedSegments = data.segments.map(function (seg) {
+      var style = normalizeStyleId(seg.style || seg.style_ref);
+      var styleAlpha = Number(seg.style_alpha);
+      if (!isFinite(styleAlpha)) styleAlpha = defaultStyleAlpha(style, cfg);
+      styleAlpha = Math.max(0, Math.min(0.9, styleAlpha));
+      var role = String(seg.role || "旁白").trim();
+      if (role === "你" || role === "user" || role === "User" || (userName && role === userName)) role = "用户";
+      if (role && role !== "旁白" && role !== "用户") {
+        var segTextForRole = String(seg.text || "");
+        var sourceIdx = findSegmentTextInSource(text, segTextForRole, sourceSearchOffset);
+        if (sourceIdx >= 0) {
+          sourceSearchOffset = sourceIdx + segTextForRole.length;
+          if (quoteDepthAt(text, sourceIdx) === 0 && looksLikeNarrationSegment(segTextForRole, role)) {
+            debugLog("↩️ 纠正旁白归属: role=" + role + " → 旁白 text=" + JSON.stringify(segTextForRole.slice(0, 32)), "#fc9");
+            role = "旁白";
+            style = "neutral";
+            styleAlpha = 0.15;
+          }
+        }
+      }
+      return {
+        role: role || "旁白",
+        text: seg.text || "",
+        style: style,
+        style_alpha: styleAlpha,
+        emo_vec: seg.emo_vec || [0,0,0,0,0,0,0,0.35],
+        emo_alpha: Number(seg.emo_alpha || cfg.emoAlpha || 0.4)
+      };
+    }).filter(function (seg) { return seg.text.trim(); });
+    assertLlmSegmentsCoverSource(text, normalizedSegments);
+    return normalizedSegments;
   }
 
   function removeLegacyGlobalGear() {
@@ -695,6 +1021,7 @@
     var characterId = (context && context.characterId) ? String(context.characterId) : "";
     var messageText = context && context.text ? context.text : "";
     var avatarUrl = context && context.avatarUrl ? context.avatarUrl : "";
+    var userAvatarUrl = context && context.userAvatarUrl ? context.userAvatarUrl : "";
     var messageId = context && context.messageId ? context.messageId : "";
     root.innerHTML = [
       '<div class="idx-card">',
@@ -706,7 +1033,7 @@
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
         + '<div class="idx-section-title">播放模式</div>'
-        + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>不走 LLM，整段使用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>第三方 AI 拆旁白/人物并输出 emo_vec[8]</span></button></div>'
+        + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>不走 LLM，整段使用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>第三方 AI 拆旁白/人物并输出 style + emo_vec</span></button></div>'
         // 单音色模式专属 —— mode==="single" 时显示
         + '<div class="idx-single-only"><div class="idx-section-title">音色库</div><div class="idx-default-voice"><button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择音色…</button></div></div>'
         // AI 八情绪专属 —— mode==="ai8" 时显示；切换不清空（输入值在 readFields 时已存入 cfg）
@@ -718,6 +1045,7 @@
             + '<label class="idx-field idx-wide"><span class="idx-label">LLM 接口地址（写到 /v1 即可，会自动补全 /chat/completions）</span><input class="idx-input" data-field="llmEndpoint" placeholder="http://127.0.0.1:8317/v1"></label>'
             + '<label class="idx-field"><span class="idx-label">LLM 模型</span><input class="idx-input" data-field="llmModel" placeholder="渡鸦/grok-4.20-fast"></label>'
             + '<label class="idx-field"><span class="idx-label">LLM Key</span><input class="idx-input" type="password" data-field="llmApiKey" placeholder="sk-..."></label>'
+            + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.08"></label>'
           + '</div></details>'
         + '</div>'
         + '<div class="idx-actions"><button class="idx-btn" type="button" data-role="save">保存</button></div>'
@@ -816,6 +1144,49 @@
       } catch (_) {}
     }
     function setError(v) { if (err) { err.textContent = v || ""; err.classList.toggle("idx-hidden", !v); } }
+    function currentTrack() { return currentTrackIndex >= 0 ? generatedTracks[currentTrackIndex] : null; }
+    function currentVoicesMap(track) {
+      return (track && track.voicesMap) || rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice);
+    }
+    function voiceNameForRole(role, track) {
+      var voices = currentVoicesMap(track);
+      role = String(role || "").trim();
+      return (role && voices[role]) || voices.default || cfg.defaultVoice || "";
+    }
+    function playbackLabelForRole(role, track) {
+      role = String(role || "").trim() || "多音色";
+      var voice = voiceNameForRole(role, track);
+      return role + (voice ? " / " + shortName(voice) : "");
+    }
+    function trackPlaybackLabel(track) {
+      if (!track) return shortName(cfg.defaultVoice);
+      if (track.mode === "ai8") {
+        var role = lastSpeakerRole || ((track.segments && track.segments[0] && track.segments[0].role) || "");
+        return role ? playbackLabelForRole(role, track) : "多音色";
+      }
+      return shortName((track && track.voice) || cfg.defaultVoice);
+    }
+    function setPlayingStatusForRole(role, track) {
+      setStatus("正在播放：" + playbackLabelForRole(role, track || currentTrack()));
+    }
+    function setAudioPlaybackRate() {
+      try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
+    }
+    function isUnsupportedPlayError(err) {
+      var name = err && err.name ? String(err.name) : "";
+      var msg = err && err.message ? String(err.message) : String(err || "");
+      return name === "NotSupportedError" || /not supported/i.test(msg);
+    }
+    function handleAudioPlayReject(label, err, fallbackStatus) {
+      if (err && err.name === "AbortError") return;
+      if (isUnsupportedPlayError(err)) {
+        debugLog("⚠️ " + label + " audio.play() 不支持: " + (err && err.message ? err.message : err), "#fc9");
+        setStatus(fallbackStatus || "当前 WebView 不支持 audio 直播，等待 Web Audio/请点播放");
+        return;
+      }
+      debugLog("❌ " + label + " audio.play() reject: " + err, "#f99");
+      setStatus(fallbackStatus || "请点播放继续");
+    }
     function setPlayState(state) { if (play) { play.dataset.state = state; play.innerHTML = playIcon(state); play.disabled = state === "loading"; } if (cover) cover.dataset.playing = state === "playing" ? "1" : "0"; }
     function updateTrackButtons() {
       if (prev) prev.disabled = currentTrackIndex <= 0;
@@ -830,6 +1201,7 @@
       // 切卡前先清掉旧 audio 状态(防止旧的 currentTime/duration 串到新卡片)
       try { audio.pause(); } catch (_) {}
       stopSubtitle();
+      hideSubtitlePanel();
       // 三种 URL 来源优先级：(a) track.url 已经是 blob/可用 URL；
       // (b) track.cacheUrl（历史恢复出来的 /cache_audio/{key}）；
       // (c) track.streamUrl（mobile 流式刚跑完还没拿到 blob 时）。
@@ -844,19 +1216,95 @@
       if (total) total.textContent = "--:--";
       if (srcUrl) {
         audio.src = srcUrl;
+        setAudioPlaybackRate();
         // 强制重新加载 metadata,避免浏览器复用上次缓存的 duration/seekable
         try { audio.load(); } catch (_) {}
         if (seek) { seek.disabled = false; }
         setStatus((autoplay ? "正在播放" : "已选择") + "：第 " + String(index + 1) + " 首");
         updateTrackButtons();
-        if (autoplay) audio.play().catch(function (err) { if (err && err.name === 'AbortError') return; debugLog("❌ audio.play() reject: " + err, "#f99"); setStatus("请点播放继续"); });
+        if (autoplay) audio.play().catch(function (err) { handleAudioPlayReject("element", err, "请点播放继续"); });
         return;
       }
       // 都没有 URL —— 该 track 是占位
       try { audio.removeAttribute('src'); audio.load(); } catch (_) {}
       if (seek) { seek.disabled = true; }
-      setStatus("第 " + String(index + 1) + " 首尚未就绪");
+      showTrackNotice(track, track.noticeTitle || ("第 " + String(index + 1) + " 首尚未就绪"), track.noticeDetail || "生成完成后会自动显示歌词");
+      setStatus(track.noticeTitle || ("第 " + String(index + 1) + " 首尚未就绪"));
       updateTrackButtons();
+    }
+    function attachCacheAudio(track, opts) {
+      opts = opts || {};
+      if (!track || !track.cacheUrl) return false;
+      track.url = track.cacheUrl;
+      track.pendingBlob = false;
+      track.status = "ready";
+      track.streaming = false;
+      track.cacheReady = true;
+      if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === track) {
+        updateTrackButtons();
+        if (track.webAudioPlaying && !opts.forceElement) return true;
+        try {
+          var currentSrc = audio.currentSrc || audio.src || "";
+          if (currentSrc !== track.cacheUrl) {
+            audio.src = track.cacheUrl;
+            audio.load();
+            if (seek) seek.value = "0";
+            if (cur) cur.textContent = "00:00";
+          }
+          if (seek) seek.disabled = false;
+          if (opts.autoplay) {
+            setAudioPlaybackRate();
+            audio.play().catch(function (err) { handleAudioPlayReject("cache", err, "缓存已就绪，点播放继续"); });
+          }
+        } catch (e) {
+          debugLog("❌ 挂载 cache audio 失败: " + (e && e.message ? e.message : e), "#f99");
+        }
+      } else {
+        updateTrackButtons();
+      }
+      return true;
+    }
+    function pollCacheUpgrade(trackEntry, label) {
+      if (!trackEntry || !trackEntry.cacheKey || trackEntry.cachePollStarted || trackEntry.cacheReady) return;
+      trackEntry.cachePollStarted = true;
+      label = label || "snapshot";
+      (async function () {
+        var done = false;
+        for (var i = 0; i < 240; i++) {
+          try {
+            var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(trackEntry.cacheKey), { cache: "no-store" });
+            if (st.ok) {
+              var j = await st.json();
+              if (j && j.cache_url) {
+                trackEntry.cacheUrl = new URL(j.cache_url, cleanBase(cfg.apiBase) + "/").href;
+              }
+              if (j && Array.isArray(j.segments_meta) && j.segments_meta.length && (!trackEntry.segments || !trackEntry.segments.length)) {
+                trackEntry.segments = j.segments_meta.map(function (s) {
+                  return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
+                });
+              }
+              if (j && j.state === "done") {
+                attachCacheAudio(trackEntry, { forceElement: false });
+                if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+                debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
+                done = true;
+                break;
+              }
+              if (j && j.state === "failed") {
+                debugLog("❌ 服务端推理失败: " + (j.error || ""), "#f99");
+                break;
+              }
+            }
+          } catch (e) {
+            debugLog("⚠️ " + label + " 状态轮询失败: " + (e && e.message ? e.message : e), "#fc9");
+          }
+          await new Promise(function(r){ setTimeout(r, 1000); });
+        }
+        if (!done && !trackEntry.cacheReady) {
+          trackEntry.cachePollStarted = false;
+          debugLog("⚠️ " + label + " 等待落盘超时，cacheKey=" + trackEntry.cacheKey, "#fc9");
+        }
+      })();
     }
     function clearCurrentTrack() {
       if (currentTrackIndex < 0) return;
@@ -902,9 +1350,16 @@
       if (el.value !== String(v)) el.value = v;
     }
     function getField(name, fallback) { var el = field(name); return el ? el.value : fallback; }
+    function clampNumber(value, fallback, min, max) {
+      var n = Number(value);
+      if (!isFinite(n)) n = fallback;
+      return Math.max(min, Math.min(max, n));
+    }
     function readFields() {
       cfg.apiBase = String(getField("apiBase", cfg.apiBase || scriptOrigin())).trim() || scriptOrigin();
       cfg.intervalMs = Number(getField("intervalMs", cfg.intervalMs || 50) || 50);
+      cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.08), 1.08, 0.85, 1.25);
+      try { audio.playbackRate = cfg.speedFactor; } catch (_) {}
       // cfg.roleVoiceList 由 renderRoleList 实时维护(addRoleRow/setRowVoice 等),
       // 这里把行里的角色名/音色同步抓一遍(防止用户没失焦就保存)。
       var rows = $all(panel, '.idx-role-row');
@@ -928,6 +1383,8 @@
       setField("llmModel", cfg.llmModel || "");
       setField("llmEndpoint", cfg.llmEndpoint || "");
       setField("llmApiKey", cfg.llmApiKey || "");
+      setField("speedFactor", cfg.speedFactor || 1.08);
+      try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
       renderRoleList();
       // AI 八情绪 设置只在该模式下显示；单音色配置反之
       try {
@@ -982,17 +1439,33 @@
 
     // ───── 实时字幕控制器 ───── (按当前播放时间显示对应 segment 的角色头像+台词)
     var DEFAULT_AVATARS = {
-      narrator: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b2a4a"/><stop offset="1" stop-color="#1c1326"/></linearGradient></defs><rect width="64" height="64" fill="url(#g)"/><text x="32" y="42" font-family="Microsoft YaHei,sans-serif" font-size="22" fill="#d9b7f0" text-anchor="middle" font-weight="bold">旁</text></svg>'),
-      user:     'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1f3a5a"/><stop offset="1" stop-color="#0e1f33"/></linearGradient></defs><rect width="64" height="64" fill="url(#g)"/><text x="32" y="42" font-family="Microsoft YaHei,sans-serif" font-size="22" fill="#a5d4ff" text-anchor="middle" font-weight="bold">我</text></svg>'),
-      character:'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a2240"/><stop offset="1" stop-color="#33152a"/></linearGradient></defs><rect width="64" height="64" fill="url(#g)"/><text x="32" y="42" font-family="Microsoft YaHei,sans-serif" font-size="22" fill="#ffd4e8" text-anchor="middle" font-weight="bold">人</text></svg>')
+      narrator: cleanBase(cfg.apiBase || scriptOrigin()) + "/prompts/icon/common.png",
+      user:     'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1f3a5a"/><stop offset="1" stop-color="#0e1f33"/></linearGradient></defs><rect width="512" height="512" fill="url(#g)"/><text x="256" y="330" font-family="Microsoft YaHei,sans-serif" font-size="180" fill="#a5d4ff" text-anchor="middle" font-weight="bold">用</text></svg>'),
+      character:'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a2240"/><stop offset="1" stop-color="#33152a"/></linearGradient></defs><rect width="512" height="512" fill="url(#g)"/><text x="256" y="330" font-family="Microsoft YaHei,sans-serif" font-size="180" fill="#ffd4e8" text-anchor="middle" font-weight="bold">人</text></svg>')
     };
     function avatarForRole(role) {
       if (role === "旁白") return DEFAULT_AVATARS.narrator;
-      if (role === "我" || role === "用户") return DEFAULT_AVATARS.user;
-      // 用户头像优先用 TAVO 提供的（context.avatarUrl）
+      if (role === "用户") return userAvatarUrl || DEFAULT_AVATARS.user;
+      // 角色/人物头像优先用当前 TAVO 角色头像
       return avatarUrl || DEFAULT_AVATARS.character;
     }
     var subBox = first(root, '[data-role="subtitle"]');
+    function showSubtitleNotice(titleText, detailText) {
+      if (!subBox) return;
+      subBox.classList.remove('idx-hidden');
+      subBox.innerHTML = '<div class="idx-sub-notice"><strong>' + escapeHtml(titleText || "") + '</strong>' + (detailText ? '<span>' + escapeHtml(detailText) + '</span>' : '') + '</div>';
+    }
+    function hideSubtitlePanel() {
+      clearSubtitleDom();
+      if (subBox) subBox.classList.add('idx-hidden');
+    }
+    function showTrackNotice(track, titleText, detailText) {
+      if (track) {
+        track.noticeTitle = titleText || "";
+        track.noticeDetail = detailText || "";
+      }
+      if (currentTrack() === track || !track) showSubtitleNotice(titleText, detailText);
+    }
 
     // 拆碎长文本成约 12-22 字的小段(歌词风格,一行可读)。
     // 1) 按句末标点切; 2) 还长就按逗号切; 3) 还长按 20 字硬切;
@@ -1066,22 +1539,35 @@
           if (title) title.textContent = role;
         } catch (_) {}
       }
+      if (role && (audio && !audio.paused || (currentTrack() && currentTrack().webAudioPlaying))) {
+        setPlayingStatusForRole(role);
+      }
       // 同步给系统媒体面板(后台/锁屏可见 + 控制)
       try { updateMediaSession(role, text); } catch (_) {}
+    }
+    function mediaArtworkType(src) {
+      src = String(src || "");
+      if (/^data:image\/svg\+xml/i.test(src) || /\.svg(?:[?#]|$)/i.test(src)) return "image/svg+xml";
+      if (/\.png(?:[?#]|$)/i.test(src) || /^data:image\/png/i.test(src)) return "image/png";
+      if (/\.(?:jpg|jpeg)(?:[?#]|$)/i.test(src) || /^data:image\/jpe?g/i.test(src)) return "image/jpeg";
+      if (/\.webp(?:[?#]|$)/i.test(src) || /^data:image\/webp/i.test(src)) return "image/webp";
+      return "";
     }
     function updateMediaSession(speakerRole, currentText) {
       if (!navigator.mediaSession || typeof MediaMetadata === "undefined") return;
       try {
         var ms = navigator.mediaSession;
         var charName = (context && context.characterName) ? context.characterName : (cfg.defaultVoice || "IndexTTS");
+        var artSrc = avatarForRole(speakerRole || "旁白");
+        var artType = mediaArtworkType(artSrc);
         ms.metadata = new MediaMetadata({
           title: (currentText ? String(currentText).slice(0, 60) : charName),
           artist: charName,
           album: "IndexTTS",
           artwork: [
-            { src: avatarForRole(speakerRole || "旁白"), sizes: "96x96",  type: "image/svg+xml" },
-            { src: avatarForRole(speakerRole || "旁白"), sizes: "256x256", type: "image/svg+xml" },
-            { src: avatarForRole(speakerRole || "旁白"), sizes: "512x512", type: "image/svg+xml" },
+            { src: artSrc, sizes: "96x96",  type: artType },
+            { src: artSrc, sizes: "256x256", type: artType },
+            { src: artSrc, sizes: "512x512", type: artType },
           ],
         });
         ms.setActionHandler('play',  function () { try { audio.play().catch(function(){}); } catch (_) {} });
@@ -1210,11 +1696,12 @@
 
     function renderRoleList() {
       if (!rolesListEl) return;
-      // 始终确保前三行常驻槽存在(旁白/用户/角色),即使旧数据丢失也补齐
+      // 始终确保前两行常驻槽存在(旁白/用户),即使旧数据丢失也补齐
       cfg.roleVoiceList = cfg.roleVoiceList || [];
-      while (cfg.roleVoiceList.length < 3) {
+      while (cfg.roleVoiceList.length < RESERVED_ROLES.length) {
         cfg.roleVoiceList.push({ role: RESERVED_ROLES[cfg.roleVoiceList.length] || "", voice: "" });
       }
+      cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList);
       var list = cfg.roleVoiceList;
       // 渲染前同步用户当前在输入框里的值,避免重渲染清空未保存输入
       var rows = $all(panel, '.idx-role-row');
@@ -1225,10 +1712,10 @@
       rolesListEl.innerHTML = list.map(function (item, idx) {
         var role = String(item.role || "");
         var voice = String(item.voice || "");
-        var protectedRow = idx < 3;
+        var protectedRow = idx < RESERVED_ROLES.length;
         return ''
           + '<div class="idx-role-row' + (protectedRow ? ' idx-role-protected' : '') + '" data-row-idx="' + idx + '" data-voice="' + escapeHtml(voice) + '">'
-          + '<input class="idx-role-name" type="text" placeholder="角色名" value="' + escapeHtml(role) + '">'
+          + '<input class="idx-role-name" type="text" placeholder="角色名" value="' + escapeHtml(role) + '"' + (protectedRow ? ' readonly' : '') + '>'
           + '<button class="idx-voice-btn" type="button">' + escapeHtml(voice || "选择音色…") + '</button>'
           + (protectedRow
               ? '<span class="idx-role-lock" title="常驻角色,不可删除">🔒</span>'
@@ -1255,11 +1742,37 @@
       });
     }
 
+    function nextNewRoleName() {
+      var used = {};
+      (cfg.roleVoiceList || []).forEach(function (r) {
+        var role = String((r && r.role) || "").trim();
+        if (role) used[role] = true;
+      });
+      var n = 1;
+      while (used["新角色" + n]) n += 1;
+      return "新角色" + n;
+    }
+
+    function focusLastEditableRole() {
+      setTimeout(function () {
+        var rows = $all(rolesListEl, '.idx-role-row');
+        for (var i = rows.length - 1; i >= 0; i -= 1) {
+          var nameEl = first(rows[i], '.idx-role-name');
+          if (nameEl && !nameEl.readOnly) {
+            nameEl.focus();
+            try { nameEl.select(); } catch (_) {}
+            return;
+          }
+        }
+      }, 0);
+    }
+
     function addRoleRow() {
       cfg.roleVoiceList = cfg.roleVoiceList || [];
-      // 头三槽位是 reserved,addRoleRow 总是在末尾追加新可删行
-      cfg.roleVoiceList.push({ role: "", voice: "" });
+      // 前两槽位是 reserved,addRoleRow 总是在末尾追加新可删行
+      cfg.roleVoiceList.push({ role: nextNewRoleName(), voice: "" });
       renderRoleList();
+      focusLastEditableRole();
     }
 
     function setRowVoice(idx, voiceName) {
@@ -1409,7 +1922,7 @@
       // 新建必须点 + 号（force=true 才走下面的 generate 流程）。
       if (!force && generatedTracks.length > 0) {
         if (audio.src) {
-          if (audio.paused) await audio.play().catch(function(){});
+          if (audio.paused) { setAudioPlaybackRate(); await audio.play().catch(function(e){ handleAudioPlayReject("element", e, "请点播放继续"); }); }
           else audio.pause();
           return;
         }
@@ -1420,7 +1933,7 @@
       }
       // 兼容旧逻辑（无卡片 + audio.src 残留时）
       if (audio.src && !force && generatedTracks.length === 0) {
-        if (audio.paused) await audio.play(); else audio.pause(); return;
+        if (audio.paused) { setAudioPlaybackRate(); await audio.play(); } else audio.pause(); return;
       }
 
       // ★ Bug 修复:点 ▶ / 🎵 第一时间 push 占位卡片,让用户立刻看见一张
@@ -1446,6 +1959,7 @@
         try { audio.pause(); } catch (_) {}
         selectTrack(currentTrackIndex, false);
         setStatus("准备生成…");
+        showTrackNotice(placeholder, "准备生成…", "等待 LLM 分析文本");
         debugLog("🎵 立即 push 占位卡片(currentTrackIndex=" + currentTrackIndex + ")", "#9ff");
       }
 
@@ -1454,23 +1968,26 @@
         var base = cleanBase(cfg.apiBase), body, url;
         if (cfg.mode === "ai8") {
           setStatus("AI 分析中…");
+          showTrackNotice(placeholder, "AI 分析中…", "正在拆分旁白、人物、声腔和情绪");
           if (!cfg.llmEndpoint || !cfg.llmModel) throw new Error("AI 八情绪模式需要填写 LLM 接口地址和模型。");
           var t0 = Date.now();
           debugLog("━━━━━━━━━━━━━━━━━━━━━━━━━", "#fff");
           debugLog("🎬 AI 八情绪生成开始 (text=" + messageText.length + " 字)", "#fff");
           startServerLogPolling(base);
-          var segments = await parseWithLlm(messageText, cfg, setStatus);
+          var segments = await parseWithLlm(messageText, cfg, setStatus, context);
           var roleCounts = {}; segments.forEach(function (s) { roleCounts[s.role] = (roleCounts[s.role] || 0) + 1; });
           var roleSummary = Object.keys(roleCounts).map(function (r) { return r + "×" + roleCounts[r]; }).join(", ");
           setStatus("开始合成 " + segments.length + " 段…");
+          showTrackNotice(placeholder, "开始合成 " + segments.length + " 段…", roleSummary);
           var voicesMap = rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice);
           debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
-          body = { segments: segments, voices: voicesMap, interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha };
+          body = { segments: segments, voices: voicesMap, interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25) };
           var ttsStart = Date.now();
           var jobInfo;
           var ttsTimer = setInterval(function () {
             var sec = Math.floor((Date.now() - ttsStart) / 1000);
             setStatus("合成中 " + sec + "s…");
+            showTrackNotice(placeholder, "合成中 " + sec + "s…", "等待首块音频返回");
           }, 1000);
           try {
             debugLog("📡 提交 dialogue job", "#ffd479");
@@ -1494,6 +2011,7 @@
           trackEntry.cacheUrl = cacheUrl;
           trackEntry.cacheKey = jobInfo.cacheKey;
           trackEntry.segments = segments;
+          trackEntry.voicesMap = voicesMap;
           trackEntry.pendingBlob = !jobInfo.cached;
           trackEntry.status = jobInfo.cached ? "ready" : "running";
           if (!placeholder) {
@@ -1510,11 +2028,12 @@
           if (jobInfo.cached && cacheUrl) {
             debugLog("⚡ 命中服务端缓存，直接 audio.src 播放", "#9f9");
             audio.src = cacheUrl;
+            setAudioPlaybackRate();
             trackEntry.url = cacheUrl;
             trackEntry.pendingBlob = false;
             setStatus("命中缓存，开始播放");
             setPlayState("loading");
-            audio.play().catch(function () { setStatus("点播放继续"); });
+            audio.play().catch(function (err) { handleAudioPlayReject("cache", err, "点播放继续"); });
             return;
           }
           // 没缓存 → 走流式（移动 Web Audio / 桌面 <audio src>）。后端是异步
@@ -1525,21 +2044,27 @@
             currentCacheKey = jobInfo.cacheKey;
             setPlayState("loading");
             var webAudioStartedAt = 0;
+            pollCacheUpgrade(trackEntry, "mobile snapshot");
             try {
               await streamWavViaWebAudio(streamUrl, {
+                playbackRate: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25),
                 onStateChange: function (state) {
                   if (state === "playing") {
+                    trackEntry.webAudioPlaying = true;
                     setPlayState("playing");
                     setStatus("流式播放中");
+                    setError("");
                     debugLog("▶️ Web Audio 首块已起播", "#9f9");
                     webAudioStartedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
                     // 启动字幕
                     startSubtitle(trackEntry, function () {
-                      return (((typeof performance !== "undefined" ? performance.now() : Date.now()) - webAudioStartedAt) / 1000);
+                      return ((((typeof performance !== "undefined" ? performance.now() : Date.now()) - webAudioStartedAt) / 1000) * clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25));
                     });
                   } else if (state === "ended") {
+                    trackEntry.webAudioPlaying = false;
+                    if (trackEntry.cacheReady) attachCacheAudio(trackEntry, { forceElement: true });
                     setPlayState("idle");
-                    setStatus("播放完成（再点播放重播 / 拖进度条）");
+                    setStatus(trackEntry.cacheReady ? "播放完成（再点播放重播 / 拖进度条）" : "播放完成，等待缓存落盘…");
                     debugLog("⏹ Web Audio 流式播完", "#9f9");
                     stopServerLogPolling();
                     stopSubtitle();
@@ -1555,35 +2080,7 @@
               stopServerLogPolling();
               throw e;
             }
-            // 后台轮询 /tts_dialogue_job_status — 推理一旦完成 (snapshot 落盘
-            // 后) trackEntry.url 就指向 cacheUrl，<audio> 就能正常播 + seek。
-            (async function () {
-              for (var i = 0; i < 240; i++) { // 最多 4 分钟
-                try {
-                  var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(trackEntry.cacheKey));
-                  if (st.ok) {
-                    var j = await st.json();
-                    if (j && j.state === "done") {
-                      trackEntry.url = trackEntry.cacheUrl;
-                      trackEntry.pendingBlob = false;
-                      updateTrackButtons();
-                      debugLog("✅ snapshot 已落盘，audio.src 升级到 cacheUrl,可重播/拖", "#9f9");
-                      // 如果用户当前还停在这张卡片且 audio 没在播,把 src 升级到 cacheUrl
-                      if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === trackEntry && audio.paused && !audio.src) {
-                        try { audio.src = trackEntry.cacheUrl; audio.load(); if (seek) { seek.disabled = false; seek.value = "0"; } } catch (_) {}
-                      }
-                      if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-                      break;
-                    }
-                    if (j && j.state === "failed") {
-                      debugLog("❌ 服务端推理失败: " + (j.error || ""), "#f99");
-                      break;
-                    }
-                  }
-                } catch (_) {}
-                await new Promise(function(r){ setTimeout(r, 1000); });
-              }
-            })();
+            if (trackEntry.cacheReady) attachCacheAudio(trackEntry, { forceElement: true });
             return;
           } else {
             // 桌面端 chunked WAV 给 <audio> 元素直接播。
@@ -1593,30 +2090,7 @@
             var totalSec = Math.floor((Date.now() - t0) / 1000);
             setStatus("流式播放 " + segments.length + " 段");
             debugLog("▶️ 启动音频播放, 截至此处用时 " + totalSec + "s", "#9f9");
-            // 后台静默 HEAD 一下（或 GET）拿 cacheKey，等服务端推完 inference
-            // 后台轮询 job_status；落盘后 trackEntry.url 升级到 cacheUrl，
-            // 这样后续点播放 / 重播 / 拖进度都走 <audio src=/cache_audio/{key}>。
-            (async function () {
-              for (var i = 0; i < 240; i++) {
-                try {
-                  var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(trackEntry.cacheKey));
-                  if (st.ok) {
-                    var j = await st.json();
-                    if (j && j.state === "done") {
-                      trackEntry.url = trackEntry.cacheUrl;
-                      updateTrackButtons();
-                      if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-                      debugLog("✅ 桌面 snapshot 落盘, 升级到 cacheUrl", "#9f9");
-                      break;
-                    }
-                    if (j && j.state === "failed") {
-                      debugLog("❌ 服务端推理失败: " + (j.error || ""), "#f99"); break;
-                    }
-                  }
-                } catch (_) {}
-                await new Promise(function(r){ setTimeout(r, 1000); });
-              }
-            })();
+            pollCacheUpgrade(trackEntry, "desktop snapshot");
             // 音频播完后停止服务端日志轮询
             try {
               audio.addEventListener("ended", stopServerLogPolling, { once: true });
@@ -1630,7 +2104,12 @@
           selectTrack(generatedTracks.length - 1, false);
           setStatus("正在连接流式音频...");
         }
-        await audio.play().catch(function (e) { if (e && e.name === 'AbortError') return; throw e; });
+        setAudioPlaybackRate();
+        await audio.play().catch(function (e) {
+          if (e && e.name === 'AbortError') return;
+          handleAudioPlayReject("element", e, "请点播放继续");
+          if (!isUnsupportedPlayError(e)) throw e;
+        });
       } catch (e) {
         var msg = String((e && e.message) || e || "");
         var isAbort = (e && e.name === 'AbortError') || /aborted/i.test(msg);
@@ -1662,6 +2141,10 @@
     function closeDialog(d) { if (!d) return; try { if (typeof d.close === 'function') d.close(); else d.removeAttribute('open'); } catch (_) { try { d.removeAttribute('open'); } catch (__) {} } }
     on(gear, 'click', function (ev) { ev.preventDefault(); ev.stopPropagation(); if (panel.open) closeDialog(panel); else openDialog(panel); });
     on(close, 'click', function () { closeDialog(panel); });
+    on(play, 'pointerdown', function () { primeAudioContext(); });
+    on(add, 'pointerdown', function () { primeAudioContext(); });
+    on(play, 'touchstart', function () { primeAudioContext(); });
+    on(add, 'touchstart', function () { primeAudioContext(); });
     on(play, 'click', function () { primeAudioContext(); generate(false); });
     on(add, 'click', function () { primeAudioContext(); generate(true); });
     on(prev, 'click', function () { selectTrack(currentTrackIndex - 1, true); });
@@ -1716,6 +2199,7 @@
     });
     on(audio, 'waiting', function () { setPlayState("loading"); setStatus("正在等待音频流..."); });
     on(audio, 'canplay', function () {
+      setError("");
       if (!audio.paused) {
         setPlayState("playing");
         // 多音色模式下当前播放的音色不固定,不要写 cfg.defaultVoice
@@ -1729,10 +2213,28 @@
         setStatus("正在播放：" + label);
       }
     });
+    on(audio, 'playing', function () { setError(""); setPlayState("playing"); });
     on(audio, 'pause', function () { setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); stopSubtitle(); });
     on(audio, 'ended', function () { setPlayState("idle"); setStatus("播放完成"); stopSubtitle(); });
-    on(audio, 'error', function () { setPlayState("idle"); setStatus("播放失败"); setError("音频流加载失败。请检查服务地址、音色和后端日志。"); stopSubtitle(); });
+    on(audio, 'error', function () {
+      var active = currentTrack();
+      if (active && (active.webAudioPlaying || (isMobileUA() && active.cacheReady && active.streamUrl))) {
+        debugLog("⚠️ 忽略 audio 元素错误：当前手机链路使用 Web Audio，src=" + (audio.currentSrc || audio.src || ""), "#fc9");
+        return;
+      }
+      var detail = "";
+      try {
+        if (audio.error) detail = " code=" + audio.error.code + (audio.error.message ? " message=" + audio.error.message : "");
+      } catch (_) {}
+      setPlayState("idle");
+      setStatus("播放失败");
+      setError("音频加载失败。" + detail + " 请检查服务地址、音色和后端日志。");
+      debugLog("❌ audio error" + detail + " src=" + (audio.currentSrc || audio.src || ""), "#f99");
+      stopSubtitle();
+    });
     on(audio, 'loadedmetadata', function () {
+      setError("");
+      setAudioPlaybackRate();
       if (seek) seek.disabled = false;
       if (total) total.textContent = formatTime(audio.duration);
       debugLog("📐 audio metadata loaded: duration=" + audio.duration.toFixed(2) + "s seekable=" + (audio.seekable.length > 0 ? audio.seekable.end(0).toFixed(2) : "0"), "#9ff");
@@ -1758,6 +2260,7 @@
             createdAt: t.createdAt || Date.now(),
             voice: t.voice || cfg.defaultVoice,
             mode: t.mode || "ai8",
+            voicesMap: t.voicesMap || null,
             segments: Array.isArray(t.segments) ? t.segments : [],
             fromHistory: true
           });
@@ -1785,17 +2288,19 @@
     if (script && script.parentNode) script.parentNode.insertBefore(root, script.nextSibling); else document.body.appendChild(root);
     var cfg = await getConfig();
     var ctx = await currentMessageContext();
-    // 按 TAVO 角色 ID 隔离 defaultVoice + roleVoiceList,覆盖全局 cfg
-    if (ctx.characterId) {
-      try {
-        var charCfg = await loadCharacterCfg(ctx.characterId);
-        if (charCfg) {
-          if (typeof charCfg.defaultVoice === "string") cfg.defaultVoice = charCfg.defaultVoice;
-          if (Array.isArray(charCfg.roleVoiceList) && charCfg.roleVoiceList.length) cfg.roleVoiceList = charCfg.roleVoiceList;
+    // 角色级 defaultVoice + roleVoiceList 覆盖全局 cfg。
+    // 优先读 TAVO character scope；ctx.characterId 只用于旧版全局 key/localStorage 迁移。
+    try {
+      var charCfg = await loadCharacterCfg(ctx.characterId);
+      if (charCfg) {
+        if (typeof charCfg.defaultVoice === "string") cfg.defaultVoice = charCfg.defaultVoice;
+        if (!cfg.defaultVoice && Array.isArray(charCfg.roleVoiceList)) {
+          cfg.defaultVoice = voiceForRoleNames(charCfg.roleVoiceList, ["角色"]) || cfg.defaultVoice;
         }
-      } catch (_) {}
-    }
-    // 关键:过滤掉历史会话累积的多余空行,确保前 3 行 reserved
+        if (Array.isArray(charCfg.roleVoiceList) && charCfg.roleVoiceList.length) cfg.roleVoiceList = charCfg.roleVoiceList;
+      }
+    } catch (_) {}
+    // 关键:过滤掉历史会话累积的多余空行,确保前 2 行 reserved
     cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList);
     mount(root, cfg, ctx);
   } catch (e) { try { console.error("[IndexTTS TAVO]", e && e.stack ? e.stack : (e && e.message ? e.message : JSON.stringify(e))); } catch (_) {} }

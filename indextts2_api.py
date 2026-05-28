@@ -122,6 +122,76 @@ async def tavo_js_endpoint():
     )
 
 
+@APP.get("/tavo_test")
+async def tavo_widget_test_endpoint():
+    """Standalone browser test page for the TAVO injected widget."""
+    return FileResponse(
+        os.path.join("static", "tavo_widget_test.html"),
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
+
+
+@APP.head("/tavo_test")
+async def tavo_widget_test_head():
+    path = os.path.join("static", "tavo_widget_test.html")
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Content-Length": str(os.path.getsize(path)) if os.path.exists(path) else "0",
+    }
+    return Response(status_code=200 if os.path.exists(path) else 404, media_type="text/html", headers=headers)
+
+
+def _icon_media_type(path: str) -> str:
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".png":
+        return "image/png"
+    if ext in (".jpg", ".jpeg"):
+        return "image/jpeg"
+    if ext == ".webp":
+        return "image/webp"
+    if ext == ".svg":
+        return "image/svg+xml"
+    return "application/octet-stream"
+
+
+def _prompt_icon_path(name: str) -> Optional[str]:
+    safe_name = os.path.basename(str(name or ""))
+    if not safe_name or safe_name != name:
+        return None
+    if os.path.splitext(safe_name)[1].lower() not in {".png", ".jpg", ".jpeg", ".webp", ".svg"}:
+        return None
+    path = os.path.join("prompts", "icon", safe_name)
+    return path if os.path.exists(path) else None
+
+
+@APP.get("/prompts/icon/{name}")
+async def prompt_icon_endpoint(name: str):
+    path = _prompt_icon_path(name)
+    if not path:
+        return JSONResponse(status_code=404, content={"message": "icon not found", "name": name})
+    return FileResponse(
+        path,
+        media_type=_icon_media_type(path),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@APP.head("/prompts/icon/{name}")
+async def prompt_icon_head(name: str):
+    path = _prompt_icon_path(name)
+    if not path:
+        return Response(status_code=404)
+    return Response(
+        status_code=200,
+        media_type=_icon_media_type(path),
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Content-Length": str(os.path.getsize(path)),
+        },
+    )
+
+
 if os.path.isdir("static"):
     APP.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -153,6 +223,12 @@ class TTS_Request(BaseModel):
 class TTS_Segment(BaseModel):
     role: str
     text: str
+    # Segment-level vocal style. `style` is the preferred public field; the
+    # other names are accepted for direct file/path control and old drafts.
+    style: Optional[str] = None
+    style_ref: Optional[str] = None
+    style_alpha: Optional[float] = None
+    emo_ref_audio_path: Optional[str] = None
     emo_vec: Optional[List[float]] = None
     emo_text: Optional[str] = None
     emo_alpha: Optional[float] = None
@@ -199,6 +275,7 @@ class Parse_Text_Request(BaseModel):
     system_prompt: Optional[str] = None
     temperature: float = 0.2
     timeout: int = 60
+    max_tokens: Optional[int] = None
 
 
 def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
@@ -386,6 +463,7 @@ async def _prepare_dialogue_for_streaming(req: dict):
             {
                 "role": (seg.get("role") or "").strip(),
                 "text": (seg.get("text") or "").strip(),
+                **_style_cache_fragment(seg),
                 "emo_vec": seg.get("emo_vec") or None,
                 "emo_text": seg.get("emo_text") or None,
                 "emo_alpha": seg.get("emo_alpha"),
@@ -442,8 +520,12 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
 
                 emo_vec = seg.get("emo_vec") or None
                 emo_text_seg = seg.get("emo_text") or None
+                style_audio = _resolve_segment_style_audio(seg)
                 seg_alpha = seg.get("emo_alpha")
                 seg_alpha = float(seg_alpha) if seg_alpha is not None else default_emo_alpha
+                style_alpha = seg.get("style_alpha")
+                if style_audio and style_alpha is not None:
+                    seg_alpha = float(style_alpha)
                 if role == "旁白":
                     if isinstance(emo_vec, list) and len(emo_vec) == 8:
                         scaled = [min(float(v) * 0.4, 0.3) for v in emo_vec[:7]]
@@ -454,7 +536,10 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     emo_text_seg = None
                     seg_alpha = min(seg_alpha, 0.25)
                 use_emo_text_seg = False
-                if emo_vec:
+                if style_audio:
+                    emo_vec = None
+                    emo_text_seg = None
+                elif emo_vec:
                     emo_text_seg = None
                 elif emo_text_seg:
                     use_emo_text_seg = True
@@ -467,7 +552,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                 seg_start_offset = len(job.pcm)
                 await tts_pipeline.infer(
                     spk_audio_prompt=voice_path,
-                    emo_audio_prompt=None,
+                    emo_audio_prompt=style_audio,
                     text=text,
                     emo_text=emo_text_seg,
                     use_emo_text=use_emo_text_seg,
@@ -483,6 +568,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     "idx": idx,
                     "role": role,
                     "text": text,
+                    "style": _segment_style_name(seg) or "neutral",
+                    "style_alpha": seg_alpha if style_audio else None,
+                    "style_audio": style_audio,
                     "start_offset_bytes": seg_start_offset,
                     "duration_s": seg_duration,
                 })
@@ -615,6 +703,59 @@ def _resolve_ref_audio(req: dict):
         )
     req["ref_audio_path"] = resolved
     return None
+
+
+STYLE_VOICE_MAP = {
+    "neutral": "",
+    "none": "",
+    "breath_soft": "声腔/breath_soft",
+    "breath_heavy": "声腔/breath_heavy",
+    "intimate_breath": "声腔/intimate_breath",
+    "moan_soft": "声腔/moan_soft",
+    "low_murmur": "声腔/low_murmur",
+    "whisper_soft": "声腔/whisper_soft",
+    "shy_whisper": "声腔/shy_whisper",
+    "tense_breath": "声腔/tense_breath",
+    "sob_soft": "声腔/sob_soft",
+    "cry_soft": "声腔/cry_soft",
+    "tease_soft": "声腔/tease_soft",
+    "laugh_soft": "声腔/laugh_soft",
+    "gasp_surprise": "声腔/gasp_surprise",
+    "stage_warmup": "声腔/breath_soft",
+    "stage_rising": "声腔/intimate_breath",
+    "stage_peak": "声腔/moan_soft",
+    "stage_afterglow": "声腔/low_murmur",
+}
+
+
+def _segment_style_name(seg: dict) -> str:
+    return str(seg.get("style") or seg.get("style_ref") or "").strip()
+
+
+def _resolve_segment_style_audio(seg: dict) -> Optional[str]:
+    ref = str(seg.get("emo_ref_audio_path") or "").strip()
+    if ref:
+        return _resolve_voice(ref)
+    style = _segment_style_name(seg)
+    if not style or style in ("neutral", "none"):
+        return None
+    mapped = STYLE_VOICE_MAP.get(style, style)
+    if not mapped:
+        return None
+    return _resolve_voice(mapped)
+
+
+def _style_cache_fragment(seg: dict) -> dict:
+    style = _segment_style_name(seg)
+    explicit = str(seg.get("emo_ref_audio_path") or "").strip()
+    style_audio = _resolve_segment_style_audio(seg)
+    return {
+        "style": style or None,
+        "style_alpha": seg.get("style_alpha"),
+        "emo_ref_audio_path": explicit or None,
+        "style_audio": style_audio,
+        "style_meta": _audio_file_meta(style_audio) if style_audio else {},
+    }
 
 
 def _audio_file_meta(path: str) -> dict:
@@ -934,7 +1075,7 @@ async def tts_dialogue_stream_handle(req: dict):
         return JSONResponse(status_code=400, content={"message": "voices is required"})
 
     # Normalize voice-mapping keys so users can write either canonical or alias
-    # forms (e.g. "我=高圆圆", "用户=高圆圆", "narrator=Jok", "旁白=Jok").
+    # forms (e.g. "用户=高圆圆", "narrator=Jok", "旁白=Jok").
     from indextts.llm_proxy import _normalize_role
     voices = {(_normalize_role(k) if k != "default" else "default"): v for k, v in voices.items()}
 
@@ -996,8 +1137,12 @@ async def tts_dialogue_stream_handle(req: dict):
 
                     emo_vec = seg.get("emo_vec") or None
                     emo_text_seg = seg.get("emo_text") or None
+                    style_audio = _resolve_segment_style_audio(seg)
                     seg_alpha = seg.get("emo_alpha")
                     seg_alpha = float(seg_alpha) if seg_alpha is not None else default_emo_alpha
+                    style_alpha = seg.get("style_alpha")
+                    if style_audio and style_alpha is not None:
+                        seg_alpha = float(style_alpha)
                     # 旁白 微情绪压制（同 tts_dialogue_cache_stream 逻辑）
                     if role == "旁白":
                         if isinstance(emo_vec, list) and len(emo_vec) == 8:
@@ -1010,7 +1155,11 @@ async def tts_dialogue_stream_handle(req: dict):
                         seg_alpha = min(seg_alpha, 0.25)
                     # emo_vec wins when both are present; matches the V26
                     # convention and the LLM-output schema we recommend.
-                    if emo_vec:
+                    if style_audio:
+                        emo_vec = None
+                        emo_text_seg = None
+                        use_emo_text_seg = False
+                    elif emo_vec:
                         emo_text_seg = None
                         use_emo_text_seg = False
                     else:
@@ -1025,7 +1174,7 @@ async def tts_dialogue_stream_handle(req: dict):
 
                     await tts_pipeline.infer(
                         spk_audio_prompt=voice_path,
-                        emo_audio_prompt=None,
+                        emo_audio_prompt=style_audio,
                         text=text,
                         emo_text=emo_text_seg,
                         use_emo_text=use_emo_text_seg,
@@ -1074,7 +1223,7 @@ async def tts_dialogue_cache_stream_handle(req: dict):
         return JSONResponse(status_code=400, content={"message": "voices is required"})
 
     # Normalize voice-mapping keys so users can write either canonical or alias
-    # forms (e.g. "我=高圆圆", "用户=高圆圆", "narrator=Jok", "旁白=Jok").
+    # forms (e.g. "用户=高圆圆", "narrator=Jok", "旁白=Jok").
     from indextts.llm_proxy import _normalize_role
     voices = {(_normalize_role(k) if k != "default" else "default"): v for k, v in voices.items()}
 
@@ -1123,6 +1272,7 @@ async def tts_dialogue_cache_stream_handle(req: dict):
             {
                 "role": (seg.get("role") or "").strip(),
                 "text": (seg.get("text") or "").strip(),
+                **_style_cache_fragment(seg),
                 "emo_vec": seg.get("emo_vec") or None,
                 "emo_text": seg.get("emo_text") or None,
                 "emo_alpha": seg.get("emo_alpha"),
@@ -1170,8 +1320,12 @@ async def tts_dialogue_cache_stream_handle(req: dict):
 
                     emo_vec = seg.get("emo_vec") or None
                     emo_text_seg = seg.get("emo_text") or None
+                    style_audio = _resolve_segment_style_audio(seg)
                     seg_alpha = seg.get("emo_alpha")
                     seg_alpha = float(seg_alpha) if seg_alpha is not None else default_emo_alpha
+                    style_alpha = seg.get("style_alpha")
+                    if style_audio and style_alpha is not None:
+                        seg_alpha = float(style_alpha)
                     # 旁白：保留 LLM 给的情绪倾向，但每个非中性维度压到 ≤0.3，
                     # 中性维度抬到 ≥0.6；alpha 也压到 0.25。
                     # 让旁白有轻微情感波动但不至于做作。
@@ -1184,7 +1338,11 @@ async def tts_dialogue_cache_stream_handle(req: dict):
                             emo_vec = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8]
                         emo_text_seg = None
                         seg_alpha = min(seg_alpha, 0.25)
-                    if emo_vec:
+                    if style_audio:
+                        emo_vec = None
+                        emo_text_seg = None
+                        use_emo_text_seg = False
+                    elif emo_vec:
                         emo_text_seg = None
                         use_emo_text_seg = False
                     else:
@@ -1197,7 +1355,7 @@ async def tts_dialogue_cache_stream_handle(req: dict):
 
                     await tts_pipeline.infer(
                         spk_audio_prompt=voice_path,
-                        emo_audio_prompt=None,
+                        emo_audio_prompt=style_audio,
                         text=text,
                         emo_text=emo_text_seg,
                         use_emo_text=use_emo_text_seg,
@@ -1292,6 +1450,34 @@ async def cache_audio_by_key(key: str):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=400, content={"message": "cache audio failed", "Exception": str(e)})
+
+
+@APP.head("/cache_audio/{key}")
+async def cache_audio_by_key_head(key: str):
+    """HEAD probe for cached audio.
+
+    Some WebViews/proxies probe media URLs before issuing a ranged GET. Keep
+    this endpoint aligned with GET /cache_audio/{key} so a valid cache does
+    not look like a 405 failure.
+    """
+    try:
+        from indextts import snapshot_cache
+        path = snapshot_cache.get_cached_audio(key)
+        if not path or not os.path.exists(path):
+            return Response(status_code=404, headers={"X-IndexTTS-Cache": "MISS", "X-IndexTTS-Cache-Key": key})
+        return Response(
+            status_code=200,
+            media_type="audio/wav",
+            headers={
+                "X-IndexTTS-Cache": "HIT",
+                "X-IndexTTS-Cache-Key": key,
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(os.path.getsize(path)),
+            },
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return Response(status_code=400, headers={"X-IndexTTS-Error": str(e)})
 
 
 @APP.get("/server_log/tail")
@@ -1499,6 +1685,7 @@ async def parse_text_endpoint(request: Parse_Text_Request):
             system_prompt=request.system_prompt,
             temperature=request.temperature,
             timeout=request.timeout,
+            max_tokens=request.max_tokens,
         )
         return JSONResponse(content=result)
     except Exception as e:
@@ -1832,6 +2019,7 @@ async def tts_dialogue_job_status_endpoint(cache_key: str):
         return JSONResponse(content={
             "state": state,
             "cache_key": cache_key,
+            "cache_url": f"/cache_audio/{cache_key}",
             "pcm_bytes": len(job.pcm),
             "segments_done": len(job.segments_meta),
             "segments_meta": job.segments_meta,

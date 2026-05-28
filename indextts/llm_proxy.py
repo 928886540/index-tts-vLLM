@@ -15,10 +15,10 @@ from typing import Any
 _FENCE_RE = re.compile(r"```[ \t]*(?:json)?[ \t]*\r?\n?(.*?)```", re.IGNORECASE | re.DOTALL)
 _NARRATOR_ALIASES = {"旁白", "叙述", "正文", "narrator"}
 _NARRATOR_CANONICAL = "旁白"
-# 第二人称小说里「你」常代指读者/玩家角色，说话时跟「我」「用户」是同一个人。
-# 统一规范成「我」，这样 role-voice 映射写 `我=X` 或 `用户=X` 都能命中。
-_USER_ALIASES = {"我", "你", "用户", "user", "me", "you"}
-_USER_CANONICAL = "我"
+# 第二人称小说里「你」常代指读者/玩家角色；第一人称「我」常是角色自述，
+# 不能归到用户。前端会把具体用户身份名也规范成「用户」。
+_USER_ALIASES = {"你", "用户", "user", "you"}
+_USER_CANONICAL = "用户"
 
 
 def parse_text_openai_compatible(
@@ -29,6 +29,7 @@ def parse_text_openai_compatible(
     system_prompt: str | None,
     temperature: float = 0.2,
     timeout: float = 60,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     """Send text to an OpenAI-compatible chat endpoint and return normalized JSON."""
 
@@ -47,6 +48,9 @@ def parse_text_openai_compatible(
         # non-streaming response.
         "stream": False,
     }
+    if max_tokens is not None:
+        max_tokens = int(max(256, min(32000, max_tokens)))
+        payload["max_tokens"] = max_tokens
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
     headers = {
@@ -202,6 +206,24 @@ def _normalize_segment(item: Any) -> dict[str, Any] | None:
         "text": text,
     }
 
+    style = _normalize_text_field(item.get("style"))
+    if style is None:
+        style = _normalize_text_field(item.get("style_ref"))
+    if style is not None:
+        segment["style"] = style
+
+    style_ref = _normalize_text_field(item.get("style_ref"))
+    if style_ref is not None:
+        segment["style_ref"] = style_ref
+
+    style_alpha = _normalize_unit_float(item.get("style_alpha"))
+    if style_alpha is not None:
+        segment["style_alpha"] = style_alpha
+
+    emo_ref_audio_path = _normalize_text_field(item.get("emo_ref_audio_path"))
+    if emo_ref_audio_path is not None:
+        segment["emo_ref_audio_path"] = emo_ref_audio_path
+
     emo_vec = _normalize_emo_vec(item.get("emo_vec"))
     if emo_vec is not None:
         segment["emo_vec"] = emo_vec
@@ -249,6 +271,13 @@ def _normalize_unit_float(value: Any) -> float | None:
     if number is None:
         return None
     return _clip_unit(number)
+
+
+def _normalize_text_field(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _finite_float(value: Any) -> float | None:

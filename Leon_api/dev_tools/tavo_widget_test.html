@@ -1,55 +1,5 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>IndexTTS TAVO Widget Test</title>
-<body style="margin:0;background:#eef1f5;color:#17202c;font-family:Microsoft YaHei,sans-serif;padding:16px">
-  <main style="max-width:720px;margin:0 auto">
-    <div class="mes" style="background:#fff;border-radius:12px;padding:14px;box-shadow:0 6px 22px rgba(15,23,42,.08)">
-      <div class="avatar" style="float:left;margin-right:10px"><img src="https://picsum.photos/seed/indextts-tavo-dom/128/128" style="width:46px;height:46px;border-radius:50%"></div>
-      <script>
-        window.tavo = {
-          message: {
-            current: async function () {
-			 // 获取页面上 class="mes_text" 的元素
-              const mesTextElement = document.querySelector('.mes_text');
-              // 获取元素里的文本内容，如果找不到元素则使用默认文本
-              const dynamicContent = mesTextElement ? mesTextElement.innerText : '未找到 mes_text 元素';
-              return {
-                id: 1,
-                characterId: 34,
-                role: 'assistant',
-                content: dynamicContent,
-              };
-            }
-          },
-          character: {
-            get: async function (id) { return { id: id, name: '测试角色', avatar: 'https://picsum.photos/seed/indextts-tavo-api/128/128' }; }
-          },
-          get: async function () { return null; },
-          set: async function () {}
-        };
-      </script>
-      <p class="mes_text" style="margin:0 0 8px">兰绯的手指死死抠着地毯.
-	  许晚秋配合地
-  把左侧乳房往上托，让你吃得更顺。
-  她的脸凑近兰绯的耳边，声音压得很低：
-
-  "绯姐……你昨天把主人赶出去，现在知道错了吗？"
-
-  兰绯的喘息越来越急促。她仰着头，颈侧的肌肉绷紧，眼角的泪水顺着脸颊往下淌。
-
-  你抬起头，皮鞭在手里轻轻敲了一下地毯。
-
-  "说。"你居高临下地看着她，"昨天把我赶出去，现在怎么说？呵呵!  想不到吧,哥们就当三天鸭王就毕业了,没错,我就是LEON!"
-
-  兰绯的喉咙动了一下。她低着头，散乱的黑发遮住了大半张脸。 
-
-  "……对不起。啊啊啊啊, 太舒服了,操我,操死我了,太深了..."
-
-  她高潮后一字一顿地说出来。
-
-  许晚秋抬起头，看了你一眼，嘴角的笑更深了。
-  "嘿嘿,老公, 你的鸡巴真厉害" </p>
-      <script src="http://127.0.0.1:9880/static/tavo.js?v=dev"></script>
-    </div>
-  </main>
-</body>
+<meta http-equiv="refresh" content="0; url=http://127.0.0.1:9880/tavo_test">
+<title>IndexTTS Tavo Test</title>
+<p>Redirecting to <a href="http://127.0.0.1:9880/tavo_test">http://127.0.0.1:9880/tavo_test</a></p>

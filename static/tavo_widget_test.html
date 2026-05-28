@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>IndexTTS Tavo Test</title>
+  <style>
+    *{box-sizing:border-box;letter-spacing:0}
+    body{margin:0;background:#10131a;color:#e8edf5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+    .shell{max-width:1180px;margin:0 auto;padding:18px;display:grid;grid-template-columns:390px minmax(0,1fr);gap:16px}
+    .panel,.mes{border:1px solid rgba(170,190,220,.18);background:#171b24;border-radius:10px}
+    .panel{padding:14px;position:sticky;top:12px;height:calc(100vh - 24px);overflow:auto}
+    .mes{padding:16px;min-height:320px}
+    h1{font-size:18px;margin:0 0 12px;color:#fff}
+    label{display:block;margin:11px 0 5px;font-size:12px;color:#aeb9c9}
+    input,textarea{width:100%;border:1px solid rgba(170,190,220,.20);background:#0d1016;color:#e8edf5;border-radius:8px;padding:8px 10px;font:13px/1.5 inherit;outline:none}
+    textarea{min-height:230px;resize:vertical}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    button{border:1px solid rgba(170,190,220,.22);background:#263143;color:#fff;border-radius:8px;padding:8px 11px;font:13px inherit;cursor:pointer}
+    button.primary{background:#b982d8;color:#160d1f;border-color:#d1a2ec;font-weight:700}
+    button.danger{background:#47212a;color:#ffd9df;border-color:#7d3b4a}
+    .status{margin-top:10px;font-size:12px;color:#aeb9c9;white-space:pre-wrap}
+    .msg-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+    .avatar{width:46px;height:46px;border-radius:50%;background:#252a36;object-fit:cover;border:1px solid rgba(255,255,255,.12)}
+    .msg-name{font-weight:800;color:#fff}
+    .msg-sub{font-size:12px;color:#8f9bad}
+    .mes_text{white-space:pre-wrap;line-height:1.65;color:#dde5f0;margin-bottom:12px}
+    .hint{font-size:12px;color:#8792a3;line-height:1.55;margin-top:12px}
+    @media(max-width:860px){.shell{grid-template-columns:1fr}.panel{position:static;height:auto}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="panel">
+      <h1>IndexTTS Tavo 测试页</h1>
+      <div class="row">
+        <div>
+          <label for="personaName">用户身份名</label>
+          <input id="personaName" value="白夜雨">
+        </div>
+        <div>
+          <label for="characterName">角色名</label>
+          <input id="characterName" value="潘金莲">
+        </div>
+      </div>
+      <label for="personaAvatar">用户头像 URL</label>
+      <input id="personaAvatar" value="https://picsum.photos/seed/indextts-user/128/128">
+      <label for="characterAvatar">角色头像 URL</label>
+      <input id="characterAvatar" value="https://picsum.photos/seed/indextts-character/128/128">
+      <label for="messageText">消息正文</label>
+      <textarea id="messageText">白夜雨抱着潘金莲，低声说：「别怕，我在这里。」
+
+潘金莲低下头，指尖攥紧衣角。「我只是有点紧张。」
+
+你抬头看着她，语气放轻：「慢慢来。」
+
+潘金莲看了你一眼，终于轻轻点头。</textarea>
+      <div class="actions">
+        <button class="primary" id="mountBtn" type="button">挂载播放器</button>
+        <button id="saveBtn" type="button">保存文本</button>
+        <button class="danger" id="clearBtn" type="button">清空测试存储</button>
+      </div>
+      <div class="status" id="status"></div>
+      <div class="hint">当前页使用真实 /static/tavo.js 和真实 API；Tavo 上下文由本页 mock。配置仍写入浏览器 localStorage，不影响手机 Tavo。</div>
+    </section>
+
+    <section class="mes" data-message-id="test-message-1">
+      <div class="msg-head">
+        <img class="avatar" id="characterAvatarPreview" alt="">
+        <div>
+          <div class="msg-name" id="characterNamePreview"></div>
+          <div class="msg-sub">assistant message mock</div>
+        </div>
+      </div>
+      <div class="mes_text" id="messagePreview"></div>
+      <span id="scriptSlot"></span>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+      var STATE_KEY = "indextts_tavo_test_state_v2";
+      var STORE_KEY = "indextts_tavo_test_store_v1";
+      var els = {
+        personaName: document.getElementById("personaName"),
+        characterName: document.getElementById("characterName"),
+        personaAvatar: document.getElementById("personaAvatar"),
+        characterAvatar: document.getElementById("characterAvatar"),
+        messageText: document.getElementById("messageText"),
+        characterAvatarPreview: document.getElementById("characterAvatarPreview"),
+        characterNamePreview: document.getElementById("characterNamePreview"),
+        messagePreview: document.getElementById("messagePreview"),
+        scriptSlot: document.getElementById("scriptSlot"),
+        status: document.getElementById("status"),
+      };
+      function loadJson(key, fallback) {
+        try { return JSON.parse(localStorage.getItem(key) || "null") || fallback; } catch (_) { return fallback; }
+      }
+      function saveState() {
+        var state = {
+          personaName: els.personaName.value,
+          characterName: els.characterName.value,
+          personaAvatar: els.personaAvatar.value,
+          characterAvatar: els.characterAvatar.value,
+          messageText: els.messageText.value,
+        };
+        localStorage.setItem(STATE_KEY, JSON.stringify(state));
+        renderPreview();
+      }
+      function loadState() {
+        var state = loadJson(STATE_KEY, null);
+        if (!state) return;
+        Object.keys(state).forEach(function (key) { if (els[key]) els[key].value = state[key]; });
+      }
+      function renderPreview() {
+        els.characterNamePreview.textContent = els.characterName.value || "测试角色";
+        els.characterAvatarPreview.src = els.characterAvatar.value || "";
+        els.messagePreview.textContent = els.messageText.value || "";
+      }
+      function storageBucket() {
+        return loadJson(STORE_KEY, {});
+      }
+      function saveBucket(bucket) {
+        localStorage.setItem(STORE_KEY, JSON.stringify(bucket || {}));
+      }
+      window.tavo = {
+        get: async function (name, scope) {
+          var bucket = storageBucket();
+          var key = (scope || "chat") + ":" + name;
+          return bucket[key] == null ? null : bucket[key];
+        },
+        set: async function (name, value, scope) {
+          var bucket = storageBucket();
+          bucket[(scope || "chat") + ":" + name] = value;
+          saveBucket(bucket);
+          return true;
+        },
+        message: {
+          current: async function () {
+            return { id: "test-message-1", characterId: 34, role: "assistant", content: els.messageText.value };
+          }
+        },
+        chat: {
+          current: async function () {
+            return {
+              id: 1,
+              name: "IndexTTS Test Chat",
+              characters: [{ id: 34, name: els.characterName.value || "测试角色", avatar: els.characterAvatar.value || "" }],
+              persona: { id: 5, name: els.personaName.value || "用户", avatar: els.personaAvatar.value || "" }
+            };
+          }
+        },
+        persona: {
+          get: async function (id) {
+            return { id: id, name: els.personaName.value || "用户", avatar: els.personaAvatar.value || "", description: "" };
+          }
+        },
+        character: {
+          get: async function (id) {
+            return { id: id, name: els.characterName.value || "测试角色", avatar: els.characterAvatar.value || "" };
+          },
+          current: async function () {
+            return { id: 34, name: els.characterName.value || "测试角色", avatar: els.characterAvatar.value || "" };
+          }
+        },
+        role: {
+          current: async function () {
+            return { id: 34, name: els.characterName.value || "测试角色", avatar: els.characterAvatar.value || "" };
+          }
+        }
+      };
+      function mountWidget() {
+        saveState();
+        document.querySelectorAll(".idx-tts,.idx-card,.idx-panel").forEach(function (node) {
+          if (node.parentNode) node.parentNode.removeChild(node);
+        });
+        els.scriptSlot.innerHTML = "";
+        var script = document.createElement("script");
+        script.src = location.origin + "/static/tavo.js?v=" + Date.now() + "&ttsDebug=1";
+        els.scriptSlot.appendChild(script);
+        els.status.textContent = "已挂载: " + script.src;
+      }
+      document.getElementById("mountBtn").addEventListener("click", mountWidget);
+      document.getElementById("saveBtn").addEventListener("click", function () {
+        saveState();
+        els.status.textContent = "已保存测试文本。";
+      });
+      document.getElementById("clearBtn").addEventListener("click", function () {
+        localStorage.removeItem(STORE_KEY);
+        els.status.textContent = "已清空本页 mock 的 tavo.get/tavo.set 存储。";
+      });
+      ["personaName","characterName","personaAvatar","characterAvatar","messageText"].forEach(function (id) {
+        els[id].addEventListener("input", renderPreview);
+      });
+      loadState();
+      renderPreview();
+      mountWidget();
+    })();
+  </script>
+</body>
+</html>
