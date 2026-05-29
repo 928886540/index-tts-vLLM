@@ -14,6 +14,38 @@
 - `handoff_docs/CURRENT_STATUS.md`：当前真实进度、测试入口、已知问题
 - `handoff_docs/QUICKSTART_TAVO.md`：TAVO 正则接入方式
 
+## 2026-05-29 Codex 接手快照
+
+先看这里，避免下个 Codex 又从旧文档绕远路。
+
+- 当前主分支：`VLLM`
+- 当前功能基线提交：`f0269e6 Fix Tavo role mapping and stream resume`
+- 本轮只新增了声腔参考说明：`prompts/library/声腔/说明.txt`
+- 不要在用户正在用服务时启动长音频测试、批量 TTS 或重启 API；需要测真实音频时先确认用户没在用。
+- TAVO 前端、角色映射、播放卡片、`tavo.get` / `tavo.set`、Advanced Rendering、正则注入相关改动，必须先读本机 `tavo` skill：`C:\Users\Administrator\.codex\skills\tavo\SKILL.md`
+- 机器规则也必须先读：`C:\Users\Administrator\.codex\AGENTS.md` 和 `C:\Users\Administrator\.codex\instruction.md`
+
+最近已经处理过的关键点：
+
+- 角色映射默认行应是 `旁白 / 用户 / 当前角色名`，不是字面量 `角色`。
+- 第三行当前角色映射可删除，`旁白` 和 `用户` 常驻。
+- 切换/重命名角色时，要用保存的 `characterName` 迁移旧映射，不能复制出同音色重复角色。
+- LLM 拆段后处理：无引号正文强制归 `旁白`；只有引号里的直接台词才归 `用户` 或具体角色。
+- 前端字幕优先用后端 `segments_meta` 补全，避免后半段歌词丢失。
+- WebAudio 流式暂停后续播要从暂停秒数继续，不能从头播放落盘音频。
+- 音色选择器两列必须固定宽度，长音色名不要撑开布局。
+
+固定验证方式：
+
+```powershell
+node --check static\tavo.js
+node --check Leon_api\dev_tools\test_tavo_widget_playwright.js
+python -m py_compile indextts2_api.py
+node Leon_api\dev_tools\test_tavo_widget_playwright.js
+```
+
+注意：Playwright runner 固定在 `%TEMP%\idx-playwright-runner`，不要在仓库里装 `node_modules` 或新浏览器。
+
 ## TAVO 开发硬性要求
 
 凡是修改 `static/tavo.js`、TAVO 注入脚本、TAVO 正则接入、`tavo.get`/`tavo.set` 持久化、消息/角色/聊天上下文、Advanced Rendering 相关逻辑时，必须先使用 `$tavo` / `tavo` skill，并优先按该 skill 的 JavaScript API 规则处理持久化和上下文读取。
