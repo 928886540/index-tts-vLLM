@@ -16,34 +16,66 @@
     "offlineAudioEnabled"
   ];
   var RESERVED_ROLES = ["旁白", "用户"];  // 这两个常驻不可删；具体人物用原名或 defaultVoice
-  function voiceForRoleNames(list, names) {
+  function normalizeCharacterRoleName(name) {
+    return String(name || "").trim();
+  }
+  function isCharacterPlaceholderRole(role) {
+    role = String(role || "").trim();
+    return role === "角色" || role === "character" || role === "当前角色";
+  }
+  function canonicalRoleName(role, characterRoleName, previousCharacterRoleName) {
+    role = String(role || "").trim();
+    characterRoleName = normalizeCharacterRoleName(characterRoleName);
+    previousCharacterRoleName = normalizeCharacterRoleName(previousCharacterRoleName);
+    if (characterRoleName && isCharacterPlaceholderRole(role)) return characterRoleName;
+    if (characterRoleName && previousCharacterRoleName && role === previousCharacterRoleName) return characterRoleName;
+    if (role === "narrator") return "旁白";
+    if (role === "你" || role === "user" || role === "User" || role === "我") return "用户";
+    return role;
+  }
+  function voiceForRoleNames(list, names, characterRoleName, previousCharacterRoleName) {
     list = (list && Array.isArray(list)) ? list : [];
     names = names || [];
     for (var i = 0; i < list.length; i++) {
-      var role = String((list[i] && list[i].role) || "").trim();
-      if (names.indexOf(role) >= 0) return String((list[i] && list[i].voice) || "");
+      var rawRole = String((list[i] && list[i].role) || "").trim();
+      var role = canonicalRoleName(rawRole, characterRoleName, previousCharacterRoleName);
+      if (names.indexOf(role) >= 0 || names.indexOf(rawRole) >= 0) return String((list[i] && list[i].voice) || "");
     }
     return "";
   }
-  function normalizeRoleVoiceList(list) {
+  function normalizeRoleVoiceList(list, characterRoleName, previousCharacterRoleName) {
     list = (list && Array.isArray(list)) ? list.slice() : [];
     function findVoice(names, fallbackIndex) {
-      var hit = voiceForRoleNames(list, names);
+      var hit = voiceForRoleNames(list, names, characterRoleName, previousCharacterRoleName);
       return hit || String((list[fallbackIndex] && list[fallbackIndex].voice) || "");
     }
     var reserved = [
       { role: "旁白", voice: findVoice(["旁白", "narrator"], 0) },
       { role: "用户", voice: findVoice(["用户", "你", "user", "我"], 1) },
     ];
-    var characterVoice = findVoice(["角色", "character", "当前角色"], 2);
-    // 后续行:去掉 role + voice 都空的(避免上次会话累积大量空行)
-    var extra = list.filter(function (r) {
+    var used = { "旁白": true, "用户": true };
+    var extra = [];
+    function addExtra(role, voice) {
+      role = canonicalRoleName(role, characterRoleName, previousCharacterRoleName);
+      voice = String(voice || "").trim();
+      if (!role || role === "旁白" || role === "用户") return;
+      if (used[role]) {
+        for (var i = 0; i < extra.length; i++) {
+          if (extra[i].role === role && !extra[i].voice && voice) extra[i].voice = voice;
+        }
+        return;
+      }
+      used[role] = true;
+      extra.push({ role: role, voice: voice });
+    }
+    // 后续行:去掉 role + voice 都空的(避免上次会话累积大量空行)。
+    // 旧配置里的“角色”只迁移为当前 Tavo 角色名一次；用户删除后不再强塞回来。
+    list.forEach(function (r) {
       var role = String((r && r.role) || "").trim();
       var voice = String((r && r.voice) || "").trim();
-      if (role === "旁白" || role === "用户" || role === "角色" || role === "我") return false;
-      return role || voice;
+      if (!role && !voice) return;
+      addExtra(role, voice);
     });
-    reserved.push({ role: "角色", voice: characterVoice });
     return reserved.concat(extra);
   }
   async function loadCharacterCfg(characterId) {
@@ -276,7 +308,7 @@
       // 结构化角色映射 UI
       ".idx-roles{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}.idx-role-row{display:grid;grid-template-columns:96px 1fr 28px;gap:6px;align-items:center}.idx-role-name{min-width:0;border:1px solid rgba(206,170,230,.16);background:#0b0810;color:#eee7f4;border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;outline:none}.idx-voice-btn{min-width:0;border:1px solid rgba(206,170,230,.20);background:rgba(206,170,230,.08);color:#eee7f4;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit}.idx-voice-btn:hover{background:rgba(206,170,230,.16)}.idx-role-del{width:28px;height:28px;border:1px solid rgba(255,120,145,.28);background:rgba(120,38,52,.22);color:#ffd5dd;border-radius:8px;cursor:pointer;font-size:14px;line-height:1;font-family:inherit}.idx-role-lock{width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:rgba(238,231,244,.45);font-size:13px;user-select:none;cursor:default}.idx-add-role{margin-top:4px;width:100%;border:1px dashed rgba(206,170,230,.30);background:transparent;color:#d9b7f0;padding:8px;border-radius:9px;cursor:pointer;font-size:12px;font-family:inherit}.idx-add-role:hover{background:rgba(206,170,230,.06)}.idx-llm-details{margin-top:10px;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:rgba(255,255,255,.03);overflow:hidden}.idx-llm-details>summary{list-style:none;cursor:pointer;padding:9px 12px;font-size:12px;font-weight:700;color:#d9b7f0;display:flex;align-items:center;justify-content:space-between;user-select:none}.idx-llm-details>summary::-webkit-details-marker{display:none}.idx-llm-details>summary::after{content:'▾';font-size:10px;color:rgba(238,231,244,.55);transition:transform .2s}.idx-llm-details[open]>summary::after{transform:rotate(180deg)}.idx-llm-details>.idx-grid{padding:8px 12px 12px;border-top:1px solid rgba(206,170,230,.12)}",
       // 音色选择器弹窗
-      ".idx-picker{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;box-shadow:0 -8px 32px rgba(0,0,0,.45);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;min-height:0}.idx-picker::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-picker-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(206,170,230,.18);margin-bottom:8px}.idx-picker-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-picker-close{border:0;background:transparent;color:#eee7f4;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}.idx-picker-tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;flex-wrap:wrap}.idx-picker-tab{flex:0 0 auto;border:1px solid rgba(206,170,230,.16);background:rgba(255,255,255,.04);color:#eee7f4;border-radius:999px;padding:5px 11px;cursor:pointer;font-size:11px;font-family:inherit;white-space:nowrap}.idx-picker-tab.is-active{border-color:#c890e8;background:rgba(200,144,232,.20);color:#fff}.idx-picker-search{margin-bottom:8px}.idx-picker-grid{flex:1 1 auto;min-height:200px;max-height:50vh;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-content:start;padding:2px}.idx-picker-item{min-height:54px;border:1px solid rgba(206,170,230,.16);border-radius:10px;background:rgba(255,255,255,.05);color:#eee7f4;text-align:left;padding:8px 8px 8px 12px;cursor:pointer;font-family:inherit;font-size:12px;line-height:1.35;display:flex;align-items:center;gap:6px;justify-content:space-between;transition:background .15s,border-color .15s}.idx-picker-item:hover{background:rgba(206,170,230,.14);border-color:rgba(206,170,230,.34)}.idx-picker-item.is-playing{border-color:#c890e8;background:rgba(200,144,232,.18);box-shadow:0 0 0 1px rgba(200,144,232,.22) inset}.idx-picker-item-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}.idx-picker-item-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}.idx-picker-item-sub{font-size:10px;color:rgba(238,231,244,.55);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-picker-apply{flex:0 0 auto;width:30px;height:30px;border-radius:50%;border:1px solid rgba(200,144,232,.45);background:rgba(200,144,232,.18);color:#fff;cursor:pointer;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:inherit;padding:0;line-height:1}.idx-picker-apply:hover{background:#c890e8;color:#170e20;border-color:#c890e8;transform:scale(1.05)}.idx-picker-apply:active{transform:scale(.95)}.idx-picker-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding-top:8px;border-top:1px solid rgba(206,170,230,.14);color:rgba(238,231,244,.72);font-size:11px}.idx-picker-pager button{border:1px solid rgba(206,170,230,.20);background:rgba(255,255,255,.06);color:#eee7f4;border-radius:7px;padding:3px 10px;cursor:pointer;font-family:inherit;font-size:11px}.idx-picker-pager button:disabled{opacity:.4;cursor:not-allowed}",
+      ".idx-picker{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;box-shadow:0 -8px 32px rgba(0,0,0,.45);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;min-height:0}.idx-picker::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-picker-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(206,170,230,.18);margin-bottom:8px}.idx-picker-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-picker-close{border:0;background:transparent;color:#eee7f4;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}.idx-picker-tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;flex-wrap:wrap}.idx-picker-tab{flex:0 0 auto;border:1px solid rgba(206,170,230,.16);background:rgba(255,255,255,.04);color:#eee7f4;border-radius:999px;padding:5px 11px;cursor:pointer;font-size:11px;font-family:inherit;white-space:nowrap}.idx-picker-tab.is-active{border-color:#c890e8;background:rgba(200,144,232,.20);color:#fff}.idx-picker-search{margin-bottom:8px}.idx-picker-grid{flex:1 1 auto;min-height:200px;max-height:50vh;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-content:start;padding:2px;width:100%}.idx-picker-item{min-width:0;overflow:hidden;min-height:54px;border:1px solid rgba(206,170,230,.16);border-radius:10px;background:rgba(255,255,255,.05);color:#eee7f4;text-align:left;padding:8px 8px 8px 12px;cursor:pointer;font-family:inherit;font-size:12px;line-height:1.35;display:flex;align-items:center;gap:6px;justify-content:space-between;transition:background .15s,border-color .15s}.idx-picker-item:hover{background:rgba(206,170,230,.14);border-color:rgba(206,170,230,.34)}.idx-picker-item.is-playing{border-color:#c890e8;background:rgba(200,144,232,.18);box-shadow:0 0 0 1px rgba(200,144,232,.22) inset}.idx-picker-item-info{flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;justify-content:center}.idx-picker-item-name{font-size:13px;font-weight:600;white-space:nowrap;overflow-x:auto;overflow-y:hidden;text-overflow:clip;display:block;scrollbar-width:none}.idx-picker-item-name::-webkit-scrollbar{display:none}.idx-picker-item-sub{font-size:10px;color:rgba(238,231,244,.55);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-picker-apply{flex:0 0 auto;width:30px;height:30px;border-radius:50%;border:1px solid rgba(200,144,232,.45);background:rgba(200,144,232,.18);color:#fff;cursor:pointer;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:inherit;padding:0;line-height:1}.idx-picker-apply:hover{background:#c890e8;color:#170e20;border-color:#c890e8;transform:scale(1.05)}.idx-picker-apply:active{transform:scale(.95)}.idx-picker-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding-top:8px;border-top:1px solid rgba(206,170,230,.14);color:rgba(238,231,244,.72);font-size:11px}.idx-picker-pager button{border:1px solid rgba(206,170,230,.20);background:rgba(255,255,255,.06);color:#eee7f4;border-radius:7px;padding:3px 10px;cursor:pointer;font-family:inherit;font-size:11px}.idx-picker-pager button:disabled{opacity:.4;cursor:not-allowed}",
       ".idx-card audio{display:none!important}.idx-info{padding-right:104px}.idx-card-counter{position:absolute;right:58px;top:16px;min-width:48px;height:32px;padding:0 10px;border:1px solid rgba(206,170,230,.22);border-radius:999px;background:rgba(20,14,28,.46);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:2}.idx-gear svg{width:19px;height:19px;fill:none!important;stroke:currentColor}",
       ".idx-seek{-webkit-appearance:none;appearance:none;height:30px;background:transparent;accent-color:auto}.idx-seek::-webkit-slider-runnable-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72));box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}.idx-seek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;margin-top:-6px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18),0 4px 12px rgba(0,0,0,.35)}.idx-seek::-moz-range-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72))}.idx-seek::-moz-range-thumb{width:18px;height:18px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18)}",
       ".idx-panel{width:min(760px,calc(100vw - 24px));max-width:760px;max-height:min(82vh,calc(100vh - 16px));margin:auto auto 0 auto;border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);scrollbar-width:none}.idx-panel::-webkit-scrollbar{display:none}.idx-panel-head{top:-14px}.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.idx-field{display:flex;flex-direction:column;gap:5px;min-width:0}.idx-field.idx-wide{grid-column:1/-1}.idx-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(206,170,230,.12)}",
@@ -323,7 +355,8 @@
   function pickCharacterConfig(cfg) {
     return {
       defaultVoice: cfg.defaultVoice || "",
-      roleVoiceList: normalizeRoleVoiceList(cfg.roleVoiceList || []),
+      characterName: cfg.currentCharacterName || "",
+      roleVoiceList: normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName),
     };
   }
   // 把旧 textarea 文本(每行/逗号分隔的 role=voice)转成结构化数组
@@ -343,10 +376,10 @@
     return (list || []).filter(function (r) { return r.role && r.voice; })
       .map(function (r) { return r.role + "=" + r.voice; }).join("\n");
   }
-  function rolesListToVoicesMap(list, defaultVoice) {
-    var fallbackVoice = defaultVoice || voiceForRoleNames(list, ["角色", "character", "当前角色"]);
-    var out = { default: fallbackVoice || "" };
-    (list || []).forEach(function (r) {
+  function rolesListToVoicesMap(list, defaultVoice, characterRoleName) {
+    var normalized = normalizeRoleVoiceList(list || [], characterRoleName);
+    var out = { default: defaultVoice || "" };
+    (normalized || []).forEach(function (r) {
       if (r.role && r.voice) out[r.role] = r.voice;
     });
     return out;
@@ -400,7 +433,7 @@
   }
   async function saveConfig(cfg, characterId) {
     // 写入前 normalize 一次,杜绝脏数据回到 storage
-    if (Array.isArray(cfg.roleVoiceList)) cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList);
+    if (Array.isArray(cfg.roleVoiceList)) cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList, cfg.currentCharacterName);
     // 全局只保存 LLM/api/mode/推理参数，不保存任何音色。
     var globalCfg = pickGlobalConfig(cfg);
     try { if (window.tavo && typeof tavo.set === "function") await tavo.set(CONFIG_KEY, globalCfg, "global"); } catch (_) {}
@@ -792,6 +825,7 @@
   async function streamWavViaWebAudio(streamUrl, hooks) {
     hooks = hooks || {};
     var playbackRate = Math.max(0.85, Math.min(1.25, Number(hooks.playbackRate || 1) || 1));
+    var startOffsetSec = Math.max(0, Number(hooks.startOffsetSec || 0) || 0);
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) throw new Error("浏览器不支持 Web Audio API");
     hooks.onStateChange && hooks.onStateChange("connecting");
@@ -924,19 +958,27 @@
         try { src.playbackRate.value = playbackRate; } catch (_) {}
         connectNode(src);
         keepSource(src);
+        var audioOffset = Math.min(startOffsetSec, Math.max(0, audioBuf.duration - 0.05));
         var fallbackStartAt = ctx.currentTime + 0.03;
-        var dur = audioBuf.duration / playbackRate;
+        var dur = Math.max(0, audioBuf.duration - audioOffset) / playbackRate;
         playbackStartCtxTime = fallbackStartAt;
         nextAt = fallbackStartAt + dur;
-        scheduledSpans.push({ start: fallbackStartAt, end: nextAt, audioStart: 0, audioEnd: audioBuf.duration });
+        scheduledSpans.push({ start: fallbackStartAt, end: nextAt, audioStart: audioOffset, audioEnd: audioBuf.duration });
         scheduledAudioSec = audioBuf.duration;
         started = true;
-        src.start(fallbackStartAt);
+        src.start(fallbackStartAt, audioOffset);
       } catch (e) { throw new Error("[step:bufferSource.start] " + (e && e.message ? e.message : e)); }
       hooks.onStateChange && hooks.onStateChange("scheduled");
       playNotifyTimer = setTimeout(function () {
         playNotifyTimer = null;
-        if (!stopped) hooks.onStateChange && hooks.onStateChange("playing");
+        if (stopped) return;
+        ensureAudioContextRunning("playNotify").then(function () {
+          if (!stopped && String(ctx.state || "running") === "running") hooks.onStateChange && hooks.onStateChange("playing");
+          else if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
+        }).catch(function (e) {
+          hooks.onError && hooks.onError(e);
+          if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
+        });
       }, Math.max(0, (fallbackStartAt - (ctx.currentTime || 0)) * 1000 + 40));
       armEndedWatcher();
       return { ctx: ctx, duration: dur, mode: "buffered" };
@@ -989,6 +1031,10 @@
     playbackStartCtxTime = null;
     var bytesPerSec = sampleRate * channels * 2;
     var blockAlign = Math.max(2 * channels, 2);
+    var skipBytesRemaining = Math.floor(startOffsetSec * bytesPerSec);
+    skipBytesRemaining = skipBytesRemaining - (skipBytesRemaining % blockAlign);
+    if (skipBytesRemaining > 0 && hooks.debug) hooks.debug("resume offset " + startOffsetSec.toFixed(2) + "s, skip " + skipBytesRemaining + " PCM bytes");
+    scheduledAudioSec = skipBytesRemaining > 0 ? startOffsetSec : scheduledAudioSec;
     var flushBytes = Math.max(8192, Math.floor(bytesPerSec * 0.35));
     flushBytes = flushBytes - (flushBytes % blockAlign);
     if (flushBytes < blockAlign) flushBytes = blockAlign;
@@ -1043,7 +1089,14 @@
           hooks.onStateChange && hooks.onStateChange("scheduled");
           playNotifyTimer = setTimeout(function () {
             playNotifyTimer = null;
-            if (!stopped) hooks.onStateChange && hooks.onStateChange("playing");
+            if (stopped) return;
+            ensureAudioContextRunning("playNotify").then(function () {
+              if (!stopped && String(ctx.state || "running") === "running") hooks.onStateChange && hooks.onStateChange("playing");
+              else if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
+            }).catch(function (e) {
+              hooks.onError && hooks.onError(e);
+              if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
+            });
           }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 40));
           armBufferWatcher();
         } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.18) {
@@ -1059,8 +1112,21 @@
       n = Math.max(0, Math.floor(n || 0));
       return n - (n % blockAlign);
     }
+    function applyStartOffsetSkip() {
+      if (!skipBytesRemaining || !pcm || !pcm.length) return;
+      var canDrop = Math.min(alignedLength(pcm.length), skipBytesRemaining);
+      if (canDrop <= 0) return;
+      pcm = pcm.slice(canDrop);
+      skipBytesRemaining -= canDrop;
+      if (skipBytesRemaining <= 0) {
+        skipBytesRemaining = 0;
+        if (hooks.debug) hooks.debug("resume offset reached, scheduling from " + startOffsetSec.toFixed(2) + "s");
+      }
+    }
     async function scheduleStartIfReady(force) {
       if (started || !pcm) return false;
+      applyStartOffsetSkip();
+      if (skipBytesRemaining > 0) return false;
       var needBytes = force ? blockAlign : startBufferBytes;
       if (pcm.length < needBytes) return false;
       var firstChunkBytes = force ? alignedLength(pcm.length) : alignedLength(Math.min(pcm.length, Math.max(startBufferBytes, flushBytes)));
@@ -1094,6 +1160,7 @@
         var nb = new Uint8Array(pcm.length + r.value.length);
         nb.set(pcm); nb.set(r.value, pcm.length); pcm = nb;
       }
+      applyStartOffsetSkip();
       await scheduleStartIfReady(false);
       while (started && pcm.length >= flushBytes) {
         var slice = pcm.slice(0, flushBytes);
@@ -1102,7 +1169,10 @@
       }
     }
     if (!started) await scheduleStartIfReady(true);
-    if (pcm && pcm.length >= blockAlign) {
+    applyStartOffsetSkip();
+    if (skipBytesRemaining > 0) {
+      pcm = null;
+    } else if (pcm && pcm.length >= blockAlign) {
       var remainLen = alignedLength(pcm.length);
       if (remainLen > 0) await schedulePcm(pcm.slice(0, remainLen));
     }
@@ -1141,9 +1211,9 @@
       "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2,\"emo_vec\":[a,h,f,d,s,l,u,n]}]}",
       "",
       "拆段规则：",
-      "1. 旁白（叙述、环境、动作描写、心理描写、无引号的第一人称自述）→ role 固定为 \"旁白\"。",
-      "   如果叙述句的主体是「你」或用户身份名（例如「你抬头」「白夜雨抱住她」「白夜雨说」且白夜雨是用户身份名），role 必须写 \"用户\"，不要写旁白。",
-      "   其他人物动作/心理描写即使能指向具体人物（例如「潘金莲低下头」「她笑了」「我低下头看着……」），只要不是直接说出口的话，都写 \"旁白\"，不要让角色认领旁白。",
+      "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
+      "   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。",
+      "   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。",
       "   ⚠️ 旁白的 style 永远写 neutral，style_alpha 写 0.15，emo_vec 永远写 [0,0,0,0,0,0,0,1]（纯 neutral）。",
       "       旁白是叙述者，本身没情绪，跟着剧情起伏会做作；后端也会强制覆盖成中性。",
       "   ⚠️ 旁白连续多个句子，要按句号/问号/感叹号/分号 拆成多个旁白 segments，每段≤2 句。",
@@ -1152,7 +1222,7 @@
       "   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"（不写 \"你\"、不写用户身份名）。",
       "   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。只有明确处在引号/对白里的「我……」才按说话人归属。",
       "   - 其他人物优先从「已知角色名单」里挑名字;名单外的新人物用原文里的名字（如「林老师」「兰绯」「她」）。",
-      "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身是旁白；后面引号里的直接台词才按说话人分配。只有「你说道：」「用户名说道：」这种用户动作引导句可写 role=\"用户\"。",
+      "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。",
       "4. text 是要朗读的原文片段，保留标点和语气词（啊、嗯、……）。",
       "5. style 是段级声腔/呼吸参考，只能从这个枚举里选：" + styleIdsText(),
       "   - 旁白、客观描写、普通对白 → neutral。",
@@ -1200,7 +1270,7 @@
       "{\"segments\":[",
       "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
       "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.58,\"emo_vec\":[0,0,0.2,0,0.7,0.4,0,0]},",
-      "  {\"role\":\"用户\",\"text\":\"" + (userName ? userName : "你") + "叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
+      "  {\"role\":\"旁白\",\"text\":\"" + (userName ? userName : "你") + "叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
       "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0,0.2,0,0,0.3,0.2,0,0.5]}",
       "]}"
     ].join("\n");
@@ -1242,19 +1312,20 @@
       if (!isFinite(styleAlpha)) styleAlpha = defaultStyleAlpha(style, cfg);
       styleAlpha = Math.max(0, Math.min(0.9, styleAlpha));
       var role = String(seg.role || "旁白").trim();
-      if (role === "你" || role === "user" || role === "User" || (userName && role === userName)) role = "用户";
-      if (role && role !== "旁白" && role !== "用户") {
-        var segTextForRole = String(seg.text || "");
-        var sourceIdx = findSegmentTextInSource(text, segTextForRole, sourceSearchOffset);
-        if (sourceIdx >= 0) {
-          sourceSearchOffset = sourceIdx + segTextForRole.length;
-          if (quoteDepthAt(text, sourceIdx) === 0 && looksLikeNarrationSegment(segTextForRole, role)) {
-            debugLog("↩️ 纠正旁白归属: role=" + role + " → 旁白 text=" + JSON.stringify(segTextForRole.slice(0, 32)), "#fc9");
-            role = "旁白";
-            style = "neutral";
-            styleAlpha = 0.15;
-          }
-        }
+      var segTextForRole = String(seg.text || "");
+      var sourceIdx = findSegmentTextInSource(text, segTextForRole, sourceSearchOffset);
+      var insideQuote = false;
+      if (sourceIdx >= 0) {
+        sourceSearchOffset = sourceIdx + segTextForRole.length;
+        insideQuote = quoteDepthAt(text, sourceIdx) > 0;
+      }
+      if (role && role !== "旁白" && !insideQuote) {
+        debugLog("↩️ 无引号正文强制归旁白: role=" + role + " → 旁白 text=" + JSON.stringify(segTextForRole.slice(0, 32)), "#fc9");
+        role = "旁白";
+        style = "neutral";
+        styleAlpha = 0.15;
+      } else if (role === "你" || role === "user" || role === "User" || (userName && role === userName)) {
+        role = "用户";
       }
       if (role === "旁白") {
         style = "neutral";
@@ -1438,7 +1509,7 @@
     }
     function currentTrack() { return currentTrackIndex >= 0 ? generatedTracks[currentTrackIndex] : null; }
     function currentVoicesMap(track) {
-      return (track && track.voicesMap) || rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice);
+      return (track && track.voicesMap) || rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
     }
     function voiceNameForRole(role, track) {
       var voices = currentVoicesMap(track);
@@ -1475,8 +1546,8 @@
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       var playable = trackPlayableUrl(track);
       if (playable && src === playable && isFinite(Number(audio.currentTime))) return Math.max(0, Number(audio.currentTime) || 0);
-      if (isFinite(Number(track.lastElementSec))) return Math.max(0, Number(track.lastElementSec) || 0);
       if (isFinite(Number(track.lastWebAudioSec))) return Math.max(0, Number(track.lastWebAudioSec) || 0);
+      if (isFinite(Number(track.lastElementSec))) return Math.max(0, Number(track.lastElementSec) || 0);
       if (isFinite(Number(track.lastStalledSec))) return Math.max(0, Number(track.lastStalledSec) || 0);
       return 0;
     }
@@ -1688,6 +1759,15 @@
       if (cfg.offlineAudioEnabled && track.offlineUrl) return track.offlineUrl;
       if (isSavedTrack(track)) return track.url || track.cacheUrl || track.streamUrl || "";
       if (isLiveTrack(track)) return track.streamUrl || track.url || "";
+      return track.url || "";
+    }
+    function liveStreamUrlForTrack(track) {
+      if (!track) return "";
+      if (track.streamUrl) return track.streamUrl;
+      if (track.mode !== "single" && track.cacheKey) {
+        track.streamUrl = cleanBase(cfg.apiBase) + "/tts_dialogue_stream_job/" + encodeURIComponent(track.cacheKey);
+        return track.streamUrl;
+      }
       return track.url || "";
     }
     function isElementUsingTrackStream(track) {
@@ -1934,7 +2014,8 @@
         setStatus(reason === "pause" ? "已暂停" : "播放已停止");
       }
     }
-    function startWebAudioProgress(token, startedAt, playbackRate, track) {
+    function startWebAudioProgress(token, startedAt, playbackRate, track, fallbackOffsetSec) {
+      fallbackOffsetSec = Math.max(0, Number(fallbackOffsetSec || 0) || 0);
       clearWebAudioProgressTimer();
       webAudioProgressTimer = setInterval(function () {
         if (token !== webAudioPlayToken) { clearWebAudioProgressTimer(); return; }
@@ -1943,7 +2024,7 @@
           if (webAudioController && typeof webAudioController.getTimeSec === "function") sec = webAudioController.getTimeSec();
           else {
             var now = (typeof performance !== "undefined" ? performance.now() : Date.now());
-            sec = Math.max(0, ((now - startedAt) / 1000) * playbackRate);
+            sec = Math.max(0, fallbackOffsetSec + ((now - startedAt) / 1000) * playbackRate);
           }
         } catch (_) { sec = 0; }
         if (cur) cur.textContent = formatTime(sec);
@@ -1956,6 +2037,7 @@
       stopWebAudioPlayback("replace");
       var token = ++webAudioPlayToken;
       var playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25);
+      var startOffsetSec = Math.max(0, Number(opts.startOffsetSec || 0) || 0);
       var startedAt = 0;
       var waitStartedAt = Date.now();
       var waitTimer = null;
@@ -1966,7 +2048,7 @@
       setTrackStreamHealth(track, "ok");
       clearElementAudioSrc();
       if (seek) { seek.disabled = true; seek.value = "0"; }
-      if (cur) cur.textContent = "00:00";
+      if (cur) cur.textContent = formatTime(startOffsetSec);
       if (total) total.textContent = "--:--";
       setError("");
       setTrackPlaybackState(track, "loading");
@@ -2004,6 +2086,13 @@
               setTrackPlaybackState(track, "buffering");
               setStatus("音频已排队，准备起播…");
               showTrackNotice(track, "音频已排队", "即将开始出声");
+            } else if (state === "audio_suspended") {
+              track.pausedByUser = true;
+              track.lastWebAudioSec = trackResumeSec(track);
+              setTrackPlaybackState(track, "paused");
+              setPlayState("idle");
+              setStatus("音频通道未放行，点播放继续");
+              showTrackNotice(track, "音频通道未放行", "点播放继续，不会从头开始");
             } else if (state === "playing") {
               stopWaitTimer();
               track.webAudioPlaying = true;
@@ -2011,12 +2100,12 @@
               setPlayState("playing");
               setStatus("正在播放：" + trackPlaybackLabel(track));
               setError("");
-              debugLog("▶️ Web Audio 已开始输出", "#9f9");
+              debugLog("▶️ Web Audio 播放时钟已启动", "#9f9");
               startedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
-              startWebAudioProgress(token, startedAt, playbackRate, track);
+              startWebAudioProgress(token, startedAt, playbackRate, track, startOffsetSec);
               startSubtitle(track, function () {
                 if (webAudioController && typeof webAudioController.getTimeSec === "function") return webAudioController.getTimeSec();
-                return ((((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt) / 1000) * playbackRate);
+                return startOffsetSec + ((((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt) / 1000) * playbackRate);
               });
             } else if (state === "buffering") {
               track.savePromptWanted = true;
@@ -2072,7 +2161,8 @@
             }
           },
           onError: function (e) { debugLog("❌ Web Audio 错误: " + (e && e.message ? e.message : e), "#f99"); },
-          debug: function (text) { debugLog("[wa] " + text, "#9ff"); }
+          debug: function (text) { debugLog("[wa] " + text, "#9ff"); },
+          startOffsetSec: startOffsetSec
         });
         return true;
       } catch (e) {
@@ -2191,9 +2281,10 @@
           if (cur) cur.textContent = "00:00";
           if (total) total.textContent = "--:--";
           if (autoplay) {
+            var liveResumeSec = trackResumeSec(track);
             setStatus("等待首段音频…");
-            showTrackNotice(track, "等待首段音频…", "正在连接流式音频");
-            playTrackViaWebAudio(track, srcUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在连接流式音频", waitDetail: "正在合成第一段" });
+            showTrackNotice(track, liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频");
+            playTrackViaWebAudio(track, liveStreamUrlForTrack(track) || srcUrl, { noticeTitle: liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", noticeDetail: liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频", waitDetail: "正在合成第一段", startOffsetSec: liveResumeSec });
           } else {
             setStatus(historyStatusText());
             showTrackNotice(track, "流式生成中", "点播放继续等待");
@@ -2545,8 +2636,8 @@
         changed = true;
       }
       if (Array.isArray(charCfg.roleVoiceList) && charCfg.roleVoiceList.length) {
-        var nextList = normalizeRoleVoiceList(charCfg.roleVoiceList);
-        if (JSON.stringify(nextList) !== JSON.stringify(normalizeRoleVoiceList(cfg.roleVoiceList || []))) {
+        var nextList = normalizeRoleVoiceList(charCfg.roleVoiceList, cfg.currentCharacterName, charCfg.characterName);
+        if (JSON.stringify(nextList) !== JSON.stringify(normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName))) {
           cfg.roleVoiceList = nextList;
           changed = true;
         }
@@ -2556,7 +2647,7 @@
     }
     function roleVoice(roleName) {
       roleName = String(roleName || "").trim();
-      var list = normalizeRoleVoiceList(cfg.roleVoiceList || []);
+      var list = normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName);
       for (var i = 0; i < list.length; i++) {
         if (String(list[i].role || "").trim() === roleName) return String(list[i].voice || "").trim();
       }
@@ -2567,8 +2658,14 @@
         return cfg.defaultVoice ? "" : "请先在“音色选择”里选择单音色音色。";
       }
       var missing = [];
-      ["旁白", "用户", "角色"].forEach(function (name) {
+      var list = normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName);
+      ["旁白", "用户"].forEach(function (name) {
         if (!roleVoice(name)) missing.push(name);
+      });
+      list.forEach(function (r) {
+        var role = String((r && r.role) || "").trim();
+        if (!role || role === "旁白" || role === "用户") return;
+        if (!String(r.voice || "").trim()) missing.push(role);
       });
       if (missing.length) return "请先在“角色音色映射”里给这些角色选择音色：" + missing.join("、") + "。";
       return "";
@@ -2881,19 +2978,21 @@
       function rebuild(metaList) {
         var t = 0;
         timeline = [];
-        for (var i = 0; i < segs.length; i++) {
+        var count = Math.max(segs.length, (metaList && metaList.length) || 0);
+        for (var i = 0; i < count; i++) {
+          var seg = (metaList && metaList[i]) || segs[i] || {};
           var segDur;
           var m = metaList && metaList[i];
           if (m && m.duration_s != null && m.duration_s > 0) segDur = m.duration_s;
-          else segDur = Math.max(0.6, (segs[i].text || "").length * 0.15);
+          else segDur = Math.max(0.6, (seg.text || "").length * 0.15);
           // 长文本按句号/逗号拆成 12-22 字的小段
-          var subs = splitLyricLines(segs[i].text);
+          var subs = splitLyricLines(seg.text);
           var totalChars = subs.reduce(function (a, s) { return a + s.length; }, 1);
           var subStart = t;
           for (var j = 0; j < subs.length; j++) {
             var subDur = segDur * (subs[j].length / totalChars);
             timeline.push({
-              role: segs[i].role || "旁白",
+              role: seg.role || "旁白",
               text: subs[j],
               start: subStart,
               end: subStart + subDur,
@@ -2935,6 +3034,13 @@
             .then(function (j) {
               if (!j) return;
               if (Array.isArray(j.segments_meta) && j.segments_meta.length) {
+                if (!segs.length || j.segments_meta.length > segs.length) {
+                  segs = j.segments_meta.map(function (s) {
+                    return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
+                  });
+                  trackEntry.segments = segs;
+                  if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+                }
                 var sig = j.segments_meta.map(function (m) {
                   return [m.role || "", m.text || "", Number(m.duration_s || 0).toFixed(3)].join(":");
                 }).join("|");
@@ -2972,7 +3078,7 @@
       while (cfg.roleVoiceList.length < RESERVED_ROLES.length) {
         cfg.roleVoiceList.push({ role: RESERVED_ROLES[cfg.roleVoiceList.length] || "", voice: "" });
       }
-      cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList);
+      cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList, cfg.currentCharacterName);
       var list = cfg.roleVoiceList;
       // 渲染前同步用户当前在输入框里的值,避免重渲染清空未保存输入
       var rows = $all(panel, '.idx-role-row');
@@ -3245,16 +3351,25 @@
         }
         if (existingTrack && existingTrack.pausedByUser && (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending")) {
           existingTrack.pausedByUser = false;
+          var resumeFromSec = trackResumeSec(existingTrack);
           if (existingTrack.cacheKey) await refreshTrackFromStatus(existingTrack, "resume snapshot");
           if (shouldUseElementForSavedTrack(existingTrack)) {
             await prepareOfflineAudio(existingTrack, "resume", { saveMissing: true });
-            startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
+            startElementAudioFrom(existingTrack, resumeFromSec);
             return;
           }
           setPlayState("loading");
-          setStatus("继续等待音频…");
-          showTrackNotice(existingTrack, "继续等待音频…", existingTrack.cacheKey ? "不从头重播，等落盘后从暂停位置续播" : "正在等待生成任务返回");
+          setStatus(resumeFromSec > 0 ? "从 " + formatTime(resumeFromSec) + " 继续流式播放…" : "继续等待音频…");
+          showTrackNotice(existingTrack, resumeFromSec > 0 ? "从暂停位置续播" : "继续等待音频…", existingTrack.cacheKey ? "重新连接流式音频，不从头听" : "正在等待生成任务返回");
           if (existingTrack.cacheKey) pollCacheUpgrade(existingTrack, "resume snapshot");
+          if (shouldUseWebAudioForLiveTrack(existingTrack)) {
+            await playTrackViaWebAudio(existingTrack, liveStreamUrlForTrack(existingTrack), {
+              noticeTitle: resumeFromSec > 0 ? "从暂停位置续播" : "等待首段音频…",
+              noticeDetail: resumeFromSec > 0 ? ("从 " + formatTime(resumeFromSec) + " 继续") : "正在连接流式音频",
+              waitDetail: "正在重新连接流式音频",
+              startOffsetSec: resumeFromSec
+            });
+          }
           return;
         }
         if (existingTrack && (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending") && play && play.dataset.state === "loading") {
@@ -3276,7 +3391,12 @@
           return;
         }
         if (shouldUseWebAudioForLiveTrack(existingTrack)) {
-          await playTrackViaWebAudio(existingTrack, trackPlayableUrl(existingTrack), { noticeTitle: "等待首段音频…", noticeDetail: "正在连接流式音频", waitDetail: "正在合成第一段" });
+          await playTrackViaWebAudio(existingTrack, liveStreamUrlForTrack(existingTrack), {
+            noticeTitle: "等待首段音频…",
+            noticeDetail: "正在连接流式音频",
+            waitDetail: "正在合成第一段",
+            startOffsetSec: existingTrack.pausedByUser ? trackResumeSec(existingTrack) : 0
+          });
           return;
         }
         if (audio.src) {
@@ -3348,7 +3468,7 @@
           var roleSummary = Object.keys(roleCounts).map(function (r) { return r + "×" + roleCounts[r]; }).join(", ");
           setStatus("开始合成 " + segments.length + " 段…");
           showTrackNotice(placeholder, "开始合成 " + segments.length + " 段…", roleSummary);
-          var voicesMap = rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice);
+          var voicesMap = rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
           debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
           body = Object.assign({ segments: segments, voices: voicesMap, performance_mode: cfg.qualityMode || "expressive", interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25) }, generationQualityOverrides(cfg.qualityMode));
           var ttsStart = Date.now();
@@ -3699,6 +3819,7 @@
     if (script && script.parentNode) script.parentNode.insertBefore(root, script.nextSibling); else document.body.appendChild(root);
     var cfg = await getConfig();
     var ctx = await currentMessageContext();
+    cfg.currentCharacterName = ctx.characterName || "";
     // 角色级 defaultVoice + roleVoiceList 覆盖全局 cfg。
     // 优先读 TAVO character scope；ctx.characterId 只用于旧版全局 key/localStorage 迁移。
     try {
@@ -3706,13 +3827,13 @@
       if (charCfg) {
         if (typeof charCfg.defaultVoice === "string") cfg.defaultVoice = charCfg.defaultVoice;
         if (!cfg.defaultVoice && Array.isArray(charCfg.roleVoiceList)) {
-          cfg.defaultVoice = voiceForRoleNames(charCfg.roleVoiceList, ["角色"]) || cfg.defaultVoice;
+          cfg.defaultVoice = voiceForRoleNames(charCfg.roleVoiceList, ["角色", "character", "当前角色", cfg.currentCharacterName], cfg.currentCharacterName, charCfg.characterName) || cfg.defaultVoice;
         }
-        if (Array.isArray(charCfg.roleVoiceList) && charCfg.roleVoiceList.length) cfg.roleVoiceList = charCfg.roleVoiceList;
+        if (Array.isArray(charCfg.roleVoiceList) && charCfg.roleVoiceList.length) cfg.roleVoiceList = normalizeRoleVoiceList(charCfg.roleVoiceList, cfg.currentCharacterName, charCfg.characterName);
       }
     } catch (_) {}
     // 关键:过滤掉历史会话累积的多余空行,确保前 2 行 reserved
-    cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList);
+    cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList, cfg.currentCharacterName);
     mount(root, cfg, ctx);
   } catch (e) { try { console.error("[IndexTTS TAVO]", e && e.stack ? e.stack : (e && e.message ? e.message : JSON.stringify(e))); } catch (_) {} }
 })();

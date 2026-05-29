@@ -71,6 +71,24 @@ function countFetches(fetches, pattern) {
 
     await page.click('[data-role="gear"]');
     await page.waitForSelector('[data-role="panel"][open]', { timeout: 5000 });
+    const roleMapping = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll(".idx-role-row")).map((row) => {
+        const name = row.querySelector(".idx-role-name");
+        return {
+          role: name ? name.value : "",
+          readonly: !!(name && name.readOnly),
+          deletable: !!row.querySelector(".idx-role-del")
+        };
+      });
+    });
+
+    if (!roleMapping.some((r) => r.role === "潘金莲" && r.deletable && !r.readonly)) {
+      throw new Error("default character role should use current Tavo character name and be deletable: " + JSON.stringify(roleMapping));
+    }
+    if (roleMapping.some((r) => r.role === "角色")) {
+      throw new Error("default role mapping still contains literal placeholder '角色': " + JSON.stringify(roleMapping));
+    }
+
     await page.click('[data-role="default-voice-btn"]');
     await page.waitForFunction(() => {
       const fetches = window.__idxTest && window.__idxTest.getFetchLog ? window.__idxTest.getFetchLog() : [];
@@ -103,6 +121,7 @@ function countFetches(fetches, pattern) {
       ok: true,
       targetUrl,
       initial,
+      roleMapping,
       afterPicker,
       consoleCount: consoleLines.length
     }, null, 2));
