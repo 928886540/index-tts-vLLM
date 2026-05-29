@@ -4,10 +4,12 @@
   var script = document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v4";
   var CONFIG_KEY = "indextts_tavo_config_v3";
+  var CONFIG_VERSION = 4;
   var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
   // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";
   var GLOBAL_CONFIG_FIELDS = [
+    "configVersion",
     "apiBase", "mode", "endpoint", "dialogueEndpoint", "parseEndpoint",
     "llmEndpoint", "llmModel", "llmApiKey",
     "intervalMs", "topP", "topK", "temperature", "repetitionPenalty", "emoAlpha", "speedFactor", "qualityMode",
@@ -33,6 +35,7 @@
       { role: "旁白", voice: findVoice(["旁白", "narrator"], 0) },
       { role: "用户", voice: findVoice(["用户", "你", "user", "我"], 1) },
     ];
+    var characterVoice = findVoice(["角色", "character", "当前角色"], 2);
     // 后续行:去掉 role + voice 都空的(避免上次会话累积大量空行)
     var extra = list.filter(function (r) {
       var role = String((r && r.role) || "").trim();
@@ -40,6 +43,7 @@
       if (role === "旁白" || role === "用户" || role === "角色" || role === "我") return false;
       return role || voice;
     });
+    reserved.push({ role: "角色", voice: characterVoice });
     return reserved.concat(extra);
   }
   async function loadCharacterCfg(characterId) {
@@ -52,6 +56,7 @@
   async function saveCharacterCfg(characterId, partial) {
     try { if (window.tavo && typeof tavo.set === "function") await tavo.set(CHAR_SCOPE_CONFIG_KEY, partial || {}, "character"); } catch (_) {}
     if (!characterId) return;
+    try { if (window.tavo && typeof tavo.set === "function") await tavo.set(CHAR_KEY_PREFIX + characterId, partial || {}, "global"); } catch (_) {}
     try { localStorage.setItem(CHAR_KEY_PREFIX + characterId, JSON.stringify(partial || {})); } catch (_) {}
   }
 
@@ -138,6 +143,7 @@
   }
 
   var DEFAULT_CONFIG = {
+    configVersion: CONFIG_VERSION,
     apiBase: scriptOrigin(),
     mode: "single",
     endpoint: "/tts_cache_stream",
@@ -149,19 +155,20 @@
     roleVoiceList: [
       { role: "旁白",   voice: "" },
       { role: "用户",   voice: "" },
+      { role: "角色",   voice: "" },
     ],
-    roleVoicesText: "旁白=\n用户=",
+    roleVoicesText: "旁白=\n用户=\n角色=",
     llmEndpoint: "http://127.0.0.1:8317/v1",
     llmModel: "渡鸦/grok-4.20-fast",
     llmApiKey: "",
     intervalMs: 50,
-    topP: 0.8,
+    topP: 0.85,
     topK: 30,
-    temperature: 0.8,
+    temperature: 0.85,
     repetitionPenalty: 10,
-    emoAlpha: 0.7,
+    emoAlpha: 0.75,
     speedFactor: 1.08,
-    qualityMode: "balanced",
+    qualityMode: "expressive",
     offlineAudioEnabled: false
   };
 
@@ -256,9 +263,9 @@
       ".idx-tts{max-width:760px;margin:12px 0;color:#eee7f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.45;letter-spacing:0}.idx-hidden{display:none!important}",
       ".idx-card{position:relative;overflow:hidden;border-radius:18px;background:radial-gradient(circle at 88% 8%,rgba(216,167,255,.22),transparent 40%),linear-gradient(160deg,rgba(27,21,34,.55) 0%,rgba(18,14,24,.48) 54%,rgba(12,9,16,.55) 100%);backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);border:1px solid rgba(206,170,230,.22);padding:16px}",
       ".idx-top{display:flex;align-items:center;gap:12px;min-width:0}.idx-cover{width:56px;height:56px;flex:0 0 56px;border-radius:14px;background:#241a2c;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 10px 24px rgba(0,0,0,.34);display:flex;align-items:center;justify-content:center;color:#e9c8ff;font-size:18px;font-weight:800;background-size:cover;background-position:center}.idx-cover[data-playing='1']{animation:none}",
-      ".idx-info{flex:1;min-width:0;padding-right:48px}.idx-title-row{display:flex;align-items:center;gap:8px;min-width:0}.idx-name{font-size:18px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-format{flex:0 0 auto;border:1px solid rgba(206,170,230,.34);background:rgba(206,170,230,.12);color:#d9b7f0;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800}.idx-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-gear{position:absolute;right:14px;top:14px;width:40px;height:40px;border-radius:50%;border:1px solid rgba(206,170,230,.30);background:rgba(20,14,28,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#eee7f4;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2;transition:background .15s,transform .12s}.idx-gear:active{transform:scale(.92)}.idx-gear svg{width:18px;height:18px;fill:currentColor}@media(hover:hover){.idx-gear:hover{background:rgba(60,38,80,.65)}}",
+      ".idx-info{flex:1;min-width:0;padding-right:48px}.idx-title-row{display:flex;align-items:center;gap:8px;min-width:0}.idx-name{font-size:18px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-format{flex:0 0 auto;border:1px solid rgba(206,170,230,.34);background:rgba(206,170,230,.12);color:#d9b7f0;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800}.idx-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-gear{position:absolute;right:14px;top:14px;width:36px;height:36px;border-radius:50%;border:1px solid rgba(206,170,230,.30);background:rgba(20,14,28,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#eee7f4;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2;transition:background .15s,transform .12s}.idx-gear:active{transform:scale(.92)}.idx-gear svg{width:18px;height:18px;fill:currentColor}@media(hover:hover){.idx-gear:hover{background:rgba(60,38,80,.65)}}",
       ".idx-seek-wrap{margin:14px 0 0;background:transparent;border:0;border-radius:0;padding:0}.idx-seek{width:100%;height:24px;margin:0;accent-color:#c88ee9;cursor:pointer}.idx-time{display:flex;justify-content:space-between;font-size:12px;color:rgba(238,231,244,.68);font-variant-numeric:tabular-nums;margin-top:4px}",
-      ".idx-subtitle{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:14px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.50) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:148px;min-height:148px;max-height:148px;overflow-y:auto;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;flex-direction:column;align-items:center;gap:4px;padding:5px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.38;font-weight:500;transition:color .25s,font-size .2s,font-weight .2s,padding .2s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:16px;font-weight:700;padding:8px}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85;transition:width .2s,height .2s,opacity .2s}.idx-sub-row.is-current .idx-sub-avatar{width:32px;height:32px;opacity:1}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:block;word-break:break-word;max-width:100%}",
+      ".idx-subtitle{display:flex;flex-direction:column;gap:3px;margin:12px 0 0;padding:12px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.48) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:136px;min-height:136px;max-height:136px;overflow-y:auto;scroll-behavior:auto;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 86%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 86%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;align-items:center;justify-content:center;min-height:34px;padding:6px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.32;font-weight:500;transition:color .18s,background .18s,box-shadow .18s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:13px;font-weight:800;background:rgba(216,167,255,.10);box-shadow:inset 3px 0 0 rgba(216,167,255,.75)}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;max-width:100%}",
       ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:currentColor}.idx-ctrl-sm{width:44px;height:44px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px}.idx-ctrl-main[data-state='loading'] svg{animation:idx-spin .9s linear infinite}@keyframes idx-spin{to{transform:rotate(360deg)}}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
       ".idx-meta{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:12px}.idx-pill{font-size:11px;color:rgba(238,231,244,.75);background:rgba(255,255,255,.06);border:1px solid rgba(206,170,230,.14);border-radius:999px;padding:4px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".idx-panel{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:1}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
@@ -270,11 +277,11 @@
       ".idx-roles{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}.idx-role-row{display:grid;grid-template-columns:96px 1fr 28px;gap:6px;align-items:center}.idx-role-name{min-width:0;border:1px solid rgba(206,170,230,.16);background:#0b0810;color:#eee7f4;border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;outline:none}.idx-voice-btn{min-width:0;border:1px solid rgba(206,170,230,.20);background:rgba(206,170,230,.08);color:#eee7f4;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit}.idx-voice-btn:hover{background:rgba(206,170,230,.16)}.idx-role-del{width:28px;height:28px;border:1px solid rgba(255,120,145,.28);background:rgba(120,38,52,.22);color:#ffd5dd;border-radius:8px;cursor:pointer;font-size:14px;line-height:1;font-family:inherit}.idx-role-lock{width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:rgba(238,231,244,.45);font-size:13px;user-select:none;cursor:default}.idx-add-role{margin-top:4px;width:100%;border:1px dashed rgba(206,170,230,.30);background:transparent;color:#d9b7f0;padding:8px;border-radius:9px;cursor:pointer;font-size:12px;font-family:inherit}.idx-add-role:hover{background:rgba(206,170,230,.06)}.idx-llm-details{margin-top:10px;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:rgba(255,255,255,.03);overflow:hidden}.idx-llm-details>summary{list-style:none;cursor:pointer;padding:9px 12px;font-size:12px;font-weight:700;color:#d9b7f0;display:flex;align-items:center;justify-content:space-between;user-select:none}.idx-llm-details>summary::-webkit-details-marker{display:none}.idx-llm-details>summary::after{content:'▾';font-size:10px;color:rgba(238,231,244,.55);transition:transform .2s}.idx-llm-details[open]>summary::after{transform:rotate(180deg)}.idx-llm-details>.idx-grid{padding:8px 12px 12px;border-top:1px solid rgba(206,170,230,.12)}",
       // 音色选择器弹窗
       ".idx-picker{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;box-shadow:0 -8px 32px rgba(0,0,0,.45);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;min-height:0}.idx-picker::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-picker-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(206,170,230,.18);margin-bottom:8px}.idx-picker-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-picker-close{border:0;background:transparent;color:#eee7f4;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}.idx-picker-tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;flex-wrap:wrap}.idx-picker-tab{flex:0 0 auto;border:1px solid rgba(206,170,230,.16);background:rgba(255,255,255,.04);color:#eee7f4;border-radius:999px;padding:5px 11px;cursor:pointer;font-size:11px;font-family:inherit;white-space:nowrap}.idx-picker-tab.is-active{border-color:#c890e8;background:rgba(200,144,232,.20);color:#fff}.idx-picker-search{margin-bottom:8px}.idx-picker-grid{flex:1 1 auto;min-height:200px;max-height:50vh;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-content:start;padding:2px}.idx-picker-item{min-height:54px;border:1px solid rgba(206,170,230,.16);border-radius:10px;background:rgba(255,255,255,.05);color:#eee7f4;text-align:left;padding:8px 8px 8px 12px;cursor:pointer;font-family:inherit;font-size:12px;line-height:1.35;display:flex;align-items:center;gap:6px;justify-content:space-between;transition:background .15s,border-color .15s}.idx-picker-item:hover{background:rgba(206,170,230,.14);border-color:rgba(206,170,230,.34)}.idx-picker-item.is-playing{border-color:#c890e8;background:rgba(200,144,232,.18);box-shadow:0 0 0 1px rgba(200,144,232,.22) inset}.idx-picker-item-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}.idx-picker-item-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}.idx-picker-item-sub{font-size:10px;color:rgba(238,231,244,.55);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-picker-apply{flex:0 0 auto;width:30px;height:30px;border-radius:50%;border:1px solid rgba(200,144,232,.45);background:rgba(200,144,232,.18);color:#fff;cursor:pointer;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:inherit;padding:0;line-height:1}.idx-picker-apply:hover{background:#c890e8;color:#170e20;border-color:#c890e8;transform:scale(1.05)}.idx-picker-apply:active{transform:scale(.95)}.idx-picker-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding-top:8px;border-top:1px solid rgba(206,170,230,.14);color:rgba(238,231,244,.72);font-size:11px}.idx-picker-pager button{border:1px solid rgba(206,170,230,.20);background:rgba(255,255,255,.06);color:#eee7f4;border-radius:7px;padding:3px 10px;cursor:pointer;font-family:inherit;font-size:11px}.idx-picker-pager button:disabled{opacity:.4;cursor:not-allowed}",
-      ".idx-card audio{display:none!important}.idx-info{padding-right:104px}.idx-card-counter{position:absolute;right:60px;top:18px;min-width:44px;height:30px;padding:0 9px;border:1px solid rgba(206,170,230,.22);border-radius:999px;background:rgba(20,14,28,.46);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:2}.idx-gear svg{width:19px;height:19px;fill:none!important;stroke:currentColor}",
+      ".idx-card audio{display:none!important}.idx-info{padding-right:104px}.idx-card-counter{position:absolute;right:58px;top:16px;min-width:48px;height:32px;padding:0 10px;border:1px solid rgba(206,170,230,.22);border-radius:999px;background:rgba(20,14,28,.46);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:2}.idx-gear svg{width:19px;height:19px;fill:none!important;stroke:currentColor}",
       ".idx-seek{-webkit-appearance:none;appearance:none;height:30px;background:transparent;accent-color:auto}.idx-seek::-webkit-slider-runnable-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72));box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}.idx-seek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;margin-top:-6px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18),0 4px 12px rgba(0,0,0,.35)}.idx-seek::-moz-range-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72))}.idx-seek::-moz-range-thumb{width:18px;height:18px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18)}",
-      ".idx-panel{width:min(760px,calc(100vw - 24px));max-width:760px;max-height:calc(100vh - 24px);margin:auto;border-radius:18px;background:rgba(12,8,18,.985);scrollbar-width:none}.idx-panel::-webkit-scrollbar{display:none}.idx-panel-head{top:-14px}.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.idx-field{display:flex;flex-direction:column;gap:5px;min-width:0}.idx-field.idx-wide{grid-column:1/-1}.idx-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(206,170,230,.12)}",
+      ".idx-panel{width:min(760px,calc(100vw - 24px));max-width:760px;max-height:min(82vh,calc(100vh - 16px));margin:auto auto 0 auto;border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);scrollbar-width:none}.idx-panel::-webkit-scrollbar{display:none}.idx-panel-head{top:-14px}.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.idx-field{display:flex;flex-direction:column;gap:5px;min-width:0}.idx-field.idx-wide{grid-column:1/-1}.idx-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(206,170,230,.12)}",
       ".idx-picker,.idx-picker-grid{scrollbar-width:none}.idx-picker::-webkit-scrollbar,.idx-picker-grid::-webkit-scrollbar,.idx-subtitle::-webkit-scrollbar{display:none}.idx-picker-item.is-selected{border-color:#d8a7ff;background:rgba(200,144,232,.20);box-shadow:0 0 0 1px rgba(216,167,255,.24) inset,0 0 18px rgba(200,144,232,.14)}.idx-picker-selected{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:#d8a7ff;color:#160d1f;font-size:12px;font-weight:900;display:none;align-items:center;justify-content:center}.idx-picker-item.is-selected .idx-picker-selected{display:flex}.idx-picker-wave{flex:0 0 auto;width:24px;height:18px;display:none;align-items:center;justify-content:center;gap:2px}.idx-picker-item.is-selected .idx-picker-wave,.idx-picker-item.is-playing .idx-picker-wave{display:flex}.idx-picker-wave i{width:3px;border-radius:999px;background:#d8a7ff;opacity:.85;animation:idx-wave .78s ease-in-out infinite}.idx-picker-wave i:nth-child(2){animation-delay:.12s}.idx-picker-wave i:nth-child(3){animation-delay:.24s}@keyframes idx-wave{0%,100%{height:5px;opacity:.45}50%{height:17px;opacity:1}}",
-      "@media(max-width:520px){.idx-card{padding:14px;border-radius:16px}.idx-info{padding-right:96px}.idx-card-counter{right:56px;top:16px}.idx-panel{width:calc(100vw - 16px);max-height:calc(100vh - 16px);border-radius:16px}.idx-controls{gap:10px}.idx-ctrl-sm{width:40px;height:40px}.idx-ctrl-main{width:62px;height:62px}.idx-ctrl-add,.idx-ctrl-delete{width:44px;height:44px}.idx-grid{grid-template-columns:1fr}.idx-voices{grid-template-columns:1fr 1fr}.idx-role-row{grid-template-columns:84px 1fr 26px}.idx-picker-grid{grid-template-columns:1fr 1fr}}"
+      "@media(max-width:520px){.idx-card{padding:14px;border-radius:16px}.idx-info{padding-right:98px}.idx-card-counter{right:56px;top:16px;height:30px;min-width:46px}.idx-panel{width:calc(100vw - 16px);max-height:min(84vh,calc(100vh - 12px));border-top-left-radius:16px;border-top-right-radius:16px;border-bottom-left-radius:0;border-bottom-right-radius:0}.idx-controls{gap:10px}.idx-ctrl-sm{width:40px;height:40px}.idx-ctrl-main{width:62px;height:62px}.idx-ctrl-add,.idx-ctrl-delete{width:44px;height:44px}.idx-grid{grid-template-columns:1fr}.idx-voices{grid-template-columns:1fr 1fr}.idx-role-row{grid-template-columns:84px 1fr 26px}.idx-picker-grid{grid-template-columns:1fr 1fr}}"
     ].join("");
     document.head.appendChild(style);
   }
@@ -283,7 +290,15 @@
     var saved = null;
     try { if (window.tavo && typeof tavo.get === "function") saved = await tavo.get(CONFIG_KEY, "global"); } catch (_) {}
     if (!saved) { try { saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null"); } catch (_) {} }
+    var savedVersion = Number(saved && saved.configVersion || 0) || 0;
     var cfg = Object.assign({}, DEFAULT_CONFIG, pickGlobalConfig(saved || {}));
+    if (savedVersion < CONFIG_VERSION) {
+      if (cfg.qualityMode === "balanced") cfg.qualityMode = "expressive";
+      if (Number(cfg.topP) === 0.8) cfg.topP = 0.85;
+      if (Number(cfg.temperature) === 0.8) cfg.temperature = 0.85;
+      if (Number(cfg.emoAlpha) === 0.7) cfg.emoAlpha = 0.75;
+    }
+    cfg.configVersion = CONFIG_VERSION;
     // 强制把 apiBase 锁死成本次加载脚本的来源 —— 用户换 LAN/外网/隧道 URL 时
     // 不会被 localStorage 里残留的旧 apiBase 拖累，所有请求一定打回脚本同源。
     cfg.apiBase = scriptOrigin();
@@ -329,7 +344,8 @@
       .map(function (r) { return r.role + "=" + r.voice; }).join("\n");
   }
   function rolesListToVoicesMap(list, defaultVoice) {
-    var out = { default: defaultVoice || "" };
+    var fallbackVoice = defaultVoice || voiceForRoleNames(list, ["角色", "character", "当前角色"]);
+    var out = { default: fallbackVoice || "" };
     (list || []).forEach(function (r) {
       if (r.role && r.voice) out[r.role] = r.voice;
     });
@@ -530,6 +546,19 @@
   function formatTime(sec) { sec = Math.max(0, Number(sec || 0)); if (!isFinite(sec)) return "--:--"; return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0"); }
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/[\r\n,，;；]+/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
+  function generationQualityOverrides(mode) {
+    mode = String(mode || "expressive").trim();
+    if (mode === "fast") return { diffusion_steps: 8, prompt_audio_seconds: 8, segment_tokens: 48, first_tokens: 12 };
+    if (mode === "balanced") return { diffusion_steps: 8, prompt_audio_seconds: 8, segment_tokens: 56, first_tokens: 16 };
+    return { diffusion_steps: 10, prompt_audio_seconds: 10, segment_tokens: 72, first_tokens: 24 };
+  }
+  function applyGenerationParamsToSearchParams(p, cfg) {
+    var q = generationQualityOverrides(cfg && cfg.qualityMode);
+    p.set("diffusion_steps", String(q.diffusion_steps));
+    p.set("prompt_audio_seconds", String(q.prompt_audio_seconds));
+    p.set("segment_tokens", String(q.segment_tokens));
+    p.set("first_tokens", String(q.first_tokens));
+  }
   var STYLE_PRESETS = [
     { id: "neutral", label: "普通/平静", alpha: 0.20 },
     { id: "breath_soft", label: "轻微气声", alpha: 0.48 },
@@ -654,6 +683,7 @@
     p.set("top_k", String(cfg.topK));
     p.set("temperature", String(cfg.temperature));
     p.set("repetition_penalty", String(cfg.repetitionPenalty));
+    applyGenerationParamsToSearchParams(p, cfg);
     return p;
   }
   function singleStreamUrl(base, cfg, text, force) {
@@ -668,7 +698,7 @@
     return cleanBase(base) + "/cache_tts_single?" + singleParams(cfg, text).toString();
   }
   function singleBody(cfg, text, force) {
-    return {
+    return Object.assign({
       text: text,
       ref_audio_path: cfg.defaultVoice,
       emo_text: "",
@@ -681,7 +711,7 @@
       repetition_penalty: cfg.repetitionPenalty,
       emo_alpha: cfg.emoAlpha,
       bypass_cache: !!force
-    };
+    }, generationQualityOverrides(cfg.qualityMode));
   }
   async function createSingleStreamJob(base, cfg, text, force) {
     var res = await fetch(cleanBase(base) + "/tts_stream_job", {
@@ -785,6 +815,7 @@
     var playbackStartCtxTime = null;
     var readEnded = false;
     var bufferTimer = null;
+    var playNotifyTimer = null;
     var bufferingState = false;
     var scheduledSpans = [];
     var scheduledAudioSec = 0;
@@ -844,6 +875,7 @@
       stopReason = reason || "播放已停止";
       if (endTimer) { try { clearInterval(endTimer); } catch (_) {} endTimer = null; }
       if (bufferTimer) { try { clearInterval(bufferTimer); } catch (_) {} bufferTimer = null; }
+      if (playNotifyTimer) { try { clearTimeout(playNotifyTimer); } catch (_) {} playNotifyTimer = null; }
       activeSources.slice().forEach(function (node) { try { node.stop(0); } catch (_) {} });
       if (reader && typeof reader.cancel === "function") {
         try { reader.cancel(stopReason).catch(function () {}); } catch (_) {}
@@ -901,7 +933,11 @@
         started = true;
         src.start(fallbackStartAt);
       } catch (e) { throw new Error("[step:bufferSource.start] " + (e && e.message ? e.message : e)); }
-      hooks.onStateChange && hooks.onStateChange("playing");
+      hooks.onStateChange && hooks.onStateChange("scheduled");
+      playNotifyTimer = setTimeout(function () {
+        playNotifyTimer = null;
+        if (!stopped) hooks.onStateChange && hooks.onStateChange("playing");
+      }, Math.max(0, (fallbackStartAt - (ctx.currentTime || 0)) * 1000 + 40));
       armEndedWatcher();
       return { ctx: ctx, duration: dur, mode: "buffered" };
     }
@@ -1004,7 +1040,11 @@
         if (!started) {
           playbackStartCtxTime = t;
           started = true;
-          hooks.onStateChange && hooks.onStateChange("playing");
+          hooks.onStateChange && hooks.onStateChange("scheduled");
+          playNotifyTimer = setTimeout(function () {
+            playNotifyTimer = null;
+            if (!stopped) hooks.onStateChange && hooks.onStateChange("playing");
+          }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 40));
           armBufferWatcher();
         } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.18) {
           bufferingState = false;
@@ -1148,10 +1188,10 @@
       "- 愤怒、咆哮 → angry 主导。例：[0.8,0,0,0,0,0,0,0.1]",
       "- 不要每段写一样；不要全 0；维度数宁少勿多。",
       "",
-      "每段可加 emo_alpha 字段（0.2-0.5），控制情绪强度：",
-      "- 平静段写 0.2-0.3，正常对话 0.35-0.4，强烈情绪 0.45-0.5。",
-      "- 不要超过 0.5，否则一定做作。",
-      "style_alpha 控制声腔参考强度：neutral=0.15-0.25；轻微 style=0.45-0.60；明显 breath/moan style=0.70-0.86。stage_peak 可写 0.82-0.88，但不要超过 0.9。",
+      "每段可加 emo_alpha 字段（0.18-0.75），控制情绪向量强度：",
+      "- 旁白固定 0.18-0.25，平静对白 0.30-0.40，正常带情绪对白 0.45-0.58，强烈台词 0.60-0.72。",
+      "- 不要每段都高强度；只有明确哭、怒、恐惧、惊讶、亲密气声时才超过 0.6。",
+      "style_alpha 控制声腔/情绪参考音频强度：neutral=0.15-0.25；轻微 style=0.48-0.62；明显 breath/moan/style 参考=0.72-0.88。stage_peak 可写 0.84-0.90，但不要超过 0.9。",
       "",
       "示例输入：",
       "她低着头，眼角有泪。「对不起，我真的撑不住了。」",
@@ -1216,13 +1256,22 @@
           }
         }
       }
+      if (role === "旁白") {
+        style = "neutral";
+        styleAlpha = 0.15;
+      }
+      var emoAlpha = Number(seg.emo_alpha);
+      if (!isFinite(emoAlpha)) emoAlpha = role === "旁白" ? 0.2 : (style === "neutral" ? 0.42 : Number(cfg.emoAlpha || 0.75));
+      emoAlpha = role === "旁白" ? Math.max(0.15, Math.min(0.25, emoAlpha)) : Math.max(0.25, Math.min(0.8, emoAlpha));
+      var emoVec = seg.emo_vec || [0,0,0,0,0,0,0,0.35];
+      if (role === "旁白") emoVec = [0,0,0,0,0,0,0,1];
       return {
         role: role || "旁白",
         text: seg.text || "",
         style: style,
         style_alpha: styleAlpha,
-        emo_vec: seg.emo_vec || [0,0,0,0,0,0,0,0.35],
-        emo_alpha: Number(seg.emo_alpha || cfg.emoAlpha || 0.4)
+        emo_vec: emoVec,
+        emo_alpha: emoAlpha
       };
     }).filter(function (seg) { return seg.text.trim(); });
     assertLlmSegmentsCoverSource(text, normalizedSegments);
@@ -1246,12 +1295,18 @@
       '  <div class="idx-card-counter" data-role="counter">0/0</div>',
       '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点播放</div></div></div>',
       '  <div class="idx-seek-wrap"><input class="idx-seek" data-role="seek" type="range" min="0" max="1000" value="0" disabled><div class="idx-time"><span data-role="current">00:00</span><span data-role="total">--:--</span></div></div>',
-      '  <div class="idx-subtitle" data-role="subtitle"><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点音符生成新的音频</span></div></div>',
+      '  <div class="idx-subtitle" data-role="subtitle"><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点播放开始生成音频</span></div></div>',
       '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button><button class="idx-ctrl idx-ctrl-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
         + '<div class="idx-section-title">播放模式</div>'
         + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>不走 LLM，整段使用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>第三方 AI 拆旁白/人物并输出 style + emo_vec</span></button></div>'
+        + '<div class="idx-section-title">合成质量</div>'
+        + '<div class="idx-grid">'
+          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="expressive">质量优先（推荐）</option><option value="balanced">平衡</option><option value="fast">极速</option></select></label>'
+          + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.08"></label>'
+        + '</div>'
+        + '<div class="idx-section-title">播放 / 离线</div>'
         + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>开启后会把已落盘音频保存到本机 IndexedDB；下次优先播放本地音频，缺失时再走在线音频。</span></span></label>'
         // 单音色模式专属 —— mode==="single" 时显示
         + '<div class="idx-single-only"><div class="idx-section-title">音色选择</div><div class="idx-default-voice"><button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择音色…</button></div></div>'
@@ -1264,8 +1319,6 @@
             + '<label class="idx-field idx-wide"><span class="idx-label">LLM 接口地址（写到 /v1 即可，会自动补全 /chat/completions）</span><input class="idx-input" data-field="llmEndpoint" placeholder="http://127.0.0.1:8317/v1"></label>'
             + '<label class="idx-field"><span class="idx-label">LLM 模型</span><input class="idx-input" data-field="llmModel" placeholder="渡鸦/grok-4.20-fast"></label>'
             + '<label class="idx-field"><span class="idx-label">LLM Key</span><input class="idx-input" type="password" data-field="llmApiKey" placeholder="sk-..."></label>'
-            + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.08"></label>'
-            + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速</option><option value="balanced">平衡</option><option value="expressive">质量</option></select></label>'
           + '</div></details>'
         + '</div>'
         + '<div class="idx-actions"><button class="idx-btn" type="button" data-role="save">保存</button></div>'
@@ -1369,12 +1422,13 @@
     }
     function historyStatusText() {
       var total = generatedTracks.length;
+      if (!total && !tracksLoaded && knownHistoryCount > 0) return "历史音频 " + knownHistoryCount + " 条";
       if (!total) return "历史音频 0 条";
       var idx = currentTrackIndex >= 0 ? currentTrackIndex + 1 : total;
       return "历史音频 " + total + " 条 · 当前 " + idx + "/" + total;
     }
     function updateTrackCounter() {
-      var total = generatedTracks.length;
+      var total = generatedTracks.length || (!tracksLoaded ? knownHistoryCount : 0);
       var idx = total && currentTrackIndex >= 0 ? currentTrackIndex + 1 : 0;
       if (counter) counter.textContent = idx + "/" + total;
     }
@@ -1414,6 +1468,35 @@
     }
     function setAudioPlaybackRate() {
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
+    }
+    function trackResumeSec(track) {
+      if (!track) return 0;
+      var src = "";
+      try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
+      var playable = trackPlayableUrl(track);
+      if (playable && src === playable && isFinite(Number(audio.currentTime))) return Math.max(0, Number(audio.currentTime) || 0);
+      if (isFinite(Number(track.lastElementSec))) return Math.max(0, Number(track.lastElementSec) || 0);
+      if (isFinite(Number(track.lastWebAudioSec))) return Math.max(0, Number(track.lastWebAudioSec) || 0);
+      if (isFinite(Number(track.lastStalledSec))) return Math.max(0, Number(track.lastStalledSec) || 0);
+      return 0;
+    }
+    function seekBySeconds(delta) {
+      delta = Number(delta) || 0;
+      var track = currentTrack();
+      var dur = Number(audio && audio.duration);
+      if (audio && (audio.currentSrc || audio.src) && isFinite(dur) && dur > 0) {
+        audio.currentTime = Math.max(0, Math.min(dur - 0.05, Number(audio.currentTime || 0) + delta));
+        return true;
+      }
+      if (track && isSavedTrack(track) && trackPlayableUrl(track)) {
+        startElementAudioFrom(track, Math.max(0, trackResumeSec(track) + delta));
+        return true;
+      }
+      if (track && track.webAudioPlaying) {
+        track.lastWebAudioSec = Math.max(0, trackResumeSec(track) + delta);
+        setStatus("流式播放暂不支持拖动，音频保存后可跳转");
+      }
+      return false;
     }
     function startElementAudioFrom(track, startSec) {
       if (!track || !trackPlayableUrl(track)) return false;
@@ -1727,7 +1810,10 @@
     async function prepareOfflineAudio(track, label) {
       if (!cfg.offlineAudioEnabled || !track) return false;
       var hit = await hydrateOfflineAudio(track, label);
-      if (!hit && isSavedTrack(track) && track.cacheKey && track.cacheUrl) scheduleOfflineAudioSave(track, (label || "offline") + " compensation", 0);
+      var opts = (arguments.length > 2 && arguments[2]) || {};
+      if (!hit && opts.saveMissing && isSavedTrack(track) && track.cacheKey && track.cacheUrl) {
+        scheduleOfflineAudioSave(track, (label || "offline") + " compensation", 0);
+      }
       return hit;
     }
     async function deleteOfflineAudioForTrack(track) {
@@ -1761,7 +1847,7 @@
     function qualityModeLabel(mode) {
       mode = String(mode || "");
       if (mode === "fast") return "极速";
-      if (mode === "expressive") return "质量";
+      if (mode === "expressive") return "质量优先";
       return "平衡";
     }
     function formatJobMetrics(metrics) {
@@ -1816,7 +1902,7 @@
         else if (isElementUsingTrackStream(track) && isFinite(Number(audio.currentTime))) resumeSec = Number(audio.currentTime) || 0;
         else if (track.lastElementSec != null) resumeSec = Number(track.lastElementSec) || 0;
       } catch (_) { resumeSec = 0; }
-      await prepareOfflineAudio(track, "switch saved");
+      await prepareOfflineAudio(track, "switch saved", { saveMissing: true });
       stopWebAudioPlayback("switch");
       startElementAudioFrom(track, resumeSec);
     }
@@ -1831,12 +1917,15 @@
     }
     function stopWebAudioPlayback(reason) {
       webAudioPlayToken++;
+      var activeTrack = currentTrack();
+      if (activeTrack && webAudioController && typeof webAudioController.getTimeSec === "function") {
+        try { activeTrack.lastWebAudioSec = Math.max(0, Number(webAudioController.getTimeSec()) || 0); } catch (_) {}
+      }
       if (webAudioController && typeof webAudioController.stop === "function") {
         try { webAudioController.stop(reason || "停止播放"); } catch (_) {}
       }
       webAudioController = null;
       clearWebAudioProgressTimer();
-      var activeTrack = currentTrack();
       markWebAudioStopped(activeTrack);
       if (activeTrack && reason === "pause") setTrackPlaybackState(activeTrack, "paused");
       stopSubtitle();
@@ -1911,6 +2000,10 @@
               setTrackPlaybackState(track, "buffering");
               setStatus("收到音频，正在缓冲…");
               showTrackNotice(track, "收到音频", "缓冲一小段后起播");
+            } else if (state === "scheduled") {
+              setTrackPlaybackState(track, "buffering");
+              setStatus("音频已排队，准备起播…");
+              showTrackNotice(track, "音频已排队", "即将开始出声");
             } else if (state === "playing") {
               stopWaitTimer();
               track.webAudioPlaying = true;
@@ -1918,7 +2011,7 @@
               setPlayState("playing");
               setStatus("正在播放：" + trackPlaybackLabel(track));
               setError("");
-              debugLog("▶️ Web Audio 首块已起播", "#9f9");
+              debugLog("▶️ Web Audio 已开始输出", "#9f9");
               startedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
               startWebAudioProgress(token, startedAt, playbackRate, track);
               startSubtitle(track, function () {
@@ -1927,10 +2020,18 @@
               });
             } else if (state === "buffering") {
               track.savePromptWanted = true;
+              track.stalledCount = Number(track.stalledCount || 0) + 1;
+              track.lastStalledAt = Date.now();
+              track.lastStalledSec = trackResumeSec(track);
+              setTrackStreamHealth(track, "stalled");
               setTrackPlaybackState(track, "buffering");
               setPlayState("loading");
               setStatus("网络缓冲中…");
               showTrackNotice(track, "网络缓冲中…", "歌词会停在当前播放位置");
+              debugLog("⚠️ Web Audio buffering count=" + track.stalledCount, "#fc9");
+              if (isSavedTrack(track) && trackShouldAskPlaySaved(track) && !track.savePromptAsked) {
+                askPlaySavedTrack(track).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
+              }
             } else if (state === "resumed") {
               setTrackPlaybackState(track, "playing");
               setPlayState("playing");
@@ -2080,7 +2181,7 @@
         await refreshTrackFromStatus(track, "select snapshot");
         state = trackState(track);
       }
-      await prepareOfflineAudio(track, "select");
+      await hydrateOfflineAudio(track, "select");
       srcUrl = trackPlayableUrl(track);
       debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.offlineUrl ? "offline" : srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
       if (srcUrl) {
@@ -2238,6 +2339,7 @@
     }
     var tracksLoaded = !messageId;
     var tracksLoading = null;
+    var knownHistoryCount = 0;
     function restoreTrackFromSaved(t, base) {
       if (!t || !t.cacheKey) return null;
       var restoredMode = t.mode || "ai8";
@@ -2282,11 +2384,12 @@
       if (tracksLoading) return tracksLoading;
       tracksLoading = (async function () {
         var saved = await loadTracksForMessage(messageId);
+        knownHistoryCount = saved && saved.length ? saved.length : 0;
         tracksLoaded = true;
         if (!saved || !saved.length) {
           updateTrackButtons();
           setStatus(historyStatusText());
-          showTrackNotice(null, "历史音频 0 条", "点音符生成新的音频");
+          showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
           return generatedTracks;
         }
         var base = cleanBase(cfg.apiBase);
@@ -2307,6 +2410,18 @@
         tracksLoading = null;
       });
       return tracksLoading;
+    }
+    async function initializeHistoryCount() {
+      if (!messageId || tracksLoaded) return;
+      try {
+        var saved = await loadTracksForMessage(messageId);
+        knownHistoryCount = saved && saved.length ? saved.length : 0;
+        updateTrackButtons();
+        setStatus(historyStatusText());
+        showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放恢复历史音频，或点加号生成新的音频" : "点播放开始生成音频");
+      } catch (e) {
+        debugLog("⚠️ 历史音频计数读取失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
     }
     async function confirmDeleteTrack(track) {
       if (!track) return false;
@@ -2368,7 +2483,7 @@
         if (total) total.textContent = "--:--";
         setPlayState("idle");
         setStatus("历史音频 0 条");
-        showTrackNotice(null, "历史音频 0 条", "点音符生成新的音频");
+        showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
         updateTrackButtons();
       }
     }
@@ -2395,8 +2510,8 @@
       cfg.apiBase = String(getField("apiBase", cfg.apiBase || scriptOrigin())).trim() || scriptOrigin();
       cfg.intervalMs = Number(getField("intervalMs", cfg.intervalMs || 50) || 50);
       cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.08), 1.08, 0.85, 1.25);
-      cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "balanced") || "balanced").trim();
-      if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
+      cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "expressive") || "expressive").trim();
+      if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "expressive";
       cfg.offlineAudioEnabled = getCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       try { audio.playbackRate = cfg.speedFactor; } catch (_) {}
       // cfg.roleVoiceList 由 renderRoleList 实时维护(addRoleRow/setRowVoice 等),
@@ -2415,6 +2530,49 @@
       cfg.llmEndpoint = String(getField("llmEndpoint", cfg.llmEndpoint || "")).trim();
       cfg.llmApiKey = String(getField("llmApiKey", cfg.llmApiKey || "")).trim();
     }
+    function isDialogOpen(d) {
+      return !!(d && (d.open || d.hasAttribute && d.hasAttribute("open")));
+    }
+    async function refreshCharacterConfig(opts) {
+      opts = opts || {};
+      if (opts.skipIfEditing && isDialogOpen(panel)) return false;
+      var charCfg = null;
+      try { charCfg = await loadCharacterCfg(characterId); } catch (_) { charCfg = null; }
+      if (!charCfg || typeof charCfg !== "object") return false;
+      var changed = false;
+      if (typeof charCfg.defaultVoice === "string" && charCfg.defaultVoice !== cfg.defaultVoice) {
+        cfg.defaultVoice = charCfg.defaultVoice;
+        changed = true;
+      }
+      if (Array.isArray(charCfg.roleVoiceList) && charCfg.roleVoiceList.length) {
+        var nextList = normalizeRoleVoiceList(charCfg.roleVoiceList);
+        if (JSON.stringify(nextList) !== JSON.stringify(normalizeRoleVoiceList(cfg.roleVoiceList || []))) {
+          cfg.roleVoiceList = nextList;
+          changed = true;
+        }
+      }
+      if (changed || opts.forceSync) syncUI();
+      return changed;
+    }
+    function roleVoice(roleName) {
+      roleName = String(roleName || "").trim();
+      var list = normalizeRoleVoiceList(cfg.roleVoiceList || []);
+      for (var i = 0; i < list.length; i++) {
+        if (String(list[i].role || "").trim() === roleName) return String(list[i].voice || "").trim();
+      }
+      return "";
+    }
+    function validateVoiceMappingForGenerate() {
+      if (cfg.mode === "single") {
+        return cfg.defaultVoice ? "" : "请先在“音色选择”里选择单音色音色。";
+      }
+      var missing = [];
+      ["旁白", "用户", "角色"].forEach(function (name) {
+        if (!roleVoice(name)) missing.push(name);
+      });
+      if (missing.length) return "请先在“角色音色映射”里给这些角色选择音色：" + missing.join("、") + "。";
+      return "";
+    }
     function modeName() { return cfg.mode === "ai8" ? "多音色" : "单音色"; }
     function syncUI() {
       setField("apiBase", cfg.apiBase || scriptOrigin());
@@ -2423,7 +2581,7 @@
       setField("llmEndpoint", cfg.llmEndpoint || "");
       setField("llmApiKey", cfg.llmApiKey || "");
       setField("speedFactor", cfg.speedFactor || 1.08);
-      setField("qualityMode", cfg.qualityMode || "balanced");
+      setField("qualityMode", cfg.qualityMode || "expressive");
       setCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
       renderRoleList();
@@ -2484,13 +2642,12 @@
       setStatus("正在读取音色列表...");
       var voices = await listVoices(cfg.apiBase);
       availableVoices = sortVoices(voices);
-      if (!cfg.defaultVoice && availableVoices[0]) cfg.defaultVoice = availableVoices[0].name;
       // 旧 voicesBox grid 已经被"默认音色按钮"替代,这里只更新按钮文本
       var defBtn = first(panel, '[data-role="default-voice-btn"]');
       if (defBtn) defBtn.textContent = cfg.defaultVoice ? cfg.defaultVoice : "选择默认音色…";
       syncUI();
       setStatus(historyStatusText());
-      if (!generatedTracks.length) showTrackNotice(null, "历史音频 0 条", voices.length ? "已就绪，可生成新的音频" : "没有找到可用音色");
+      if (!generatedTracks.length) showTrackNotice(null, historyStatusText(), voices.length ? "点播放开始生成音频" : "没有找到可用音色");
       return availableVoices;
     }
     async function ensureVoicesLoaded() {
@@ -2516,7 +2673,7 @@
 
     // ───── 实时字幕控制器 ───── (按当前播放时间显示对应 segment 的角色头像+台词)
     var DEFAULT_AVATARS = {
-      narrator: cleanBase(cfg.apiBase || scriptOrigin()) + "/prompts/icon/narrator-transparent.png",
+      narrator: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2b2340"/><stop offset="1" stop-color="#171827"/></linearGradient><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3d8ff"/><stop offset="1" stop-color="#8ecbff"/></linearGradient></defs><rect width="512" height="512" rx="112" fill="url(#g)"/><path d="M146 164c58-24 94-12 110 2 16-14 52-26 110-2v186c-54-20-89-12-110 6-21-18-56-26-110-6V164z" fill="none" stroke="url(#a)" stroke-width="28" stroke-linejoin="round"/><path d="M256 170v178" stroke="url(#a)" stroke-width="22" stroke-linecap="round"/><path d="M176 218h48M288 218h48M176 268h48M288 268h48" stroke="#f3d8ff" stroke-width="18" stroke-linecap="round" opacity=".82"/></svg>'),
       user:     'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1f3a5a"/><stop offset="1" stop-color="#0e1f33"/></linearGradient></defs><rect width="512" height="512" fill="url(#g)"/><text x="256" y="330" font-family="Microsoft YaHei,sans-serif" font-size="180" fill="#a5d4ff" text-anchor="middle" font-weight="bold">用</text></svg>'),
       character:'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a2240"/><stop offset="1" stop-color="#33152a"/></linearGradient></defs><rect width="512" height="512" fill="url(#g)"/><text x="256" y="330" font-family="Microsoft YaHei,sans-serif" font-size="180" fill="#ffd4e8" text-anchor="middle" font-weight="bold">人</text></svg>')
     };
@@ -2653,9 +2810,25 @@
           ],
         });
         ms.setActionHandler('play',  function () { try { generate(false).catch(function(){}); } catch (_) {} });
-        ms.setActionHandler('pause', function () { try { if (currentTrack() && currentTrack().webAudioPlaying) stopWebAudioPlayback("pause"); else audio.pause(); } catch (_) {} });
-        ms.setActionHandler('previoustrack', function () { try { ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex - 1, true); }).catch(function(){}); } catch (_) {} });
-        ms.setActionHandler('nexttrack',     function () { try { ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex + 1, true); }).catch(function(){}); } catch (_) {} });
+        ms.setActionHandler('pause', function () { try { if (currentTrack() && currentTrack().webAudioPlaying) { var t = currentTrack(); if (t) t.pausedByUser = true; stopWebAudioPlayback("pause"); } else audio.pause(); } catch (_) {} });
+        try { ms.setActionHandler('previoustrack', null); } catch (_) {}
+        try { ms.setActionHandler('nexttrack', null); } catch (_) {}
+        ms.setActionHandler('seekbackward', function (details) {
+          try { seekBySeconds(-Math.max(1, Number(details && details.seekOffset) || 10)); } catch (_) {}
+        });
+        ms.setActionHandler('seekforward', function (details) {
+          try { seekBySeconds(Math.max(1, Number(details && details.seekOffset) || 10)); } catch (_) {}
+        });
+        ms.setActionHandler('seekto', function (details) {
+          try {
+            var pos = Number(details && details.seekTime);
+            if (isFinite(pos)) {
+              var track = currentTrack();
+              if (audio && (audio.currentSrc || audio.src)) audio.currentTime = Math.max(0, pos);
+              else if (track && isSavedTrack(track)) startElementAudioFrom(track, Math.max(0, pos));
+            }
+          } catch (_) {}
+        });
         try {
           if (audio && isFinite(audio.duration) && audio.duration > 0) {
             ms.setPositionState({
@@ -2681,13 +2854,19 @@
 
     function scrollCurrentIntoMiddle() {
       if (!subBox) return;
+      var now = Date.now();
+      if (subBox.__idxLastLyricScroll && now - subBox.__idxLastLyricScroll < 450) return;
       var cur = first(subBox, '.idx-sub-row.is-current');
       if (!cur) return;
       try {
         var boxRect = subBox.getBoundingClientRect();
         var rowRect = cur.getBoundingClientRect();
         var offset = (rowRect.top + rowRect.height / 2) - (boxRect.top + boxRect.height / 2);
-        if (Math.abs(offset) > 2) subBox.scrollTop = Math.max(0, subBox.scrollTop + offset);
+        var deadZone = Math.max(18, boxRect.height * 0.18);
+        if (Math.abs(offset) > deadZone) {
+          subBox.__idxLastLyricScroll = now;
+          subBox.scrollTop = Math.max(0, subBox.scrollTop + offset);
+        }
       } catch (_) {}
     }
 
@@ -2698,6 +2877,7 @@
       var gap = (Number(cfg.intervalMs || 350) / 1000);
       var timeline = [];
       var lastIdx = -1;
+      var lastMetaSignature = "";
       function rebuild(metaList) {
         var t = 0;
         timeline = [];
@@ -2754,7 +2934,15 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (j) {
               if (!j) return;
-              if (Array.isArray(j.segments_meta) && j.segments_meta.length) rebuild(j.segments_meta);
+              if (Array.isArray(j.segments_meta) && j.segments_meta.length) {
+                var sig = j.segments_meta.map(function (m) {
+                  return [m.role || "", m.text || "", Number(m.duration_s || 0).toFixed(3)].join(":");
+                }).join("|");
+                if (sig !== lastMetaSignature) {
+                  lastMetaSignature = sig;
+                  rebuild(j.segments_meta);
+                }
+              }
               if (j.state === "done" || j.state === "failed") {
                 if (state.pollHandle) { clearInterval(state.pollHandle); state.pollHandle = null; }
               }
@@ -2814,6 +3002,7 @@
           if (!cfg.roleVoiceList[idx]) cfg.roleVoiceList[idx] = { role: "", voice: "" };
           cfg.roleVoiceList[idx].role = String(nameEl.value || "").trim();
         });
+        on(nameEl, 'change', function () { saveConfig(cfg, characterId).catch(function(){}); });
         on(voiceBtn, 'click', function (e) { e.preventDefault(); e.stopPropagation(); openVoicePicker(idx).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); });
         on(delBtn, 'click', function (e) {
           e.preventDefault(); e.stopPropagation();
@@ -2984,6 +3173,7 @@
             saveConfig(cfg, characterId).catch(function(){});
           } else if (pickerState.rowIdx >= 0) {
             setRowVoice(pickerState.rowIdx, voiceName);
+            saveConfig(cfg, characterId).catch(function(){});
           }
           closeVoicePicker();
         }
@@ -3021,6 +3211,9 @@
     function pauseLiveTrack(track) {
       if (!track) return;
       track.pausedByUser = true;
+      try {
+        if (isFinite(Number(audio.currentTime))) track.lastElementSec = Math.max(0, Number(audio.currentTime) || 0);
+      } catch (_) {}
       try { audio.pause(); } catch (_) {}
       stopWebAudioPlayback("pause");
       setPlayState("idle");
@@ -3030,6 +3223,7 @@
     }
 
     async function generate(force) {
+      await refreshCharacterConfig({ skipIfEditing: true });
       readFields(); await saveConfig(cfg, characterId); setError("");
       if (!messageText) { setError("当前消息没有可朗读正文。"); return; }
       try {
@@ -3044,14 +3238,22 @@
         if (currentTrackIndex < 0) currentTrackIndex = generatedTracks.length - 1;
         var existingTrack = currentTrack();
         if (existingTrack && existingTrack.webAudioPlaying) {
+          existingTrack.pausedByUser = true;
           stopWebAudioPlayback("pause");
+          if (existingTrack.cacheKey) pollCacheUpgrade(existingTrack, "paused snapshot");
           return;
         }
         if (existingTrack && existingTrack.pausedByUser && (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending")) {
           existingTrack.pausedByUser = false;
+          if (existingTrack.cacheKey) await refreshTrackFromStatus(existingTrack, "resume snapshot");
+          if (shouldUseElementForSavedTrack(existingTrack)) {
+            await prepareOfflineAudio(existingTrack, "resume", { saveMissing: true });
+            startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
+            return;
+          }
           setPlayState("loading");
           setStatus("继续等待音频…");
-          showTrackNotice(existingTrack, "继续等待音频…", existingTrack.cacheKey ? "正在检查保存状态" : "正在等待生成任务返回");
+          showTrackNotice(existingTrack, "继续等待音频…", existingTrack.cacheKey ? "不从头重播，等落盘后从暂停位置续播" : "正在等待生成任务返回");
           if (existingTrack.cacheKey) pollCacheUpgrade(existingTrack, "resume snapshot");
           return;
         }
@@ -3060,16 +3262,16 @@
           return;
         }
         if (shouldUseElementForSavedTrack(existingTrack)) {
-          await prepareOfflineAudio(existingTrack, "play");
+          await prepareOfflineAudio(existingTrack, "play", { saveMissing: true });
           var existingUrl = trackPlayableUrl(existingTrack);
           var audioUrl = audio.currentSrc || audio.src || "";
           if (existingUrl && audioUrl !== existingUrl) {
-            startElementAudioFrom(existingTrack, 0);
+            startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
           } else if (audio.src) {
             if (audio.paused) { setAudioPlaybackRate(); await audio.play().catch(function(e){ handleAudioPlayReject("element", e, "请点播放继续"); }); }
             else audio.pause();
           } else {
-            startElementAudioFrom(existingTrack, 0);
+            startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
           }
           return;
         }
@@ -3086,11 +3288,12 @@
         await selectTrack(currentTrackIndex, true);
         return;
       }
-      if (!cfg.defaultVoice) {
-        try { await ensureVoicesLoaded(); }
-        catch (e) { setError("音色列表读取失败: " + (e && e.message ? e.message : String(e))); return; }
+      var voiceProblem = validateVoiceMappingForGenerate();
+      if (voiceProblem) {
+        setError(voiceProblem);
+        showTrackNotice(null, "音色映射未配置", voiceProblem);
+        return;
       }
-      if (!cfg.defaultVoice) { setError("请先点选一个音色卡片。"); return; }
       // 兼容旧逻辑（无卡片 + audio.src 残留时）
       if (audio.src && !force && generatedTracks.length === 0) {
         if (audio.paused) {
@@ -3147,7 +3350,7 @@
           showTrackNotice(placeholder, "开始合成 " + segments.length + " 段…", roleSummary);
           var voicesMap = rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice);
           debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
-          body = { segments: segments, voices: voicesMap, performance_mode: cfg.qualityMode || "balanced", interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25) };
+          body = Object.assign({ segments: segments, voices: voicesMap, performance_mode: cfg.qualityMode || "expressive", interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25) }, generationQualityOverrides(cfg.qualityMode));
           var ttsStart = Date.now();
           var jobInfo;
           var ttsTimer = setInterval(function () {
@@ -3209,7 +3412,7 @@
           if (jobInfo.cached && cacheUrl) {
             trackEntry.url = cacheUrl;
             setTrackState(trackEntry, "saved");
-            await prepareOfflineAudio(trackEntry, "cached hit");
+            await prepareOfflineAudio(trackEntry, "cached hit", { saveMissing: true });
             setStatus("已有音频，正在播放");
             showTrackNotice(trackEntry, trackEntry.offlineUrl ? "本地离线音频" : "已有音频", trackEntry.offlineUrl ? "已从 IndexedDB 读取" : "已加载音频，支持拖动");
             setPlayState("loading");
@@ -3268,7 +3471,7 @@
             savePromptAsked: false
           };
           setTrackState(singleTrack, singleJob.cached ? "saved" : "live");
-          if (singleJob.cached) await prepareOfflineAudio(singleTrack, "single cached hit");
+          if (singleJob.cached) await prepareOfflineAudio(singleTrack, "single cached hit", { saveMissing: true });
           generatedTracks.push(singleTrack);
           await selectTrack(generatedTracks.length - 1, false);
           if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
@@ -3310,7 +3513,14 @@
 
     function openDialog(d) { if (!d) return; try { if (typeof d.showModal === 'function') d.showModal(); else if (typeof d.show === 'function') d.show(); else d.setAttribute('open', ''); } catch (_) { try { d.setAttribute('open', ''); } catch (__) {} } }
     function closeDialog(d) { if (!d) return; try { if (typeof d.close === 'function') d.close(); else d.removeAttribute('open'); } catch (_) { try { d.removeAttribute('open'); } catch (__) {} } }
-    on(gear, 'click', function (ev) { ev.preventDefault(); ev.stopPropagation(); if (panel.open) closeDialog(panel); else openDialog(panel); });
+    on(gear, 'click', async function (ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      if (panel.open) closeDialog(panel);
+      else {
+        await refreshCharacterConfig({ forceSync: true });
+        openDialog(panel);
+      }
+    });
     on(close, 'click', function () { closeDialog(panel); });
     on(play, 'pointerdown', function () { primeAudioContext(); });
     on(add, 'pointerdown', function () { primeAudioContext(); });
@@ -3344,7 +3554,7 @@
       var t = currentTrack();
       if (t) setTrackPlaybackState(t, "playing");
       setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(t));
-      // 系统媒体面板基础信息(后台/锁屏可见,可控制播放/上下首)
+      // 系统媒体面板基础信息(后台/锁屏可见,可控制播放/前后 10 秒)
       try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
       // 桌面 / <audio> 路径的字幕：当前 track 是 ai8 且有 segments 时启动
       if (t && t.mode === "ai8") {
@@ -3470,8 +3680,9 @@
 
     updateTrackButtons();
     syncUI();
-    setStatus("待播放");
-    showTrackNotice(null, messageId ? "历史音频未加载" : "未播放音频", messageId ? "点播放时恢复历史音频" : "点音符生成新的音频");
+    setStatus(messageId ? "读取历史音频…" : "待播放");
+    showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+    initializeHistoryCount().catch(function () {});
   }
 
   try {

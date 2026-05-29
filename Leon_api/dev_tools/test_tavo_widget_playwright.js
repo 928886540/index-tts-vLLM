@@ -67,7 +67,7 @@ function countFetches(fetches, pattern) {
     if (!initial.card) throw new Error("player was not mounted");
     if (initial.voices !== 0) throw new Error("lazy-load failed: /voices was requested on mount, count=" + initial.voices);
     if (initial.jobs !== 0) throw new Error("mount should not create TTS jobs, count=" + initial.jobs);
-    if (initial.subtitleHeight !== "148px") throw new Error("subtitle height should stay fixed at 148px, got " + initial.subtitleHeight);
+    if (initial.subtitleHeight !== "136px") throw new Error("subtitle height should stay fixed at 136px, got " + initial.subtitleHeight);
 
     await page.click('[data-role="gear"]');
     await page.waitForSelector('[data-role="panel"][open]', { timeout: 5000 });

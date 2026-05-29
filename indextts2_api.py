@@ -206,9 +206,9 @@ class TTS_Request(BaseModel):
     ref_audio_path: str = None
     emo_ref_audio_path: str = None
     top_k: int = 30
-    top_p: float = 0.8
-    temperature: float = 0.8
-    emo_alpha: float = 0.7
+    top_p: float = 0.85
+    temperature: float = 0.85
+    emo_alpha: float = 0.75
     emo_vec: list = []
     normalize_emo_vec: bool = False
     speed_factor: float = 1.0
@@ -247,13 +247,13 @@ class TTS_Dialogue_Request(BaseModel):
     segments: List[TTS_Segment]
     # role -> voice library name OR direct file path
     voices: Dict[str, str]
-    performance_mode: str = "balanced"
+    performance_mode: str = "expressive"
     interval_ms: int = 350
-    top_p: float = 0.8
+    top_p: float = 0.85
     top_k: int = 30
-    temperature: float = 0.8
+    temperature: float = 0.85
     repetition_penalty: float = 10
-    emo_alpha: float = 0.7  # default if a segment doesn't override
+    emo_alpha: float = 0.75  # default if a segment doesn't override
     diffusion_steps: Optional[int] = None
     prompt_audio_seconds: Optional[float] = None
     segment_tokens: Optional[int] = None
@@ -334,24 +334,24 @@ STREAM_MODE_SETTINGS = {
         "prompt_audio_seconds": 8,
     },
     "expressive": {
-        "target_tokens": STREAM_TARGET_SEGMENT_TOKENS,
-        "hard_tokens": STREAM_HARD_SEGMENT_TOKENS,
-        "first_tokens": STREAM_FIRST_SEGMENT_TOKENS,
+        "target_tokens": 72,
+        "hard_tokens": 88,
+        "first_tokens": 24,
         "min_tokens": STREAM_MIN_SEGMENT_TOKENS,
-        "diffusion_steps": STREAM_DIFFUSION_STEPS,
-        "prompt_audio_seconds": STREAM_PROMPT_AUDIO_SECONDS,
+        "diffusion_steps": 10,
+        "prompt_audio_seconds": 10,
     },
 }
 
 
-def _stream_mode_settings(mode: str = "balanced") -> dict:
-    mode = str(mode or "balanced").strip().lower()
+def _stream_mode_settings(mode: str = "expressive") -> dict:
+    mode = str(mode or "expressive").strip().lower()
     if mode not in STREAM_MODE_SETTINGS:
-        mode = "balanced"
+        mode = "expressive"
     return dict(STREAM_MODE_SETTINGS[mode], mode=mode)
 
 
-def _stream_infer_kwargs(requested_segment_tokens: int = None, performance_mode: str = "balanced") -> dict:
+def _stream_infer_kwargs(requested_segment_tokens: int = None, performance_mode: str = "expressive") -> dict:
     settings = _stream_mode_settings(performance_mode)
     target_tokens = int(requested_segment_tokens or settings["target_tokens"])
     target_tokens = max(8, min(target_tokens, STREAM_TARGET_SEGMENT_TOKENS))
@@ -557,12 +557,12 @@ async def _prepare_dialogue_for_streaming(req: dict):
         )
 
     interval_ms = int(req.get("interval_ms", 350))
-    default_emo_alpha = float(req.get("emo_alpha", 0.7))
-    performance_mode = str(req.get("performance_mode") or "balanced").strip().lower()
+    default_emo_alpha = float(req.get("emo_alpha", 0.75))
+    performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.8)),
+        "top_p": float(req.get("top_p", 0.85)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.8)),
+        "temperature": float(req.get("temperature", 0.85)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
@@ -978,10 +978,14 @@ def _single_tts_cache_payload(req: dict) -> dict:
         "emo_vec": req.get("emo_vec") or [],
         "normalize_emo_vec": bool(req.get("normalize_emo_vec", False)),
         "top_k": int(req.get("top_k", 30)),
-        "top_p": float(req.get("top_p", 0.8)),
-        "temperature": float(req.get("temperature", 0.8)),
-        "emo_alpha": float(req.get("emo_alpha", 0.7)),
+        "top_p": float(req.get("top_p", 0.85)),
+        "temperature": float(req.get("temperature", 0.85)),
+        "emo_alpha": float(req.get("emo_alpha", 0.75)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
+        "diffusion_steps": int(req.get("diffusion_steps") or 0),
+        "prompt_audio_seconds": float(req.get("prompt_audio_seconds") or 0),
+        "segment_tokens": int(req.get("segment_tokens") or 0),
+        "first_tokens": int(req.get("first_tokens") or 0),
     }
 
 
@@ -1090,11 +1094,11 @@ async def tts_stream_handle(req: dict):
                     text=req["text"],
                     emo_text=emo_text,
                     use_emo_text=use_emo_text,
-                    emo_alpha=float(req.get("emo_alpha", 0.7)),
+                    emo_alpha=float(req.get("emo_alpha", 0.75)),
                     emo_vector=emo_vec,
-                    top_p=float(req.get("top_p", 0.8)),
+                    top_p=float(req.get("top_p", 0.85)),
                     top_k=int(req.get("top_k", 30)),
-                    temperature=float(req.get("temperature", 0.8)),
+                    temperature=float(req.get("temperature", 0.85)),
                     repetition_penalty=float(req.get("repetition_penalty", 10)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
@@ -1194,11 +1198,11 @@ async def tts_cache_stream_handle(req: dict):
                     text=req["text"],
                     emo_text=emo_text,
                     use_emo_text=use_emo_text,
-                    emo_alpha=float(req.get("emo_alpha", 0.7)),
+                    emo_alpha=float(req.get("emo_alpha", 0.75)),
                     emo_vector=emo_vec,
-                    top_p=float(req.get("top_p", 0.8)),
+                    top_p=float(req.get("top_p", 0.85)),
                     top_k=int(req.get("top_k", 30)),
-                    temperature=float(req.get("temperature", 0.8)),
+                    temperature=float(req.get("temperature", 0.85)),
                     repetition_penalty=float(req.get("repetition_penalty", 10)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
@@ -1306,12 +1310,12 @@ async def tts_dialogue_stream_handle(req: dict):
         )
 
     interval_ms = int(req.get("interval_ms", 350))
-    default_emo_alpha = float(req.get("emo_alpha", 0.7))
-    performance_mode = str(req.get("performance_mode") or "balanced").strip().lower()
+    default_emo_alpha = float(req.get("emo_alpha", 0.75))
+    performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.8)),
+        "top_p": float(req.get("top_p", 0.85)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.8)),
+        "temperature": float(req.get("temperature", 0.85)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
@@ -1457,12 +1461,12 @@ async def tts_dialogue_cache_stream_handle(req: dict):
     from indextts import snapshot_cache
 
     interval_ms = int(req.get("interval_ms", 350))
-    default_emo_alpha = float(req.get("emo_alpha", 0.7))
-    performance_mode = str(req.get("performance_mode") or "balanced").strip().lower()
+    default_emo_alpha = float(req.get("emo_alpha", 0.75))
+    performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.8)),
+        "top_p": float(req.get("top_p", 0.85)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.8)),
+        "temperature": float(req.get("temperature", 0.85)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
@@ -2043,9 +2047,9 @@ async def cache_delete_single_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.8,
-    temperature: float = 0.8,
-    emo_alpha: float = 0.7,
+    top_p: float = 0.85,
+    temperature: float = 0.85,
+    emo_alpha: float = 0.75,
     normalize_emo_vec: bool = False,
     repetition_penalty: float = 10,
     bypass_cache: bool = False,
@@ -2089,9 +2093,9 @@ async def tts_get_endpoint(
     ref_audio_path: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.8,
-    temperature: float = 0.8,
-    emo_alpha: float = 0.7,
+    top_p: float = 0.85,
+    temperature: float = 0.85,
+    emo_alpha: float = 0.75,
     normalize_emo_vec: bool = False,
     speed_factor: float = 1.0,
     seed: int = -1,
@@ -2130,9 +2134,9 @@ async def tts_stream_get_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.8,
-    temperature: float = 0.8,
-    emo_alpha: float = 0.7,
+    top_p: float = 0.85,
+    temperature: float = 0.85,
+    emo_alpha: float = 0.75,
     repetition_penalty: float = 10,
 ):
     """Streaming TTS for TAVO regex injection.
@@ -2170,9 +2174,9 @@ async def tts_cache_stream_get_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.8,
-    temperature: float = 0.8,
-    emo_alpha: float = 0.7,
+    top_p: float = 0.85,
+    temperature: float = 0.85,
+    emo_alpha: float = 0.75,
     normalize_emo_vec: bool = False,
     repetition_penalty: float = 10,
 ):
@@ -2407,9 +2411,9 @@ async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
             "default":  "voice_a"          // fallback for any unmapped role
           },
           "interval_ms": 350,
-          "top_p": 0.8, "top_k": 30, "temperature": 0.8,
+          "top_p": 0.85, "top_k": 30, "temperature": 0.85,
           "repetition_penalty": 10,
-          "emo_alpha": 0.7
+          "emo_alpha": 0.75
         }
 
     Returns chunked audio/wav. First bytes go out as soon as the first
