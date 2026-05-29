@@ -1,0 +1,338 @@
+[
+  {
+    "speaker": "步非烟",
+    "style": "轻喘",
+    "file": "轻喘-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\breath_soft.wav",
+    "start_sec": null,
+    "duration_sec": 5.0
+  },
+  {
+    "speaker": "步非烟",
+    "style": "喘息",
+    "file": "喘息-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\breath_heavy.wav",
+    "start_sec": null,
+    "duration_sec": 5.5
+  },
+  {
+    "speaker": "步非烟",
+    "style": "耳语",
+    "file": "耳语-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\whisper_soft.wav",
+    "start_sec": null,
+    "duration_sec": 5.5
+  },
+  {
+    "speaker": "步非烟",
+    "style": "低语",
+    "file": "低语-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\shy_whisper.wav",
+    "start_sec": null,
+    "duration_sec": 4.5
+  },
+  {
+    "speaker": "步非烟",
+    "style": "低吟",
+    "file": "低吟-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\moan_soft.wav",
+    "start_sec": null,
+    "duration_sec": 4.8
+  },
+  {
+    "speaker": "步非烟",
+    "style": "惊喘",
+    "file": "惊喘-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\gasp_surprise.wav",
+    "start_sec": null,
+    "duration_sec": 3.5
+  },
+  {
+    "speaker": "步非烟",
+    "style": "哭腔",
+    "file": "哭腔-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\cry_soft.wav",
+    "start_sec": null,
+    "duration_sec": 5.0
+  },
+  {
+    "speaker": "步非烟",
+    "style": "哽咽",
+    "file": "哽咽-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\sob_soft.wav",
+    "start_sec": null,
+    "duration_sec": 5.0
+  },
+  {
+    "speaker": "步非烟",
+    "style": "挑逗",
+    "file": "挑逗-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\tease_soft.wav",
+    "start_sec": null,
+    "duration_sec": 5.0
+  },
+  {
+    "speaker": "步非烟",
+    "style": "轻笑",
+    "file": "轻笑-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\laugh_soft.wav",
+    "start_sec": null,
+    "duration_sec": 3.8
+  },
+  {
+    "speaker": "步非烟",
+    "style": "尖叫",
+    "file": "尖叫-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\scream_peak.wav",
+    "start_sec": null,
+    "duration_sec": 4.8
+  },
+  {
+    "speaker": "步非烟",
+    "style": "余韵",
+    "file": "余韵-步非烟.MP3",
+    "source": "D:\\apiWorkSpace\\index-tts2-vLLM\\prompts\\library\\声腔\\low_murmur.wav",
+    "start_sec": null,
+    "duration_sec": 5.5
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "轻喘",
+    "file": "轻喘-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 796.4,
+    "end_sec": 800.9,
+    "duration_sec": 4.5,
+    "score": 0.630335
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "喘息",
+    "file": "喘息-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 617.5,
+    "end_sec": 622.5,
+    "duration_sec": 5.0,
+    "score": 0.631949
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "耳语",
+    "file": "耳语-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 581.25,
+    "end_sec": 586.25,
+    "duration_sec": 5.0,
+    "score": 0.613092
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "低语",
+    "file": "低语-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 228.75,
+    "end_sec": 233.75,
+    "duration_sec": 5.0,
+    "score": 0.575033
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "低吟",
+    "file": "低吟-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 764.4,
+    "end_sec": 769.2,
+    "duration_sec": 4.8,
+    "score": 0.680084
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "惊喘",
+    "file": "惊喘-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 834.7,
+    "end_sec": 838.2,
+    "duration_sec": 3.5,
+    "score": 0.760297
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "哭腔",
+    "file": "哭腔-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 856.25,
+    "end_sec": 861.25,
+    "duration_sec": 5.0,
+    "score": 0.541715
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "哽咽",
+    "file": "哽咽-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 33.75,
+    "end_sec": 38.75,
+    "duration_sec": 5.0,
+    "score": 0.596398
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "挑逗",
+    "file": "挑逗-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 558.75,
+    "end_sec": 563.75,
+    "duration_sec": 5.0,
+    "score": 0.622366
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "轻笑",
+    "file": "轻笑-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 830.3,
+    "end_sec": 834.1,
+    "duration_sec": 3.8,
+    "score": 0.58152
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "尖叫",
+    "file": "尖叫-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 585.6,
+    "end_sec": 590.4,
+    "duration_sec": 4.8,
+    "score": 0.786762
+  },
+  {
+    "speaker": "AD学姐",
+    "style": "余韵",
+    "file": "余韵-AD学姐.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\查寝时突然欲望爆发\\vocals.wav",
+    "start_sec": 25.0,
+    "end_sec": 30.0,
+    "duration_sec": 5.0,
+    "score": 0.606244
+  },
+  {
+    "speaker": "JOK",
+    "style": "轻喘",
+    "file": "轻喘-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 938.3,
+    "end_sec": 942.8,
+    "duration_sec": 4.5,
+    "score": 0.664314
+  },
+  {
+    "speaker": "JOK",
+    "style": "喘息",
+    "file": "喘息-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 815.0,
+    "end_sec": 820.0,
+    "duration_sec": 5.0,
+    "score": 0.505367
+  },
+  {
+    "speaker": "JOK",
+    "style": "耳语",
+    "file": "耳语-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 643.75,
+    "end_sec": 648.75,
+    "duration_sec": 5.0,
+    "score": 0.648529
+  },
+  {
+    "speaker": "JOK",
+    "style": "低语",
+    "file": "低语-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 901.25,
+    "end_sec": 906.25,
+    "duration_sec": 5.0,
+    "score": 0.673687
+  },
+  {
+    "speaker": "JOK",
+    "style": "低吟",
+    "file": "低吟-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 72.0,
+    "end_sec": 76.8,
+    "duration_sec": 4.8,
+    "score": 0.661347
+  },
+  {
+    "speaker": "JOK",
+    "style": "惊喘",
+    "file": "惊喘-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 1188.3,
+    "end_sec": 1191.8,
+    "duration_sec": 3.5,
+    "score": 0.739971
+  },
+  {
+    "speaker": "JOK",
+    "style": "哭腔",
+    "file": "哭腔-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 707.5,
+    "end_sec": 712.5,
+    "duration_sec": 5.0,
+    "score": 0.532736
+  },
+  {
+    "speaker": "JOK",
+    "style": "哽咽",
+    "file": "哽咽-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 313.75,
+    "end_sec": 318.75,
+    "duration_sec": 5.0,
+    "score": 0.61927
+  },
+  {
+    "speaker": "JOK",
+    "style": "挑逗",
+    "file": "挑逗-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 686.25,
+    "end_sec": 691.25,
+    "duration_sec": 5.0,
+    "score": 0.571504
+  },
+  {
+    "speaker": "JOK",
+    "style": "轻笑",
+    "file": "轻笑-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 664.05,
+    "end_sec": 667.85,
+    "duration_sec": 3.8,
+    "score": 0.571783
+  },
+  {
+    "speaker": "JOK",
+    "style": "尖叫",
+    "file": "尖叫-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 126.0,
+    "end_sec": 130.8,
+    "duration_sec": 4.8,
+    "score": 0.793942
+  },
+  {
+    "speaker": "JOK",
+    "style": "余韵",
+    "file": "余韵-JOK.MP3",
+    "source": "D:\\人声处理工具\\输出\\htdemucs\\出差后的NTR电话\\vocals.wav",
+    "start_sec": 227.5,
+    "end_sec": 232.5,
+    "duration_sec": 5.0,
+    "score": 0.7006
+  }
+]

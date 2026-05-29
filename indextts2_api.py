@@ -206,9 +206,9 @@ class TTS_Request(BaseModel):
     ref_audio_path: str = None
     emo_ref_audio_path: str = None
     top_k: int = 30
-    top_p: float = 0.85
-    temperature: float = 0.85
-    emo_alpha: float = 0.75
+    top_p: float = 0.78
+    temperature: float = 0.72
+    emo_alpha: float = 0.55
     emo_vec: list = []
     normalize_emo_vec: bool = False
     speed_factor: float = 1.0
@@ -249,11 +249,11 @@ class TTS_Dialogue_Request(BaseModel):
     voices: Dict[str, str]
     performance_mode: str = "expressive"
     interval_ms: int = 350
-    top_p: float = 0.85
+    top_p: float = 0.78
     top_k: int = 30
-    temperature: float = 0.85
+    temperature: float = 0.72
     repetition_penalty: float = 10
-    emo_alpha: float = 0.75  # default if a segment doesn't override
+    emo_alpha: float = 0.55  # default if a segment doesn't override
     diffusion_steps: Optional[int] = None
     prompt_audio_seconds: Optional[float] = None
     segment_tokens: Optional[int] = None
@@ -318,25 +318,25 @@ STREAM_DIFFUSION_STEPS = 8
 STREAM_PROMPT_AUDIO_SECONDS = 8
 STREAM_MODE_SETTINGS = {
     "fast": {
-        "target_tokens": 48,
-        "hard_tokens": 56,
-        "first_tokens": 12,
+        "target_tokens": 32,
+        "hard_tokens": 40,
+        "first_tokens": 8,
         "min_tokens": 12,
-        "diffusion_steps": 8,
-        "prompt_audio_seconds": 8,
+        "diffusion_steps": 6,
+        "prompt_audio_seconds": 6,
     },
     "balanced": {
-        "target_tokens": 56,
-        "hard_tokens": 72,
-        "first_tokens": 16,
+        "target_tokens": 48,
+        "hard_tokens": 64,
+        "first_tokens": 12,
         "min_tokens": 16,
         "diffusion_steps": 8,
         "prompt_audio_seconds": 8,
     },
     "expressive": {
-        "target_tokens": 72,
-        "hard_tokens": 88,
-        "first_tokens": 24,
+        "target_tokens": 56,
+        "hard_tokens": 72,
+        "first_tokens": 16,
         "min_tokens": STREAM_MIN_SEGMENT_TOKENS,
         "diffusion_steps": 10,
         "prompt_audio_seconds": 10,
@@ -557,12 +557,12 @@ async def _prepare_dialogue_for_streaming(req: dict):
         )
 
     interval_ms = int(req.get("interval_ms", 350))
-    default_emo_alpha = float(req.get("emo_alpha", 0.75))
+    default_emo_alpha = float(req.get("emo_alpha", 0.55))
     performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.85)),
+        "top_p": float(req.get("top_p", 0.78)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.85)),
+        "temperature": float(req.get("temperature", 0.72)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
@@ -605,6 +605,44 @@ async def _prepare_dialogue_for_streaming(req: dict):
         "cache_payload": cache_payload,
         "cache_key": cache_key,
     }, None
+
+
+def _stabilize_dialogue_emo_vec(role: str, emo_vec):
+    """Keep LLM-provided emotion vectors from hitting the model at full force."""
+    if role == "旁白":
+        return [0.0] * 7 + [0.85]
+    if not isinstance(emo_vec, list) or len(emo_vec) != 8:
+        return None
+    vals = []
+    for value in emo_vec[:8]:
+        try:
+            vals.append(max(0.0, min(1.0, float(value))))
+        except (TypeError, ValueError):
+            vals.append(0.0)
+    active_cap = 0.58
+    active_sum = 0.0
+    for idx in range(7):
+        vals[idx] = min(vals[idx], active_cap)
+        active_sum += vals[idx]
+    max_active_sum = 1.05
+    if active_sum > max_active_sum:
+        scale = max_active_sum / active_sum
+        for idx in range(7):
+            vals[idx] *= scale
+    vals[7] = max(vals[7], 0.25)
+    return vals
+
+
+def _clamp_dialogue_alpha(role: str, value, *, style_audio: bool = False) -> float:
+    try:
+        alpha = float(value)
+    except (TypeError, ValueError):
+        alpha = 0.55
+    if role == "旁白":
+        return max(0.12, min(0.25, alpha))
+    if style_audio:
+        return max(0.25, min(0.66, alpha))
+    return max(0.20, min(0.62, alpha))
 
 
 async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dict):
@@ -664,15 +702,10 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                 style_alpha = seg.get("style_alpha")
                 if style_audio and style_alpha is not None:
                     seg_alpha = float(style_alpha)
+                seg_alpha = _clamp_dialogue_alpha(role, seg_alpha, style_audio=bool(style_audio))
+                emo_vec = _stabilize_dialogue_emo_vec(role, emo_vec)
                 if role == "旁白":
-                    if isinstance(emo_vec, list) and len(emo_vec) == 8:
-                        scaled = [min(float(v) * 0.4, 0.3) for v in emo_vec[:7]]
-                        neu = max(float(emo_vec[7]) if len(emo_vec) > 7 else 0.6, 0.6)
-                        emo_vec = scaled + [neu]
-                    else:
-                        emo_vec = [0.0]*7 + [0.8]
                     emo_text_seg = None
-                    seg_alpha = min(seg_alpha, 0.25)
                 use_emo_text_seg = False
                 if style_audio:
                     emo_vec = None
@@ -921,11 +954,32 @@ STYLE_VOICE_MAP = {
     "tease_soft": "声腔/tease_soft",
     "laugh_soft": "声腔/laugh_soft",
     "gasp_surprise": "声腔/gasp_surprise",
+    "scream_peak": "声腔/scream_peak",
     "stage_warmup": "声腔/breath_soft",
     "stage_rising": "声腔/intimate_breath",
-    "stage_peak": "声腔/moan_soft",
+    "stage_peak": "声腔/scream_peak",
     "stage_afterglow": "声腔/low_murmur",
 }
+
+_PERSON_STYLE_NAMES = (
+    "轻喘",
+    "喘息",
+    "耳语",
+    "低语",
+    "低吟",
+    "惊喘",
+    "哭腔",
+    "哽咽",
+    "挑逗",
+    "轻笑",
+    "尖叫",
+    "余韵",
+)
+
+for _style_speaker in ("步非烟", "AD学姐", "JOK"):
+    for _style_name in _PERSON_STYLE_NAMES:
+        _style_id = f"{_style_name}-{_style_speaker}"
+        STYLE_VOICE_MAP[_style_id] = f"声腔/{_style_id}"
 
 
 def _segment_style_name(seg: dict) -> str:
@@ -978,9 +1032,9 @@ def _single_tts_cache_payload(req: dict) -> dict:
         "emo_vec": req.get("emo_vec") or [],
         "normalize_emo_vec": bool(req.get("normalize_emo_vec", False)),
         "top_k": int(req.get("top_k", 30)),
-        "top_p": float(req.get("top_p", 0.85)),
-        "temperature": float(req.get("temperature", 0.85)),
-        "emo_alpha": float(req.get("emo_alpha", 0.75)),
+        "top_p": float(req.get("top_p", 0.78)),
+        "temperature": float(req.get("temperature", 0.72)),
+        "emo_alpha": float(req.get("emo_alpha", 0.55)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         "diffusion_steps": int(req.get("diffusion_steps") or 0),
         "prompt_audio_seconds": float(req.get("prompt_audio_seconds") or 0),
@@ -1094,11 +1148,11 @@ async def tts_stream_handle(req: dict):
                     text=req["text"],
                     emo_text=emo_text,
                     use_emo_text=use_emo_text,
-                    emo_alpha=float(req.get("emo_alpha", 0.75)),
+                    emo_alpha=float(req.get("emo_alpha", 0.55)),
                     emo_vector=emo_vec,
-                    top_p=float(req.get("top_p", 0.85)),
+                    top_p=float(req.get("top_p", 0.78)),
                     top_k=int(req.get("top_k", 30)),
-                    temperature=float(req.get("temperature", 0.85)),
+                    temperature=float(req.get("temperature", 0.72)),
                     repetition_penalty=float(req.get("repetition_penalty", 10)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
@@ -1198,11 +1252,11 @@ async def tts_cache_stream_handle(req: dict):
                     text=req["text"],
                     emo_text=emo_text,
                     use_emo_text=use_emo_text,
-                    emo_alpha=float(req.get("emo_alpha", 0.75)),
+                    emo_alpha=float(req.get("emo_alpha", 0.55)),
                     emo_vector=emo_vec,
-                    top_p=float(req.get("top_p", 0.85)),
+                    top_p=float(req.get("top_p", 0.78)),
                     top_k=int(req.get("top_k", 30)),
-                    temperature=float(req.get("temperature", 0.85)),
+                    temperature=float(req.get("temperature", 0.72)),
                     repetition_penalty=float(req.get("repetition_penalty", 10)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
@@ -1310,12 +1364,12 @@ async def tts_dialogue_stream_handle(req: dict):
         )
 
     interval_ms = int(req.get("interval_ms", 350))
-    default_emo_alpha = float(req.get("emo_alpha", 0.75))
+    default_emo_alpha = float(req.get("emo_alpha", 0.55))
     performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.85)),
+        "top_p": float(req.get("top_p", 0.78)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.85)),
+        "temperature": float(req.get("temperature", 0.72)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
@@ -1350,16 +1404,10 @@ async def tts_dialogue_stream_handle(req: dict):
                     style_alpha = seg.get("style_alpha")
                     if style_audio and style_alpha is not None:
                         seg_alpha = float(style_alpha)
-                    # 旁白 微情绪压制（同 tts_dialogue_cache_stream 逻辑）
+                    seg_alpha = _clamp_dialogue_alpha(role, seg_alpha, style_audio=bool(style_audio))
+                    emo_vec = _stabilize_dialogue_emo_vec(role, emo_vec)
                     if role == "旁白":
-                        if isinstance(emo_vec, list) and len(emo_vec) == 8:
-                            scaled = [min(float(v) * 0.4, 0.3) for v in emo_vec[:7]]
-                            neu = max(float(emo_vec[7]) if len(emo_vec) > 7 else 0.6, 0.6)
-                            emo_vec = scaled + [neu]
-                        else:
-                            emo_vec = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8]
                         emo_text_seg = None
-                        seg_alpha = min(seg_alpha, 0.25)
                     # emo_vec wins when both are present; matches the V26
                     # convention and the LLM-output schema we recommend.
                     if style_audio:
@@ -1461,12 +1509,12 @@ async def tts_dialogue_cache_stream_handle(req: dict):
     from indextts import snapshot_cache
 
     interval_ms = int(req.get("interval_ms", 350))
-    default_emo_alpha = float(req.get("emo_alpha", 0.75))
+    default_emo_alpha = float(req.get("emo_alpha", 0.55))
     performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.85)),
+        "top_p": float(req.get("top_p", 0.78)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.85)),
+        "temperature": float(req.get("temperature", 0.72)),
         "repetition_penalty": float(req.get("repetition_penalty", 10)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
@@ -1538,18 +1586,10 @@ async def tts_dialogue_cache_stream_handle(req: dict):
                     style_alpha = seg.get("style_alpha")
                     if style_audio and style_alpha is not None:
                         seg_alpha = float(style_alpha)
-                    # 旁白：保留 LLM 给的情绪倾向，但每个非中性维度压到 ≤0.3，
-                    # 中性维度抬到 ≥0.6；alpha 也压到 0.25。
-                    # 让旁白有轻微情感波动但不至于做作。
+                    seg_alpha = _clamp_dialogue_alpha(role, seg_alpha, style_audio=bool(style_audio))
+                    emo_vec = _stabilize_dialogue_emo_vec(role, emo_vec)
                     if role == "旁白":
-                        if isinstance(emo_vec, list) and len(emo_vec) == 8:
-                            scaled = [min(float(v) * 0.4, 0.3) for v in emo_vec[:7]]
-                            neu = max(float(emo_vec[7]) if len(emo_vec) > 7 else 0.6, 0.6)
-                            emo_vec = scaled + [neu]
-                        else:
-                            emo_vec = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8]
                         emo_text_seg = None
-                        seg_alpha = min(seg_alpha, 0.25)
                     if style_audio:
                         emo_vec = None
                         emo_text_seg = None
@@ -2047,9 +2087,9 @@ async def cache_delete_single_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.85,
-    temperature: float = 0.85,
-    emo_alpha: float = 0.75,
+    top_p: float = 0.78,
+    temperature: float = 0.72,
+    emo_alpha: float = 0.55,
     normalize_emo_vec: bool = False,
     repetition_penalty: float = 10,
     bypass_cache: bool = False,
@@ -2093,9 +2133,9 @@ async def tts_get_endpoint(
     ref_audio_path: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.85,
-    temperature: float = 0.85,
-    emo_alpha: float = 0.75,
+    top_p: float = 0.78,
+    temperature: float = 0.72,
+    emo_alpha: float = 0.55,
     normalize_emo_vec: bool = False,
     speed_factor: float = 1.0,
     seed: int = -1,
@@ -2134,9 +2174,9 @@ async def tts_stream_get_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.85,
-    temperature: float = 0.85,
-    emo_alpha: float = 0.75,
+    top_p: float = 0.78,
+    temperature: float = 0.72,
+    emo_alpha: float = 0.55,
     repetition_penalty: float = 10,
 ):
     """Streaming TTS for TAVO regex injection.
@@ -2174,9 +2214,9 @@ async def tts_cache_stream_get_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.85,
-    temperature: float = 0.85,
-    emo_alpha: float = 0.75,
+    top_p: float = 0.78,
+    temperature: float = 0.72,
+    emo_alpha: float = 0.55,
     normalize_emo_vec: bool = False,
     repetition_penalty: float = 10,
 ):
@@ -2298,7 +2338,7 @@ async def tts_dialogue_stream_job_endpoint(request: TTS_Dialogue_Request):
         "cache_url": f"/cache_audio/{cache_key}",
         "expires_in": LIVE_JOB_LINGER_SECONDS,
         "cached": False,
-        "live": False,
+        "live": True,
     })
 
 
@@ -2411,9 +2451,9 @@ async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
             "default":  "voice_a"          // fallback for any unmapped role
           },
           "interval_ms": 350,
-          "top_p": 0.85, "top_k": 30, "temperature": 0.85,
+          "top_p": 0.78, "top_k": 30, "temperature": 0.72,
           "repetition_penalty": 10,
-          "emo_alpha": 0.75
+          "emo_alpha": 0.55
         }
 
     Returns chunked audio/wav. First bytes go out as soon as the first

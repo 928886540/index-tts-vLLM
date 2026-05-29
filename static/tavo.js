@@ -4,7 +4,7 @@
   var script = document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v4";
   var CONFIG_KEY = "indextts_tavo_config_v3";
-  var CONFIG_VERSION = 4;
+  var CONFIG_VERSION = 6;
   var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
   // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";
@@ -79,6 +79,9 @@
     return reserved.concat(extra);
   }
   async function loadCharacterCfg(characterId) {
+    if (characterId) {
+      try { var rawLocal = localStorage.getItem(CHAR_KEY_PREFIX + characterId); if (rawLocal) return JSON.parse(rawLocal); } catch (_) {}
+    }
     try { if (window.tavo && typeof tavo.get === "function") { var cs = await tavo.get(CHAR_SCOPE_CONFIG_KEY, "character"); if (cs) return cs; } } catch (_) {}
     if (!characterId) return null;
     try { if (window.tavo && typeof tavo.get === "function") { var tv = await tavo.get(CHAR_KEY_PREFIX + characterId, "global"); if (tv) return tv; } } catch (_) {}
@@ -194,13 +197,13 @@
     llmModel: "渡鸦/grok-4.20-fast",
     llmApiKey: "",
     intervalMs: 50,
-    topP: 0.85,
+    topP: 0.78,
     topK: 30,
-    temperature: 0.85,
+    temperature: 0.72,
     repetitionPenalty: 10,
-    emoAlpha: 0.75,
+    emoAlpha: 0.55,
     speedFactor: 1.08,
-    qualityMode: "expressive",
+    qualityMode: "fast",
     offlineAudioEnabled: false
   };
 
@@ -300,7 +303,7 @@
       ".idx-subtitle{display:flex;flex-direction:column;gap:3px;margin:12px 0 0;padding:12px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.48) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:136px;min-height:136px;max-height:136px;overflow-y:auto;scroll-behavior:auto;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 86%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 86%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;align-items:center;justify-content:center;min-height:34px;padding:6px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.32;font-weight:500;transition:color .18s,background .18s,box-shadow .18s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:13px;font-weight:800;background:rgba(216,167,255,.10);box-shadow:inset 3px 0 0 rgba(216,167,255,.75)}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;max-width:100%}",
       ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:currentColor}.idx-ctrl-sm{width:44px;height:44px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px}.idx-ctrl-main[data-state='loading'] svg{animation:idx-spin .9s linear infinite}@keyframes idx-spin{to{transform:rotate(360deg)}}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
       ".idx-meta{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:12px}.idx-pill{font-size:11px;color:rgba(238,231,244,.75);background:rgba(255,255,255,.06);border:1px solid rgba(206,170,230,.14);border-radius:999px;padding:4px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-      ".idx-panel{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:1}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
+      ".idx-panel,.idx-panel *{box-sizing:border-box}.idx-panel{margin:auto auto 8px auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:auto;max-height:min(88dvh,calc(100dvh - 12px));overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:2}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
       ".idx-section-title{font-size:12px;font-weight:700;color:#d9b7f0;margin:12px 0 7px}.idx-voices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.idx-voice{min-height:58px;border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}.idx-voice:before{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,#c890e8,#d8a7ff);opacity:.30}.idx-voice strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-voice span{display:block;margin-top:4px;font-size:11px;color:rgba(238,231,244,.56)}.idx-voice.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.12)}",
       ".idx-modes{display:grid;grid-template-columns:1fr;gap:7px}.idx-mode{border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit}.idx-mode strong{display:block;font-size:12px}.idx-mode span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56)}.idx-mode.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.10)}",
       ".idx-check{display:flex;align-items:flex-start;gap:8px;margin:10px 0 4px;padding:9px;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:rgba(255,255,255,.04);cursor:pointer}.idx-check input{margin:2px 0 0;accent-color:#c890e8}.idx-check strong{display:block;font-size:12px;color:#eee7f4}.idx-check span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56);line-height:1.35}",
@@ -311,24 +314,24 @@
       ".idx-picker{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;box-shadow:0 -8px 32px rgba(0,0,0,.45);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;min-height:0}.idx-picker::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-picker-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(206,170,230,.18);margin-bottom:8px}.idx-picker-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-picker-close{border:0;background:transparent;color:#eee7f4;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}.idx-picker-tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;flex-wrap:wrap}.idx-picker-tab{flex:0 0 auto;border:1px solid rgba(206,170,230,.16);background:rgba(255,255,255,.04);color:#eee7f4;border-radius:999px;padding:5px 11px;cursor:pointer;font-size:11px;font-family:inherit;white-space:nowrap}.idx-picker-tab.is-active{border-color:#c890e8;background:rgba(200,144,232,.20);color:#fff}.idx-picker-search{margin-bottom:8px}.idx-picker-grid{flex:1 1 auto;min-height:200px;max-height:50vh;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-content:start;padding:2px;width:100%}.idx-picker-item{min-width:0;overflow:hidden;min-height:54px;border:1px solid rgba(206,170,230,.16);border-radius:10px;background:rgba(255,255,255,.05);color:#eee7f4;text-align:left;padding:8px 8px 8px 12px;cursor:pointer;font-family:inherit;font-size:12px;line-height:1.35;display:flex;align-items:center;gap:6px;justify-content:space-between;transition:background .15s,border-color .15s}.idx-picker-item:hover{background:rgba(206,170,230,.14);border-color:rgba(206,170,230,.34)}.idx-picker-item.is-playing{border-color:#c890e8;background:rgba(200,144,232,.18);box-shadow:0 0 0 1px rgba(200,144,232,.22) inset}.idx-picker-item-info{flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;justify-content:center}.idx-picker-item-name{font-size:13px;font-weight:600;white-space:nowrap;overflow-x:auto;overflow-y:hidden;text-overflow:clip;display:block;scrollbar-width:none}.idx-picker-item-name::-webkit-scrollbar{display:none}.idx-picker-item-sub{font-size:10px;color:rgba(238,231,244,.55);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-picker-apply{flex:0 0 auto;width:30px;height:30px;border-radius:50%;border:1px solid rgba(200,144,232,.45);background:rgba(200,144,232,.18);color:#fff;cursor:pointer;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:inherit;padding:0;line-height:1}.idx-picker-apply:hover{background:#c890e8;color:#170e20;border-color:#c890e8;transform:scale(1.05)}.idx-picker-apply:active{transform:scale(.95)}.idx-picker-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding-top:8px;border-top:1px solid rgba(206,170,230,.14);color:rgba(238,231,244,.72);font-size:11px}.idx-picker-pager button{border:1px solid rgba(206,170,230,.20);background:rgba(255,255,255,.06);color:#eee7f4;border-radius:7px;padding:3px 10px;cursor:pointer;font-family:inherit;font-size:11px}.idx-picker-pager button:disabled{opacity:.4;cursor:not-allowed}",
       ".idx-card audio{display:none!important}.idx-info{padding-right:104px}.idx-card-counter{position:absolute;right:58px;top:16px;min-width:48px;height:32px;padding:0 10px;border:1px solid rgba(206,170,230,.22);border-radius:999px;background:rgba(20,14,28,.46);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:2}.idx-gear svg{width:19px;height:19px;fill:none!important;stroke:currentColor}",
       ".idx-seek{-webkit-appearance:none;appearance:none;height:30px;background:transparent;accent-color:auto}.idx-seek::-webkit-slider-runnable-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72));box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}.idx-seek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;margin-top:-6px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18),0 4px 12px rgba(0,0,0,.35)}.idx-seek::-moz-range-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72))}.idx-seek::-moz-range-thumb{width:18px;height:18px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18)}",
-      ".idx-panel{width:min(760px,calc(100vw - 24px));max-width:760px;max-height:min(82vh,calc(100vh - 16px));margin:auto auto 0 auto;border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);scrollbar-width:none}.idx-panel::-webkit-scrollbar{display:none}.idx-panel-head{top:-14px}.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.idx-field{display:flex;flex-direction:column;gap:5px;min-width:0}.idx-field.idx-wide{grid-column:1/-1}.idx-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(206,170,230,.12)}",
+      ".idx-panel{width:min(760px,calc(100vw - 24px));max-width:760px;max-height:min(88dvh,calc(100dvh - 12px));margin:auto auto 8px auto;border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);scrollbar-width:thin}.idx-panel::-webkit-scrollbar{width:6px}.idx-panel::-webkit-scrollbar-thumb{background:rgba(216,167,255,.28);border-radius:999px}.idx-panel-head{top:-14px}.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.idx-field{display:flex;flex-direction:column;gap:5px;min-width:0}.idx-field.idx-wide{grid-column:1/-1}.idx-actions{position:sticky;bottom:-18px;z-index:2;display:flex;justify-content:flex-end;gap:12px;margin:14px -14px -18px;padding:12px 14px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid rgba(206,170,230,.12);background:linear-gradient(180deg,rgba(12,8,18,.74) 0%,rgba(12,8,18,.985) 34%,rgba(12,8,18,.985) 100%);backdrop-filter:blur(8px)}",
       ".idx-picker,.idx-picker-grid{scrollbar-width:none}.idx-picker::-webkit-scrollbar,.idx-picker-grid::-webkit-scrollbar,.idx-subtitle::-webkit-scrollbar{display:none}.idx-picker-item.is-selected{border-color:#d8a7ff;background:rgba(200,144,232,.20);box-shadow:0 0 0 1px rgba(216,167,255,.24) inset,0 0 18px rgba(200,144,232,.14)}.idx-picker-selected{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:#d8a7ff;color:#160d1f;font-size:12px;font-weight:900;display:none;align-items:center;justify-content:center}.idx-picker-item.is-selected .idx-picker-selected{display:flex}.idx-picker-wave{flex:0 0 auto;width:24px;height:18px;display:none;align-items:center;justify-content:center;gap:2px}.idx-picker-item.is-selected .idx-picker-wave,.idx-picker-item.is-playing .idx-picker-wave{display:flex}.idx-picker-wave i{width:3px;border-radius:999px;background:#d8a7ff;opacity:.85;animation:idx-wave .78s ease-in-out infinite}.idx-picker-wave i:nth-child(2){animation-delay:.12s}.idx-picker-wave i:nth-child(3){animation-delay:.24s}@keyframes idx-wave{0%,100%{height:5px;opacity:.45}50%{height:17px;opacity:1}}",
-      "@media(max-width:520px){.idx-card{padding:14px;border-radius:16px}.idx-info{padding-right:98px}.idx-card-counter{right:56px;top:16px;height:30px;min-width:46px}.idx-panel{width:calc(100vw - 16px);max-height:min(84vh,calc(100vh - 12px));border-top-left-radius:16px;border-top-right-radius:16px;border-bottom-left-radius:0;border-bottom-right-radius:0}.idx-controls{gap:10px}.idx-ctrl-sm{width:40px;height:40px}.idx-ctrl-main{width:62px;height:62px}.idx-ctrl-add,.idx-ctrl-delete{width:44px;height:44px}.idx-grid{grid-template-columns:1fr}.idx-voices{grid-template-columns:1fr 1fr}.idx-role-row{grid-template-columns:84px 1fr 26px}.idx-picker-grid{grid-template-columns:1fr 1fr}}"
+      "@media(max-width:520px){.idx-card{padding:14px;border-radius:16px}.idx-info{padding-right:98px}.idx-card-counter{right:56px;top:16px;height:30px;min-width:46px}.idx-panel{width:calc(100vw - 16px);max-height:min(90dvh,calc(100dvh - 10px));border-top-left-radius:16px;border-top-right-radius:16px;border-bottom-left-radius:0;border-bottom-right-radius:0}.idx-actions{justify-content:stretch}.idx-actions .idx-btn{flex:1;min-width:0}.idx-controls{gap:10px}.idx-ctrl-sm{width:40px;height:40px}.idx-ctrl-main{width:62px;height:62px}.idx-ctrl-add,.idx-ctrl-delete{width:44px;height:44px}.idx-grid{grid-template-columns:1fr}.idx-voices{grid-template-columns:1fr 1fr}.idx-role-row{grid-template-columns:84px 1fr 26px}.idx-picker-grid{grid-template-columns:1fr 1fr}}"
     ].join("");
     document.head.appendChild(style);
   }
 
   async function getConfig() {
     var saved = null;
-    try { if (window.tavo && typeof tavo.get === "function") saved = await tavo.get(CONFIG_KEY, "global"); } catch (_) {}
-    if (!saved) { try { saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null"); } catch (_) {} }
+    try { saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null"); } catch (_) {}
+    if (!saved) { try { if (window.tavo && typeof tavo.get === "function") saved = await tavo.get(CONFIG_KEY, "global"); } catch (_) {} }
     var savedVersion = Number(saved && saved.configVersion || 0) || 0;
     var cfg = Object.assign({}, DEFAULT_CONFIG, pickGlobalConfig(saved || {}));
     if (savedVersion < CONFIG_VERSION) {
-      if (cfg.qualityMode === "balanced") cfg.qualityMode = "expressive";
-      if (Number(cfg.topP) === 0.8) cfg.topP = 0.85;
-      if (Number(cfg.temperature) === 0.8) cfg.temperature = 0.85;
-      if (Number(cfg.emoAlpha) === 0.7) cfg.emoAlpha = 0.75;
+      if (cfg.qualityMode === "balanced" || cfg.qualityMode === "expressive") cfg.qualityMode = "fast";
+      if (Number(cfg.topP) === 0.8 || Number(cfg.topP) === 0.85) cfg.topP = 0.78;
+      if (Number(cfg.temperature) === 0.8 || Number(cfg.temperature) === 0.85) cfg.temperature = 0.72;
+      if (Number(cfg.emoAlpha) === 0.7 || Number(cfg.emoAlpha) === 0.75) cfg.emoAlpha = 0.55;
     }
     cfg.configVersion = CONFIG_VERSION;
     // 强制把 apiBase 锁死成本次加载脚本的来源 —— 用户换 LAN/外网/隧道 URL 时
@@ -521,10 +524,24 @@
   async function loadTracksForMessage(messageId) {
     if (!messageId) return [];
     var key = TRACKS_KEY_PREFIX + messageId;
+    try { var raw = localStorage.getItem(key); if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; } } catch (_) {}
     try { if (window.tavo && typeof tavo.get === "function") { var cv = await tavo.get(key, "chat"); if (Array.isArray(cv)) return cv; } } catch (_) {}
     try { if (window.tavo && typeof tavo.get === "function") { var v = await tavo.get(key, "global"); if (Array.isArray(v)) return v; } } catch (_) {}
-    try { var raw = localStorage.getItem(key); if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; } } catch (_) {}
     return [];
+  }
+  function localTracksForMessage(messageId) {
+    if (!messageId) return [];
+    try {
+      var raw = localStorage.getItem(TRACKS_KEY_PREFIX + messageId);
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) {
+      return [];
+    }
+  }
+  function localHistoryCountForMessage(messageId) {
+    return localTracksForMessage(messageId).filter(function (t) { return !!(t && t.cacheKey); }).length;
   }
   async function saveTracksForMessage(messageId, tracks) {
     if (!messageId) return;
@@ -581,9 +598,9 @@
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
   function generationQualityOverrides(mode) {
     mode = String(mode || "expressive").trim();
-    if (mode === "fast") return { diffusion_steps: 8, prompt_audio_seconds: 8, segment_tokens: 48, first_tokens: 12 };
-    if (mode === "balanced") return { diffusion_steps: 8, prompt_audio_seconds: 8, segment_tokens: 56, first_tokens: 16 };
-    return { diffusion_steps: 10, prompt_audio_seconds: 10, segment_tokens: 72, first_tokens: 24 };
+    if (mode === "fast") return { diffusion_steps: 6, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 8 };
+    if (mode === "balanced") return { diffusion_steps: 8, prompt_audio_seconds: 8, segment_tokens: 48, first_tokens: 12 };
+    return { diffusion_steps: 10, prompt_audio_seconds: 10, segment_tokens: 56, first_tokens: 16 };
   }
   function applyGenerationParamsToSearchParams(p, cfg) {
     var q = generationQualityOverrides(cfg && cfg.qualityMode);
@@ -594,24 +611,48 @@
   }
   var STYLE_PRESETS = [
     { id: "neutral", label: "普通/平静", alpha: 0.20 },
-    { id: "breath_soft", label: "轻微气声", alpha: 0.48 },
-    { id: "breath_heavy", label: "明显喘息", alpha: 0.74 },
-    { id: "intimate_breath", label: "亲密气声", alpha: 0.78 },
-    { id: "moan_soft", label: "低声短吟", alpha: 0.82 },
-    { id: "low_murmur", label: "压低呢喃", alpha: 0.58 },
-    { id: "whisper_soft", label: "温柔耳语", alpha: 0.50 },
-    { id: "shy_whisper", label: "害羞低语", alpha: 0.52 },
-    { id: "tense_breath", label: "紧张呼吸", alpha: 0.50 },
-    { id: "sob_soft", label: "委屈哽咽", alpha: 0.58 },
-    { id: "cry_soft", label: "哭腔", alpha: 0.60 },
-    { id: "tease_soft", label: "轻声撒娇", alpha: 0.52 },
-    { id: "laugh_soft", label: "慵懒轻笑", alpha: 0.48 },
-    { id: "gasp_surprise", label: "惊讶轻叹", alpha: 0.50 },
-    { id: "stage_warmup", label: "亲密初段/轻气声", alpha: 0.55 },
-    { id: "stage_rising", label: "升温段/呼吸变重", alpha: 0.76 },
-    { id: "stage_peak", label: "高强度段/短促声腔", alpha: 0.86 },
-    { id: "stage_afterglow", label: "余韵段/低声放松", alpha: 0.56 }
+    { id: "breath_soft", label: "轻微气声", alpha: 0.42 },
+    { id: "breath_heavy", label: "明显喘息", alpha: 0.58 },
+    { id: "intimate_breath", label: "亲密气声", alpha: 0.60 },
+    { id: "moan_soft", label: "低声短吟", alpha: 0.62 },
+    { id: "low_murmur", label: "压低呢喃", alpha: 0.50 },
+    { id: "whisper_soft", label: "温柔耳语", alpha: 0.44 },
+    { id: "shy_whisper", label: "害羞低语", alpha: 0.46 },
+    { id: "tense_breath", label: "紧张呼吸", alpha: 0.46 },
+    { id: "sob_soft", label: "委屈哽咽", alpha: 0.50 },
+    { id: "cry_soft", label: "哭腔", alpha: 0.54 },
+    { id: "tease_soft", label: "轻声撒娇", alpha: 0.46 },
+    { id: "laugh_soft", label: "慵懒轻笑", alpha: 0.42 },
+    { id: "gasp_surprise", label: "惊讶轻叹", alpha: 0.46 },
+    { id: "scream_peak", label: "尖叫/高潮峰值", alpha: 0.64 },
+    { id: "stage_warmup", label: "亲密初段/轻气声", alpha: 0.48 },
+    { id: "stage_rising", label: "升温段/呼吸变重", alpha: 0.58 },
+    { id: "stage_peak", label: "高潮峰值/尖叫", alpha: 0.64 },
+    { id: "stage_afterglow", label: "余韵段/低声放松", alpha: 0.48 }
   ];
+  var PERSON_STYLE_VARIANTS = [
+    { name: "轻喘", label: "轻喘", alpha: 0.42 },
+    { name: "喘息", label: "明显喘息", alpha: 0.58 },
+    { name: "耳语", label: "耳语", alpha: 0.44 },
+    { name: "低语", label: "低语", alpha: 0.46 },
+    { name: "低吟", label: "低声短吟", alpha: 0.62 },
+    { name: "惊喘", label: "惊喘", alpha: 0.46 },
+    { name: "哭腔", label: "哭腔", alpha: 0.54 },
+    { name: "哽咽", label: "哽咽", alpha: 0.50 },
+    { name: "挑逗", label: "挑逗", alpha: 0.46 },
+    { name: "轻笑", label: "轻笑", alpha: 0.42 },
+    { name: "尖叫", label: "尖叫/峰值", alpha: 0.64 },
+    { name: "余韵", label: "余韵低声", alpha: 0.48 }
+  ];
+  ["步非烟", "AD学姐", "JOK"].forEach(function (speaker) {
+    PERSON_STYLE_VARIANTS.forEach(function (item) {
+      STYLE_PRESETS.push({
+        id: item.name + "-" + speaker,
+        label: item.label + "/" + speaker,
+        alpha: item.alpha
+      });
+    });
+  });
   function styleIdsText() { return STYLE_PRESETS.map(function (s) { return s.id + "=" + s.label + "(建议" + s.alpha + ")"; }).join(" / "); }
   function normalizeStyleId(style) {
     style = String(style || "neutral").trim();
@@ -621,8 +662,29 @@
   function defaultStyleAlpha(style, cfg) {
     style = normalizeStyleId(style);
     var hit = STYLE_PRESETS.find(function (s) { return s.id === style; });
-    if (hit) return hit.alpha;
-    return Number(cfg.emoAlpha || 0.4);
+    if (hit) return Math.min(hit.alpha, style === "neutral" ? 0.22 : 0.62);
+    return Math.min(Number(cfg.emoAlpha || 0.4), 0.62);
+  }
+  function stabilizeEmoVec(vec, role, style) {
+    if (role === "旁白") return [0,0,0,0,0,0,0,1];
+    var arr = Array.isArray(vec) ? vec.slice(0, 8).map(function (v) {
+      v = Number(v);
+      return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+    }) : [];
+    while (arr.length < 8) arr.push(0);
+    var activeCap = style === "neutral" ? 0.42 : 0.58;
+    var activeSum = 0;
+    for (var i = 0; i < 7; i++) {
+      arr[i] = Math.min(arr[i], activeCap);
+      activeSum += arr[i];
+    }
+    var maxActiveSum = style === "neutral" ? 0.70 : 1.05;
+    if (activeSum > maxActiveSum && activeSum > 0) {
+      var scale = maxActiveSum / activeSum;
+      for (var j = 0; j < 7; j++) arr[j] = arr[j] * scale;
+    }
+    arr[7] = Math.max(style === "neutral" ? 0.52 : 0.25, Math.min(1, arr[7] || 0));
+    return arr;
   }
   function llmMaxTokensForText(text) {
     return Math.min(12000, Math.max(4000, Math.ceil(String(text || "").length * 5)));
@@ -890,10 +952,10 @@
         var now = 0;
         try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
         var ahead = nextAt - now;
-        if (ahead <= 0.04 && !bufferingState) {
+        if (ahead <= 0.12 && !bufferingState) {
           bufferingState = true;
           hooks.onStateChange && hooks.onStateChange("buffering");
-        } else if (bufferingState && ahead >= 0.18) {
+        } else if (bufferingState && ahead >= 0.65) {
           bufferingState = false;
           hooks.onStateChange && hooks.onStateChange("resumed");
         }
@@ -1035,10 +1097,12 @@
     skipBytesRemaining = skipBytesRemaining - (skipBytesRemaining % blockAlign);
     if (skipBytesRemaining > 0 && hooks.debug) hooks.debug("resume offset " + startOffsetSec.toFixed(2) + "s, skip " + skipBytesRemaining + " PCM bytes");
     scheduledAudioSec = skipBytesRemaining > 0 ? startOffsetSec : scheduledAudioSec;
-    var flushBytes = Math.max(8192, Math.floor(bytesPerSec * 0.35));
+    // 本机/LAN 也可能因为 TTS 推理 RTF > 1 出现 underrun。起播前多攒一点
+    // PCM，比 0.6s 起播稳定很多，不会刚显示 playing 就立刻 buffering。
+    var flushBytes = Math.max(8192, Math.floor(bytesPerSec * 0.50));
     flushBytes = flushBytes - (flushBytes % blockAlign);
     if (flushBytes < blockAlign) flushBytes = blockAlign;
-    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * 0.65));
+    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * 2.20));
     startBufferBytes = startBufferBytes - (startBufferBytes % blockAlign);
     if (startBufferBytes < flushBytes) startBufferBytes = flushBytes;
     var interrupted = false;
@@ -1099,7 +1163,7 @@
             });
           }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 40));
           armBufferWatcher();
-        } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.18) {
+        } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.65) {
           bufferingState = false;
           hooks.onStateChange && hooks.onStateChange("resumed");
         }
@@ -1144,13 +1208,14 @@
       catch (e) {
         if (stopped) throw makeAbortError(stopReason);
         if (started) {
-          // 已经起播了。流被切到后台/导航等中断算正常退出，不要弹 UI 错误，
-          // 已经调度进 AudioContext 的 buffer 会自然播完。
+          // 已经起播后读流失败，按真实失败处理；不再继续播放残留 buffer，
+          // 也不做断线恢复，避免弱网下重复尾段/乱跳。
           interrupted = true;
           readEnded = true;
           hooks.onStateChange && hooks.onStateChange("interrupted");
-          hooks.debug && hooks.debug("流中断但已起播，转后台保存: " + (e && e.message ? e.message : e));
-          break;
+          hooks.debug && hooks.debug("流中断，停止 Web Audio: " + (e && e.message ? e.message : e));
+          stopWebAudio("stream interrupted");
+          throw new Error("[step:reader.read.loop] " + (e && e.message ? e.message : e));
         }
         hooks.onError && hooks.onError(e);
         throw new Error("[step:reader.read.loop] " + (e && e.message ? e.message : e));
@@ -1229,11 +1294,13 @@
       "   - 只是轻微带气声/柔声 → breath_soft 或 whisper_soft。",
       "   - 语义里有急促呼吸、压抑紧张 → tense_breath。",
       "   - 明显呼吸加重但仍在说话 → breath_heavy。",
-      "   - 亲密、贴耳、黏连、短促气声 → intimate_breath，style_alpha 0.70-0.82。",
+      "   - 亲密、贴耳、黏连、短促气声 → intimate_breath，style_alpha 0.50-0.62。",
       "   - 明显的「嗯、啊、唔、哈、呼、……」等短促气音/短吟，必须用 moan_soft 或 breath_heavy，不要写 neutral。",
       "   - 委屈、哭腔、鼻音 → sob_soft 或 cry_soft。",
       "   - 撒娇、轻笑、惊讶分别用 tease_soft / laugh_soft / gasp_surprise。",
-      "   - 如果文本明显呈现亲密互动的强度变化，用阶段型 style：stage_warmup=轻微升温；stage_rising=呼吸变重；stage_peak=最高强度的短促声腔；stage_afterglow=余韵/低声放松。",
+      "   - 如果文本明显呈现亲密互动的强度变化，用阶段型 style：stage_warmup=轻微升温；stage_rising=呼吸变重；stage_peak=高潮峰值/尖叫；stage_afterglow=余韵/低声放松。",
+      "   - 明确是尖叫、峰值、高潮爆发时，可直接用 scream_peak；普通短促呻吟用 moan_soft。",
+      "   - 如果想指定某个参考来源，优先用「声腔-人名」格式，例如 喘息-AD学姐、耳语-JOK、哭腔-步非烟；没有合适人名版本再用通用英文 style。",
       "   - 普通对话优先 neutral；但带明显气音、短促反应、断续语气词的段落不要 neutral。",
       "",
       "完整性硬规则：",
@@ -1258,10 +1325,10 @@
       "- 愤怒、咆哮 → angry 主导。例：[0.8,0,0,0,0,0,0,0.1]",
       "- 不要每段写一样；不要全 0；维度数宁少勿多。",
       "",
-      "每段可加 emo_alpha 字段（0.18-0.75），控制情绪向量强度：",
-      "- 旁白固定 0.18-0.25，平静对白 0.30-0.40，正常带情绪对白 0.45-0.58，强烈台词 0.60-0.72。",
+      "每段可加 emo_alpha 字段（0.18-0.62），控制情绪向量强度：",
+      "- 旁白固定 0.18-0.25，平静对白 0.28-0.36，正常带情绪对白 0.40-0.52，强烈台词 0.54-0.62。",
       "- 不要每段都高强度；只有明确哭、怒、恐惧、惊讶、亲密气声时才超过 0.6。",
-      "style_alpha 控制声腔/情绪参考音频强度：neutral=0.15-0.25；轻微 style=0.48-0.62；明显 breath/moan/style 参考=0.72-0.88。stage_peak 可写 0.84-0.90，但不要超过 0.9。",
+      "style_alpha 控制声腔/情绪参考音频强度：neutral=0.15-0.24；轻微 style=0.36-0.50；明显 breath/moan/style 参考=0.52-0.66。stage_peak 也不要超过 0.66。",
       "",
       "示例输入：",
       "她低着头，眼角有泪。「对不起，我真的撑不住了。」",
@@ -1269,7 +1336,7 @@
       "示例输出：",
       "{\"segments\":[",
       "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
-      "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.58,\"emo_vec\":[0,0,0.2,0,0.7,0.4,0,0]},",
+      "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.50,\"emo_vec\":[0,0,0.1,0,0.55,0.25,0,0.25]},",
       "  {\"role\":\"旁白\",\"text\":\"" + (userName ? userName : "你") + "叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
       "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0,0.2,0,0,0.3,0.2,0,0.5]}",
       "]}"
@@ -1310,7 +1377,7 @@
       var style = normalizeStyleId(seg.style || seg.style_ref);
       var styleAlpha = Number(seg.style_alpha);
       if (!isFinite(styleAlpha)) styleAlpha = defaultStyleAlpha(style, cfg);
-      styleAlpha = Math.max(0, Math.min(0.9, styleAlpha));
+      styleAlpha = style === "neutral" ? Math.max(0.12, Math.min(0.24, styleAlpha)) : Math.max(0.30, Math.min(0.66, styleAlpha));
       var role = String(seg.role || "旁白").trim();
       var segTextForRole = String(seg.text || "");
       var sourceIdx = findSegmentTextInSource(text, segTextForRole, sourceSearchOffset);
@@ -1332,10 +1399,10 @@
         styleAlpha = 0.15;
       }
       var emoAlpha = Number(seg.emo_alpha);
-      if (!isFinite(emoAlpha)) emoAlpha = role === "旁白" ? 0.2 : (style === "neutral" ? 0.42 : Number(cfg.emoAlpha || 0.75));
-      emoAlpha = role === "旁白" ? Math.max(0.15, Math.min(0.25, emoAlpha)) : Math.max(0.25, Math.min(0.8, emoAlpha));
+      if (!isFinite(emoAlpha)) emoAlpha = role === "旁白" ? 0.2 : (style === "neutral" ? 0.35 : Number(cfg.emoAlpha || 0.55));
+      emoAlpha = role === "旁白" ? Math.max(0.15, Math.min(0.25, emoAlpha)) : Math.max(0.22, Math.min(0.62, emoAlpha));
       var emoVec = seg.emo_vec || [0,0,0,0,0,0,0,0.35];
-      if (role === "旁白") emoVec = [0,0,0,0,0,0,0,1];
+      emoVec = stabilizeEmoVec(emoVec, role, style);
       return {
         role: role || "旁白",
         text: seg.text || "",
@@ -1374,7 +1441,7 @@
         + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>不走 LLM，整段使用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>第三方 AI 拆旁白/人物并输出 style + emo_vec</span></button></div>'
         + '<div class="idx-section-title">合成质量</div>'
         + '<div class="idx-grid">'
-          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="expressive">质量优先（推荐）</option><option value="balanced">平衡</option><option value="fast">极速</option></select></label>'
+          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option></select></label>'
           + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.08"></label>'
         + '</div>'
         + '<div class="idx-section-title">播放 / 离线</div>'
@@ -1540,12 +1607,29 @@
     function setAudioPlaybackRate() {
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
     }
+    function markElementAudioTrack(track, sourceKind) {
+      try {
+        if (!audio) return;
+        if (track && track.cacheKey) audio.dataset.idxCacheKey = String(track.cacheKey);
+        else delete audio.dataset.idxCacheKey;
+        audio.dataset.idxSourceKind = sourceKind || "";
+      } catch (_) {}
+    }
+    function elementAudioBelongsToTrack(track) {
+      if (!track || !audio) return false;
+      try {
+        if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey)) return true;
+      } catch (_) {}
+      var src = "";
+      try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
+      return !!(src && src === trackPlayableUrl(track));
+    }
     function trackResumeSec(track) {
       if (!track) return 0;
       var src = "";
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       var playable = trackPlayableUrl(track);
-      if (playable && src === playable && isFinite(Number(audio.currentTime))) return Math.max(0, Number(audio.currentTime) || 0);
+      if ((elementAudioBelongsToTrack(track) || (playable && src === playable)) && isFinite(Number(audio.currentTime))) return Math.max(0, Number(audio.currentTime) || 0);
       if (isFinite(Number(track.lastWebAudioSec))) return Math.max(0, Number(track.lastWebAudioSec) || 0);
       if (isFinite(Number(track.lastElementSec))) return Math.max(0, Number(track.lastElementSec) || 0);
       if (isFinite(Number(track.lastStalledSec))) return Math.max(0, Number(track.lastStalledSec) || 0);
@@ -1577,6 +1661,7 @@
         audio.src = url;
         try { audio.load(); } catch (_) {}
       }
+      markElementAudioTrack(track, isSavedTrack(track) ? "saved" : (url === track.streamUrl ? "stream" : "audio"));
       setAudioPlaybackRate();
       if (seek) seek.disabled = false;
       if (startSec != null && isFinite(Number(startSec))) {
@@ -1641,6 +1726,7 @@
     function clearElementAudioSrc() {
       try { audio.pause(); } catch (_) {}
       try { audio.removeAttribute("src"); audio.load(); } catch (_) {}
+      markElementAudioTrack(null, "");
     }
     function oneOf(value, list, fallback) {
       value = String(value || "").trim();
@@ -1772,6 +1858,9 @@
     }
     function isElementUsingTrackStream(track) {
       if (!track || !track.streamUrl) return false;
+      try {
+        if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey) && audio.dataset.idxSourceKind === "stream") return true;
+      } catch (_) {}
       var src = audio.currentSrc || audio.src || "";
       return src === track.streamUrl;
     }
@@ -1804,6 +1893,10 @@
       if (!cfg.offlineAudioEnabled || !track || !track.cacheKey) {
         if (track) setTrackOfflineState(track, cfg.offlineAudioEnabled ? "missing" : "disabled");
         return false;
+      }
+      if (track.offlineReady && track.offlineUrl && /^blob:/i.test(String(track.offlineUrl))) {
+        setTrackOfflineState(track, "ready");
+        return true;
       }
       var key = ensureTrackOfflineKey(track);
       if (!key) return false;
@@ -1911,7 +2004,7 @@
       return ok;
     }
     function shouldUseWebAudioForLiveTrack(track) {
-      return !!(isMobileUA() && track && track.mode === "ai8" && isLiveTrack(track) && track.streamUrl);
+      return !!(track && track.mode === "ai8" && isLiveTrack(track) && track.streamUrl);
     }
     function shouldUseElementForSavedTrack(track) {
       return isSavedTrack(track);
@@ -2041,6 +2134,8 @@
       var startedAt = 0;
       var waitStartedAt = Date.now();
       var waitTimer = null;
+      var firstAudioTimedOut = false;
+      var streamTooSlowFallback = false;
       function stopWaitTimer() {
         if (waitTimer) { try { clearInterval(waitTimer); } catch (_) {} waitTimer = null; }
       }
@@ -2059,6 +2154,20 @@
         if (token !== webAudioPlayToken) { stopWaitTimer(); return; }
         if (track.webAudioPlaying) return;
         var sec = Math.max(1, Math.floor((Date.now() - waitStartedAt) / 1000));
+        if (sec >= 90) {
+          firstAudioTimedOut = true;
+          setTrackStreamHealth(track, "interrupted");
+          setTrackPlaybackState(track, "error");
+          setPlayState("idle");
+          setStatus("首段音频超时");
+          setError("90 秒内没有收到可播放音频，已停止这次流式连接。可以重新生成或稍后点播放检查历史音频。");
+          showTrackNotice(track, "首段音频超时", "已停止这次流式连接，不会继续卡住");
+          if (webAudioController && typeof webAudioController.stop === "function") {
+            try { webAudioController.stop("first audio timeout"); } catch (_) {}
+          }
+          stopWaitTimer();
+          return;
+        }
         setStatus("等待首段音频 " + sec + "s…");
         showTrackNotice(track, "等待首段音频 " + sec + "s…", opts.waitDetail || "弱网或后端合成较慢");
       }, 1000);
@@ -2118,8 +2227,15 @@
               setStatus("网络缓冲中…");
               showTrackNotice(track, "网络缓冲中…", "歌词会停在当前播放位置");
               debugLog("⚠️ Web Audio buffering count=" + track.stalledCount, "#fc9");
-              if (isSavedTrack(track) && trackShouldAskPlaySaved(track) && !track.savePromptAsked) {
-                askPlaySavedTrack(track).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
+              if (track.cacheKey && track.stalledCount >= 4 && !streamTooSlowFallback) {
+                streamTooSlowFallback = true;
+                track.playSavedWhenReady = true;
+                setStatus("实时生成跟不上，等待保存音频…");
+                showTrackNotice(track, "实时生成跟不上", "停止流式，等完整音频保存后自动播放");
+                debugLog("⚠️ Web Audio 连续缓冲，切到落盘后播放 cacheKey=" + track.cacheKey, "#fc9");
+                if (webAudioController && typeof webAudioController.stop === "function") {
+                  try { webAudioController.stop("stream too slow"); } catch (_) {}
+                }
               }
             } else if (state === "resumed") {
               setTrackPlaybackState(track, "playing");
@@ -2128,15 +2244,14 @@
             } else if (state === "interrupted") {
               stopWaitTimer();
               setTrackStreamHealth(track, "interrupted");
-              setTrackPlaybackState(track, "buffering");
-              track.savePromptWanted = true;
-              setStatus("网络不稳，转后台保存…");
-              showTrackNotice(track, "网络不稳，转后台保存…", "合成任务还在跑，保存后会询问是否直接播放");
-              if (isSavedTrack(track)) {
-                askPlaySavedTrack(track).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
-              } else if (track.cacheKey) {
-                pollCacheUpgrade(track, "weak-net snapshot");
-              }
+              markWebAudioStopped(track);
+              webAudioController = null;
+              clearWebAudioProgressTimer();
+              stopSubtitle();
+              setTrackPlaybackState(track, "error");
+              setPlayState("idle");
+              setStatus("流式播放已断开");
+              showTrackNotice(track, "流式播放已断开", "不会自动重连；音频保存后可再点播放检查历史音频");
             } else if (state === "stopped") {
               stopWaitTimer();
               markWebAudioStopped(track);
@@ -2173,6 +2288,21 @@
         webAudioController = null;
         clearWebAudioProgressTimer();
         stopSubtitle();
+        if (streamTooSlowFallback) {
+          setTrackStreamHealth(track, "stalled");
+          setTrackPlaybackState(track, "buffering");
+          setPlayState("loading");
+          setStatus("实时生成跟不上，等待保存音频…");
+          pollCacheUpgrade(track, "slow stream fallback");
+          return false;
+        }
+        if (firstAudioTimedOut) {
+          setTrackStreamHealth(track, "interrupted");
+          setTrackPlaybackState(track, "error");
+          setPlayState("idle");
+          setStatus("首段音频超时");
+          return false;
+        }
         if ((e && e.name === "AbortError") || /播放已停止|停止播放/i.test(msg)) {
           setTrackPlaybackState(track, "idle");
           setPlayState("idle");
@@ -2180,21 +2310,12 @@
         }
         if (isNetworkStreamError(e) && track.cacheKey) {
           setTrackStreamHealth(track, "interrupted");
-          track.savePromptWanted = true;
-          setTrackPlaybackState(track, "buffering");
+          setTrackPlaybackState(track, "error");
           setPlayState("idle");
-          setError("");
-          if (shouldUseElementForSavedTrack(track)) {
-            setStatus("网络不稳，音频已保存");
-            showTrackNotice(track, "网络不稳，音频已保存", "正在询问是否直接播放");
-            askPlaySavedTrack(track).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
-          } else {
-            setTrackState(track, "live");
-            setStatus("网络不稳，后台合成中…");
-            showTrackNotice(track, "网络不稳，后台合成中…", "这张音频不会丢，保存后会询问是否直接播放");
-            pollCacheUpgrade(track, "weak-net snapshot");
-          }
-          debugLog("⚠️ Web Audio 连接中断，保留 cacheKey 等待落盘: " + msg, "#fc9");
+          setStatus("流式播放失败");
+          setError("流式连接失败，不自动重连。音频如果已保存，下一次点播放会直接走历史音频。");
+          showTrackNotice(track, "流式播放失败", "弱网下不再自动恢复；稍后点播放可检查是否已有保存音频");
+          debugLog("⚠️ Web Audio 连接中断，不恢复流式: " + msg, "#fc9");
           return false;
         }
         var friendly = friendlyPlaybackError(e);
@@ -2274,6 +2395,16 @@
       await hydrateOfflineAudio(track, "select");
       srcUrl = trackPlayableUrl(track);
       debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.offlineUrl ? "offline" : srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
+      if (isLiveTrack(track) && !track.allowStreamPlay && !autoplay) {
+        clearElementAudioSrc();
+        if (seek) { seek.disabled = true; seek.value = "0"; }
+        setTrackPlaybackState(track, "idle");
+        setPlayState("idle");
+        setStatus("流式生成中");
+        showTrackNotice(track, "流式生成中", track.cacheKey ? "点播放会手动连接一次；不会自动重连" : "当前生成还没有可播放音频");
+        updateTrackButtons();
+        return;
+      }
       if (srcUrl) {
         if (shouldUseWebAudioForLiveTrack(track)) {
           clearElementAudioSrc();
@@ -2284,6 +2415,7 @@
             var liveResumeSec = trackResumeSec(track);
             setStatus("等待首段音频…");
             showTrackNotice(track, liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频");
+            track.allowStreamPlay = false;
             playTrackViaWebAudio(track, liveStreamUrlForTrack(track) || srcUrl, { noticeTitle: liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", noticeDetail: liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频", waitDetail: "正在合成第一段", startOffsetSec: liveResumeSec });
           } else {
             setStatus(historyStatusText());
@@ -2293,6 +2425,8 @@
           return;
         }
         audio.src = srcUrl;
+        markElementAudioTrack(track, isSavedTrack(track) ? "saved" : (srcUrl === track.streamUrl ? "stream" : "audio"));
+        if (isLiveTrack(track)) track.allowStreamPlay = false;
         setAudioPlaybackRate();
         // 强制重新加载 metadata,避免浏览器复用上次缓存的 duration/seekable
         try { audio.load(); } catch (_) {}
@@ -2345,6 +2479,7 @@
           var currentSrc = audio.currentSrc || audio.src || "";
           if (currentSrc !== track.cacheUrl) {
             audio.src = track.cacheUrl;
+            markElementAudioTrack(track, "saved");
             audio.load();
             if (seek) seek.value = "0";
             if (cur) cur.textContent = "00:00";
@@ -2395,19 +2530,19 @@
                 });
               }
               if (j && j.state === "done") {
-                var shouldAskPlaySaved = currentTrack() === trackEntry && trackShouldAskPlaySaved(trackEntry)
-                  && (trackEntry.streamInterrupted || trackEntry.webAudioPlaying || isElementUsingTrackStream(trackEntry));
                 setTrackState(trackEntry, "saved");
-                attachCacheAudio(trackEntry, { forceElement: false, deferElement: trackEntry.webAudioPlaying });
+                var autoplaySaved = !!(trackEntry.playSavedWhenReady && currentTrack() === trackEntry);
+                trackEntry.playSavedWhenReady = false;
+                attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: trackEntry.webAudioPlaying && !autoplaySaved, autoplay: autoplaySaved });
                 scheduleOfflineAudioSave(trackEntry, label + " offline", 0);
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
+                if (autoplaySaved) setStatus("生成完成，正在播放保存音频");
                 var metricsLine = formatJobMetrics(trackEntry.metrics);
                 if (metricsLine) debugLog("📊 " + label + " 指标: " + metricsLine, "#9ff");
-                if (currentTrack() === trackEntry && isElementUsingTrackStream(trackEntry) && !shouldAskPlaySaved) {
+                if (currentTrack() === trackEntry && isElementUsingTrackStream(trackEntry)) {
                   debugLog("✅ 未检测到 stalled/中断，保持当前流式播放，不切到落盘音频", "#9f9");
                 }
-                if (shouldAskPlaySaved) askPlaySavedTrack(trackEntry).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
                 done = true;
                 break;
               }
@@ -2504,15 +2639,10 @@
     }
     async function initializeHistoryCount() {
       if (!messageId || tracksLoaded) return;
-      try {
-        var saved = await loadTracksForMessage(messageId);
-        knownHistoryCount = saved && saved.length ? saved.length : 0;
-        updateTrackButtons();
-        setStatus(historyStatusText());
-        showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放恢复历史音频，或点加号生成新的音频" : "点播放开始生成音频");
-      } catch (e) {
-        debugLog("⚠️ 历史音频计数读取失败: " + (e && e.message ? e.message : e), "#fc9");
-      }
+      knownHistoryCount = localHistoryCountForMessage(messageId);
+      updateTrackButtons();
+      setStatus(historyStatusText());
+      showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
     }
     async function confirmDeleteTrack(track) {
       if (!track) return false;
@@ -3322,10 +3452,10 @@
       } catch (_) {}
       try { audio.pause(); } catch (_) {}
       stopWebAudioPlayback("pause");
+      track.playSavedWhenReady = false;
       setPlayState("idle");
-      if (track.cacheKey) pollCacheUpgrade(track, "paused snapshot");
-      setStatus("已暂停，后台继续保存");
-      showTrackNotice(track, "已暂停", track.cacheKey ? "合成还在后台进行，保存后可播放历史音频" : "已停止等待，点播放可继续");
+      setStatus("已暂停");
+      showTrackNotice(track, "已暂停", track.cacheKey ? "不会自动恢复流式；保存完成后点播放会检查历史音频" : "已停止等待");
     }
 
     async function generate(force) {
@@ -3343,36 +3473,23 @@
       if (!force && generatedTracks.length > 0) {
         if (currentTrackIndex < 0) currentTrackIndex = generatedTracks.length - 1;
         var existingTrack = currentTrack();
-        if (existingTrack && existingTrack.webAudioPlaying) {
-          existingTrack.pausedByUser = true;
-          stopWebAudioPlayback("pause");
-          if (existingTrack.cacheKey) pollCacheUpgrade(existingTrack, "paused snapshot");
-          return;
-        }
-        if (existingTrack && existingTrack.pausedByUser && (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending")) {
-          existingTrack.pausedByUser = false;
-          var resumeFromSec = trackResumeSec(existingTrack);
-          if (existingTrack.cacheKey) await refreshTrackFromStatus(existingTrack, "resume snapshot");
-          if (shouldUseElementForSavedTrack(existingTrack)) {
-            await prepareOfflineAudio(existingTrack, "resume", { saveMissing: true });
-            startElementAudioFrom(existingTrack, resumeFromSec);
-            return;
-          }
-          setPlayState("loading");
-          setStatus(resumeFromSec > 0 ? "从 " + formatTime(resumeFromSec) + " 继续流式播放…" : "继续等待音频…");
-          showTrackNotice(existingTrack, resumeFromSec > 0 ? "从暂停位置续播" : "继续等待音频…", existingTrack.cacheKey ? "重新连接流式音频，不从头听" : "正在等待生成任务返回");
-          if (existingTrack.cacheKey) pollCacheUpgrade(existingTrack, "resume snapshot");
-          if (shouldUseWebAudioForLiveTrack(existingTrack)) {
-            await playTrackViaWebAudio(existingTrack, liveStreamUrlForTrack(existingTrack), {
-              noticeTitle: resumeFromSec > 0 ? "从暂停位置续播" : "等待首段音频…",
-              noticeDetail: resumeFromSec > 0 ? ("从 " + formatTime(resumeFromSec) + " 继续") : "正在连接流式音频",
-              waitDetail: "正在重新连接流式音频",
-              startOffsetSec: resumeFromSec
-            });
+        if (!existingTrack) return;
+        if (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (elementAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended)) {
+          if (isSavedTrack(existingTrack)) {
+            try {
+              existingTrack.lastElementSec = Math.max(0, Number(audio.currentTime || 0) || 0);
+              audio.pause();
+              setTrackPlaybackState(existingTrack, "paused");
+              setPlayState("idle");
+              setStatus("已暂停");
+              showTrackNotice(existingTrack, "已暂停", "点播放从当前位置继续");
+            } catch (_) {}
+          } else {
+            pauseLiveTrack(existingTrack);
           }
           return;
         }
-        if (existingTrack && (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending") && play && play.dataset.state === "loading") {
+        if ((isLiveTrack(existingTrack) || trackState(existingTrack) === "pending") && play && play.dataset.state === "loading") {
           pauseLiveTrack(existingTrack);
           return;
         }
@@ -3380,7 +3497,7 @@
           await prepareOfflineAudio(existingTrack, "play", { saveMissing: true });
           var existingUrl = trackPlayableUrl(existingTrack);
           var audioUrl = audio.currentSrc || audio.src || "";
-          if (existingUrl && audioUrl !== existingUrl) {
+          if (existingUrl && !elementAudioBelongsToTrack(existingTrack) && audioUrl !== existingUrl) {
             startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
           } else if (audio.src) {
             if (audio.paused) { setAudioPlaybackRate(); await audio.play().catch(function(e){ handleAudioPlayReject("element", e, "请点播放继续"); }); }
@@ -3390,13 +3507,32 @@
           }
           return;
         }
-        if (shouldUseWebAudioForLiveTrack(existingTrack)) {
-          await playTrackViaWebAudio(existingTrack, liveStreamUrlForTrack(existingTrack), {
-            noticeTitle: "等待首段音频…",
-            noticeDetail: "正在连接流式音频",
-            waitDetail: "正在合成第一段",
-            startOffsetSec: existingTrack.pausedByUser ? trackResumeSec(existingTrack) : 0
-          });
+        if (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending") {
+          if (existingTrack.cacheKey && await refreshTrackFromStatus(existingTrack, "play snapshot")) {
+            if (shouldUseElementForSavedTrack(existingTrack)) {
+              await prepareOfflineAudio(existingTrack, "play saved", { saveMissing: true });
+              startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
+              return;
+            }
+          }
+          var liveUrl = liveStreamUrlForTrack(existingTrack);
+          if (liveUrl) {
+            var manualResumeSec = trackResumeSec(existingTrack);
+            existingTrack.allowStreamPlay = false;
+            setStatus(manualResumeSec > 0 ? "手动连接流式音频…" : "等待首段音频…");
+            showTrackNotice(existingTrack, manualResumeSec > 0 ? "手动连接流式音频" : "等待首段音频…", manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 附近继续") : "不会自动重连，只执行这次播放请求");
+            await playTrackViaWebAudio(existingTrack, liveUrl, {
+              noticeTitle: manualResumeSec > 0 ? "手动连接流式音频" : "等待首段音频…",
+              noticeDetail: manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 附近继续") : "不会自动重连，只执行这次播放请求",
+              waitDetail: "等待后端继续输出 PCM",
+              startOffsetSec: manualResumeSec
+            });
+            return;
+          }
+          setTrackPlaybackState(existingTrack, "error");
+          setPlayState("idle");
+          setStatus("暂无可播放音频");
+          showTrackNotice(existingTrack, "暂无可播放音频", existingTrack.cacheKey ? "未找到运行中的流式任务或历史音频" : "当前生成还没有可播放音频");
           return;
         }
         if (audio.src) {
@@ -3510,6 +3646,7 @@
           trackEntry.stalledCount = 0;
           trackEntry.streamHealth = "ok";
           trackEntry.savePromptAsked = false;
+          trackEntry.allowStreamPlay = true;
           setTrackState(trackEntry, jobInfo.cached ? "saved" : "live");
           if (!placeholder) {
             // 防御性:正常路径下 placeholder 一定有,这里兜底
@@ -3542,13 +3679,14 @@
           }
           // 没缓存 → 走流式（移动 Web Audio / 桌面 <audio src>）。后端是异步
           // job，断线重连不丢；同时 GET 完成后会自动落盘到 snapshot_cache。
-          if (isMobileUA()) {
+          if (shouldUseWebAudioForLiveTrack(trackEntry)) {
             setStatus("等待首段音频…");
             showTrackNotice(trackEntry, "等待首段音频…", "正在合成，声音出来前不要切走");
-            debugLog("📱 检测到手机 UA, 用 Web Audio API 真流式", "#ffd479");
+            debugLog("▶️ live track 使用 Web Audio API 真流式", "#ffd479");
             currentCacheKey = jobInfo.cacheKey;
             setPlayState("loading");
-            pollCacheUpgrade(trackEntry, "mobile snapshot");
+            pollCacheUpgrade(trackEntry, "web audio snapshot");
+            trackEntry.allowStreamPlay = false;
             await playTrackViaWebAudio(trackEntry, streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，声音出来前不要切走", waitDetail: "正在合成第一段" });
             if (isSavedTrack(trackEntry)) attachCacheAudio(trackEntry, { deferElement: true });
             stopServerLogPolling();
@@ -3588,7 +3726,8 @@
             streamStalled: false,
             stalledCount: 0,
             streamHealth: "ok",
-            savePromptAsked: false
+            savePromptAsked: false,
+            allowStreamPlay: !singleJob.cached
           };
           setTrackState(singleTrack, singleJob.cached ? "saved" : "live");
           if (singleJob.cached) await prepareOfflineAudio(singleTrack, "single cached hit", { saveMissing: true });
@@ -3775,9 +3914,6 @@
         t.lastStalledSec = Number(audio.currentTime || 0) || 0;
       }
       debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2) + (t ? " count=" + t.stalledCount : ""), "#fc9");
-      if (t && isSavedTrack(t) && isElementUsingTrackStream(t) && currentTrack() === t && trackShouldAskPlaySaved(t) && !t.savePromptAsked) {
-        askPlaySavedTrack(t).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
-      }
     });
     on(audio, 'timeupdate', function () {
       var activeTrack = currentTrack();
@@ -3800,8 +3936,9 @@
 
     updateTrackButtons();
     syncUI();
-    setStatus(messageId ? "读取历史音频…" : "待播放");
-    showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+    knownHistoryCount = messageId ? localHistoryCountForMessage(messageId) : 0;
+    setStatus(historyStatusText());
+    showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
     initializeHistoryCount().catch(function () {});
   }
 

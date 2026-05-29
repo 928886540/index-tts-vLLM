@@ -12,7 +12,7 @@ _INVALID_COMPONENT_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
 def safe_voice_name(name: str) -> str:
-    """Return a library-safe voice identifier capped at 80 chars.
+    """Return a library-safe voice identifier capped at 160 chars.
 
     允许 "/" 作为子目录分隔符(如 "男声/陈宇")。每段(由 / 分隔)各自做 windows 文件名
     清洗,并禁止 ".." 越级。"""
@@ -24,7 +24,7 @@ def safe_voice_name(name: str) -> str:
     cleaned_parts = [_INVALID_COMPONENT_CHARS.sub("", p) for p in parts]
     cleaned_parts = [p for p in cleaned_parts if p]
     joined = "/".join(cleaned_parts)
-    return joined[:80]
+    return joined[:160]
 
 
 def list_voices() -> list[dict]:
