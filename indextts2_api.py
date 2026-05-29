@@ -2210,6 +2210,11 @@ async def tts_stream_job_endpoint(request: TTS_Request):
     if resolve_res is not None:
         return resolve_res
 
+    from indextts import snapshot_cache
+
+    cache_key = snapshot_cache.make_cache_key(_single_tts_cache_payload(req))
+    bypass_cache = bool(req.get("bypass_cache", False))
+    cached_path = None if bypass_cache else snapshot_cache.get_cached_audio(cache_key)
     _prune_stream_jobs()
     job_id = secrets.token_urlsafe(18)
     STREAM_JOBS[job_id] = {
@@ -2218,7 +2223,10 @@ async def tts_stream_job_endpoint(request: TTS_Request):
     }
     return JSONResponse(content={
         "job_id": job_id,
+        "cache_key": cache_key,
         "url": f"/tts_stream_job/{job_id}",
+        "cache_url": f"/cache_audio/{cache_key}",
+        "cached": bool(cached_path),
         "expires_in": STREAM_JOB_TTL_SECONDS,
     })
 

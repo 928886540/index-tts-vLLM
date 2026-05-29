@@ -10,7 +10,8 @@
   var GLOBAL_CONFIG_FIELDS = [
     "apiBase", "mode", "endpoint", "dialogueEndpoint", "parseEndpoint",
     "llmEndpoint", "llmModel", "llmApiKey",
-    "intervalMs", "topP", "topK", "temperature", "repetitionPenalty", "emoAlpha", "speedFactor", "qualityMode"
+    "intervalMs", "topP", "topK", "temperature", "repetitionPenalty", "emoAlpha", "speedFactor", "qualityMode",
+    "offlineAudioEnabled"
   ];
   var RESERVED_ROLES = ["旁白", "用户"];  // 这两个常驻不可删；具体人物用原名或 defaultVoice
   function voiceForRoleNames(list, names) {
@@ -160,7 +161,8 @@
     repetitionPenalty: 10,
     emoAlpha: 0.7,
     speedFactor: 1.08,
-    qualityMode: "balanced"
+    qualityMode: "balanced",
+    offlineAudioEnabled: false
   };
 
   function $(root, sel) { return root && root.querySelector ? root.querySelector(sel) : null; }
@@ -256,12 +258,13 @@
       ".idx-top{display:flex;align-items:center;gap:12px;min-width:0}.idx-cover{width:56px;height:56px;flex:0 0 56px;border-radius:14px;background:#241a2c;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 10px 24px rgba(0,0,0,.34);display:flex;align-items:center;justify-content:center;color:#e9c8ff;font-size:18px;font-weight:800;background-size:cover;background-position:center}.idx-cover[data-playing='1']{animation:none}",
       ".idx-info{flex:1;min-width:0;padding-right:48px}.idx-title-row{display:flex;align-items:center;gap:8px;min-width:0}.idx-name{font-size:18px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-format{flex:0 0 auto;border:1px solid rgba(206,170,230,.34);background:rgba(206,170,230,.12);color:#d9b7f0;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800}.idx-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-gear{position:absolute;right:14px;top:14px;width:40px;height:40px;border-radius:50%;border:1px solid rgba(206,170,230,.30);background:rgba(20,14,28,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#eee7f4;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2;transition:background .15s,transform .12s}.idx-gear:active{transform:scale(.92)}.idx-gear svg{width:18px;height:18px;fill:currentColor}@media(hover:hover){.idx-gear:hover{background:rgba(60,38,80,.65)}}",
       ".idx-seek-wrap{margin:14px 0 0;background:transparent;border:0;border-radius:0;padding:0}.idx-seek{width:100%;height:24px;margin:0;accent-color:#c88ee9;cursor:pointer}.idx-time{display:flex;justify-content:space-between;font-size:12px;color:rgba(238,231,244,.68);font-variant-numeric:tabular-nums;margin-top:4px}",
-      ".idx-subtitle{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:18px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.50) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;max-height:240px;min-height:160px;overflow-y:auto;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.45;font-weight:500;transition:color .25s,font-size .2s,font-weight .2s,letter-spacing .2s,padding .2s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:17px;font-weight:700;letter-spacing:.5px;padding:10px 8px}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.6;max-width:92%;padding:18px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:16px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85;transition:width .2s,height .2s,opacity .2s}.idx-sub-row.is-current .idx-sub-avatar{width:32px;height:32px;opacity:1}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:block;word-break:break-word;max-width:100%}",
+      ".idx-subtitle{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:14px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.50) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:148px;min-height:148px;max-height:148px;overflow-y:auto;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;flex-direction:column;align-items:center;gap:4px;padding:5px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.38;font-weight:500;transition:color .25s,font-size .2s,font-weight .2s,padding .2s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:16px;font-weight:700;padding:8px}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85;transition:width .2s,height .2s,opacity .2s}.idx-sub-row.is-current .idx-sub-avatar{width:32px;height:32px;opacity:1}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:block;word-break:break-word;max-width:100%}",
       ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:currentColor}.idx-ctrl-sm{width:44px;height:44px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px}.idx-ctrl-main[data-state='loading'] svg{animation:idx-spin .9s linear infinite}@keyframes idx-spin{to{transform:rotate(360deg)}}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
       ".idx-meta{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:12px}.idx-pill{font-size:11px;color:rgba(238,231,244,.75);background:rgba(255,255,255,.06);border:1px solid rgba(206,170,230,.14);border-radius:999px;padding:4px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".idx-panel{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:1}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
       ".idx-section-title{font-size:12px;font-weight:700;color:#d9b7f0;margin:12px 0 7px}.idx-voices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.idx-voice{min-height:58px;border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}.idx-voice:before{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,#c890e8,#d8a7ff);opacity:.30}.idx-voice strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-voice span{display:block;margin-top:4px;font-size:11px;color:rgba(238,231,244,.56)}.idx-voice.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.12)}",
       ".idx-modes{display:grid;grid-template-columns:1fr;gap:7px}.idx-mode{border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit}.idx-mode strong{display:block;font-size:12px}.idx-mode span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56)}.idx-mode.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.10)}",
+      ".idx-check{display:flex;align-items:flex-start;gap:8px;margin:10px 0 4px;padding:9px;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:rgba(255,255,255,.04);cursor:pointer}.idx-check input{margin:2px 0 0;accent-color:#c890e8}.idx-check strong{display:block;font-size:12px;color:#eee7f4}.idx-check span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56);line-height:1.35}",
       ".idx-label{font-size:11px;color:rgba(238,231,244,.66)}.idx-input,.idx-textarea{width:100%;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:#0b0810;color:#eee7f4;padding:8px;font-size:12px;font-family:inherit;outline:none}.idx-btn{height:32px;border:1px solid rgba(206,170,230,.20);border-radius:9px;background:rgba(255,255,255,.06);color:#eee7f4;padding:0 10px;font-size:12px;cursor:pointer;font-family:inherit}.idx-error{margin-top:10px;color:#ffd5dd;background:rgba(120,38,52,.22);border:1px solid rgba(255,120,145,.28);border-radius:10px;padding:8px;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}",
       // 结构化角色映射 UI
       ".idx-roles{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}.idx-role-row{display:grid;grid-template-columns:96px 1fr 28px;gap:6px;align-items:center}.idx-role-name{min-width:0;border:1px solid rgba(206,170,230,.16);background:#0b0810;color:#eee7f4;border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;outline:none}.idx-voice-btn{min-width:0;border:1px solid rgba(206,170,230,.20);background:rgba(206,170,230,.08);color:#eee7f4;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit}.idx-voice-btn:hover{background:rgba(206,170,230,.16)}.idx-role-del{width:28px;height:28px;border:1px solid rgba(255,120,145,.28);background:rgba(120,38,52,.22);color:#ffd5dd;border-radius:8px;cursor:pointer;font-size:14px;line-height:1;font-family:inherit}.idx-role-lock{width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:rgba(238,231,244,.45);font-size:13px;user-select:none;cursor:default}.idx-add-role{margin-top:4px;width:100%;border:1px dashed rgba(206,170,230,.30);background:transparent;color:#d9b7f0;padding:8px;border-radius:9px;cursor:pointer;font-size:12px;font-family:inherit}.idx-add-role:hover{background:rgba(206,170,230,.06)}.idx-llm-details{margin-top:10px;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:rgba(255,255,255,.03);overflow:hidden}.idx-llm-details>summary{list-style:none;cursor:pointer;padding:9px 12px;font-size:12px;font-weight:700;color:#d9b7f0;display:flex;align-items:center;justify-content:space-between;user-select:none}.idx-llm-details>summary::-webkit-details-marker{display:none}.idx-llm-details>summary::after{content:'▾';font-size:10px;color:rgba(238,231,244,.55);transition:transform .2s}.idx-llm-details[open]>summary::after{transform:rotate(180deg)}.idx-llm-details>.idx-grid{padding:8px 12px 12px;border-top:1px solid rgba(206,170,230,.12)}",
@@ -331,6 +334,53 @@
       if (r.role && r.voice) out[r.role] = r.voice;
     });
     return out;
+  }
+  var OFFLINE_DB_NAME = "indextts_tavo_audio_v1";
+  var OFFLINE_DB_STORE = "audio";
+  var OFFLINE_DB_PROMISE = null;
+  function offlineAudioKey(cacheKey) {
+    cacheKey = String(cacheKey || "").trim();
+    return cacheKey ? "cache:" + cacheKey : "";
+  }
+  function openOfflineAudioDb() {
+    if (!("indexedDB" in window)) return Promise.reject(new Error("当前 WebView 不支持 IndexedDB"));
+    if (OFFLINE_DB_PROMISE) return OFFLINE_DB_PROMISE;
+    OFFLINE_DB_PROMISE = new Promise(function (resolve, reject) {
+      var req;
+      try { req = indexedDB.open(OFFLINE_DB_NAME, 1); }
+      catch (e) { reject(e); return; }
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(OFFLINE_DB_STORE)) db.createObjectStore(OFFLINE_DB_STORE, { keyPath: "key" });
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error || new Error("IndexedDB 打开失败")); };
+      req.onblocked = function () { reject(new Error("IndexedDB 被旧页面占用")); };
+    });
+    return OFFLINE_DB_PROMISE;
+  }
+  function offlineDbRequest(mode, fn) {
+    return openOfflineAudioDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(OFFLINE_DB_STORE, mode);
+        var store = tx.objectStore(OFFLINE_DB_STORE);
+        var req;
+        try { req = fn(store); } catch (e) { reject(e); return; }
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error || tx.error || new Error("IndexedDB 操作失败")); };
+      });
+    });
+  }
+  function getOfflineAudioRecord(key) {
+    if (!key) return Promise.resolve(null);
+    return offlineDbRequest("readonly", function (store) { return store.get(key); }).catch(function () { return null; });
+  }
+  function putOfflineAudioRecord(record) {
+    return offlineDbRequest("readwrite", function (store) { return store.put(record); });
+  }
+  function deleteOfflineAudioRecord(key) {
+    if (!key) return Promise.resolve(false);
+    return offlineDbRequest("readwrite", function (store) { return store.delete(key); }).then(function () { return true; }).catch(function () { return false; });
   }
   async function saveConfig(cfg, characterId) {
     // 写入前 normalize 一次,杜绝脏数据回到 storage
@@ -416,8 +466,8 @@
     return { text: text.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/\[IndexTTS_TAVO_SCRIPT\]/g, "").trim(), avatarUrl: avatarUrl, characterName: characterName, characterId: characterId, messageId: messageId, userName: userName, userAvatarUrl: userAvatarUrl };
   }
   // 每条消息的播放历史持久化：key = "indextts_tracks_<messageId>"。
-  // 只存可重建的元信息（cacheKey + voice + mode + createdAt），不存 blob。
-  // 重新进页面时通过 /cache_audio/{cacheKey} 把 audio.src 接上。
+  // 只存可重建的元信息（cacheKey + voice + mode + offlineKey），不存 blob。
+  // 重新进页面时优先从 IndexedDB 读离线音频；缺失时通过 /cache_audio/{cacheKey} 接上。
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   async function loadTracksForMessage(messageId) {
     if (!messageId) return [];
@@ -442,7 +492,19 @@
         voice: t.voice || "",
         mode: t.mode || "",
         state: state,
+        playbackState: t.playbackState || "",
+        serverState: t.serverState || "",
+        cacheState: t.cacheState || t.remoteCacheState || "",
+        remoteCacheState: t.remoteCacheState || t.cacheState || "",
+        offlineState: t.offlineState || "",
+        streamHealth: t.streamHealth || (t.streamInterrupted ? "interrupted" : (t.streamStalled ? "stalled" : "")),
+        stalledCount: Number(t.stalledCount || 0) || 0,
         createdAt: t.createdAt || Date.now(),
+        offlineKey: t.offlineKey || offlineAudioKey(t.cacheKey),
+        offlineReady: !!t.offlineReady,
+        offlineWanted: !!t.offlineWanted,
+        offlineSavedAt: t.offlineSavedAt || 0,
+        offlineSize: t.offlineSize || 0,
         voicesMap: t.voicesMap || null,
         metrics: t.metrics ? {
           first_pcm_s: t.metrics.first_pcm_s,
@@ -630,7 +692,13 @@
     if (!res.ok) throw new Error(await res.text());
     var data = await res.json();
     if (!data || !data.url) throw new Error("后端没有返回流式播放地址。");
-    return new URL(data.url, cleanBase(base) + "/").href;
+    return {
+      streamUrl: new URL(data.url, cleanBase(base) + "/").href,
+      cacheUrl: data.cache_url ? new URL(data.cache_url, cleanBase(base) + "/").href : "",
+      cacheKey: data.cache_key || "",
+      cached: !!data.cached,
+      live: false
+    };
   }
 
   async function createDialogueStreamJob(base, body) {
@@ -1184,6 +1252,7 @@
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
         + '<div class="idx-section-title">播放模式</div>'
         + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>不走 LLM，整段使用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>第三方 AI 拆旁白/人物并输出 style + emo_vec</span></button></div>'
+        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>开启后会把已落盘音频保存到本机 IndexedDB；下次优先播放本地音频，缺失时再走在线音频。</span></span></label>'
         // 单音色模式专属 —— mode==="single" 时显示
         + '<div class="idx-single-only"><div class="idx-section-title">音色选择</div><div class="idx-default-voice"><button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择音色…</button></div></div>'
         // AI 八情绪专属 —— mode==="ai8" 时显示；切换不清空（输入值在 readFields 时已存入 cfg）
@@ -1358,13 +1427,22 @@
       if (seek) seek.disabled = false;
       if (startSec != null && isFinite(Number(startSec))) {
         var target = Math.max(0, Number(startSec));
-        try {
+        var seekApplied = false;
+        var applySeek = function () {
           if (isFinite(audio.duration) && audio.duration > 0) target = Math.min(target, Math.max(0, audio.duration - 0.05));
           audio.currentTime = target;
+          seekApplied = true;
+        };
+        try {
+          if (audio.readyState > 0) applySeek();
         } catch (_) {}
+        if (!seekApplied) {
+          try { audio.addEventListener("loadedmetadata", function () { try { applySeek(); } catch (_) {} }, { once: true }); } catch (_) {}
+        }
       }
       setStatus("正在加载音频…");
       showTrackNotice(track, "正在加载音频…", shouldUseElementForSavedTrack(track) ? "已加载音频，支持拖动" : "马上开始播放");
+      setTrackPlaybackState(track, "loading");
       setPlayState("loading");
       audio.play().catch(function (err) { handleAudioPlayReject("element", err, "请点播放继续"); });
       return true;
@@ -1410,45 +1488,261 @@
       try { audio.pause(); } catch (_) {}
       try { audio.removeAttribute("src"); audio.load(); } catch (_) {}
     }
+    function oneOf(value, list, fallback) {
+      value = String(value || "").trim();
+      return list.indexOf(value) >= 0 ? value : fallback;
+    }
+    function inferLegacyTrackState(track) {
+      if (!track) return "pending";
+      if (track.status === "failed" || track.serverState === "failed" || track.cacheState === "failed" || track.remoteCacheState === "failed") return "failed";
+      if (track.cacheReady || track.fromHistory || track.status === "ready" || track.cacheState === "ready" || track.remoteCacheState === "ready" || (track.url && !track.streaming && !track.pendingBlob)) return "saved";
+      if (track.streamUrl || track.streaming || track.status === "running" || track.serverState === "running" || track.pendingBlob) return "live";
+      return "pending";
+    }
+    function ensureTrackStates(track) {
+      if (!track) return null;
+      var state = oneOf(track.state, ["pending", "live", "saved", "failed"], inferLegacyTrackState(track));
+      track.state = state; // legacy coarse state, persisted for old cards.
+      track.serverState = oneOf(track.serverState, ["pending", "running", "done", "failed"],
+        state === "saved" ? "done" : (state === "failed" ? "failed" : (state === "live" ? "running" : "pending")));
+      var cacheState = track.cacheState || track.remoteCacheState;
+      track.cacheState = oneOf(cacheState, ["none", "pending", "ready", "failed", "missing"],
+        state === "saved" ? "ready" : (state === "failed" ? "failed" : ((track.cacheKey || track.cacheUrl) ? "pending" : "none")));
+      track.remoteCacheState = track.cacheState;
+      track.offlineState = !cfg.offlineAudioEnabled ? "disabled" : oneOf(track.offlineState, ["missing", "saving", "ready", "failed"],
+        (track.offlineReady || track.offlineUrl) ? "ready" : (track.offlineSaveInProgress ? "saving" : "missing"));
+      track.streamHealth = oneOf(track.streamHealth, ["ok", "stalled", "interrupted"],
+        track.streamInterrupted ? "interrupted" : (track.streamStalled ? "stalled" : "ok"));
+      if (track.stalledCount == null) track.stalledCount = 0;
+      return track;
+    }
+    function setTrackPlaybackState(track, state) {
+      if (!track) return "";
+      ensureTrackStates(track);
+      track.playbackState = oneOf(state, ["idle", "loading", "streaming", "playing", "buffering", "paused", "ended", "error"], "idle");
+      return track.playbackState;
+    }
+    function setTrackServerState(track, state) {
+      if (!track) return "";
+      ensureTrackStates(track);
+      track.serverState = oneOf(state, ["pending", "running", "done", "failed"], "pending");
+      return track.serverState;
+    }
+    function setTrackCacheState(track, state) {
+      if (!track) return "";
+      ensureTrackStates(track);
+      track.cacheState = oneOf(state, ["none", "pending", "ready", "failed", "missing"], "none");
+      track.remoteCacheState = track.cacheState;
+      if (track.cacheState === "ready") track.cacheReady = true;
+      return track.cacheState;
+    }
+    function setTrackOfflineState(track, state) {
+      if (!track) return "";
+      ensureTrackStates(track);
+      track.offlineState = !cfg.offlineAudioEnabled ? "disabled" : oneOf(state, ["missing", "saving", "ready", "failed"], "missing");
+      return track.offlineState;
+    }
+    function setTrackStreamHealth(track, state) {
+      if (!track) return "";
+      ensureTrackStates(track);
+      track.streamHealth = oneOf(state, ["ok", "stalled", "interrupted"], "ok");
+      if (track.streamHealth === "ok") {
+        track.streamInterrupted = false;
+        track.streamStalled = false;
+      } else if (track.streamHealth === "interrupted") {
+        track.streamInterrupted = true;
+        track.streamStalled = true;
+      } else {
+        track.streamStalled = true;
+      }
+      return track.streamHealth;
+    }
     function setTrackState(track, state) {
       if (!track) return "";
-      state = state || "pending";
+      state = oneOf(state, ["pending", "live", "saved", "failed"], "pending");
       track.state = state;
       if (state === "saved") {
         track.status = "ready";
         track.pendingBlob = false;
         track.streaming = false;
-        if (track.cacheUrl || track.fromHistory) track.cacheReady = true;
+        if (track.cacheUrl || track.fromHistory || track.url) track.cacheReady = true;
+        setTrackServerState(track, "done");
+        setTrackCacheState(track, "ready");
+        if (!track.playbackState || track.playbackState === "loading" || track.playbackState === "streaming") setTrackPlaybackState(track, "idle");
       } else if (state === "live") {
         track.status = "running";
         track.pendingBlob = true;
         track.streaming = true;
+        setTrackServerState(track, "running");
+        setTrackCacheState(track, (track.cacheKey || track.cacheUrl) ? "pending" : "none");
+        if (!track.playbackState || track.playbackState === "idle") setTrackPlaybackState(track, "streaming");
       } else if (state === "failed") {
         track.status = "failed";
         track.pendingBlob = false;
         track.streaming = false;
+        setTrackServerState(track, "failed");
+        setTrackCacheState(track, "failed");
+        setTrackPlaybackState(track, "error");
       } else {
         track.status = "pending";
         track.pendingBlob = true;
+        setTrackServerState(track, "pending");
+        setTrackCacheState(track, (track.cacheKey || track.cacheUrl) ? "pending" : "none");
+        if (!track.playbackState) setTrackPlaybackState(track, "loading");
       }
+      ensureTrackStates(track);
       return state;
     }
     function trackState(track) {
       if (!track) return "pending";
-      var s = String(track.state || "").trim();
-      if (s === "pending" || s === "live" || s === "saved" || s === "failed") return s;
-      if (track.status === "failed") return setTrackState(track, "failed");
-      if (track.cacheReady || track.fromHistory || track.status === "ready" || (track.url && !track.streaming && !track.pendingBlob)) return setTrackState(track, "saved");
-      if (track.streamUrl || track.streaming || track.status === "running" || track.pendingBlob) return setTrackState(track, "live");
-      return setTrackState(track, "pending");
+      ensureTrackStates(track);
+      return track.state;
     }
     function isSavedTrack(track) { return trackState(track) === "saved"; }
     function isLiveTrack(track) { return trackState(track) === "live"; }
     function trackPlayableUrl(track) {
       if (!track) return "";
+      if (cfg.offlineAudioEnabled && track.offlineUrl) return track.offlineUrl;
       if (isSavedTrack(track)) return track.url || track.cacheUrl || track.streamUrl || "";
       if (isLiveTrack(track)) return track.streamUrl || track.url || "";
       return track.url || "";
+    }
+    function isElementUsingTrackStream(track) {
+      if (!track || !track.streamUrl) return false;
+      var src = audio.currentSrc || audio.src || "";
+      return src === track.streamUrl;
+    }
+    function isElementPlayingTrackStream(track) {
+      return !!(isElementUsingTrackStream(track) && !audio.paused && !audio.ended);
+    }
+    function trackHasStreamIssue(track) {
+      if (!track) return false;
+      ensureTrackStates(track);
+      return !!(track.streamInterrupted || track.streamHealth === "interrupted" || track.streamHealth === "stalled" || Number(track.stalledCount || 0) > 0);
+    }
+    function trackShouldAskPlaySaved(track) {
+      if (!track) return false;
+      ensureTrackStates(track);
+      return !!(track.streamInterrupted || track.streamHealth === "interrupted" || Number(track.stalledCount || 0) > 2);
+    }
+    function revokeOfflineObjectUrl(track) {
+      if (track && track.offlineObjectUrl) {
+        try { URL.revokeObjectURL(track.offlineObjectUrl); } catch (_) {}
+        track.offlineObjectUrl = "";
+        if (track.offlineUrl && /^blob:/i.test(track.offlineUrl)) track.offlineUrl = "";
+      }
+    }
+    function ensureTrackOfflineKey(track) {
+      if (!track) return "";
+      if (!track.offlineKey) track.offlineKey = offlineAudioKey(track.cacheKey);
+      return track.offlineKey || "";
+    }
+    async function hydrateOfflineAudio(track, label) {
+      if (!cfg.offlineAudioEnabled || !track || !track.cacheKey) {
+        if (track) setTrackOfflineState(track, cfg.offlineAudioEnabled ? "missing" : "disabled");
+        return false;
+      }
+      var key = ensureTrackOfflineKey(track);
+      if (!key) return false;
+      var rec = await getOfflineAudioRecord(key);
+      if (!rec || !rec.blob) {
+        track.offlineReady = false;
+        setTrackOfflineState(track, "missing");
+        return false;
+      }
+      revokeOfflineObjectUrl(track);
+      track.offlineUrl = URL.createObjectURL(rec.blob);
+      track.offlineObjectUrl = track.offlineUrl;
+      track.offlineReady = true;
+      track.offlineWanted = false;
+      track.offlineSavedAt = rec.updatedAt || rec.createdAt || Date.now();
+      track.offlineSize = rec.size || (rec.blob && rec.blob.size) || 0;
+      setTrackOfflineState(track, "ready");
+      debugLog("📦 " + (label || "offline") + " 命中 IndexedDB: " + key, "#9f9");
+      return true;
+    }
+    async function saveOfflineAudioForTrack(track, label) {
+      if (!cfg.offlineAudioEnabled || !track || !track.cacheKey || !track.cacheUrl || track.offlineSaveInProgress) {
+        if (track) setTrackOfflineState(track, cfg.offlineAudioEnabled ? "missing" : "disabled");
+        return false;
+      }
+      var key = ensureTrackOfflineKey(track);
+      if (!key) return false;
+      track.offlineSaveInProgress = true;
+      setTrackOfflineState(track, "saving");
+      try {
+        var existing = await getOfflineAudioRecord(key);
+        if (existing && existing.blob) {
+          await hydrateOfflineAudio(track, label || "offline");
+          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          return true;
+        }
+        var res = await fetch(track.cacheUrl, { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        var blob = await res.blob();
+        if (!blob || !blob.size) throw new Error("空音频");
+        var now = Date.now();
+        await putOfflineAudioRecord({
+          key: key,
+          cacheKey: track.cacheKey,
+          sourceUrl: track.cacheUrl,
+          mode: track.mode || "",
+          voice: track.voice || "",
+          contentType: blob.type || "audio/wav",
+          size: blob.size,
+          blob: blob,
+          createdAt: track.offlineSavedAt || now,
+          updatedAt: now
+        });
+        revokeOfflineObjectUrl(track);
+        track.offlineUrl = URL.createObjectURL(blob);
+        track.offlineObjectUrl = track.offlineUrl;
+        track.offlineReady = true;
+        track.offlineWanted = false;
+        track.offlineSavedAt = now;
+        track.offlineSize = blob.size;
+        setTrackOfflineState(track, "ready");
+        if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+        debugLog("💾 " + (label || "offline") + " 已保存离线音频: " + key + " (" + Math.round(blob.size / 1024) + " KB)", "#9f9");
+        return true;
+      } catch (e) {
+        track.offlineWanted = true;
+        setTrackOfflineState(track, "failed");
+        debugLog("⚠️ " + (label || "offline") + " 离线保存失败，稍后播放在线音频时补偿: " + (e && e.message ? e.message : e), "#fc9");
+        if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+        return false;
+      } finally {
+        track.offlineSaveInProgress = false;
+      }
+    }
+    function scheduleOfflineAudioSave(track, label, delayMs) {
+      if (!cfg.offlineAudioEnabled || !track || !track.cacheKey || !track.cacheUrl || track.offlineReady || track.offlineSaveInProgress || track.offlineSaveTimer) return;
+      track.offlineWanted = true;
+      setTrackOfflineState(track, "missing");
+      track.offlineSaveTimer = setTimeout(function () {
+        track.offlineSaveTimer = null;
+        saveOfflineAudioForTrack(track, label).catch(function(){});
+      }, Math.max(0, Number(delayMs || 0) || 0));
+    }
+    async function prepareOfflineAudio(track, label) {
+      if (!cfg.offlineAudioEnabled || !track) return false;
+      var hit = await hydrateOfflineAudio(track, label);
+      if (!hit && isSavedTrack(track) && track.cacheKey && track.cacheUrl) scheduleOfflineAudioSave(track, (label || "offline") + " compensation", 0);
+      return hit;
+    }
+    async function deleteOfflineAudioForTrack(track) {
+      if (!track) return false;
+      var key = ensureTrackOfflineKey(track);
+      revokeOfflineObjectUrl(track);
+      if (!key) return false;
+      var ok = await deleteOfflineAudioRecord(key);
+      if (ok) {
+        track.offlineReady = false;
+        track.offlineWanted = false;
+        setTrackOfflineState(track, cfg.offlineAudioEnabled ? "missing" : "disabled");
+        debugLog("🗑 已删除离线音频: " + key, "#fc9");
+      }
+      return ok;
     }
     function shouldUseWebAudioForLiveTrack(track) {
       return !!(isMobileUA() && track && track.mode === "ai8" && isLiveTrack(track) && track.streamUrl);
@@ -1505,7 +1799,7 @@
       try {
         if (window.tavo && tavo.utils && typeof tavo.utils.select === "function") {
           choice = await tavo.utils.select([
-            { value: "play", label: "直接播放", description: "切到已保存音频，支持拖动进度条" },
+            { value: "play", label: "直接播放", description: "从当前位置切到已保存音频，支持拖动进度条" },
             { value: "wait", label: "继续等待", description: "保持当前流式播放，不切换" }
           ], "音频已保存，是否直接播放？", "play");
         } else if (typeof window.confirm === "function") {
@@ -1519,7 +1813,10 @@
       try {
         if (webAudioController && typeof webAudioController.getTimeSec === "function") resumeSec = webAudioController.getTimeSec();
         else if (track.lastWebAudioSec != null) resumeSec = Number(track.lastWebAudioSec) || 0;
+        else if (isElementUsingTrackStream(track) && isFinite(Number(audio.currentTime))) resumeSec = Number(audio.currentTime) || 0;
+        else if (track.lastElementSec != null) resumeSec = Number(track.lastElementSec) || 0;
       } catch (_) { resumeSec = 0; }
+      await prepareOfflineAudio(track, "switch saved");
       stopWebAudioPlayback("switch");
       startElementAudioFrom(track, resumeSec);
     }
@@ -1539,7 +1836,9 @@
       }
       webAudioController = null;
       clearWebAudioProgressTimer();
-      markWebAudioStopped(currentTrack());
+      var activeTrack = currentTrack();
+      markWebAudioStopped(activeTrack);
+      if (activeTrack && reason === "pause") setTrackPlaybackState(activeTrack, "paused");
       stopSubtitle();
       if (reason && reason !== "switch" && reason !== "replace" && reason !== "silent") {
         setPlayState("idle");
@@ -1575,12 +1874,13 @@
         if (waitTimer) { try { clearInterval(waitTimer); } catch (_) {} waitTimer = null; }
       }
       track.webAudioPlaying = false;
-      track.streamInterrupted = false;
+      setTrackStreamHealth(track, "ok");
       clearElementAudioSrc();
       if (seek) { seek.disabled = true; seek.value = "0"; }
       if (cur) cur.textContent = "00:00";
       if (total) total.textContent = "--:--";
       setError("");
+      setTrackPlaybackState(track, "loading");
       setPlayState("loading");
       setStatus(opts.connectingStatus || "正在连接音频…");
       showTrackNotice(track, opts.noticeTitle || "正在连接音频…", opts.noticeDetail || "等待后端返回声音");
@@ -1600,17 +1900,21 @@
           onStateChange: function (state) {
             if (token !== webAudioPlayToken) return;
             if (state === "connecting") {
+              setTrackPlaybackState(track, "loading");
               setStatus("正在连接音频…");
               showTrackNotice(track, "正在连接音频…", "弱网下可能需要多等几秒");
             } else if (state === "connected" || state === "waiting_pcm") {
+              setTrackPlaybackState(track, "streaming");
               setStatus("等待首段音频…");
               showTrackNotice(track, "等待首段音频…", opts.waitDetail || "后端正在合成第一段");
             } else if (state === "first_pcm") {
+              setTrackPlaybackState(track, "buffering");
               setStatus("收到音频，正在缓冲…");
               showTrackNotice(track, "收到音频", "缓冲一小段后起播");
             } else if (state === "playing") {
               stopWaitTimer();
               track.webAudioPlaying = true;
+              setTrackPlaybackState(track, "playing");
               setPlayState("playing");
               setStatus("正在播放：" + trackPlaybackLabel(track));
               setError("");
@@ -1623,15 +1927,18 @@
               });
             } else if (state === "buffering") {
               track.savePromptWanted = true;
+              setTrackPlaybackState(track, "buffering");
               setPlayState("loading");
               setStatus("网络缓冲中…");
               showTrackNotice(track, "网络缓冲中…", "歌词会停在当前播放位置");
             } else if (state === "resumed") {
+              setTrackPlaybackState(track, "playing");
               setPlayState("playing");
               setStatus("正在播放：" + trackPlaybackLabel(track));
             } else if (state === "interrupted") {
               stopWaitTimer();
-              track.streamInterrupted = true;
+              setTrackStreamHealth(track, "interrupted");
+              setTrackPlaybackState(track, "buffering");
               track.savePromptWanted = true;
               setStatus("网络不稳，转后台保存…");
               showTrackNotice(track, "网络不稳，转后台保存…", "合成任务还在跑，保存后会询问是否直接播放");
@@ -1643,15 +1950,17 @@
             } else if (state === "stopped") {
               stopWaitTimer();
               markWebAudioStopped(track);
+              setTrackPlaybackState(track, "paused");
               clearWebAudioProgressTimer();
             } else if (state === "ended") {
               stopWaitTimer();
               markWebAudioStopped(track);
               webAudioController = null;
               clearWebAudioProgressTimer();
+              setTrackPlaybackState(track, "ended");
               setPlayState("idle");
               stopSubtitle();
-              if (track.streamInterrupted && !isSavedTrack(track)) {
+              if ((track.streamInterrupted || track.streamHealth === "interrupted") && !isSavedTrack(track)) {
                 setStatus("网络中断，等待音频保存…");
                 showTrackNotice(track, "网络中断，等待音频保存…", "保存完成后会询问是否直接播放");
               } else {
@@ -1674,12 +1983,14 @@
         clearWebAudioProgressTimer();
         stopSubtitle();
         if ((e && e.name === "AbortError") || /播放已停止|停止播放/i.test(msg)) {
+          setTrackPlaybackState(track, "idle");
           setPlayState("idle");
           return false;
         }
         if (isNetworkStreamError(e) && track.cacheKey) {
-          track.streamInterrupted = true;
+          setTrackStreamHealth(track, "interrupted");
           track.savePromptWanted = true;
+          setTrackPlaybackState(track, "buffering");
           setPlayState("idle");
           setError("");
           if (shouldUseElementForSavedTrack(track)) {
@@ -1696,6 +2007,7 @@
           return false;
         }
         var friendly = friendlyPlaybackError(e);
+        setTrackPlaybackState(track, "error");
         setPlayState("idle");
         setStatus("播放失败");
         setError(friendly);
@@ -1707,6 +2019,17 @@
     async function refreshTrackFromStatus(track, label) {
       if (!track || !track.cacheKey || track.deleted) return false;
       try {
+        if (track.mode === "single") {
+          if (!track.cacheUrl) track.cacheUrl = cleanBase(cfg.apiBase) + "/cache_audio/" + encodeURIComponent(track.cacheKey);
+          var hs = await fetch(track.cacheUrl, { method: "HEAD", cache: "no-store" });
+          if (!hs.ok) return false;
+          setTrackState(track, "saved");
+          attachCacheAudio(track, { deferElement: true });
+          scheduleOfflineAudioSave(track, (label || "single") + " offline", 0);
+          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          debugLog("✅ " + (label || "single") + " 单音色缓存已保存", "#9f9");
+          return true;
+        }
         var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(track.cacheKey), { cache: "no-store" });
         if (!st.ok) return false;
         var j = await st.json();
@@ -1720,6 +2043,7 @@
         if (j && j.state === "done") {
           setTrackState(track, "saved");
           attachCacheAudio(track, { deferElement: true });
+          scheduleOfflineAudioSave(track, (label || "track") + " offline", 0);
           if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
           debugLog("✅ " + (label || "track") + " 已保存，切换为历史音频", "#9f9");
           return true;
@@ -1752,12 +2076,13 @@
       if (total) total.textContent = "--:--";
       if (state === "live" && track.cacheKey && !track.deleted) {
         setStatus("检查历史音频…");
-        showTrackNotice(track, "检查历史音频…", "如果已保存，会直接切到可拖动音频");
+        showTrackNotice(track, "检查历史音频…", cfg.offlineAudioEnabled ? "优先检查本机离线音频" : "如果已保存，会切到可拖动音频");
         await refreshTrackFromStatus(track, "select snapshot");
         state = trackState(track);
       }
+      await prepareOfflineAudio(track, "select");
       srcUrl = trackPlayableUrl(track);
-      debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
+      debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.offlineUrl ? "offline" : srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
       if (srcUrl) {
         if (shouldUseWebAudioForLiveTrack(track)) {
           clearElementAudioSrc();
@@ -1819,6 +2144,11 @@
           showTrackNotice(track, "音频已保存", formatJobMetrics(track.metrics) || "点播放可重播");
           return true;
         }
+        if (isElementUsingTrackStream(track) && !opts.forceElement && !opts.autoplay) {
+          setStatus(isElementPlayingTrackStream(track) ? "音频已保存，继续流式播放" : "音频已保存，可重播");
+          showTrackNotice(track, "音频已保存", trackHasStreamIssue(track) ? "检测到流式卡顿，可选择切到已保存音频" : "当前流式播放不切换，结束后可重播");
+          return true;
+        }
         try {
           var currentSrc = audio.currentSrc || audio.src || "";
           if (currentSrc !== track.cacheUrl) {
@@ -1843,12 +2173,21 @@
     function pollCacheUpgrade(trackEntry, label) {
       if (!trackEntry || !trackEntry.cacheKey || trackEntry.cachePollStarted || isSavedTrack(trackEntry)) return;
       trackEntry.cachePollStarted = true;
+      setTrackCacheState(trackEntry, "pending");
       label = label || "snapshot";
       (async function () {
         var done = false;
         for (var i = 0; i < 240; i++) {
           if (trackEntry.deleted) { done = true; break; }
           try {
+            if (trackEntry.mode === "single") {
+              if (await refreshTrackFromStatus(trackEntry, label)) {
+                done = true;
+                break;
+              }
+              await new Promise(function(r){ setTimeout(r, 1000); });
+              continue;
+            }
             var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(trackEntry.cacheKey), { cache: "no-store" });
             if (st.ok) {
               var j = await st.json();
@@ -1864,13 +2203,18 @@
                 });
               }
               if (j && j.state === "done") {
-                var shouldAskPlaySaved = currentTrack() === trackEntry && !!(trackEntry.savePromptWanted || trackEntry.streamInterrupted);
+                var shouldAskPlaySaved = currentTrack() === trackEntry && trackShouldAskPlaySaved(trackEntry)
+                  && (trackEntry.streamInterrupted || trackEntry.webAudioPlaying || isElementUsingTrackStream(trackEntry));
                 setTrackState(trackEntry, "saved");
                 attachCacheAudio(trackEntry, { forceElement: false, deferElement: trackEntry.webAudioPlaying });
+                scheduleOfflineAudioSave(trackEntry, label + " offline", 0);
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
                 var metricsLine = formatJobMetrics(trackEntry.metrics);
                 if (metricsLine) debugLog("📊 " + label + " 指标: " + metricsLine, "#9ff");
+                if (currentTrack() === trackEntry && isElementUsingTrackStream(trackEntry) && !shouldAskPlaySaved) {
+                  debugLog("✅ 未检测到 stalled/中断，保持当前流式播放，不切到落盘音频", "#9f9");
+                }
                 if (shouldAskPlaySaved) askPlaySavedTrack(trackEntry).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
                 done = true;
                 break;
@@ -1891,6 +2235,78 @@
           debugLog("⚠️ " + label + " 等待落盘超时，cacheKey=" + trackEntry.cacheKey, "#fc9");
         }
       })();
+    }
+    var tracksLoaded = !messageId;
+    var tracksLoading = null;
+    function restoreTrackFromSaved(t, base) {
+      if (!t || !t.cacheKey) return null;
+      var restoredMode = t.mode || "ai8";
+      var savedState = oneOf(t.state, ["pending", "live", "saved", "failed"],
+        (t.cacheState === "failed" || t.remoteCacheState === "failed") ? "failed" : ((t.cacheState === "pending" || t.remoteCacheState === "pending") ? "live" : "saved"));
+      var restored = {
+        url: null,
+        cacheKey: t.cacheKey,
+        cacheUrl: base + "/cache_audio/" + encodeURIComponent(t.cacheKey),
+        streamUrl: restoredMode === "single" ? "" : base + "/tts_dialogue_stream_job/" + encodeURIComponent(t.cacheKey),
+        createdAt: t.createdAt || Date.now(),
+        voice: t.voice || cfg.defaultVoice,
+        mode: restoredMode,
+        offlineKey: t.offlineKey || offlineAudioKey(t.cacheKey),
+        offlineReady: !!t.offlineReady,
+        offlineWanted: !!t.offlineWanted,
+        offlineSavedAt: t.offlineSavedAt || 0,
+        offlineSize: t.offlineSize || 0,
+        voicesMap: t.voicesMap || null,
+        metrics: t.metrics || null,
+        segments: Array.isArray(t.segments) ? t.segments : [],
+        fromHistory: savedState === "saved",
+        state: savedState,
+        playbackState: "idle",
+        serverState: t.serverState || "",
+        cacheState: t.cacheState || t.remoteCacheState || "",
+        remoteCacheState: t.remoteCacheState || t.cacheState || "",
+        offlineState: t.offlineState || "",
+        streamHealth: t.streamHealth || "",
+        stalledCount: Number(t.stalledCount || 0) || 0
+      };
+      setTrackState(restored, savedState);
+      if (t.serverState) restored.serverState = t.serverState;
+      if (t.cacheState || t.remoteCacheState) setTrackCacheState(restored, t.cacheState || t.remoteCacheState);
+      if (t.offlineState) setTrackOfflineState(restored, t.offlineState);
+      if (t.streamHealth) setTrackStreamHealth(restored, t.streamHealth);
+      ensureTrackStates(restored);
+      return restored;
+    }
+    async function ensureTracksLoaded() {
+      if (tracksLoaded) return generatedTracks;
+      if (tracksLoading) return tracksLoading;
+      tracksLoading = (async function () {
+        var saved = await loadTracksForMessage(messageId);
+        tracksLoaded = true;
+        if (!saved || !saved.length) {
+          updateTrackButtons();
+          setStatus(historyStatusText());
+          showTrackNotice(null, "历史音频 0 条", "点音符生成新的音频");
+          return generatedTracks;
+        }
+        var base = cleanBase(cfg.apiBase);
+        saved.forEach(function (t) {
+          var restored = restoreTrackFromSaved(t, base);
+          if (restored) generatedTracks.push(restored);
+        });
+        currentTrackIndex = generatedTracks.length - 1;
+        updateTrackButtons();
+        setStatus(historyStatusText());
+        showTrackNotice(currentTrack(), historyStatusText(), "点播放继续，或用左右按钮切换历史音频");
+        debugLog("📂 按需恢复历史 tracks: " + generatedTracks.length + " 段, 未预取离线音频/未轮询落盘", "#9ff");
+        return generatedTracks;
+      })().catch(function (e) {
+        tracksLoaded = false;
+        throw e;
+      }).finally(function () {
+        tracksLoading = null;
+      });
+      return tracksLoading;
     }
     async function confirmDeleteTrack(track) {
       if (!track) return false;
@@ -1933,6 +2349,7 @@
       if (removed && removed.url && /^blob:/i.test(removed.url)) {
         try { URL.revokeObjectURL(removed.url); } catch (_) {}
       }
+      deleteOfflineAudioForTrack(removed).catch(function () {});
       deleteRemoteTrack(removed).catch(function () {});
       // 删除后同步把变更写回 tavo.set，下次进页面就不会再看到这张卡片
       if (messageId) {
@@ -1967,6 +2384,8 @@
       if (el.value !== String(v)) el.value = v;
     }
     function getField(name, fallback) { var el = field(name); return el ? el.value : fallback; }
+    function setCheckedField(name, value) { var el = field(name); if (el) el.checked = !!value; }
+    function getCheckedField(name, fallback) { var el = field(name); return el ? !!el.checked : !!fallback; }
     function clampNumber(value, fallback, min, max) {
       var n = Number(value);
       if (!isFinite(n)) n = fallback;
@@ -1978,6 +2397,7 @@
       cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.08), 1.08, 0.85, 1.25);
       cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "balanced") || "balanced").trim();
       if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
+      cfg.offlineAudioEnabled = getCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       try { audio.playbackRate = cfg.speedFactor; } catch (_) {}
       // cfg.roleVoiceList 由 renderRoleList 实时维护(addRoleRow/setRowVoice 等),
       // 这里把行里的角色名/音色同步抓一遍(防止用户没失焦就保存)。
@@ -2004,6 +2424,7 @@
       setField("llmApiKey", cfg.llmApiKey || "");
       setField("speedFactor", cfg.speedFactor || 1.08);
       setField("qualityMode", cfg.qualityMode || "balanced");
+      setCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
       renderRoleList();
       // AI 八情绪 设置只在该模式下显示；单音色配置反之
@@ -2036,6 +2457,8 @@
       $all(panel, '.idx-voice').forEach(function (b) { b.classList.toggle('is-active', b.dataset.voice === cfg.defaultVoice); });
     }
     var availableVoices = [];
+    var voicesLoaded = false;
+    var voicesLoading = null;
     function voiceCategoryRank(subdir) {
       subdir = String(subdir || "");
       if (subdir === "女声") return 0;
@@ -2068,6 +2491,18 @@
       syncUI();
       setStatus(historyStatusText());
       if (!generatedTracks.length) showTrackNotice(null, "历史音频 0 条", voices.length ? "已就绪，可生成新的音频" : "没有找到可用音色");
+      return availableVoices;
+    }
+    async function ensureVoicesLoaded() {
+      if (voicesLoaded) return availableVoices;
+      if (voicesLoading) return voicesLoading;
+      voicesLoading = renderVoices().then(function (list) {
+        voicesLoaded = true;
+        return list || availableVoices;
+      }).finally(function () {
+        voicesLoading = null;
+      });
+      return voicesLoading;
     }
     async function previewVoice() {
       if (!cfg.defaultVoice) return;
@@ -2219,8 +2654,8 @@
         });
         ms.setActionHandler('play',  function () { try { generate(false).catch(function(){}); } catch (_) {} });
         ms.setActionHandler('pause', function () { try { if (currentTrack() && currentTrack().webAudioPlaying) stopWebAudioPlayback("pause"); else audio.pause(); } catch (_) {} });
-        ms.setActionHandler('previoustrack', function () { try { selectTrack(currentTrackIndex - 1, true).catch(function(){}); } catch (_) {} });
-        ms.setActionHandler('nexttrack',     function () { try { selectTrack(currentTrackIndex + 1, true).catch(function(){}); } catch (_) {} });
+        ms.setActionHandler('previoustrack', function () { try { ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex - 1, true); }).catch(function(){}); } catch (_) {} });
+        ms.setActionHandler('nexttrack',     function () { try { ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex + 1, true); }).catch(function(){}); } catch (_) {} });
         try {
           if (audio && isFinite(audio.duration) && audio.duration > 0) {
             ms.setPositionState({
@@ -2379,7 +2814,7 @@
           if (!cfg.roleVoiceList[idx]) cfg.roleVoiceList[idx] = { role: "", voice: "" };
           cfg.roleVoiceList[idx].role = String(nameEl.value || "").trim();
         });
-        on(voiceBtn, 'click', function (e) { e.preventDefault(); e.stopPropagation(); openVoicePicker(idx); });
+        on(voiceBtn, 'click', function (e) { e.preventDefault(); e.stopPropagation(); openVoicePicker(idx).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); });
         on(delBtn, 'click', function (e) {
           e.preventDefault(); e.stopPropagation();
           if (cfg.roleVoiceList && cfg.roleVoiceList[idx] !== undefined) {
@@ -2429,16 +2864,27 @@
       renderRoleList();
     }
 
-    function openVoicePicker(rowIdx) {
+    async function openVoicePicker(rowIdx) {
       if (!pickerEl) return;
       pickerState.rowIdx = rowIdx;
       pickerState.tab = "";
       pickerState.search = "";
       pickerState.page = 1;
       if (pickerSearchEl) pickerSearchEl.value = "";
+      if (pickerTabsEl) pickerTabsEl.innerHTML = "";
+      if (pickerGridEl) pickerGridEl.innerHTML = '<div style="grid-column:1/-1;padding:20px;text-align:center;color:rgba(238,231,244,.58);font-size:12px">正在读取音色…</div>';
+      if (pickerPageEl) pickerPageEl.textContent = "读取中";
+      openDialog(pickerEl);
+      try {
+        await ensureVoicesLoaded();
+      } catch (e) {
+        if (pickerGridEl) pickerGridEl.innerHTML = '<div style="grid-column:1/-1;padding:20px;text-align:center;color:rgba(255,213,221,.82);font-size:12px">音色列表读取失败</div>';
+        setStatus("音色列表读取失败");
+        setError(e && e.message ? e.message : String(e));
+        return;
+      }
       renderPickerTabs();
       renderPickerGrid();
-      openDialog(pickerEl);
     }
     function closeVoicePicker() {
       if (pickerEl) closeDialog(pickerEl);
@@ -2563,12 +3009,12 @@
     on(panel, 'click', function (e) {
       var t = e.target; if (!t || !t.closest) return;
       if (t.closest('[data-role="add-role"]')) { e.preventDefault(); addRoleRow(); return; }
-      if (t.closest('[data-role="default-voice-btn"]')) { e.preventDefault(); openVoicePicker(-2); return; }
+      if (t.closest('[data-role="default-voice-btn"]')) { e.preventDefault(); openVoicePicker(-2).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); return; }
       var roleRow = t.closest('.idx-role-row');
       if (roleRow) {
         var idx = Number(roleRow.dataset.rowIdx);
         if (t.closest('.idx-role-del')) { e.preventDefault(); if (cfg.roleVoiceList && cfg.roleVoiceList[idx] !== undefined) { cfg.roleVoiceList.splice(idx, 1); renderRoleList(); } return; }
-        if (t.closest('.idx-voice-btn')) { e.preventDefault(); openVoicePicker(idx); return; }
+        if (t.closest('.idx-voice-btn')) { e.preventDefault(); openVoicePicker(idx).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); return; }
       }
     });
 
@@ -2586,7 +3032,12 @@
     async function generate(force) {
       readFields(); await saveConfig(cfg, characterId); setError("");
       if (!messageText) { setError("当前消息没有可朗读正文。"); return; }
-      if (!cfg.defaultVoice) { setError("请先点选一个音色卡片。"); return; }
+      try {
+        await ensureTracksLoaded();
+      } catch (e) {
+        setError("历史音频读取失败: " + (e && e.message ? e.message : String(e)));
+        return;
+      }
       // 已有卡片时，播放按钮只做"播放/暂停/选当前卡片"，不生成新音频。
       // 新建必须点 + 号（force=true 才走下面的 generate 流程）。
       if (!force && generatedTracks.length > 0) {
@@ -2609,6 +3060,7 @@
           return;
         }
         if (shouldUseElementForSavedTrack(existingTrack)) {
+          await prepareOfflineAudio(existingTrack, "play");
           var existingUrl = trackPlayableUrl(existingTrack);
           var audioUrl = audio.currentSrc || audio.src || "";
           if (existingUrl && audioUrl !== existingUrl) {
@@ -2634,6 +3086,11 @@
         await selectTrack(currentTrackIndex, true);
         return;
       }
+      if (!cfg.defaultVoice) {
+        try { await ensureVoicesLoaded(); }
+        catch (e) { setError("音色列表读取失败: " + (e && e.message ? e.message : String(e))); return; }
+      }
+      if (!cfg.defaultVoice) { setError("请先点选一个音色卡片。"); return; }
       // 兼容旧逻辑（无卡片 + audio.src 残留时）
       if (audio.src && !force && generatedTracks.length === 0) {
         if (audio.paused) {
@@ -2725,6 +3182,11 @@
           trackEntry.cacheKey = jobInfo.cacheKey;
           trackEntry.segments = segments;
           trackEntry.voicesMap = voicesMap;
+          trackEntry.streamInterrupted = false;
+          trackEntry.streamStalled = false;
+          trackEntry.stalledCount = 0;
+          trackEntry.streamHealth = "ok";
+          trackEntry.savePromptAsked = false;
           setTrackState(trackEntry, jobInfo.cached ? "saved" : "live");
           if (!placeholder) {
             // 防御性:正常路径下 placeholder 一定有,这里兜底
@@ -2747,10 +3209,11 @@
           if (jobInfo.cached && cacheUrl) {
             trackEntry.url = cacheUrl;
             setTrackState(trackEntry, "saved");
+            await prepareOfflineAudio(trackEntry, "cached hit");
             setStatus("已有音频，正在播放");
-            showTrackNotice(trackEntry, "已有音频", "已加载音频，支持拖动");
+            showTrackNotice(trackEntry, trackEntry.offlineUrl ? "本地离线音频" : "已有音频", trackEntry.offlineUrl ? "已从 IndexedDB 读取" : "已加载音频，支持拖动");
             setPlayState("loading");
-            debugLog("⚡ 命中服务端缓存，直接 audio.src 播放", "#9f9");
+            debugLog(trackEntry.offlineUrl ? "⚡ 命中本地离线音频，直接播放" : "⚡ 命中服务端缓存，直接 audio.src 播放", "#9f9");
             startElementAudioFrom(trackEntry, 0);
             return;
           }
@@ -2784,11 +3247,33 @@
             } catch (_) { stopServerLogPolling(); }
           }
         } else {
-          url = await createSingleStreamJob(base, cfg, messageText, force);
-          generatedTracks.push({ url: url, cacheKey: "", deleteUrl: singleDeleteUrl(base, cfg, messageText), createdAt: Date.now(), voice: cfg.defaultVoice, mode: cfg.mode, state: "live", status: "running", pendingBlob: true, streaming: true });
+          var singleJob = await createSingleStreamJob(base, cfg, messageText, force);
+          var singleTrack = {
+            url: singleJob.cached && singleJob.cacheUrl ? singleJob.cacheUrl : singleJob.streamUrl,
+            streamUrl: singleJob.streamUrl,
+            cacheUrl: singleJob.cacheUrl,
+            cacheKey: singleJob.cacheKey,
+            deleteUrl: singleDeleteUrl(base, cfg, messageText),
+            createdAt: Date.now(),
+            voice: cfg.defaultVoice,
+            mode: cfg.mode,
+            state: singleJob.cached ? "saved" : "live",
+            status: singleJob.cached ? "ready" : "running",
+            pendingBlob: !singleJob.cached,
+            streaming: !singleJob.cached,
+            streamInterrupted: false,
+            streamStalled: false,
+            stalledCount: 0,
+            streamHealth: "ok",
+            savePromptAsked: false
+          };
+          setTrackState(singleTrack, singleJob.cached ? "saved" : "live");
+          if (singleJob.cached) await prepareOfflineAudio(singleTrack, "single cached hit");
+          generatedTracks.push(singleTrack);
           await selectTrack(generatedTracks.length - 1, false);
-          setStatus("正在生成单音色音频...");
-          showTrackNotice(currentTrack(), "正在生成单音色音频…", "声音出来后会自动播放");
+          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          setStatus(singleJob.cached ? "已有单音色音频" : "正在生成单音色音频...");
+          showTrackNotice(currentTrack(), singleJob.cached ? (singleTrack.offlineUrl ? "本地离线音频" : "已有单音色音频") : "正在生成单音色音频…", singleJob.cached ? "马上开始播放" : "声音出来后会自动播放");
         }
         setAudioPlaybackRate();
         await audio.play().catch(function (e) {
@@ -2831,10 +3316,14 @@
     on(add, 'pointerdown', function () { primeAudioContext(); });
     on(play, 'touchstart', function () { primeAudioContext(); });
     on(add, 'touchstart', function () { primeAudioContext(); });
-    on(play, 'click', function () { primeAudioContext(); generate(false); });
-    on(add, 'click', function () { primeAudioContext(); generate(true); });
-    on(prev, 'click', function () { selectTrack(currentTrackIndex - 1, true).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
-    on(next, 'click', function () { selectTrack(currentTrackIndex + 1, true).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(play, 'click', function () { primeAudioContext(); generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(add, 'click', function () { primeAudioContext(); generate(true).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(prev, 'click', function () {
+      ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex - 1, true); }).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
+    });
+    on(next, 'click', function () {
+      ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex + 1, true); }).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
+    });
     on(del, 'click', function () { clearCurrentTrack().catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(first(panel, '[data-role="save"]'), 'click', async function () { readFields(); await saveConfig(cfg, characterId); syncUI(); closeDialog(panel); setStatus("设置已保存"); });
     // IME 组词期间不覆盖输入值（搜狗/微软拼音等）。事件委托到 panel 上，覆盖所有 data-field 输入。
@@ -2846,10 +3335,14 @@
         if (e.target && e.target.dataset && e.target.dataset.field) e.target.__indexttsComposing = false;
       }, true);
     } catch (_) {}
-    on(first(panel, '[data-role="reload"]'), 'click', renderVoices);
+    on(first(panel, '[data-role="reload"]'), 'click', function () {
+      voicesLoaded = false;
+      ensureVoicesLoaded().catch(function (e) { setStatus("音色列表读取失败"); setError(e && e.message ? e.message : String(e)); });
+    });
     $all(panel, '.idx-mode').forEach(function (b) { b.addEventListener('click', async function () { readFields(); cfg.mode = b.dataset.mode; syncUI(); await saveConfig(cfg, characterId); }); });
     on(audio, 'play', function () {
       var t = currentTrack();
+      if (t) setTrackPlaybackState(t, "playing");
       setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(t));
       // 系统媒体面板基础信息(后台/锁屏可见,可控制播放/上下首)
       try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
@@ -2886,6 +3379,7 @@
     on(audio, 'waiting', function () {
       var t = currentTrack();
       var label = waitingLabelForTrack(t);
+      if (t) setTrackPlaybackState(t, "buffering");
       setPlayState("loading");
       setStatus(label);
       if (t && !hasActiveSubtitleRows(t)) showTrackNotice(t, label, "歌词会停在当前播放位置");
@@ -2893,14 +3387,28 @@
     on(audio, 'canplay', function () {
       setError("");
       if (!audio.paused) {
+        var t = currentTrack();
+        if (t) setTrackPlaybackState(t, "playing");
         setPlayState("playing");
         // 多音色模式下当前播放的音色不固定,不要写 cfg.defaultVoice
-        setStatus("正在播放：" + trackPlaybackLabel(currentTrack()));
+        setStatus("正在播放：" + trackPlaybackLabel(t));
       }
     });
-    on(audio, 'playing', function () { setError(""); setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(currentTrack())); });
-    on(audio, 'pause', function () { setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); stopSubtitle(); });
-    on(audio, 'ended', function () { setPlayState("idle"); setStatus("播放完成"); stopSubtitle(); });
+    on(audio, 'playing', function () { var t = currentTrack(); if (t) setTrackPlaybackState(t, "playing"); setError(""); setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(t)); });
+    on(audio, 'pause', function () { var t = currentTrack(); if (t && !audio.ended) setTrackPlaybackState(t, "paused"); setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); stopSubtitle(); });
+    on(audio, 'ended', function () {
+      var t = currentTrack();
+      if (t && t.mode === "single" && t.cacheKey && t.cacheUrl) {
+        setTrackState(t, "saved");
+        attachCacheAudio(t, { deferElement: true });
+        if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+      }
+      if (t && t.cacheKey && t.cacheUrl) scheduleOfflineAudioSave(t, "ended offline", 800);
+      if (t) setTrackPlaybackState(t, "ended");
+      setPlayState("idle");
+      setStatus("播放完成");
+      stopSubtitle();
+    });
     on(audio, 'error', function () {
       var active = currentTrack();
       if (active && (active.webAudioPlaying || shouldUseWebAudioForLiveTrack(active))) {
@@ -2912,6 +3420,7 @@
       try {
         if (audio.error) detail = " code=" + audio.error.code + (audio.error.message ? " message=" + audio.error.message : "");
       } catch (_) {}
+      if (active) setTrackPlaybackState(active, "error");
       setPlayState("idle");
       setStatus("播放失败");
       setError("音频加载失败。" + detail + " 请检查服务地址、音色和后端日志。");
@@ -2927,8 +3436,22 @@
     });
     on(audio, 'seeking', function () { debugLog("⏩ seeking → " + audio.currentTime.toFixed(2), "#9ff"); });
     on(audio, 'seeked',  function () { debugLog("✅ seeked  → " + audio.currentTime.toFixed(2), "#9ff"); });
-    on(audio, 'stalled', function () { debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2), "#fc9"); });
+    on(audio, 'stalled', function () {
+      var t = currentTrack();
+      if (t) {
+        t.stalledCount = Number(t.stalledCount || 0) + 1;
+        setTrackStreamHealth(t, "stalled");
+        t.lastStalledAt = Date.now();
+        t.lastStalledSec = Number(audio.currentTime || 0) || 0;
+      }
+      debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2) + (t ? " count=" + t.stalledCount : ""), "#fc9");
+      if (t && isSavedTrack(t) && isElementUsingTrackStream(t) && currentTrack() === t && trackShouldAskPlaySaved(t) && !t.savePromptAsked) {
+        askPlaySavedTrack(t).catch(function(e){ debugLog("⚠️ 已保存播放弹窗失败: " + (e && e.message ? e.message : e), "#fc9"); });
+      }
+    });
     on(audio, 'timeupdate', function () {
+      var activeTrack = currentTrack();
+      if (activeTrack) activeTrack.lastElementSec = Number(audio.currentTime || 0) || 0;
       var dur = Number(audio.duration);
       var hasDur = isFinite(dur) && dur > 0;
       if (cur) cur.textContent = formatTime(audio.currentTime);
@@ -2946,40 +3469,9 @@
     });
 
     updateTrackButtons();
-    syncUI(); renderVoices().catch(function (e) { setStatus("音色列表读取失败，仍可打开设置"); setError(e && e.message ? e.message : String(e)); });
-    // 从 tavo.set 持久化恢复本条消息的历史卡片（cacheKey 列表 → 转成可重播的 track）
-    if (messageId) {
-      loadTracksForMessage(messageId).then(function (saved) {
-        if (!saved || !saved.length) return;
-        var base = cleanBase(cfg.apiBase);
-        saved.forEach(function (t) {
-          var savedState = t.state === "live" ? "live" : (t.state === "failed" ? "failed" : "saved");
-          var restored = {
-            url: null,                 // 用到时由 selectTrack 通过 cacheKey 拉
-            cacheKey: t.cacheKey,
-            cacheUrl: base + "/cache_audio/" + encodeURIComponent(t.cacheKey),
-            streamUrl: base + "/tts_dialogue_stream_job/" + encodeURIComponent(t.cacheKey),
-            createdAt: t.createdAt || Date.now(),
-            voice: t.voice || cfg.defaultVoice,
-            mode: t.mode || "ai8",
-            voicesMap: t.voicesMap || null,
-            metrics: t.metrics || null,
-            segments: Array.isArray(t.segments) ? t.segments : [],
-            fromHistory: savedState === "saved",
-            state: savedState
-          };
-          setTrackState(restored, savedState);
-          generatedTracks.push(restored);
-          if (savedState === "live") pollCacheUpgrade(restored, "restored live snapshot");
-        });
-        currentTrackIndex = generatedTracks.length - 1;
-        updateTrackButtons();
-        setStatus(historyStatusText());
-        showTrackNotice(currentTrack(), historyStatusText(), "点播放继续，或用左右按钮切换历史音频");
-        debugLog("📂 恢复历史 tracks: " + generatedTracks.length + " 段, 每张含 segments: " +
-          generatedTracks.map(function(t){return (t.segments||[]).length;}).join(','), "#9ff");
-      }).catch(function () {});
-    }
+    syncUI();
+    setStatus("待播放");
+    showTrackNotice(null, messageId ? "历史音频未加载" : "未播放音频", messageId ? "点播放时恢复历史音频" : "点音符生成新的音频");
   }
 
   try {
