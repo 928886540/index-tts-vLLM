@@ -1,0 +1,267 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1120" viewBox="0 0 1800 1120">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#050511"/>
+      <stop offset="52%" stop-color="#08061a"/>
+      <stop offset="100%" stop-color="#0d0820"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#20145b" stop-opacity=".96"/>
+      <stop offset="100%" stop-color="#100a2b" stop-opacity=".96"/>
+    </linearGradient>
+    <linearGradient id="panel2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#15113b"/>
+      <stop offset="100%" stop-color="#0c0921"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#24106a"/>
+      <stop offset="100%" stop-color="#13092f"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a66bff"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ff9b55"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5bdc80"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5ba7ff"/>
+    </marker>
+    <style>
+      .bg { fill: url(#bg); }
+      .title { font: 800 54px "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #f1e9ff; letter-spacing: 1px; }
+      .subtitle { font: 400 24px "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #d7c9f5; }
+      .tag { fill: rgba(159,111,255,.16); stroke: rgba(183,147,255,.45); stroke-width: 1.4; }
+      .tagText { font: 700 18px "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #eee8ff; }
+      .box { fill: url(#panel); stroke: rgba(166,107,255,.72); stroke-width: 1.5; rx: 14; }
+      .boxAlt { fill: url(#panel2); stroke: rgba(166,107,255,.55); stroke-width: 1.2; rx: 12; }
+      .card { fill: url(#card); stroke: rgba(202,161,255,.45); stroke-width: 1; rx: 9; }
+      .future { fill: rgba(46,38,72,.62); stroke: rgba(165,157,190,.48); stroke-width: 1.1; stroke-dasharray: 7 5; rx: 9; }
+      .h { font: 800 22px "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #f4edff; }
+      .hSmall { font: 800 18px "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #f4edff; }
+      .body { font: 400 16px "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #dcd2f1; }
+      .bodySmall { font: 400 14px "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #cabee3; }
+      .muted { font: 400 13px "Microsoft YaHei", "PingFang SC", Arial, sans-serif; fill: #9e93b9; }
+      .ok { fill: #70f2a3; font-weight: 800; }
+      .warn { fill: #ffbd75; font-weight: 800; }
+      .next { fill: #b7b0c9; font-weight: 800; }
+      .purpleLine { stroke: #a66bff; stroke-width: 2.3; fill: none; marker-end: url(#arrowPurple); filter: url(#glow); }
+      .orangeLine { stroke: #ff9b55; stroke-width: 2.3; fill: none; stroke-dasharray: 8 5; marker-end: url(#arrowOrange); }
+      .greenLine { stroke: #5bdc80; stroke-width: 2.3; fill: none; stroke-dasharray: 6 5; marker-end: url(#arrowGreen); }
+      .blueLine { stroke: #5ba7ff; stroke-width: 2.3; fill: none; stroke-dasharray: 4 5; marker-end: url(#arrowBlue); }
+      .thin { stroke-width: 1.7; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1800" height="1120"/>
+  <circle cx="1540" cy="115" r="280" fill="#1b0d4f" opacity=".18"/>
+  <circle cx="350" cy="1030" r="360" fill="#2b1164" opacity=".14"/>
+
+  <text class="title" x="54" y="76">Leon / IndexTTS2 × Tavo 本机交付架构图</text>
+  <text class="subtitle" x="58" y="116">定位：项目发给用户自己安装启动；不提供云服务。重点是本机多消息排队、稳定落盘、Tavo 播放闭环和离线音频。</text>
+
+  <g transform="translate(58 150)">
+    <rect class="tag" x="0" y="0" width="142" height="46" rx="9"/>
+    <text class="tagText" x="18" y="30">多角色多音色</text>
+    <rect class="tag" x="154" y="0" width="118" height="46" rx="9"/>
+    <text class="tagText" x="174" y="30">真流式播放</text>
+    <rect class="tag" x="284" y="0" width="148" height="46" rx="9"/>
+    <text class="tagText" x="304" y="30">本地快照缓存</text>
+    <rect class="tag" x="444" y="0" width="168" height="46" rx="9"/>
+    <text class="tagText" x="463" y="30">Tavo 持久化配置</text>
+    <rect class="tag" x="624" y="0" width="116" height="46" rx="9"/>
+    <text class="tagText" x="648" y="30">0 运行费用</text>
+    <rect class="tag" x="752" y="0" width="148" height="46" rx="9"/>
+    <text class="tagText" x="772" y="30">多消息排队</text>
+  </g>
+
+  <g transform="translate(1470 34)">
+    <rect class="boxAlt" x="0" y="0" width="278" height="162"/>
+    <text class="hSmall" x="20" y="34">图例</text>
+    <line class="purpleLine thin" x1="24" y1="60" x2="82" y2="60"/>
+    <text class="bodySmall" x="100" y="66">同步 HTTP / 点击播放</text>
+    <line class="orangeLine thin" x1="24" y1="88" x2="82" y2="88"/>
+    <text class="bodySmall" x="100" y="94">异步生成 / 轮询状态</text>
+    <line class="greenLine thin" x1="24" y1="116" x2="82" y2="116"/>
+    <text class="bodySmall" x="100" y="122">文件缓存 / 元数据</text>
+    <line class="blueLine thin" x1="24" y1="144" x2="82" y2="144"/>
+    <text class="bodySmall" x="100" y="150">浏览器离线 / Tavo 变量</text>
+  </g>
+
+  <!-- Client / Tavo -->
+  <g transform="translate(58 248)">
+    <rect class="box" x="0" y="0" width="310" height="300"/>
+    <text class="h" x="24" y="38">客户端 / Tavo 层</text>
+    <rect class="card" x="22" y="62" width="266" height="56"/>
+    <text class="hSmall" x="42" y="96">Tavo 正则注入 static/tavo.js</text>
+    <rect class="card" x="22" y="132" width="266" height="70"/>
+    <text class="body" x="42" y="162">播放器卡片、歌词、音色选择</text>
+    <text class="bodySmall" x="42" y="184">点击播放才懒加载 / 生成</text>
+    <rect class="card" x="22" y="216" width="266" height="60"/>
+    <text class="body" x="42" y="247">Tavo get/set 保存配置和历史卡片</text>
+  </g>
+
+  <!-- Browser local -->
+  <g transform="translate(58 592)">
+    <rect class="boxAlt" x="0" y="0" width="310" height="208"/>
+    <text class="h" x="24" y="38">浏览器本地层</text>
+    <rect class="card" x="22" y="62" width="266" height="54"/>
+    <text class="body" x="42" y="95">IndexedDB 离线音频 Blob</text>
+    <rect class="card" x="22" y="130" width="266" height="54"/>
+    <text class="body" x="42" y="163">localStorage 兜底配置</text>
+  </g>
+
+  <!-- API service -->
+  <g transform="translate(450 224)">
+    <rect class="box" x="0" y="0" width="520" height="380"/>
+    <text class="h" x="24" y="38">FastAPI 服务层（indextts2_api.py / 9880）</text>
+    <rect class="card" x="24" y="64" width="222" height="68"/>
+    <text class="hSmall" x="44" y="92">Tavo API</text>
+    <text class="bodySmall" x="44" y="116">/voices /profiles /parse_text</text>
+    <rect class="card" x="274" y="64" width="222" height="68"/>
+    <text class="hSmall" x="294" y="92">流式任务 API</text>
+    <text class="bodySmall" x="294" y="116">POST/GET /tts_dialogue_stream_job</text>
+    <rect class="card" x="24" y="150" width="222" height="74"/>
+    <text class="hSmall" x="44" y="178">状态与缓存 API</text>
+    <text class="bodySmall" x="44" y="202">/tts_dialogue_job_status /cache_audio</text>
+    <rect class="card" x="274" y="150" width="222" height="74"/>
+    <text class="hSmall" x="294" y="178">诊断与日志</text>
+    <text class="bodySmall" x="294" y="202">/diagnostics/* /server_log/tail</text>
+    <rect class="card" x="24" y="246" width="222" height="82"/>
+    <text class="hSmall" x="44" y="274">LLM 代理</text>
+    <text class="bodySmall" x="44" y="298">OpenAI-compatible /parse_text</text>
+    <text class="muted" x="44" y="318">可选，不等于 GPT 必需</text>
+    <rect class="future" x="274" y="246" width="222" height="82"/>
+    <text class="hSmall" x="294" y="274">本机交付边界</text>
+    <text class="bodySmall" x="294" y="298">不做云端多用户/计费/公网后台</text>
+  </g>
+
+  <!-- Live job -->
+  <g transform="translate(1050 224)">
+    <rect class="box" x="0" y="0" width="328" height="300"/>
+    <text class="h" x="24" y="38">本机任务调度</text>
+    <rect class="card" x="24" y="64" width="280" height="74"/>
+    <text class="hSmall" x="44" y="93">LIVE_JOBS</text>
+    <text class="bodySmall" x="44" y="116">cache_key → header + PCM buffer</text>
+    <rect class="card" x="24" y="154" width="280" height="70"/>
+    <text class="body" x="44" y="184">TTS 生成受控排队</text>
+    <text class="bodySmall" x="44" y="205">已有流式播放时，新消息等落盘</text>
+    <rect class="future" x="24" y="238" width="280" height="42"/>
+    <text class="bodySmall" x="44" y="265">建议补齐：本机 FIFO 队列/忙碌提示/取消任务</text>
+  </g>
+
+  <!-- Engine -->
+  <g transform="translate(1460 224)">
+    <rect class="box" x="0" y="0" width="286" height="300"/>
+    <text class="h" x="24" y="38">IndexTTS2 引擎层</text>
+    <rect class="card" x="22" y="64" width="242" height="64"/>
+    <text class="hSmall" x="42" y="92">同进程本地加载</text>
+    <text class="bodySmall" x="42" y="114">s2mel + BigVGAN + vLLM GPT</text>
+    <rect class="card" x="22" y="146" width="242" height="62"/>
+    <text class="body" x="42" y="176">质量档位 expressive 默认</text>
+    <text class="bodySmall" x="42" y="198">fast/balanced 可选但听感较差</text>
+    <rect class="future" x="22" y="226" width="242" height="54"/>
+    <text class="bodySmall" x="42" y="252">后续：BigVGAN CUDA kernel</text>
+    <text class="bodySmall" x="42" y="271">多消息时避免抢占正在播放的流</text>
+  </g>
+
+  <!-- Storage -->
+  <g transform="translate(450 678)">
+    <rect class="box" x="0" y="0" width="520" height="294"/>
+    <text class="h" x="24" y="38">本地文件存储层</text>
+    <rect class="card" x="24" y="62" width="222" height="78"/>
+    <text class="hSmall" x="44" y="91">音色库</text>
+    <text class="bodySmall" x="44" y="114">prompts/library/**/*.wav</text>
+    <text class="muted" x="44" y="132">男声 / 女声 / 声腔 等分组</text>
+    <rect class="card" x="274" y="62" width="222" height="78"/>
+    <text class="hSmall" x="294" y="91">快照缓存</text>
+    <text class="bodySmall" x="294" y="114">outputs/cache/{sha1}.wav</text>
+    <text class="muted" x="294" y="132">同名 JSON 存 segments_meta</text>
+    <rect class="card" x="24" y="160" width="222" height="78"/>
+    <text class="hSmall" x="44" y="189">运行输出</text>
+    <text class="bodySmall" x="44" y="212">outputs/...</text>
+    <text class="muted" x="44" y="230">日志目录应排除提交</text>
+    <rect class="card" x="274" y="160" width="222" height="78"/>
+    <text class="hSmall" x="294" y="189">参考说明</text>
+    <text class="bodySmall" x="294" y="212">prompts/library/声腔/说明.txt</text>
+  </g>
+
+  <!-- DB -->
+  <g transform="translate(1050 678)">
+    <rect class="box" x="0" y="0" width="328" height="294"/>
+    <text class="h" x="24" y="38">SQLite 轻量配置库</text>
+    <rect class="card" x="24" y="64" width="280" height="64"/>
+    <text class="hSmall" x="44" y="93">outputs/indextts_profiles.sqlite3</text>
+    <text class="bodySmall" x="44" y="116">profiles：Tavo 配置快照</text>
+    <rect class="card" x="24" y="146" width="280" height="58"/>
+    <text class="body" x="44" y="177">usage_logs：轻量使用事件</text>
+    <rect class="future" x="24" y="222" width="280" height="48"/>
+    <text class="bodySmall" x="44" y="250">可选：本机任务历史表，不需要 users 表</text>
+  </g>
+
+  <!-- External LLM -->
+  <g transform="translate(1460 676)">
+    <rect class="boxAlt" x="0" y="0" width="286" height="150"/>
+    <text class="h" x="24" y="38">可选外部 LLM</text>
+    <rect class="card" x="22" y="62" width="242" height="62"/>
+    <text class="body" x="42" y="92">只做文本拆段 / 情绪分析</text>
+    <text class="bodySmall" x="42" y="114">可直连，也可经 /parse_text 代理</text>
+  </g>
+
+  <!-- Recommendations -->
+  <g transform="translate(1460 858)">
+    <rect class="boxAlt" x="0" y="0" width="286" height="114"/>
+    <text class="hSmall" x="22" y="32">建议优先级</text>
+    <text class="bodySmall" x="22" y="58"><tspan class="ok">1.</tspan> 多消息：LLM 先解析，TTS 排队</text>
+    <text class="bodySmall" x="22" y="82"><tspan class="warn">2.</tspan> 非当前播放卡片优先落盘不抢播</text>
+    <text class="bodySmall" x="22" y="106"><tspan class="next">3.</tspan> 再修 BigVGAN CUDA 性能</text>
+  </g>
+
+  <!-- Lines -->
+  <path class="purpleLine" d="M368 334 C402 334 410 334 450 334"/>
+  <text class="bodySmall" x="392" y="305">点击生成</text>
+
+  <path class="orangeLine" d="M970 356 C1010 356 1010 356 1050 356"/>
+  <text class="bodySmall" x="992" y="332">排队/复用</text>
+
+  <path class="orangeLine" d="M1378 356 C1410 356 1426 356 1460 356"/>
+  <text class="bodySmall" x="1398" y="332">受控推理</text>
+
+  <path class="purpleLine" d="M1050 442 C1008 442 1010 442 970 442"/>
+  <text class="bodySmall" x="986" y="456">当前卡片流式</text>
+
+  <path class="greenLine" d="M1188 524 C1188 642 970 642 850 678"/>
+  <text class="bodySmall" x="1010" y="650">完成后保存 WAV + JSON</text>
+
+  <path class="greenLine" d="M710 678 C710 642 706 642 706 604"/>
+  <text class="bodySmall" x="724" y="638">缓存命中直接 /cache_audio</text>
+
+  <path class="blueLine" d="M210 548 C210 574 210 574 210 592"/>
+  <text class="bodySmall" x="230" y="577">配置 / 历史卡片</text>
+
+  <path class="blueLine" d="M368 706 C398 706 414 706 450 706"/>
+  <text class="bodySmall" x="388" y="686">离线缺失补偿</text>
+
+  <path class="purpleLine" d="M1460 750 C1418 750 1418 760 1378 760"/>
+  <text class="bodySmall" x="1394" y="738">可选拆段</text>
+
+  <path class="purpleLine" d="M970 760 C1008 760 1012 760 1050 760"/>
+  <text class="bodySmall" x="984" y="744">Profile / usage</text>
+
+  <!-- Bottom comparison strip -->
+  <g transform="translate(58 1010)">
+    <rect class="boxAlt" x="0" y="0" width="1688" height="72"/>
+    <text class="hSmall" x="24" y="30">和最初设计图的主要出入</text>
+    <text class="bodySmall" x="24" y="56">已落地：Tavo 前端、流式播放、文件快照缓存、SQLite Profile、诊断日志、音色库管理、IndexedDB 离线音频。</text>
+    <text class="bodySmall" x="835" y="56">需要补齐：本机多消息队列、忙碌提示、非当前卡片只落盘、任务取消/清理；不做云端多用户体系。</text>
+  </g>
+</svg>

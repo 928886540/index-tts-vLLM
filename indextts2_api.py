@@ -324,22 +324,29 @@ STREAM_MODE_SETTINGS = {
         "min_tokens": 12,
         "diffusion_steps": 6,
         "prompt_audio_seconds": 6,
+        # ⚠️ CFG=0 会让本模型 s2mel 输出近静音（极速档曾因此“进度在走但没声音”）。
+        # 必须 cfg>0；实时靠 diffusion=6 + 短参考/短段做到 RTF<1，不靠关 CFG。
+        "s2mel_cfg_rate": 0.7,
     },
     "balanced": {
         "target_tokens": 48,
         "hard_tokens": 64,
         "first_tokens": 12,
         "min_tokens": 16,
-        "diffusion_steps": 8,
+        "diffusion_steps": 9,
         "prompt_audio_seconds": 8,
+        "s2mel_cfg_rate": 0.7,
     },
     "expressive": {
         "target_tokens": 56,
         "hard_tokens": 72,
         "first_tokens": 16,
         "min_tokens": STREAM_MIN_SEGMENT_TOKENS,
-        "diffusion_steps": 10,
-        "prompt_audio_seconds": 10,
+        # 画质优先：建议“生成→落盘→播落盘”，不要指望实时（RTF>1 必然 underrun）。
+        # diffusion 14→12、参考 10→8s 收一点 s2mel；噪声不在步数，硬堆步数没用。
+        "diffusion_steps": 12,
+        "prompt_audio_seconds": 8,
+        "s2mel_cfg_rate": 0.7,
     },
 }
 
@@ -369,6 +376,7 @@ def _stream_infer_kwargs(requested_segment_tokens: int = None, performance_mode:
         "sentence_split_hard_max_tokens": hard_tokens,
         "sentence_split_min_tokens": min_tokens,
         "performance_mode": settings["mode"],
+        "s2mel_cfg_rate": float(settings.get("s2mel_cfg_rate", 0.7)),
     }
 
 
@@ -619,6 +627,15 @@ def _stabilize_dialogue_emo_vec(role: str, emo_vec):
             vals.append(max(0.0, min(1.0, float(value))))
         except (TypeError, ValueError):
             vals.append(0.0)
+    # Intimate/ASMR lean: the model's bright, high-arousal dimensions push
+    # pitch and energy up, which is the opposite of the low/breathy delivery
+    # this deployment wants. Gently de-emphasize them; sad/fear/hate/low/neutral
+    # pass through untouched. Model emo order (config.yaml emo_num):
+    # [0]=happy [1]=angry [2]=sad [3]=fear [4]=hate [5]=low [6]=surprise [7]=neutral.
+    # Tune AROUSAL_DAMP at the wake-up A/B; 1.0 disables the lean.
+    AROUSAL_DAMP = {0: 0.8, 1: 0.8, 6: 0.8}
+    for idx, factor in AROUSAL_DAMP.items():
+        vals[idx] *= factor
     active_cap = 0.58
     active_sum = 0.0
     for idx in range(7):
@@ -641,7 +658,9 @@ def _clamp_dialogue_alpha(role: str, value, *, style_audio: bool = False) -> flo
     if role == "旁白":
         return max(0.12, min(0.25, alpha))
     if style_audio:
-        return max(0.25, min(0.66, alpha))
+        # 情色/亲密的质感全在声腔参考音频里；让它真正盖上去，而不是只贴一半。
+        # 上限为“做爱感”抬高，但仍 <1.0 以保住角色本身音色。A/B 时再细调。
+        return max(0.32, min(0.78, alpha))
     return max(0.20, min(0.62, alpha))
 
 

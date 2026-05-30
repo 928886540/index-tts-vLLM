@@ -13,6 +13,7 @@
 
 - `handoff_docs/CURRENT_STATUS.md`：当前真实进度、测试入口、已知问题
 - `handoff_docs/QUICKSTART_TAVO.md`：TAVO 正则接入方式
+- `handoff_docs/architecture/README.md`：本机交付架构图与多消息排队策略
 
 ## 2026-05-29 Codex 接手快照
 

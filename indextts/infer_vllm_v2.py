@@ -680,7 +680,7 @@ class IndexTTS2:
                             S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
                             S_infer = S_infer.transpose(1, 2)
                             S_infer = S_infer + local_latent
-                            target_lengths = (code_lens * 1.72).long()
+                            target_lengths = (code_lens * 1.78).long()
 
                             cond = self.s2mel.models['length_regulator'](
                                 S_infer,

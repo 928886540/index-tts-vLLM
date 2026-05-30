@@ -197,12 +197,12 @@
     llmModel: "渡鸦/grok-4.20-fast",
     llmApiKey: "",
     intervalMs: 50,
-    topP: 0.78,
+    topP: 0.72,
     topK: 30,
-    temperature: 0.72,
-    repetitionPenalty: 10,
-    emoAlpha: 0.55,
-    speedFactor: 1.08,
+    temperature: 0.62,
+    repetitionPenalty: 8,
+    emoAlpha: 0.38,
+    speedFactor: 1.0,
     qualityMode: "fast",
     offlineAudioEnabled: false
   };
@@ -304,8 +304,8 @@
       ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:currentColor}.idx-ctrl-sm{width:44px;height:44px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px}.idx-ctrl-main[data-state='loading'] svg{animation:idx-spin .9s linear infinite}@keyframes idx-spin{to{transform:rotate(360deg)}}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
       ".idx-meta{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:12px}.idx-pill{font-size:11px;color:rgba(238,231,244,.75);background:rgba(255,255,255,.06);border:1px solid rgba(206,170,230,.14);border-radius:999px;padding:4px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".idx-panel,.idx-panel *{box-sizing:border-box}.idx-panel{margin:auto auto 8px auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:auto;max-height:min(88dvh,calc(100dvh - 12px));overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:2}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
-      ".idx-section-title{font-size:12px;font-weight:700;color:#d9b7f0;margin:12px 0 7px}.idx-voices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.idx-voice{min-height:58px;border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}.idx-voice:before{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,#c890e8,#d8a7ff);opacity:.30}.idx-voice strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-voice span{display:block;margin-top:4px;font-size:11px;color:rgba(238,231,244,.56)}.idx-voice.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.12)}",
-      ".idx-modes{display:grid;grid-template-columns:1fr;gap:7px}.idx-mode{border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit}.idx-mode strong{display:block;font-size:12px}.idx-mode span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56)}.idx-mode.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.10)}",
+      ".idx-section-title{font-size:12px;font-weight:700;color:#d9b7f0;margin:10px 0 5px}.idx-voices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.idx-voice{min-height:58px;border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}.idx-voice:before{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,#c890e8,#d8a7ff);opacity:.30}.idx-voice strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-voice span{display:block;margin-top:4px;font-size:11px;color:rgba(238,231,244,.56)}.idx-voice.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.12)}",
+      ".idx-modes{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.idx-mode{border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit}.idx-mode strong{display:block;font-size:12px}.idx-mode span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56)}.idx-mode.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.10)}",
       ".idx-check{display:flex;align-items:flex-start;gap:8px;margin:10px 0 4px;padding:9px;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:rgba(255,255,255,.04);cursor:pointer}.idx-check input{margin:2px 0 0;accent-color:#c890e8}.idx-check strong{display:block;font-size:12px;color:#eee7f4}.idx-check span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56);line-height:1.35}",
       ".idx-label{font-size:11px;color:rgba(238,231,244,.66)}.idx-input,.idx-textarea{width:100%;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:#0b0810;color:#eee7f4;padding:8px;font-size:12px;font-family:inherit;outline:none}.idx-btn{height:32px;border:1px solid rgba(206,170,230,.20);border-radius:9px;background:rgba(255,255,255,.06);color:#eee7f4;padding:0 10px;font-size:12px;cursor:pointer;font-family:inherit}.idx-error{margin-top:10px;color:#ffd5dd;background:rgba(120,38,52,.22);border:1px solid rgba(255,120,145,.28);border-radius:10px;padding:8px;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}",
       // 结构化角色映射 UI
@@ -329,9 +329,10 @@
     var cfg = Object.assign({}, DEFAULT_CONFIG, pickGlobalConfig(saved || {}));
     if (savedVersion < CONFIG_VERSION) {
       if (cfg.qualityMode === "balanced" || cfg.qualityMode === "expressive") cfg.qualityMode = "fast";
-      if (Number(cfg.topP) === 0.8 || Number(cfg.topP) === 0.85) cfg.topP = 0.78;
-      if (Number(cfg.temperature) === 0.8 || Number(cfg.temperature) === 0.85) cfg.temperature = 0.72;
-      if (Number(cfg.emoAlpha) === 0.7 || Number(cfg.emoAlpha) === 0.75) cfg.emoAlpha = 0.55;
+      if (Number(cfg.topP) === 0.8 || Number(cfg.topP) === 0.85 || Number(cfg.topP) === 0.78) cfg.topP = 0.72;
+      if (Number(cfg.temperature) === 0.8 || Number(cfg.temperature) === 0.85 || Number(cfg.temperature) === 0.72) cfg.temperature = 0.62;
+      if (Number(cfg.emoAlpha) === 0.7 || Number(cfg.emoAlpha) === 0.75 || Number(cfg.emoAlpha) === 0.55) cfg.emoAlpha = 0.38;
+      if (Number(cfg.speedFactor) === 1.08) cfg.speedFactor = 1.0;
     }
     cfg.configVersion = CONFIG_VERSION;
     // 强制把 apiBase 锁死成本次加载脚本的来源 —— 用户换 LAN/外网/隧道 URL 时
@@ -531,14 +532,25 @@
   }
   function localTracksForMessage(messageId) {
     if (!messageId) return [];
+    var key = TRACKS_KEY_PREFIX + messageId;
+    // AR webview 重建/重进页面后 localStorage 会被清空，tavo 变量才是持久源。
+    // 变量操作是同步的，优先同步读 tavo.get；读不到（或本版 tavo.get 返回 Promise）
+    // 再回退 localStorage。否则懒加载时首页历史条数永远显示 0。
     try {
-      var raw = localStorage.getItem(TRACKS_KEY_PREFIX + messageId);
+      if (window.tavo && typeof tavo.get === "function") {
+        var cv = tavo.get(key, "chat");
+        if (Array.isArray(cv) && cv.length) return cv;
+        var gv = tavo.get(key, "global");
+        if (Array.isArray(gv) && gv.length) return gv;
+      }
+    } catch (_) {}
+    try {
+      var raw = localStorage.getItem(key);
       if (!raw) return [];
       var arr = JSON.parse(raw);
       return Array.isArray(arr) ? arr : [];
-    } catch (_) {
-      return [];
-    }
+    } catch (_) {}
+    return [];
   }
   function localHistoryCountForMessage(messageId) {
     return localTracksForMessage(messageId).filter(function (t) { return !!(t && t.cacheKey); }).length;
@@ -598,9 +610,9 @@
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
   function generationQualityOverrides(mode) {
     mode = String(mode || "expressive").trim();
-    if (mode === "fast") return { diffusion_steps: 6, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 8 };
-    if (mode === "balanced") return { diffusion_steps: 8, prompt_audio_seconds: 8, segment_tokens: 48, first_tokens: 12 };
-    return { diffusion_steps: 10, prompt_audio_seconds: 10, segment_tokens: 56, first_tokens: 16 };
+    if (mode === "fast") return { diffusion_steps: 6, prompt_audio_seconds: 5, segment_tokens: 36, first_tokens: 8 };
+    if (mode === "balanced") return { diffusion_steps: 9, prompt_audio_seconds: 8, segment_tokens: 48, first_tokens: 12 };
+    return { diffusion_steps: 12, prompt_audio_seconds: 8, segment_tokens: 56, first_tokens: 16 };
   }
   function applyGenerationParamsToSearchParams(p, cfg) {
     var q = generationQualityOverrides(cfg && cfg.qualityMode);
@@ -611,38 +623,38 @@
   }
   var STYLE_PRESETS = [
     { id: "neutral", label: "普通/平静", alpha: 0.20 },
-    { id: "breath_soft", label: "轻微气声", alpha: 0.42 },
-    { id: "breath_heavy", label: "明显喘息", alpha: 0.58 },
-    { id: "intimate_breath", label: "亲密气声", alpha: 0.60 },
-    { id: "moan_soft", label: "低声短吟", alpha: 0.62 },
-    { id: "low_murmur", label: "压低呢喃", alpha: 0.50 },
-    { id: "whisper_soft", label: "温柔耳语", alpha: 0.44 },
-    { id: "shy_whisper", label: "害羞低语", alpha: 0.46 },
-    { id: "tense_breath", label: "紧张呼吸", alpha: 0.46 },
-    { id: "sob_soft", label: "委屈哽咽", alpha: 0.50 },
-    { id: "cry_soft", label: "哭腔", alpha: 0.54 },
-    { id: "tease_soft", label: "轻声撒娇", alpha: 0.46 },
-    { id: "laugh_soft", label: "慵懒轻笑", alpha: 0.42 },
-    { id: "gasp_surprise", label: "惊讶轻叹", alpha: 0.46 },
-    { id: "scream_peak", label: "尖叫/高潮峰值", alpha: 0.64 },
-    { id: "stage_warmup", label: "亲密初段/轻气声", alpha: 0.48 },
-    { id: "stage_rising", label: "升温段/呼吸变重", alpha: 0.58 },
-    { id: "stage_peak", label: "高潮峰值/尖叫", alpha: 0.64 },
-    { id: "stage_afterglow", label: "余韵段/低声放松", alpha: 0.48 }
+    { id: "breath_soft", label: "轻微气声", alpha: 0.34 },
+    { id: "breath_heavy", label: "明显喘息", alpha: 0.46 },
+    { id: "intimate_breath", label: "亲密气声", alpha: 0.44 },
+    { id: "moan_soft", label: "低声短吟", alpha: 0.48 },
+    { id: "low_murmur", label: "压低呢喃", alpha: 0.40 },
+    { id: "whisper_soft", label: "温柔耳语", alpha: 0.36 },
+    { id: "shy_whisper", label: "害羞低语", alpha: 0.36 },
+    { id: "tense_breath", label: "紧张呼吸", alpha: 0.38 },
+    { id: "sob_soft", label: "委屈哽咽", alpha: 0.42 },
+    { id: "cry_soft", label: "哭腔", alpha: 0.44 },
+    { id: "tease_soft", label: "轻声撒娇", alpha: 0.38 },
+    { id: "laugh_soft", label: "慵懒轻笑", alpha: 0.34 },
+    { id: "gasp_surprise", label: "惊讶轻叹", alpha: 0.38 },
+    { id: "scream_peak", label: "尖叫/高潮峰值", alpha: 0.50 },
+    { id: "stage_warmup", label: "亲密初段/轻气声", alpha: 0.36 },
+    { id: "stage_rising", label: "升温段/呼吸变重", alpha: 0.44 },
+    { id: "stage_peak", label: "高潮峰值/尖叫", alpha: 0.50 },
+    { id: "stage_afterglow", label: "余韵段/低声放松", alpha: 0.38 }
   ];
   var PERSON_STYLE_VARIANTS = [
-    { name: "轻喘", label: "轻喘", alpha: 0.42 },
-    { name: "喘息", label: "明显喘息", alpha: 0.58 },
-    { name: "耳语", label: "耳语", alpha: 0.44 },
-    { name: "低语", label: "低语", alpha: 0.46 },
-    { name: "低吟", label: "低声短吟", alpha: 0.62 },
-    { name: "惊喘", label: "惊喘", alpha: 0.46 },
-    { name: "哭腔", label: "哭腔", alpha: 0.54 },
-    { name: "哽咽", label: "哽咽", alpha: 0.50 },
-    { name: "挑逗", label: "挑逗", alpha: 0.46 },
-    { name: "轻笑", label: "轻笑", alpha: 0.42 },
-    { name: "尖叫", label: "尖叫/峰值", alpha: 0.64 },
-    { name: "余韵", label: "余韵低声", alpha: 0.48 }
+    { name: "轻喘", label: "轻喘", alpha: 0.34 },
+    { name: "喘息", label: "明显喘息", alpha: 0.46 },
+    { name: "耳语", label: "耳语", alpha: 0.36 },
+    { name: "低语", label: "低语", alpha: 0.36 },
+    { name: "低吟", label: "低声短吟", alpha: 0.48 },
+    { name: "惊喘", label: "惊喘", alpha: 0.38 },
+    { name: "哭腔", label: "哭腔", alpha: 0.44 },
+    { name: "哽咽", label: "哽咽", alpha: 0.42 },
+    { name: "挑逗", label: "挑逗", alpha: 0.38 },
+    { name: "轻笑", label: "轻笑", alpha: 0.34 },
+    { name: "尖叫", label: "尖叫/峰值", alpha: 0.50 },
+    { name: "余韵", label: "余韵低声", alpha: 0.38 }
   ];
   ["步非烟", "AD学姐", "JOK"].forEach(function (speaker) {
     PERSON_STYLE_VARIANTS.forEach(function (item) {
@@ -662,8 +674,8 @@
   function defaultStyleAlpha(style, cfg) {
     style = normalizeStyleId(style);
     var hit = STYLE_PRESETS.find(function (s) { return s.id === style; });
-    if (hit) return Math.min(hit.alpha, style === "neutral" ? 0.22 : 0.62);
-    return Math.min(Number(cfg.emoAlpha || 0.4), 0.62);
+    if (hit) return Math.min(hit.alpha, style === "neutral" ? 0.20 : 0.66);
+    return Math.min(Number(cfg.emoAlpha || 0.38), 0.66);
   }
   function stabilizeEmoVec(vec, role, style) {
     if (role === "旁白") return [0,0,0,0,0,0,0,1];
@@ -672,18 +684,18 @@
       return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
     }) : [];
     while (arr.length < 8) arr.push(0);
-    var activeCap = style === "neutral" ? 0.42 : 0.58;
+    var activeCap = style === "neutral" ? 0.34 : 0.42;
     var activeSum = 0;
     for (var i = 0; i < 7; i++) {
       arr[i] = Math.min(arr[i], activeCap);
       activeSum += arr[i];
     }
-    var maxActiveSum = style === "neutral" ? 0.70 : 1.05;
+    var maxActiveSum = style === "neutral" ? 0.55 : 0.76;
     if (activeSum > maxActiveSum && activeSum > 0) {
       var scale = maxActiveSum / activeSum;
       for (var j = 0; j < 7; j++) arr[j] = arr[j] * scale;
     }
-    arr[7] = Math.max(style === "neutral" ? 0.52 : 0.25, Math.min(1, arr[7] || 0));
+    arr[7] = Math.max(style === "neutral" ? 0.60 : 0.38, Math.min(1, arr[7] || 0));
     return arr;
   }
   function llmMaxTokensForText(text) {
@@ -1273,7 +1285,7 @@
       userAliasHint,
       characterHint,
       "输出格式：",
-      "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2,\"emo_vec\":[a,h,f,d,s,l,u,n]}]}",
+      "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2,\"emo_vec\":[h,a,s,f,d,l,u,n]}]}",
       "",
       "拆段规则：",
       "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
@@ -1294,14 +1306,15 @@
       "   - 只是轻微带气声/柔声 → breath_soft 或 whisper_soft。",
       "   - 语义里有急促呼吸、压抑紧张 → tense_breath。",
       "   - 明显呼吸加重但仍在说话 → breath_heavy。",
-      "   - 亲密、贴耳、黏连、短促气声 → intimate_breath，style_alpha 0.50-0.62。",
+      "   - 亲密、贴耳、黏连、短促气声 → intimate_breath，style_alpha 0.42-0.60。",
       "   - 明显的「嗯、啊、唔、哈、呼、……」等短促气音/短吟，必须用 moan_soft 或 breath_heavy，不要写 neutral。",
       "   - 委屈、哭腔、鼻音 → sob_soft 或 cry_soft。",
       "   - 撒娇、轻笑、惊讶分别用 tease_soft / laugh_soft / gasp_surprise。",
       "   - 如果文本明显呈现亲密互动的强度变化，用阶段型 style：stage_warmup=轻微升温；stage_rising=呼吸变重；stage_peak=高潮峰值/尖叫；stage_afterglow=余韵/低声放松。",
       "   - 明确是尖叫、峰值、高潮爆发时，可直接用 scream_peak；普通短促呻吟用 moan_soft。",
       "   - 如果想指定某个参考来源，优先用「声腔-人名」格式，例如 喘息-AD学姐、耳语-JOK、哭腔-步非烟；没有合适人名版本再用通用英文 style。",
-      "   - 普通对话优先 neutral；但带明显气音、短促反应、断续语气词的段落不要 neutral。",
+      "   - 普通对话才用 neutral；亲密/情色场景里的喘息、呻吟、娇喘、抽气、断续语气词绝不能用 neutral，必须选对应声腔。",
+      "   - 情色/做爱场景按强度递进选 style：前戏轻喘 → intimate_breath / breath_heavy；动作中持续呻吟 → moan_soft 或 喘息-人名；临近高潮 → stage_rising；高潮 → scream_peak / stage_peak；事后余韵 → low_murmur / stage_afterglow。这类段 style_alpha 给足 0.50-0.70，让气声真正盖上去，别绵软。",
       "",
       "完整性硬规则：",
       "- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。",
@@ -1309,26 +1322,26 @@
       "- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。",
       "- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。",
       "",
-      "emo_vec 是 8 维向量，必须严格按这个顺序：",
-      "  [0]=angry 愤怒    [1]=happy 高兴    [2]=fear 恐惧     [3]=hate 反感",
-      "  [4]=sad 悲伤      [5]=low 低落      [6]=surprise 惊讶 [7]=neutral 自然",
+      "emo_vec 是 8 维向量，必须严格按这个顺序（与模型情绪矩阵一致，顺序错位会让整段情绪跑偏）：",
+      "  [0]=happy 高兴    [1]=angry 愤怒    [2]=sad 悲伤     [3]=fear 恐惧",
+      "  [4]=hate 反感     [5]=low 低落      [6]=surprise 惊讶 [7]=neutral 自然",
       "每个值 0-1。必须根据该段实际语义分析，不是随便填数。",
       "",
       "分析要求（极重要）：",
       "- 每段只激活 1-2 个最匹配的维度，其他全部写 0。多维齐动 = 模型会演得做作。",
       "  ❌ 错误示范：[0,0,0.4,0,0.5,0.6,0.3,0.1]（4 维齐动）",
-      "  ✅ 正确示范：[0,0,0,0,0.7,0,0,0.3]（只 sad 主导 + 一点 neutral）",
+      "  ✅ 正确示范：[0,0,0.7,0,0,0,0,0.3]（只 sad 主导 + 一点 neutral）",
       "- 平静叙述 / 客观描写 → [0,0,0,0,0,0,0,0.8]。不要混入别的。",
-      "- 哭、自责 → sad 主导。例：[0,0,0,0,0.7,0,0,0.2]",
-      "- 紧张、害怕 → fear 主导。例：[0,0,0.7,0,0,0,0,0.2]",
-      "- 撒娇、温柔 → happy 适中。例：[0,0.4,0,0,0,0,0,0.5]",
-      "- 愤怒、咆哮 → angry 主导。例：[0.8,0,0,0,0,0,0,0.1]",
+      "- 哭、自责 → sad 主导。例：[0,0,0.7,0,0,0,0,0.2]",
+      "- 紧张、害怕 → fear 主导。例：[0,0,0,0.7,0,0,0,0.2]",
+      "- 撒娇、温柔 → happy 适中。例：[0.4,0,0,0,0,0,0,0.5]",
+      "- 愤怒、咆哮 → angry 主导。例：[0,0.8,0,0,0,0,0,0.1]",
       "- 不要每段写一样；不要全 0；维度数宁少勿多。",
       "",
-      "每段可加 emo_alpha 字段（0.18-0.62），控制情绪向量强度：",
-      "- 旁白固定 0.18-0.25，平静对白 0.28-0.36，正常带情绪对白 0.40-0.52，强烈台词 0.54-0.62。",
+      "每段可加 emo_alpha 字段（0.12-0.52），控制情绪向量强度：",
+      "- 旁白固定 0.12-0.22，平静对白 0.20-0.30，正常带情绪对白 0.32-0.44，强烈台词 0.46-0.52。",
       "- 不要每段都高强度；只有明确哭、怒、恐惧、惊讶、亲密气声时才超过 0.6。",
-      "style_alpha 控制声腔/情绪参考音频强度：neutral=0.15-0.24；轻微 style=0.36-0.50；明显 breath/moan/style 参考=0.52-0.66。stage_peak 也不要超过 0.66。",
+      "style_alpha 控制声腔/情绪参考音频强度：neutral=0.12-0.20；轻微 style=0.34-0.46；明显 breath/moan/呻吟/喘息 参考=0.50-0.70；高潮 scream_peak/stage_peak 可到 0.70。",
       "",
       "示例输入：",
       "她低着头，眼角有泪。「对不起，我真的撑不住了。」",
@@ -1336,9 +1349,9 @@
       "示例输出：",
       "{\"segments\":[",
       "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
-      "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.50,\"emo_vec\":[0,0,0.1,0,0.55,0.25,0,0.25]},",
+      "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.42,\"emo_vec\":[0,0,0.48,0.05,0,0.12,0,0.35]},",
       "  {\"role\":\"旁白\",\"text\":\"" + (userName ? userName : "你") + "叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
-      "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0,0.2,0,0,0.3,0.2,0,0.5]}",
+      "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0.2,0,0.3,0,0,0.2,0,0.5]}",
       "]}"
     ].join("\n");
     setStatus("AI 分析中…");
@@ -1377,7 +1390,7 @@
       var style = normalizeStyleId(seg.style || seg.style_ref);
       var styleAlpha = Number(seg.style_alpha);
       if (!isFinite(styleAlpha)) styleAlpha = defaultStyleAlpha(style, cfg);
-      styleAlpha = style === "neutral" ? Math.max(0.12, Math.min(0.24, styleAlpha)) : Math.max(0.30, Math.min(0.66, styleAlpha));
+      styleAlpha = style === "neutral" ? Math.max(0.12, Math.min(0.20, styleAlpha)) : Math.max(0.30, Math.min(0.70, styleAlpha));
       var role = String(seg.role || "旁白").trim();
       var segTextForRole = String(seg.text || "");
       var sourceIdx = findSegmentTextInSource(text, segTextForRole, sourceSearchOffset);
@@ -1399,8 +1412,8 @@
         styleAlpha = 0.15;
       }
       var emoAlpha = Number(seg.emo_alpha);
-      if (!isFinite(emoAlpha)) emoAlpha = role === "旁白" ? 0.2 : (style === "neutral" ? 0.35 : Number(cfg.emoAlpha || 0.55));
-      emoAlpha = role === "旁白" ? Math.max(0.15, Math.min(0.25, emoAlpha)) : Math.max(0.22, Math.min(0.62, emoAlpha));
+      if (!isFinite(emoAlpha)) emoAlpha = role === "旁白" ? 0.18 : (style === "neutral" ? 0.28 : Number(cfg.emoAlpha || 0.38));
+      emoAlpha = role === "旁白" ? Math.max(0.12, Math.min(0.22, emoAlpha)) : Math.max(0.18, Math.min(0.52, emoAlpha));
       var emoVec = seg.emo_vec || [0,0,0,0,0,0,0,0.35];
       emoVec = stabilizeEmoVec(emoVec, role, style);
       return {
@@ -1438,14 +1451,14 @@
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
         + '<div class="idx-section-title">播放模式</div>'
-        + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>不走 LLM，整段使用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>第三方 AI 拆旁白/人物并输出 style + emo_vec</span></button></div>'
+        + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>整段用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>AI 拆旁白/人物</span></button></div>'
         + '<div class="idx-section-title">合成质量</div>'
         + '<div class="idx-grid">'
           + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option></select></label>'
-          + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.08"></label>'
+          + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.00"></label>'
         + '</div>'
         + '<div class="idx-section-title">播放 / 离线</div>'
-        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>开启后会把已落盘音频保存到本机 IndexedDB；下次优先播放本地音频，缺失时再走在线音频。</span></span></label>'
+        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>已落盘音频存到本机，下次优先放本地。</span></span></label>'
         // 单音色模式专属 —— mode==="single" 时显示
         + '<div class="idx-single-only"><div class="idx-section-title">音色选择</div><div class="idx-default-voice"><button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择音色…</button></div></div>'
         // AI 八情绪专属 —— mode==="ai8" 时显示；切换不清空（输入值在 readFields 时已存入 cfg）
@@ -1605,7 +1618,7 @@
       setStatus("正在播放：" + playbackLabelForRole(role, track || currentTrack()));
     }
     function setAudioPlaybackRate() {
-      try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
+      try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25); } catch (_) {}
     }
     function markElementAudioTrack(track, sourceKind) {
       try {
@@ -2129,7 +2142,7 @@
       if (!track || !url) return false;
       stopWebAudioPlayback("replace");
       var token = ++webAudioPlayToken;
-      var playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25);
+      var playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25);
       var startOffsetSec = Math.max(0, Number(opts.startOffsetSec || 0) || 0);
       var startedAt = 0;
       var waitStartedAt = Date.now();
@@ -2250,8 +2263,8 @@
               stopSubtitle();
               setTrackPlaybackState(track, "error");
               setPlayState("idle");
-              setStatus("流式播放已断开");
-              showTrackNotice(track, "流式播放已断开", "不会自动重连；音频保存后可再点播放检查历史音频");
+              setStatus("流式中断，点播放从断点继续");
+              showTrackNotice(track, "流式中断", "后台仍在合成；点播放从断点继续，完成后转为可拖动音频");
             } else if (state === "stopped") {
               stopWaitTimer();
               markWebAudioStopped(track);
@@ -2312,9 +2325,9 @@
           setTrackStreamHealth(track, "interrupted");
           setTrackPlaybackState(track, "error");
           setPlayState("idle");
-          setStatus("流式播放失败");
-          setError("流式连接失败，不自动重连。音频如果已保存，下一次点播放会直接走历史音频。");
-          showTrackNotice(track, "流式播放失败", "弱网下不再自动恢复；稍后点播放可检查是否已有保存音频");
+          setStatus("流式中断，点播放从断点继续");
+          setError("网络中断。点播放可从断点继续；若已合成完成会自动转为可拖动音频。");
+          showTrackNotice(track, "流式中断", "为省流量不自动重连；点播放从断点继续");
           debugLog("⚠️ Web Audio 连接中断，不恢复流式: " + msg, "#fc9");
           return false;
         }
@@ -2401,7 +2414,7 @@
         setTrackPlaybackState(track, "idle");
         setPlayState("idle");
         setStatus("流式生成中");
-        showTrackNotice(track, "流式生成中", track.cacheKey ? "点播放会手动连接一次；不会自动重连" : "当前生成还没有可播放音频");
+        showTrackNotice(track, "流式生成中", track.cacheKey ? "点播放从断点继续合成播放" : "正在合成第一段，稍候");
         updateTrackButtons();
         return;
       }
@@ -2643,6 +2656,19 @@
       updateTrackButtons();
       setStatus(historyStatusText());
       showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
+      // 兜底：若本版 tavo.get 是异步实现，上面的同步读会落空，这里异步从 tavo 持久层
+      // 再确认一次条数（只读变量，不请求 /voices、不生成）。
+      try {
+        var arr = await loadTracksForMessage(messageId);
+        if (tracksLoaded || generatedTracks.length) return;
+        var n = (arr || []).filter(function (t) { return t && t.cacheKey; }).length;
+        if (n !== knownHistoryCount) {
+          knownHistoryCount = n;
+          updateTrackButtons();
+          setStatus(historyStatusText());
+          showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
+        }
+      } catch (_) {}
     }
     async function confirmDeleteTrack(track) {
       if (!track) return false;
@@ -2730,7 +2756,7 @@
     function readFields() {
       cfg.apiBase = String(getField("apiBase", cfg.apiBase || scriptOrigin())).trim() || scriptOrigin();
       cfg.intervalMs = Number(getField("intervalMs", cfg.intervalMs || 50) || 50);
-      cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.08), 1.08, 0.85, 1.25);
+      cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.0), 1.0, 0.85, 1.25);
       cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "expressive") || "expressive").trim();
       if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "expressive";
       cfg.offlineAudioEnabled = getCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
@@ -2807,10 +2833,10 @@
       setField("llmModel", cfg.llmModel || "");
       setField("llmEndpoint", cfg.llmEndpoint || "");
       setField("llmApiKey", cfg.llmApiKey || "");
-      setField("speedFactor", cfg.speedFactor || 1.08);
+      setField("speedFactor", cfg.speedFactor || 1.0);
       setField("qualityMode", cfg.qualityMode || "expressive");
       setCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
-      try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25); } catch (_) {}
+      try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25); } catch (_) {}
       renderRoleList();
       // AI 八情绪 设置只在该模式下显示；单音色配置反之
       try {
@@ -3519,11 +3545,11 @@
           if (liveUrl) {
             var manualResumeSec = trackResumeSec(existingTrack);
             existingTrack.allowStreamPlay = false;
-            setStatus(manualResumeSec > 0 ? "手动连接流式音频…" : "等待首段音频…");
-            showTrackNotice(existingTrack, manualResumeSec > 0 ? "手动连接流式音频" : "等待首段音频…", manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 附近继续") : "不会自动重连，只执行这次播放请求");
+            setStatus(manualResumeSec > 0 ? "从断点继续…" : "连接流式音频…");
+            showTrackNotice(existingTrack, manualResumeSec > 0 ? "从断点继续播放" : "连接流式音频", manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续，后台仍在合成") : "后台仍在合成，连接后从断点继续");
             await playTrackViaWebAudio(existingTrack, liveUrl, {
-              noticeTitle: manualResumeSec > 0 ? "手动连接流式音频" : "等待首段音频…",
-              noticeDetail: manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 附近继续") : "不会自动重连，只执行这次播放请求",
+              noticeTitle: manualResumeSec > 0 ? "从断点继续播放" : "连接流式音频",
+              noticeDetail: manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续，后台仍在合成") : "后台仍在合成，连接后从断点继续",
               waitDetail: "等待后端继续输出 PCM",
               startOffsetSec: manualResumeSec
             });
@@ -3531,8 +3557,8 @@
           }
           setTrackPlaybackState(existingTrack, "error");
           setPlayState("idle");
-          setStatus("暂无可播放音频");
-          showTrackNotice(existingTrack, "暂无可播放音频", existingTrack.cacheKey ? "未找到运行中的流式任务或历史音频" : "当前生成还没有可播放音频");
+          setStatus(existingTrack.cacheKey ? "音频已失效，点 + 重新生成" : "还没有音频，点 + 生成");
+          showTrackNotice(existingTrack, existingTrack.cacheKey ? "需要重新生成" : "还没有音频", existingTrack.cacheKey ? "原流式任务已结束且无保存音频，点 + 重新生成" : "点 + 号开始生成");
           return;
         }
         if (audio.src) {
@@ -3606,7 +3632,7 @@
           showTrackNotice(placeholder, "开始合成 " + segments.length + " 段…", roleSummary);
           var voicesMap = rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
           debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
-          body = Object.assign({ segments: segments, voices: voicesMap, performance_mode: cfg.qualityMode || "expressive", interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.08, 1.08, 0.85, 1.25) }, generationQualityOverrides(cfg.qualityMode));
+          body = Object.assign({ segments: segments, voices: voicesMap, performance_mode: cfg.qualityMode || "expressive", interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25) }, generationQualityOverrides(cfg.qualityMode));
           var ttsStart = Date.now();
           var jobInfo;
           var ttsTimer = setInterval(function () {
@@ -3781,11 +3807,30 @@
       }
     });
     on(close, 'click', function () { closeDialog(panel); });
+    // 移动 webview 的 audio.play() 必须在用户手势的同步调用栈里执行。generate(false)
+    // 里有一串 await（refreshConfig/saveConfig/ensureTracksLoaded/prepareOffline）会把
+    // 手势耗掉，导致已落盘音频暂停后再点播放被 NotAllowedError 拒绝、看起来“卡死没法播”。
+    // 这里在手势内同步处理“元素音频已就绪”的续播/暂停，命中即不进 await 链。
+    function tryResumeOrPauseInGesture() {
+      try {
+        var t = currentTrack();
+        if (!t || !elementAudioBelongsToTrack(t)) return false;
+        if (!(audio.currentSrc || audio.src) || audio.ended) return false;
+        if (audio.paused) {
+          setAudioPlaybackRate();
+          var p = audio.play();
+          if (p && typeof p.then === "function") p.catch(function (e) { handleAudioPlayReject("element", e, "请点播放继续"); });
+        } else {
+          audio.pause();
+        }
+        return true;
+      } catch (_) { return false; }
+    }
     on(play, 'pointerdown', function () { primeAudioContext(); });
     on(add, 'pointerdown', function () { primeAudioContext(); });
     on(play, 'touchstart', function () { primeAudioContext(); });
     on(add, 'touchstart', function () { primeAudioContext(); });
-    on(play, 'click', function () { primeAudioContext(); generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(play, 'click', function () { primeAudioContext(); if (tryResumeOrPauseInGesture()) return; generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(add, 'click', function () { primeAudioContext(); generate(true).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(prev, 'click', function () {
       ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex - 1, true); }).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
