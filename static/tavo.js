@@ -1118,12 +1118,12 @@
     skipBytesRemaining = skipBytesRemaining - (skipBytesRemaining % blockAlign);
     if (skipBytesRemaining > 0 && hooks.debug) hooks.debug("resume offset " + startOffsetSec.toFixed(2) + "s, skip " + skipBytesRemaining + " PCM bytes");
     scheduledAudioSec = skipBytesRemaining > 0 ? startOffsetSec : scheduledAudioSec;
-    // 本机/LAN 也可能因为 TTS 推理 RTF > 1 出现 underrun。起播前多攒一点
-    // PCM，比 0.6s 起播稳定很多，不会刚显示 playing 就立刻 buffering。
+    // 本机/LAN 也可能因为首段内部 chunk 间隔出现 underrun。起播前多攒一点
+    // PCM，避免刚显示 playing 就立刻 buffering。
     var flushBytes = Math.max(8192, Math.floor(bytesPerSec * 0.50));
     flushBytes = flushBytes - (flushBytes % blockAlign);
     if (flushBytes < blockAlign) flushBytes = blockAlign;
-    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * 2.20));
+    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * 5.00));
     startBufferBytes = startBufferBytes - (startBufferBytes % blockAlign);
     if (startBufferBytes < flushBytes) startBufferBytes = flushBytes;
     var interrupted = false;
