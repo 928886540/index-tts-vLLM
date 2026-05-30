@@ -4,7 +4,7 @@
   var script = document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v4";
   var CONFIG_KEY = "indextts_tavo_config_v3";
-  var CONFIG_VERSION = 8;
+  var CONFIG_VERSION = 9;
   var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
   // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";
@@ -218,6 +218,16 @@
   function first(root) { for (var i = 1; i < arguments.length; i++) { var el = $(root, arguments[i]); if (el) return el; } return null; }
   function on(el, ev, fn) { if (el) el.addEventListener(ev, fn); }
   function cleanBase(url) { return String(url || "").replace(/\/+$/, ""); }
+  function withQueryParam(url, key, value) {
+    try {
+      var u = new URL(url, location.href);
+      u.searchParams.set(key, String(value));
+      return u.href;
+    } catch (_) {
+      var sep = String(url || "").indexOf("?") >= 0 ? "&" : "?";
+      return String(url || "") + sep + encodeURIComponent(key) + "=" + encodeURIComponent(String(value));
+    }
+  }
   function shortText(v, limit) {
     v = String(v == null ? "" : v);
     limit = limit || 1200;
@@ -1631,12 +1641,14 @@
     function setAudioPlaybackRate() {
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25); } catch (_) {}
     }
-    function markElementAudioTrack(track, sourceKind) {
+    function markElementAudioTrack(track, sourceKind, liveOffsetSec) {
       try {
         if (!audio) return;
         if (track && track.cacheKey) audio.dataset.idxCacheKey = String(track.cacheKey);
         else delete audio.dataset.idxCacheKey;
         audio.dataset.idxSourceKind = sourceKind || "";
+        if (sourceKind === "stream" && isFinite(Number(liveOffsetSec))) audio.dataset.idxLiveOffsetSec = String(Math.max(0, Number(liveOffsetSec) || 0));
+        else delete audio.dataset.idxLiveOffsetSec;
       } catch (_) {}
     }
     function elementAudioBelongsToTrack(track) {
@@ -1648,12 +1660,26 @@
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       return !!(src && src === trackPlayableUrl(track));
     }
+    function liveElementOffsetSec(track) {
+      if (!track || !audio) return 0;
+      try {
+        if (audio.dataset.idxSourceKind === "stream" && audio.dataset.idxLiveOffsetSec != null) {
+          return Math.max(0, Number(audio.dataset.idxLiveOffsetSec) || 0);
+        }
+      } catch (_) {}
+      return Math.max(0, Number(track.liveElementOffsetSec || 0) || 0);
+    }
+    function elementPlaybackTimeSec(track) {
+      var current = 0;
+      try { current = Math.max(0, Number(audio.currentTime || 0) || 0); } catch (_) { current = 0; }
+      return (isElementUsingTrackStream(track) ? liveElementOffsetSec(track) : 0) + current;
+    }
     function trackResumeSec(track) {
       if (!track) return 0;
       var src = "";
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       var playable = trackPlayableUrl(track);
-      if ((elementAudioBelongsToTrack(track) || (playable && src === playable)) && isFinite(Number(audio.currentTime))) return Math.max(0, Number(audio.currentTime) || 0);
+      if ((elementAudioBelongsToTrack(track) || (playable && src === playable)) && isFinite(Number(audio.currentTime))) return Math.max(0, elementPlaybackTimeSec(track));
       if (isFinite(Number(track.lastWebAudioSec))) return Math.max(0, Number(track.lastWebAudioSec) || 0);
       if (isFinite(Number(track.lastElementSec))) return Math.max(0, Number(track.lastElementSec) || 0);
       if (isFinite(Number(track.lastStalledSec))) return Math.max(0, Number(track.lastStalledSec) || 0);
@@ -1695,11 +1721,16 @@
         startElementAudioFrom(track, pos);
         return true;
       }
+      if (track && isLiveTrack(track) && !shouldUseWebAudioForLiveTrack(track) && liveStreamUrlForTrack(track)) {
+        track.lastElementSec = pos;
+        startElementAudioFrom(track, pos);
+        return true;
+      }
       if (track && (track.webAudioPlaying || isLiveTrack(track) || liveStreamUrlForTrack(track))) {
         track.lastWebAudioSec = pos;
         var liveUrl = liveStreamUrlForTrack(track);
         if (liveUrl) {
-          playTrackViaWebAudio(track, liveUrl, {
+          playLiveTrack(track, liveUrl, {
             noticeTitle: opts.noticeTitle || "跳转播放",
             noticeDetail: "从 " + formatTime(pos) + " 继续",
             waitDetail: "等待后端返回对应位置音频",
@@ -1723,11 +1754,21 @@
       if (!track || !trackPlayableUrl(track)) return false;
       stopWebAudioPlayback("switch");
       var url = trackPlayableUrl(track);
+      var sourceKind = isSavedTrack(track) ? "saved" : (url === track.streamUrl ? "stream" : "audio");
+      var liveOffsetSec = 0;
+      if (!isSavedTrack(track) && isLiveTrack(track) && liveStreamUrlForTrack(track)) {
+        liveOffsetSec = Math.max(0, Number(startSec || 0) || 0);
+        url = liveStreamPlaybackUrlForTrack(track, liveOffsetSec);
+        sourceKind = "stream";
+        track.liveElementOffsetSec = liveOffsetSec;
+      } else {
+        track.liveElementOffsetSec = 0;
+      }
       if ((audio.currentSrc || audio.src || "") !== url) {
         audio.src = url;
         try { audio.load(); } catch (_) {}
       }
-      markElementAudioTrack(track, isSavedTrack(track) ? "saved" : (url === track.streamUrl ? "stream" : "audio"));
+      markElementAudioTrack(track, sourceKind, liveOffsetSec);
       setAudioPlaybackRate();
       if (seek) seek.disabled = false;
       if (startSec != null && isFinite(Number(startSec))) {
@@ -1738,11 +1779,17 @@
           audio.currentTime = target;
           seekApplied = true;
         };
-        try {
-          if (audio.readyState > 0) applySeek();
-        } catch (_) {}
-        if (!seekApplied) {
-          try { audio.addEventListener("loadedmetadata", function () { try { applySeek(); } catch (_) {} }, { once: true }); } catch (_) {}
+        if (sourceKind !== "stream") {
+          try {
+            if (audio.readyState > 0) applySeek();
+          } catch (_) {}
+          if (!seekApplied) {
+            try { audio.addEventListener("loadedmetadata", function () { try { applySeek(); } catch (_) {} }, { once: true }); } catch (_) {}
+          }
+        } else {
+          if (cur) cur.textContent = formatTime(liveOffsetSec);
+          var hint = trackDurationHintSec(track);
+          if (total) total.textContent = hint > 0 ? formatTime(hint) : "--:--";
         }
       }
       setStatus("正在加载音频…");
@@ -1925,6 +1972,12 @@
       }
       return track.url || "";
     }
+    function liveStreamPlaybackUrlForTrack(track, startOffsetSec) {
+      var url = liveStreamUrlForTrack(track);
+      if (!url) return "";
+      startOffsetSec = Math.max(0, Number(startOffsetSec || 0) || 0);
+      return startOffsetSec > 0.01 ? withQueryParam(url, "start_s", startOffsetSec.toFixed(3)) : url;
+    }
     function isElementUsingTrackStream(track) {
       if (!track || !track.streamUrl) return false;
       try {
@@ -2073,7 +2126,11 @@
       return ok;
     }
     function shouldUseWebAudioForLiveTrack(track) {
-      return !!(track && track.mode === "ai8" && isLiveTrack(track) && track.streamUrl);
+      if (!(track && track.mode === "ai8" && isLiveTrack(track) && track.streamUrl)) return false;
+      try {
+        if (script && script.src && /[?&]webAudioLive=1\b/.test(script.src)) return true;
+      } catch (_) {}
+      return false;
     }
     function shouldUseElementForSavedTrack(track) {
       return isSavedTrack(track);
@@ -2414,6 +2471,24 @@
         return false;
       }
     }
+    function playLiveTrack(track, url, opts) {
+      opts = opts || {};
+      if (!track || !url) return Promise.resolve(false);
+      if (shouldUseWebAudioForLiveTrack(track)) return playTrackViaWebAudio(track, url, opts);
+      var startOffsetSec = Math.max(0, Number(opts.startOffsetSec || 0) || 0);
+      stopWebAudioPlayback("replace");
+      track.streamUrl = liveStreamUrlForTrack(track) || url;
+      track.url = track.streamUrl;
+      track.streaming = true;
+      track.allowStreamPlay = false;
+      setTrackStreamHealth(track, "ok");
+      setTrackPlaybackState(track, "loading");
+      setPlayState("loading");
+      setStatus(opts.noticeTitle || (startOffsetSec > 0 ? "从断点继续播放" : "连接流式音频"));
+      showTrackNotice(track, opts.noticeTitle || "连接流式音频", opts.noticeDetail || "使用系统音频通道播放直播流");
+      debugLog("▶️ live track 使用 audio 元素流式 start_s=" + startOffsetSec.toFixed(3), "#ffd479");
+      return Promise.resolve(startElementAudioFrom(track, startOffsetSec));
+    }
     async function refreshTrackFromStatus(track, label) {
       if (!track || !track.cacheKey || track.deleted) return false;
       try {
@@ -2504,11 +2579,16 @@
             setStatus("等待首段音频…");
             showTrackNotice(track, liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频");
             track.allowStreamPlay = false;
-            playTrackViaWebAudio(track, liveStreamUrlForTrack(track) || srcUrl, { noticeTitle: liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", noticeDetail: liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频", waitDetail: "正在合成第一段", startOffsetSec: liveResumeSec });
+            playLiveTrack(track, liveStreamUrlForTrack(track) || srcUrl, { noticeTitle: liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", noticeDetail: liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频", waitDetail: "正在合成第一段", startOffsetSec: liveResumeSec });
           } else {
             setStatus(historyStatusText());
             showTrackNotice(track, "流式生成中", "点播放继续等待");
           }
+          updateTrackButtons();
+          return;
+        }
+        if (autoplay && isLiveTrack(track) && liveStreamUrlForTrack(track)) {
+          startElementAudioFrom(track, trackResumeSec(track));
           updateTrackButtons();
           return;
         }
@@ -3151,17 +3231,23 @@
             var pos = Number(details && details.seekTime);
             if (isFinite(pos)) {
               var track = currentTrack();
-              if (audio && (audio.currentSrc || audio.src)) audio.currentTime = Math.max(0, pos);
-              else if (track && isSavedTrack(track)) startElementAudioFrom(track, Math.max(0, pos));
+              var dur = Number(audio && audio.duration);
+              if (audio && (audio.currentSrc || audio.src) && isFinite(dur) && dur > 0) audio.currentTime = Math.max(0, Math.min(dur - 0.05, pos));
+              else seekToSeconds(Math.max(0, pos), { noticeTitle: "系统进度跳转" });
             }
           } catch (_) {}
         });
         try {
-          if (audio && isFinite(audio.duration) && audio.duration > 0) {
+          var activeForMedia = currentTrack();
+          var mediaDur = Number(audio && audio.duration);
+          var mediaHint = trackDurationHintSec(activeForMedia);
+          if ((!isFinite(mediaDur) || mediaDur <= 0) && mediaHint > 0) mediaDur = mediaHint;
+          if (audio && isFinite(mediaDur) && mediaDur > 0) {
+            var mediaPos = elementPlaybackTimeSec(activeForMedia);
             ms.setPositionState({
-              duration: audio.duration,
+              duration: mediaDur,
               playbackRate: audio.playbackRate || 1,
-              position: Math.min(audio.currentTime || 0, audio.duration),
+              position: Math.min(mediaPos, mediaDur),
             });
           }
         } catch (_) {}
@@ -3553,7 +3639,7 @@
       if (!track) return;
       track.pausedByUser = true;
       try {
-        if (isFinite(Number(audio.currentTime))) track.lastElementSec = Math.max(0, Number(audio.currentTime) || 0);
+        if (isFinite(Number(audio.currentTime))) track.lastElementSec = Math.max(0, elementPlaybackTimeSec(track));
       } catch (_) {}
       try { audio.pause(); } catch (_) {}
       stopWebAudioPlayback("pause");
@@ -3626,7 +3712,7 @@
             existingTrack.allowStreamPlay = false;
             setStatus(manualResumeSec > 0 ? "从断点继续…" : "连接流式音频…");
             showTrackNotice(existingTrack, manualResumeSec > 0 ? "从断点继续播放" : "连接流式音频", manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续，后台仍在合成") : "后台仍在合成，连接后从断点继续");
-            await playTrackViaWebAudio(existingTrack, liveUrl, {
+            await playLiveTrack(existingTrack, liveUrl, {
               noticeTitle: manualResumeSec > 0 ? "从断点继续播放" : "连接流式音频",
               noticeDetail: manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续，后台仍在合成") : "后台仍在合成，连接后从断点继续",
               waitDetail: "等待后端继续输出 PCM",
@@ -3792,19 +3878,22 @@
             setPlayState("loading");
             pollCacheUpgrade(trackEntry, "web audio snapshot");
             trackEntry.allowStreamPlay = false;
-            await playTrackViaWebAudio(trackEntry, streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，声音出来前不要切走", waitDetail: "正在合成第一段" });
+            await playLiveTrack(trackEntry, streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，声音出来前不要切走", waitDetail: "正在合成第一段" });
             if (isSavedTrack(trackEntry)) attachCacheAudio(trackEntry, { deferElement: true });
             stopServerLogPolling();
             return;
           } else {
-            // 桌面端 chunked WAV 给 <audio> 元素直接播。
+            // 默认把 chunked WAV 交给 <audio> 元素播放。Tavo/WebView 的
+            // WebAudio 时钟可能会走但系统音频不出声；原生 audio 更可靠。
             trackEntry.url = streamUrl;
             trackEntry.streaming = true;
-            await selectTrack(generatedTracks.length - 1, false);
             var totalSec = Math.floor((Date.now() - t0) / 1000);
-            setStatus("流式播放 " + segments.length + " 段");
-            debugLog("▶️ 启动音频播放, 截至此处用时 " + totalSec + "s", "#9f9");
-            pollCacheUpgrade(trackEntry, "desktop snapshot");
+            currentCacheKey = jobInfo.cacheKey;
+            setPlayState("loading");
+            debugLog("▶️ 启动 audio 元素流式播放, 截至此处用时 " + totalSec + "s", "#9f9");
+            pollCacheUpgrade(trackEntry, "audio element snapshot");
+            trackEntry.allowStreamPlay = false;
+            await playLiveTrack(trackEntry, streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，声音出来前不要切走", waitDetail: "正在合成第一段" });
             // 音频播完后停止服务端日志轮询
             try {
               audio.addEventListener("ended", stopServerLogPolling, { once: true });
@@ -3948,7 +4037,7 @@
       // 桌面 / <audio> 路径的字幕：当前 track 是 ai8 且有 segments 时启动
       if (t && t.mode === "ai8") {
         if (t.segments && t.segments.length) {
-          startSubtitle(t, function () { return audio.currentTime || 0; });
+          startSubtitle(t, function () { return elementPlaybackTimeSec(t); });
         } else if (t.cacheKey && !t.fetchingSegments) {
           // 历史卡片没存 segments → 后台拉 job_status 补回来
           t.fetchingSegments = true;
@@ -3966,7 +4055,7 @@
                 debugLog("✅ 补回 " + t.segments.length + " 段 segments,字幕启动", "#9f9");
                 // 现在启动字幕
                 if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === t) {
-                  startSubtitle(t, function () { return audio.currentTime || 0; });
+                  startSubtitle(t, function () { return elementPlaybackTimeSec(t); });
                 }
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
               } else {
@@ -4033,8 +4122,11 @@
       setError("");
       setAudioPlaybackRate();
       if (seek) seek.disabled = false;
-      if (total) total.textContent = formatTime(audio.duration);
-      debugLog("📐 audio metadata loaded: duration=" + audio.duration.toFixed(2) + "s seekable=" + (audio.seekable.length > 0 ? audio.seekable.end(0).toFixed(2) : "0"), "#9ff");
+      var t = currentTrack();
+      var hint = trackDurationHintSec(t);
+      var dur = Number(audio.duration);
+      if (total) total.textContent = (isFinite(dur) && dur > 0) ? formatTime(dur) : (hint > 0 ? formatTime(hint) : "--:--");
+      debugLog("📐 audio metadata loaded: duration=" + (isFinite(dur) ? dur.toFixed(2) : String(audio.duration)) + "s seekable=" + (audio.seekable.length > 0 ? audio.seekable.end(0).toFixed(2) : "0"), "#9ff");
     });
     on(audio, 'seeking', function () { debugLog("⏩ seeking → " + audio.currentTime.toFixed(2), "#9ff"); });
     on(audio, 'seeked',  function () { debugLog("✅ seeked  → " + audio.currentTime.toFixed(2), "#9ff"); });
@@ -4044,20 +4136,24 @@
         t.stalledCount = Number(t.stalledCount || 0) + 1;
         setTrackStreamHealth(t, "stalled");
         t.lastStalledAt = Date.now();
-        t.lastStalledSec = Number(audio.currentTime || 0) || 0;
+        t.lastStalledSec = elementPlaybackTimeSec(t);
       }
       debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2) + (t ? " count=" + t.stalledCount : ""), "#fc9");
     });
     on(audio, 'timeupdate', function () {
       var activeTrack = currentTrack();
-      if (activeTrack) activeTrack.lastElementSec = Number(audio.currentTime || 0) || 0;
+      var pos = elementPlaybackTimeSec(activeTrack);
+      if (activeTrack) activeTrack.lastElementSec = pos;
       var dur = Number(audio.duration);
       var hasDur = isFinite(dur) && dur > 0;
-      if (cur) cur.textContent = formatTime(audio.currentTime);
-      if (total) total.textContent = hasDur ? formatTime(dur) : "--:--";
+      var hint = trackDurationHintSec(activeTrack);
+      var progressDur = hasDur ? dur : hint;
+      if (cur) cur.textContent = formatTime(pos);
+      if (total) total.textContent = progressDur > 0 ? formatTime(progressDur) : "--:--";
       if (seek) {
         seekProgrammaticUpdate = true;
-        seek.value = hasDur ? String(Math.floor((audio.currentTime || 0) / dur * 1000)) : "0";
+        seek.disabled = !(progressDur > 0);
+        seek.value = progressDur > 0 ? String(Math.floor(Math.min(pos, progressDur) / progressDur * 1000)) : "0";
         setTimeout(function () { seekProgrammaticUpdate = false; }, 0);
       }
     });

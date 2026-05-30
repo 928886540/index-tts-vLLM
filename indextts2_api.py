@@ -488,10 +488,17 @@ def _gc_live_job(cache_key: str, delay: float = LIVE_JOB_LINGER_SECONDS):
     except Exception: pass
 
 
-async def _stream_from_live_job(job: "_LiveStreamingJob"):
+async def _stream_from_live_job(job: "_LiveStreamingJob", start_offset_s: float = 0.0):
     """Multi-consumer streamer; reads job.pcm tail-poll, yields new bytes."""
-    yield job.header
-    offset = 0
+    try:
+        start_offset_s = max(0.0, float(start_offset_s or 0.0))
+    except Exception:
+        start_offset_s = 0.0
+    sample_rate = int(job.sample_rate or 22050)
+    block_align = 2
+    offset = int(start_offset_s * sample_rate * block_align)
+    offset = max(0, offset - (offset % block_align))
+    yield _wav_streaming_header(sample_rate, channels=1, bits=16)
     while True:
         if offset < len(job.pcm):
             chunk = bytes(job.pcm[offset:])
@@ -2363,7 +2370,7 @@ async def tts_dialogue_stream_job_endpoint(request: TTS_Dialogue_Request):
 
 
 @APP.get("/tts_dialogue_stream_job/{job_id}")
-async def tts_dialogue_stream_job_audio_endpoint(job_id: str):
+async def tts_dialogue_stream_job_audio_endpoint(job_id: str, start_s: float = 0.0):
     """从 cache_key 拉音频：磁盘缓存命中→FileResponse(可 seek)；
     LIVE_JOBS 命中→StreamingResponse(buffer 从头读)；都没有→404。"""
     cache_key = job_id
@@ -2378,7 +2385,7 @@ async def tts_dialogue_stream_job_audio_endpoint(job_id: str):
     job = LIVE_JOBS.get(cache_key)
     if job:
         return StreamingResponse(
-            _stream_from_live_job(job),
+            _stream_from_live_job(job, start_offset_s=start_s),
             media_type="audio/wav",
             headers={"X-IndexTTS-Cache": "LIVE", "X-IndexTTS-Cache-Key": cache_key},
         )
