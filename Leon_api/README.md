@@ -141,7 +141,7 @@ node Leon_api\dev_tools\test_tavo_widget_playwright.js
 正则里用最新版脚本：
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260525-fix5"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260530-seek-quality"></script>
 ```
 
 ## 访问地址
