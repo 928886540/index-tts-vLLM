@@ -27,7 +27,7 @@
   - `static/tavo.js`：系统后台/锁屏媒体图不再使用当前角色小头像，改用 `static/tavo-now-playing-cover.png` 大图。
   - `static/tavo.js` + `indextts2_api.py`：`segments_meta` 保存/返回 `start_s/start_offset_bytes/duration_s/sample_rate`，前端字幕用真实起始时间校准，减少切后台回来后歌词和进度错位。
   - `indextts/gpt/model_vllm_v2.py` + `indextts/infer_vllm_v2.py`：TAVO/API 传入的 `top_p/top_k/temperature/repetition_penalty` 现在真正进入 vLLM `SamplingParams`；之前这些参数在 vLLM 路径基本没生效。
-  - 音质默认值已向质量侧移动：TAVO 默认 `qualityMode=balanced`，fast/balanced/expressive 对应 diffusion `8/12/16`，默认采样 `top_p=0.8 temperature=0.78 repetition_penalty=2.0`。
+  - 音质默认值已向质量侧移动：TAVO 默认 `qualityMode=balanced`，fast/balanced/expressive 对应 diffusion `8/14/16`；balanced/expressive 参考音频与分段窗口更长，默认采样 `top_p=0.8 temperature=0.7 repetition_penalty=1.2`。
 - 已过的轻量验证：`node --check static\tavo.js`，`python -m py_compile indextts2_api.py indextts\infer_vllm_v2.py indextts\gpt\model_vllm_v2.py`，运行时 Python 下的 `vllm.SamplingParams` 参数实例化检查，`node Leon_api\dev_tools\test_tavo_widget_playwright.js`，以及 `/static/tavo-now-playing-cover.png` 返回 200。
 - 注意：当前会话没有可用的内置 image2 工具入口，`OPENAI_API_KEY` 也没设置；所以背景图先用本地 Pillow 生成 PNG 接入。若后续要严格换成 image2 生成图，覆盖同一路径 `static/tavo-now-playing-cover.png` 即可。
 - 不要把当前工作区里 `prompts/` 和 `音色参考音频/` 的大量素材删除/新增混进本轮提交，上一轮 checkpoint 也刻意排除了这些音频素材变动。
@@ -141,7 +141,7 @@ node Leon_api\dev_tools\test_tavo_widget_playwright.js
 正则里用最新版脚本：
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260530-stream-buffer"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260530-quality-presets"></script>
 ```
 
 ## 访问地址

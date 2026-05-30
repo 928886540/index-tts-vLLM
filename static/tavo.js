@@ -4,7 +4,7 @@
   var script = document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v4";
   var CONFIG_KEY = "indextts_tavo_config_v3";
-  var CONFIG_VERSION = 7;
+  var CONFIG_VERSION = 8;
   var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
   // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";
@@ -205,8 +205,8 @@
     intervalMs: 50,
     topP: 0.8,
     topK: 30,
-    temperature: 0.78,
-    repetitionPenalty: 2.0,
+    temperature: 0.7,
+    repetitionPenalty: 1.2,
     emoAlpha: 0.38,
     speedFactor: 1.0,
     qualityMode: "balanced",
@@ -336,8 +336,8 @@
     if (savedVersion < CONFIG_VERSION) {
       if (savedVersion < 7 && cfg.qualityMode === "fast") cfg.qualityMode = "balanced";
       if (Number(cfg.topP) === 0.72 || Number(cfg.topP) === 0.78 || Number(cfg.topP) === 0.85) cfg.topP = 0.8;
-      if (Number(cfg.temperature) === 0.62 || Number(cfg.temperature) === 0.72 || Number(cfg.temperature) === 0.8 || Number(cfg.temperature) === 0.85) cfg.temperature = 0.78;
-      if (Number(cfg.repetitionPenalty) === 8 || Number(cfg.repetitionPenalty) === 10) cfg.repetitionPenalty = 2.0;
+      if (Number(cfg.temperature) === 0.62 || Number(cfg.temperature) === 0.72 || Number(cfg.temperature) === 0.78 || Number(cfg.temperature) === 0.8 || Number(cfg.temperature) === 0.85) cfg.temperature = 0.7;
+      if (Number(cfg.repetitionPenalty) === 2 || Number(cfg.repetitionPenalty) === 8 || Number(cfg.repetitionPenalty) === 10) cfg.repetitionPenalty = 1.2;
       if (Number(cfg.emoAlpha) === 0.7 || Number(cfg.emoAlpha) === 0.75 || Number(cfg.emoAlpha) === 0.55) cfg.emoAlpha = 0.38;
       if (Number(cfg.speedFactor) === 1.08) cfg.speedFactor = 1.0;
     }
@@ -620,8 +620,8 @@
   function generationQualityOverrides(mode) {
     mode = String(mode || "balanced").trim();
     if (mode === "fast") return { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10 };
-    if (mode === "balanced") return { diffusion_steps: 12, prompt_audio_seconds: 8, segment_tokens: 52, first_tokens: 14 };
-    return { diffusion_steps: 16, prompt_audio_seconds: 10, segment_tokens: 64, first_tokens: 18 };
+    if (mode === "balanced") return { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18 };
+    return { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24 };
   }
   function applyGenerationParamsToSearchParams(p, cfg) {
     var q = generationQualityOverrides(cfg && cfg.qualityMode);
