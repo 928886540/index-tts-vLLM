@@ -21,6 +21,16 @@
 
 - 当前主分支：`VLLM`
 - 当前功能基线提交：`f0269e6 Fix Tavo role mapping and stream resume`
+- 2026-05-30 继续前已先按用户要求推 checkpoint：`dde94ce Checkpoint Tavo playback tuning`
+- 2026-05-30 当前未推修复方向：
+  - `static/tavo.js`：播放器卡片新增后退/快进 10 秒按钮，进度条圆点加大；歌词点击、进度拖动、后台媒体按钮统一走同一个 seek 入口。
+  - `static/tavo.js`：系统后台/锁屏媒体图不再使用当前角色小头像，改用 `static/tavo-now-playing-cover.png` 大图。
+  - `static/tavo.js` + `indextts2_api.py`：`segments_meta` 保存/返回 `start_s/start_offset_bytes/duration_s/sample_rate`，前端字幕用真实起始时间校准，减少切后台回来后歌词和进度错位。
+  - `indextts/gpt/model_vllm_v2.py` + `indextts/infer_vllm_v2.py`：TAVO/API 传入的 `top_p/top_k/temperature/repetition_penalty` 现在真正进入 vLLM `SamplingParams`；之前这些参数在 vLLM 路径基本没生效。
+  - 音质默认值已向质量侧移动：TAVO 默认 `qualityMode=balanced`，fast/balanced/expressive 对应 diffusion `8/12/16`，默认采样 `top_p=0.8 temperature=0.78 repetition_penalty=2.0`。
+- 已过的轻量验证：`node --check static\tavo.js`，`python -m py_compile indextts2_api.py indextts\infer_vllm_v2.py indextts\gpt\model_vllm_v2.py`，运行时 Python 下的 `vllm.SamplingParams` 参数实例化检查，`node Leon_api\dev_tools\test_tavo_widget_playwright.js`，以及 `/static/tavo-now-playing-cover.png` 返回 200。
+- 注意：当前会话没有可用的内置 image2 工具入口，`OPENAI_API_KEY` 也没设置；所以背景图先用本地 Pillow 生成 PNG 接入。若后续要严格换成 image2 生成图，覆盖同一路径 `static/tavo-now-playing-cover.png` 即可。
+- 不要把当前工作区里 `prompts/` 和 `音色参考音频/` 的大量素材删除/新增混进本轮提交，上一轮 checkpoint 也刻意排除了这些音频素材变动。
 - 本轮只新增了声腔参考说明：`prompts/library/声腔/说明.txt`
 - 不要在用户正在用服务时启动长音频测试、批量 TTS 或重启 API；需要测真实音频时先确认用户没在用。
 - TAVO 前端、角色映射、播放卡片、`tavo.get` / `tavo.set`、Advanced Rendering、正则注入相关改动，必须先读本机 `tavo` skill：`C:\Users\Administrator\.codex\skills\tavo\SKILL.md`

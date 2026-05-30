@@ -4,7 +4,7 @@
   var script = document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v4";
   var CONFIG_KEY = "indextts_tavo_config_v3";
-  var CONFIG_VERSION = 6;
+  var CONFIG_VERSION = 7;
   var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
   // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";
@@ -176,6 +176,12 @@
     try { return new URL(script && script.src ? script.src : location.href).origin; }
     catch (_) { return "http://127.0.0.1:9880"; }
   }
+  function scriptAssetUrl(fileName) {
+    try {
+      if (script && script.src) return new URL(fileName, script.src).href;
+    } catch (_) {}
+    return scriptOrigin().replace(/\/+$/, "") + "/static/" + String(fileName || "").replace(/^\/+/, "");
+  }
 
   var DEFAULT_CONFIG = {
     configVersion: CONFIG_VERSION,
@@ -197,13 +203,13 @@
     llmModel: "渡鸦/grok-4.20-fast",
     llmApiKey: "",
     intervalMs: 50,
-    topP: 0.72,
+    topP: 0.8,
     topK: 30,
-    temperature: 0.62,
-    repetitionPenalty: 8,
+    temperature: 0.78,
+    repetitionPenalty: 2.0,
     emoAlpha: 0.38,
     speedFactor: 1.0,
-    qualityMode: "fast",
+    qualityMode: "balanced",
     offlineAudioEnabled: false
   };
 
@@ -301,7 +307,7 @@
       ".idx-info{flex:1;min-width:0;padding-right:48px}.idx-title-row{display:flex;align-items:center;gap:8px;min-width:0}.idx-name{font-size:18px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-format{flex:0 0 auto;border:1px solid rgba(206,170,230,.34);background:rgba(206,170,230,.12);color:#d9b7f0;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800}.idx-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-gear{position:absolute;right:14px;top:14px;width:36px;height:36px;border-radius:50%;border:1px solid rgba(206,170,230,.30);background:rgba(20,14,28,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#eee7f4;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2;transition:background .15s,transform .12s}.idx-gear:active{transform:scale(.92)}.idx-gear svg{width:18px;height:18px;fill:currentColor}@media(hover:hover){.idx-gear:hover{background:rgba(60,38,80,.65)}}",
       ".idx-seek-wrap{margin:14px 0 0;background:transparent;border:0;border-radius:0;padding:0}.idx-seek{width:100%;height:24px;margin:0;accent-color:#c88ee9;cursor:pointer}.idx-time{display:flex;justify-content:space-between;font-size:12px;color:rgba(238,231,244,.68);font-variant-numeric:tabular-nums;margin-top:4px}",
       ".idx-subtitle{display:flex;flex-direction:column;gap:3px;margin:12px 0 0;padding:12px 10px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.48) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:136px;min-height:136px;max-height:136px;overflow-y:auto;scroll-behavior:auto;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 86%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 86%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;align-items:center;justify-content:center;min-height:34px;padding:6px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.32;font-weight:500;transition:color .18s,background .18s,box-shadow .18s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:13px;font-weight:800;background:rgba(216,167,255,.10);box-shadow:inset 3px 0 0 rgba(216,167,255,.75)}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;max-width:100%}",
-      ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:currentColor}.idx-ctrl-sm{width:44px;height:44px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px}.idx-ctrl-main[data-state='loading'] svg{animation:idx-spin .9s linear infinite}@keyframes idx-spin{to{transform:rotate(360deg)}}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
+      ".idx-controls{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:14px;flex-wrap:wrap}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}.idx-ctrl-sm{width:42px;height:42px}.idx-ctrl-skip{width:42px;height:42px;background:rgba(130,190,255,.10);color:#cfe6ff}.idx-ctrl-skip svg{width:22px;height:22px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px;fill:currentColor;stroke:none}.idx-ctrl-main[data-state='loading'] svg{animation:idx-spin .9s linear infinite}@keyframes idx-spin{to{transform:rotate(360deg)}}.idx-ctrl-add{width:48px;height:48px;background:rgba(154,94,182,.42);color:#f4e7ff}.idx-ctrl-add svg,.idx-ctrl-delete svg{fill:currentColor;stroke:none}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-ctrl:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
       ".idx-meta{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:12px}.idx-pill{font-size:11px;color:rgba(238,231,244,.75);background:rgba(255,255,255,.06);border:1px solid rgba(206,170,230,.14);border-radius:999px;padding:4px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".idx-panel,.idx-panel *{box-sizing:border-box}.idx-panel{margin:auto auto 8px auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:auto;max-height:min(88dvh,calc(100dvh - 12px));overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:2}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
       ".idx-section-title{font-size:12px;font-weight:700;color:#d9b7f0;margin:10px 0 5px}.idx-voices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.idx-voice{min-height:58px;border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}.idx-voice:before{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,#c890e8,#d8a7ff);opacity:.30}.idx-voice strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-voice span{display:block;margin-top:4px;font-size:11px;color:rgba(238,231,244,.56)}.idx-voice.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.12)}",
@@ -313,7 +319,7 @@
       // 音色选择器弹窗
       ".idx-picker{margin:auto auto 0 auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:fit-content;max-height:80vh;box-shadow:0 -8px 32px rgba(0,0,0,.45);padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;min-height:0}.idx-picker::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-picker-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(206,170,230,.18);margin-bottom:8px}.idx-picker-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-picker-close{border:0;background:transparent;color:#eee7f4;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}.idx-picker-tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;flex-wrap:wrap}.idx-picker-tab{flex:0 0 auto;border:1px solid rgba(206,170,230,.16);background:rgba(255,255,255,.04);color:#eee7f4;border-radius:999px;padding:5px 11px;cursor:pointer;font-size:11px;font-family:inherit;white-space:nowrap}.idx-picker-tab.is-active{border-color:#c890e8;background:rgba(200,144,232,.20);color:#fff}.idx-picker-search{margin-bottom:8px}.idx-picker-grid{flex:1 1 auto;min-height:200px;max-height:50vh;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-content:start;padding:2px;width:100%}.idx-picker-item{min-width:0;overflow:hidden;min-height:54px;border:1px solid rgba(206,170,230,.16);border-radius:10px;background:rgba(255,255,255,.05);color:#eee7f4;text-align:left;padding:8px 8px 8px 12px;cursor:pointer;font-family:inherit;font-size:12px;line-height:1.35;display:flex;align-items:center;gap:6px;justify-content:space-between;transition:background .15s,border-color .15s}.idx-picker-item:hover{background:rgba(206,170,230,.14);border-color:rgba(206,170,230,.34)}.idx-picker-item.is-playing{border-color:#c890e8;background:rgba(200,144,232,.18);box-shadow:0 0 0 1px rgba(200,144,232,.22) inset}.idx-picker-item-info{flex:1;min-width:0;overflow:hidden;display:flex;flex-direction:column;justify-content:center}.idx-picker-item-name{font-size:13px;font-weight:600;white-space:nowrap;overflow-x:auto;overflow-y:hidden;text-overflow:clip;display:block;scrollbar-width:none}.idx-picker-item-name::-webkit-scrollbar{display:none}.idx-picker-item-sub{font-size:10px;color:rgba(238,231,244,.55);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-picker-apply{flex:0 0 auto;width:30px;height:30px;border-radius:50%;border:1px solid rgba(200,144,232,.45);background:rgba(200,144,232,.18);color:#fff;cursor:pointer;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:inherit;padding:0;line-height:1}.idx-picker-apply:hover{background:#c890e8;color:#170e20;border-color:#c890e8;transform:scale(1.05)}.idx-picker-apply:active{transform:scale(.95)}.idx-picker-pager{display:flex;align-items:center;justify-content:center;gap:12px;padding-top:8px;border-top:1px solid rgba(206,170,230,.14);color:rgba(238,231,244,.72);font-size:11px}.idx-picker-pager button{border:1px solid rgba(206,170,230,.20);background:rgba(255,255,255,.06);color:#eee7f4;border-radius:7px;padding:3px 10px;cursor:pointer;font-family:inherit;font-size:11px}.idx-picker-pager button:disabled{opacity:.4;cursor:not-allowed}",
       ".idx-card audio{display:none!important}.idx-info{padding-right:104px}.idx-card-counter{position:absolute;right:58px;top:16px;min-width:48px;height:32px;padding:0 10px;border:1px solid rgba(206,170,230,.22);border-radius:999px;background:rgba(20,14,28,.46);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:2}.idx-gear svg{width:19px;height:19px;fill:none!important;stroke:currentColor}",
-      ".idx-seek{-webkit-appearance:none;appearance:none;height:30px;background:transparent;accent-color:auto}.idx-seek::-webkit-slider-runnable-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72));box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}.idx-seek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;margin-top:-6px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18),0 4px 12px rgba(0,0,0,.35)}.idx-seek::-moz-range-track{height:8px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72))}.idx-seek::-moz-range-thumb{width:18px;height:18px;border-radius:50%;border:2px solid #fff;background:#c890e8;box-shadow:0 0 0 5px rgba(200,144,232,.18)}",
+      ".idx-seek{-webkit-appearance:none;appearance:none;height:36px;background:transparent;accent-color:auto}.idx-seek::-webkit-slider-runnable-track{height:9px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72));box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}.idx-seek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;margin-top:-9.5px;border-radius:50%;border:3px solid #fff;background:#c890e8;box-shadow:0 0 0 6px rgba(200,144,232,.20),0 5px 16px rgba(0,0,0,.42)}.idx-seek::-moz-range-track{height:9px;border-radius:999px;background:linear-gradient(90deg,rgba(216,167,255,.85),rgba(130,190,255,.72))}.idx-seek::-moz-range-thumb{width:26px;height:26px;border-radius:50%;border:3px solid #fff;background:#c890e8;box-shadow:0 0 0 6px rgba(200,144,232,.20)}",
       ".idx-panel{width:min(760px,calc(100vw - 24px));max-width:760px;max-height:min(88dvh,calc(100dvh - 12px));margin:auto auto 8px auto;border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);scrollbar-width:thin}.idx-panel::-webkit-scrollbar{width:6px}.idx-panel::-webkit-scrollbar-thumb{background:rgba(216,167,255,.28);border-radius:999px}.idx-panel-head{top:-14px}.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.idx-field{display:flex;flex-direction:column;gap:5px;min-width:0}.idx-field.idx-wide{grid-column:1/-1}.idx-actions{position:sticky;bottom:-18px;z-index:2;display:flex;justify-content:flex-end;gap:12px;margin:14px -14px -18px;padding:12px 14px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid rgba(206,170,230,.12);background:linear-gradient(180deg,rgba(12,8,18,.74) 0%,rgba(12,8,18,.985) 34%,rgba(12,8,18,.985) 100%);backdrop-filter:blur(8px)}",
       ".idx-picker,.idx-picker-grid{scrollbar-width:none}.idx-picker::-webkit-scrollbar,.idx-picker-grid::-webkit-scrollbar,.idx-subtitle::-webkit-scrollbar{display:none}.idx-picker-item.is-selected{border-color:#d8a7ff;background:rgba(200,144,232,.20);box-shadow:0 0 0 1px rgba(216,167,255,.24) inset,0 0 18px rgba(200,144,232,.14)}.idx-picker-selected{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:#d8a7ff;color:#160d1f;font-size:12px;font-weight:900;display:none;align-items:center;justify-content:center}.idx-picker-item.is-selected .idx-picker-selected{display:flex}.idx-picker-wave{flex:0 0 auto;width:24px;height:18px;display:none;align-items:center;justify-content:center;gap:2px}.idx-picker-item.is-selected .idx-picker-wave,.idx-picker-item.is-playing .idx-picker-wave{display:flex}.idx-picker-wave i{width:3px;border-radius:999px;background:#d8a7ff;opacity:.85;animation:idx-wave .78s ease-in-out infinite}.idx-picker-wave i:nth-child(2){animation-delay:.12s}.idx-picker-wave i:nth-child(3){animation-delay:.24s}@keyframes idx-wave{0%,100%{height:5px;opacity:.45}50%{height:17px;opacity:1}}",
       "@media(max-width:520px){.idx-card{padding:14px;border-radius:16px}.idx-info{padding-right:98px}.idx-card-counter{right:56px;top:16px;height:30px;min-width:46px}.idx-panel{width:calc(100vw - 16px);max-height:min(90dvh,calc(100dvh - 10px));border-top-left-radius:16px;border-top-right-radius:16px;border-bottom-left-radius:0;border-bottom-right-radius:0}.idx-actions{justify-content:stretch}.idx-actions .idx-btn{flex:1;min-width:0}.idx-controls{gap:10px}.idx-ctrl-sm{width:40px;height:40px}.idx-ctrl-main{width:62px;height:62px}.idx-ctrl-add,.idx-ctrl-delete{width:44px;height:44px}.idx-grid{grid-template-columns:1fr}.idx-voices{grid-template-columns:1fr 1fr}.idx-role-row{grid-template-columns:84px 1fr 26px}.idx-picker-grid{grid-template-columns:1fr 1fr}}"
@@ -328,9 +334,10 @@
     var savedVersion = Number(saved && saved.configVersion || 0) || 0;
     var cfg = Object.assign({}, DEFAULT_CONFIG, pickGlobalConfig(saved || {}));
     if (savedVersion < CONFIG_VERSION) {
-      if (cfg.qualityMode === "balanced" || cfg.qualityMode === "expressive") cfg.qualityMode = "fast";
-      if (Number(cfg.topP) === 0.8 || Number(cfg.topP) === 0.85 || Number(cfg.topP) === 0.78) cfg.topP = 0.72;
-      if (Number(cfg.temperature) === 0.8 || Number(cfg.temperature) === 0.85 || Number(cfg.temperature) === 0.72) cfg.temperature = 0.62;
+      if (savedVersion < 7 && cfg.qualityMode === "fast") cfg.qualityMode = "balanced";
+      if (Number(cfg.topP) === 0.72 || Number(cfg.topP) === 0.78 || Number(cfg.topP) === 0.85) cfg.topP = 0.8;
+      if (Number(cfg.temperature) === 0.62 || Number(cfg.temperature) === 0.72 || Number(cfg.temperature) === 0.8 || Number(cfg.temperature) === 0.85) cfg.temperature = 0.78;
+      if (Number(cfg.repetitionPenalty) === 8 || Number(cfg.repetitionPenalty) === 10) cfg.repetitionPenalty = 2.0;
       if (Number(cfg.emoAlpha) === 0.7 || Number(cfg.emoAlpha) === 0.75 || Number(cfg.emoAlpha) === 0.55) cfg.emoAlpha = 0.38;
       if (Number(cfg.speedFactor) === 1.08) cfg.speedFactor = 1.0;
     }
@@ -594,8 +601,10 @@
           segments_total: t.metrics.segments_total,
           segments_done: t.metrics.segments_done
         } : null,
+        sampleRate: t.sampleRate || t.sample_rate || 0,
+        duration_s: t.duration_s || (t.metrics && t.metrics.audio_duration_s) || 0,
         segments: (t.segments || []).map(function (s) {
-          return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
+          return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
         }),
       };
     }).filter(function (t) { return !!t.cacheKey; });
@@ -609,10 +618,10 @@
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/[\r\n,，;；]+/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
   function generationQualityOverrides(mode) {
-    mode = String(mode || "expressive").trim();
-    if (mode === "fast") return { diffusion_steps: 6, prompt_audio_seconds: 5, segment_tokens: 36, first_tokens: 8 };
-    if (mode === "balanced") return { diffusion_steps: 9, prompt_audio_seconds: 8, segment_tokens: 48, first_tokens: 12 };
-    return { diffusion_steps: 12, prompt_audio_seconds: 8, segment_tokens: 56, first_tokens: 16 };
+    mode = String(mode || "balanced").trim();
+    if (mode === "fast") return { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10 };
+    if (mode === "balanced") return { diffusion_steps: 12, prompt_audio_seconds: 8, segment_tokens: 52, first_tokens: 14 };
+    return { diffusion_steps: 16, prompt_audio_seconds: 10, segment_tokens: 64, first_tokens: 18 };
   }
   function applyGenerationParamsToSearchParams(p, cfg) {
     var q = generationQualityOverrides(cfg && cfg.qualityMode);
@@ -1447,7 +1456,7 @@
       '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点播放</div></div></div>',
       '  <div class="idx-seek-wrap"><input class="idx-seek" data-role="seek" type="range" min="0" max="1000" value="0" disabled><div class="idx-time"><span data-role="current">00:00</span><span data-role="total">--:--</span></div></div>',
       '  <div class="idx-subtitle" data-role="subtitle"><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点播放开始生成音频</span></div></div>',
-      '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button><button class="idx-ctrl idx-ctrl-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button></div>',
+      '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-skip" type="button" data-role="rewind10" aria-label="后退 10 秒" title="后退 10 秒"><svg viewBox="0 0 24 24"><path d="M9 8H4V3"/><path d="M5 8a8 8 0 1 1-1 6"/><path d="M10 12v5"/><path d="M14 12v5"/><path d="M10 12h1.5"/><path d="M14 12h1.5"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-ctrl-skip" type="button" data-role="forward10" aria-label="快进 10 秒" title="快进 10 秒"><svg viewBox="0 0 24 24"><path d="M15 8h5V3"/><path d="M19 8a8 8 0 1 0 1 6"/><path d="M8 12v5"/><path d="M12 12v5"/><path d="M8 12h1.5"/><path d="M12 12h1.5"/></svg></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button><button class="idx-ctrl idx-ctrl-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
         + '<div class="idx-section-title">播放模式</div>'
@@ -1491,6 +1500,8 @@
     var play = first(root, '[data-role="play"]', '.idx-ctrl-main');
     var prev = first(root, '[data-role="prev"]');
     var next = first(root, '[data-role="next"]');
+    var rewind10 = first(root, '[data-role="rewind10"]');
+    var forward10 = first(root, '[data-role="forward10"]');
     var add = first(root, '[data-role="add"]');
     var del = first(root, '[data-role="delete"]');
     var status = first(root, '[data-role="status"]', '.idx-status');
@@ -1648,23 +1659,65 @@
       if (isFinite(Number(track.lastStalledSec))) return Math.max(0, Number(track.lastStalledSec) || 0);
       return 0;
     }
+    function segmentStartSec(seg, sampleRate) {
+      if (!seg) return NaN;
+      if (isFinite(Number(seg.start_s))) return Math.max(0, Number(seg.start_s));
+      if (isFinite(Number(seg.start_offset_s))) return Math.max(0, Number(seg.start_offset_s));
+      sampleRate = Number(sampleRate || seg.sample_rate || 0);
+      if (sampleRate > 0 && isFinite(Number(seg.start_offset_bytes))) {
+        return Math.max(0, Number(seg.start_offset_bytes) / (sampleRate * 2));
+      }
+      return NaN;
+    }
+    function trackDurationHintSec(track) {
+      if (!track) return 0;
+      var d = Number(track.duration_s || (track.metrics && track.metrics.audio_duration_s));
+      if (isFinite(d) && d > 0) return d;
+      var sr = Number(track.sampleRate || track.sample_rate || 0);
+      var maxEnd = 0;
+      (track.segments || []).forEach(function (s) {
+        var st = segmentStartSec(s, sr);
+        var dur = Number(s.duration_s || 0);
+        if (isFinite(st) && isFinite(dur) && dur > 0) maxEnd = Math.max(maxEnd, st + dur);
+      });
+      return maxEnd;
+    }
+    function seekToSeconds(pos, opts) {
+      opts = opts || {};
+      var track = currentTrack();
+      pos = Math.max(0, Number(pos) || 0);
+      var dur = Number(audio && audio.duration);
+      if (audio && (audio.currentSrc || audio.src) && isFinite(dur) && dur > 0) {
+        audio.currentTime = Math.max(0, Math.min(dur - 0.05, pos));
+        return true;
+      }
+      if (track && isSavedTrack(track) && trackPlayableUrl(track)) {
+        startElementAudioFrom(track, pos);
+        return true;
+      }
+      if (track && (track.webAudioPlaying || isLiveTrack(track) || liveStreamUrlForTrack(track))) {
+        track.lastWebAudioSec = pos;
+        var liveUrl = liveStreamUrlForTrack(track);
+        if (liveUrl) {
+          playTrackViaWebAudio(track, liveUrl, {
+            noticeTitle: opts.noticeTitle || "跳转播放",
+            noticeDetail: "从 " + formatTime(pos) + " 继续",
+            waitDetail: "等待后端返回对应位置音频",
+            startOffsetSec: pos
+          });
+          return true;
+        }
+      }
+      return false;
+    }
     function seekBySeconds(delta) {
       delta = Number(delta) || 0;
       var track = currentTrack();
       var dur = Number(audio && audio.duration);
-      if (audio && (audio.currentSrc || audio.src) && isFinite(dur) && dur > 0) {
-        audio.currentTime = Math.max(0, Math.min(dur - 0.05, Number(audio.currentTime || 0) + delta));
-        return true;
-      }
-      if (track && isSavedTrack(track) && trackPlayableUrl(track)) {
-        startElementAudioFrom(track, Math.max(0, trackResumeSec(track) + delta));
-        return true;
-      }
-      if (track && track.webAudioPlaying) {
-        track.lastWebAudioSec = Math.max(0, trackResumeSec(track) + delta);
-        setStatus("流式播放暂不支持拖动，音频保存后可跳转");
-      }
-      return false;
+      var maxDur = (isFinite(dur) && dur > 0) ? dur : trackDurationHintSec(track);
+      var target = Math.max(0, trackResumeSec(track) + delta);
+      if (maxDur > 0) target = Math.min(target, Math.max(0, maxDur - 0.05));
+      return seekToSeconds(target, { noticeTitle: delta < 0 ? "后退 10 秒" : "快进 10 秒" });
     }
     function startElementAudioFrom(track, startSec) {
       if (!track || !trackPlayableUrl(track)) return false;
@@ -1727,6 +1780,9 @@
       var track = currentTrack();
       if (prev) prev.disabled = currentTrackIndex <= 0;
       if (next) next.disabled = currentTrackIndex < 0 || currentTrackIndex >= generatedTracks.length - 1;
+      var canSeekTrack = !!(track && (trackPlayableUrl(track) || track.webAudioPlaying || track.cacheKey));
+      if (rewind10) rewind10.disabled = !canSeekTrack;
+      if (forward10) forward10.disabled = !canSeekTrack;
       if (del) del.disabled = currentTrackIndex < 0 || !track;
       updateTrackCounter();
     }
@@ -2134,6 +2190,23 @@
           }
         } catch (_) { sec = 0; }
         if (cur) cur.textContent = formatTime(sec);
+        var durHint = trackDurationHintSec(track);
+        if (total) total.textContent = durHint > 0 ? formatTime(durHint) : "--:--";
+        if (seek) {
+          seekProgrammaticUpdate = true;
+          seek.disabled = !(durHint > 0);
+          seek.value = durHint > 0 ? String(Math.floor(Math.min(sec, durHint) / durHint * 1000)) : "0";
+          setTimeout(function () { seekProgrammaticUpdate = false; }, 0);
+        }
+        try {
+          if (navigator.mediaSession && navigator.mediaSession.setPositionState && durHint > 0) {
+            navigator.mediaSession.setPositionState({
+              duration: durHint,
+              playbackRate: playbackRate || 1,
+              position: Math.min(sec, durHint),
+            });
+          }
+        } catch (_) {}
         if (track) track.lastWebAudioSec = sec;
       }, 250);
     }
@@ -2359,10 +2432,12 @@
         if (!st.ok) return false;
         var j = await st.json();
         if (j && j.metrics) track.metrics = j.metrics;
+        if (j && j.sample_rate) track.sampleRate = j.sample_rate;
+        if (j && j.duration_s) track.duration_s = j.duration_s;
         if (j && j.cache_url) track.cacheUrl = new URL(j.cache_url, cleanBase(cfg.apiBase) + "/").href;
         if (j && Array.isArray(j.segments_meta) && j.segments_meta.length) {
           track.segments = j.segments_meta.map(function (s) {
-            return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
+            return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
           });
         }
         if (j && j.state === "done") {
@@ -2534,12 +2609,14 @@
               if (j && j.metrics) {
                 trackEntry.metrics = j.metrics;
               }
+              if (j && j.sample_rate) trackEntry.sampleRate = j.sample_rate;
+              if (j && j.duration_s) trackEntry.duration_s = j.duration_s;
               if (j && j.cache_url) {
                 trackEntry.cacheUrl = new URL(j.cache_url, cleanBase(cfg.apiBase) + "/").href;
               }
               if (j && Array.isArray(j.segments_meta) && j.segments_meta.length && (!trackEntry.segments || !trackEntry.segments.length)) {
                 trackEntry.segments = j.segments_meta.map(function (s) {
-                  return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
+                  return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
                 });
               }
               if (j && j.state === "done") {
@@ -2599,6 +2676,8 @@
         offlineSize: t.offlineSize || 0,
         voicesMap: t.voicesMap || null,
         metrics: t.metrics || null,
+        sampleRate: t.sampleRate || t.sample_rate || 0,
+        duration_s: t.duration_s || (t.metrics && t.metrics.audio_duration_s) || 0,
         segments: Array.isArray(t.segments) ? t.segments : [],
         fromHistory: savedState === "saved",
         state: savedState,
@@ -2757,8 +2836,8 @@
       cfg.apiBase = String(getField("apiBase", cfg.apiBase || scriptOrigin())).trim() || scriptOrigin();
       cfg.intervalMs = Number(getField("intervalMs", cfg.intervalMs || 50) || 50);
       cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.0), 1.0, 0.85, 1.25);
-      cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "expressive") || "expressive").trim();
-      if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "expressive";
+      cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "balanced") || "balanced").trim();
+      if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
       cfg.offlineAudioEnabled = getCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       try { audio.playbackRate = cfg.speedFactor; } catch (_) {}
       // cfg.roleVoiceList 由 renderRoleList 实时维护(addRoleRow/setRowVoice 等),
@@ -2834,7 +2913,7 @@
       setField("llmEndpoint", cfg.llmEndpoint || "");
       setField("llmApiKey", cfg.llmApiKey || "");
       setField("speedFactor", cfg.speedFactor || 1.0);
-      setField("qualityMode", cfg.qualityMode || "expressive");
+      setField("qualityMode", cfg.qualityMode || "balanced");
       setCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25); } catch (_) {}
       renderRoleList();
@@ -3005,12 +3084,7 @@
       $all(subBox, '.idx-sub-row').forEach(function (row) {
         on(row, 'click', function () {
           var startSec = parseFloat(row.dataset.start || "0");
-          try {
-            if (audio && audio.src && isFinite(audio.duration) && audio.duration > 0) {
-              audio.currentTime = Math.min(Math.max(0, startSec), audio.duration - 0.05);
-              if (audio.paused) audio.play().catch(function () {});
-            }
-          } catch (_) {}
+          try { seekToSeconds(startSec, { noticeTitle: "跳到歌词" }); } catch (_) {}
         });
       });
     }
@@ -3050,16 +3124,16 @@
       try {
         var ms = navigator.mediaSession;
         var charName = (context && context.characterName) ? context.characterName : (cfg.defaultVoice || "IndexTTS");
-        var artSrc = avatarForRole(speakerRole || "旁白");
-        var artType = mediaArtworkType(artSrc);
+        var artSrc = scriptAssetUrl("tavo-now-playing-cover.png");
+        var artType = "image/png";
         ms.metadata = new MediaMetadata({
           title: (currentText ? String(currentText).slice(0, 60) : charName),
           artist: charName,
           album: "IndexTTS",
           artwork: [
-            { src: artSrc, sizes: "96x96",  type: artType },
-            { src: artSrc, sizes: "256x256", type: artType },
             { src: artSrc, sizes: "512x512", type: artType },
+            { src: artSrc, sizes: "1024x1024", type: artType },
+            { src: artSrc, sizes: "256x256", type: artType },
           ],
         });
         ms.setActionHandler('play',  function () { try { generate(false).catch(function(){}); } catch (_) {} });
@@ -3131,7 +3205,7 @@
       var timeline = [];
       var lastIdx = -1;
       var lastMetaSignature = "";
-      function rebuild(metaList) {
+      function rebuild(metaList, sampleRate) {
         var t = 0;
         timeline = [];
         var count = Math.max(segs.length, (metaList && metaList.length) || 0);
@@ -3141,6 +3215,8 @@
           var m = metaList && metaList[i];
           if (m && m.duration_s != null && m.duration_s > 0) segDur = m.duration_s;
           else segDur = Math.max(0.6, (seg.text || "").length * 0.15);
+          var exactStart = segmentStartSec(m || seg, sampleRate || (trackEntry && trackEntry.sampleRate));
+          if (isFinite(exactStart)) t = exactStart;
           // 长文本按句号/逗号拆成 12-22 字的小段
           var subs = splitLyricLines(seg.text);
           var totalChars = subs.reduce(function (a, s) { return a + s.length; }, 1);
@@ -3155,7 +3231,7 @@
             });
             subStart += subDur;
           }
-          t += segDur + gap;
+          t = isFinite(exactStart) ? (exactStart + segDur) : (t + segDur + gap);
         }
         renderSubtitleRows(timeline, !metaList);
         if (metaList) lastIdx = -1;
@@ -3192,17 +3268,20 @@
               if (Array.isArray(j.segments_meta) && j.segments_meta.length) {
                 if (!segs.length || j.segments_meta.length > segs.length) {
                   segs = j.segments_meta.map(function (s) {
-                    return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha };
+                    return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
                   });
                   trackEntry.segments = segs;
                   if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 }
+                if (j.sample_rate) trackEntry.sampleRate = j.sample_rate;
+                if (j.duration_s) trackEntry.duration_s = j.duration_s;
+                if (j.metrics) trackEntry.metrics = j.metrics;
                 var sig = j.segments_meta.map(function (m) {
-                  return [m.role || "", m.text || "", Number(m.duration_s || 0).toFixed(3)].join(":");
+                  return [m.role || "", m.text || "", Number(m.start_s || 0).toFixed(3), Number(m.start_offset_bytes || 0), Number(m.duration_s || 0).toFixed(3)].join(":");
                 }).join("|");
                 if (sig !== lastMetaSignature) {
                   lastMetaSignature = sig;
-                  rebuild(j.segments_meta);
+                  rebuild(j.segments_meta, j.sample_rate);
                 }
               }
               if (j.state === "done" || j.state === "failed") {
@@ -3632,7 +3711,7 @@
           showTrackNotice(placeholder, "开始合成 " + segments.length + " 段…", roleSummary);
           var voicesMap = rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
           debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
-          body = Object.assign({ segments: segments, voices: voicesMap, performance_mode: cfg.qualityMode || "expressive", interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25) }, generationQualityOverrides(cfg.qualityMode));
+          body = Object.assign({ segments: segments, voices: voicesMap, performance_mode: cfg.qualityMode || "balanced", interval_ms: cfg.intervalMs, top_p: cfg.topP, top_k: cfg.topK, temperature: cfg.temperature, repetition_penalty: cfg.repetitionPenalty, emo_alpha: cfg.emoAlpha, speed_factor: clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25) }, generationQualityOverrides(cfg.qualityMode));
           var ttsStart = Date.now();
           var jobInfo;
           var ttsTimer = setInterval(function () {
@@ -3828,10 +3907,16 @@
     }
     on(play, 'pointerdown', function () { primeAudioContext(); });
     on(add, 'pointerdown', function () { primeAudioContext(); });
+    on(rewind10, 'pointerdown', function () { primeAudioContext(); });
+    on(forward10, 'pointerdown', function () { primeAudioContext(); });
     on(play, 'touchstart', function () { primeAudioContext(); });
     on(add, 'touchstart', function () { primeAudioContext(); });
+    on(rewind10, 'touchstart', function () { primeAudioContext(); });
+    on(forward10, 'touchstart', function () { primeAudioContext(); });
     on(play, 'click', function () { primeAudioContext(); if (tryResumeOrPauseInGesture()) return; generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(add, 'click', function () { primeAudioContext(); generate(true).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(rewind10, 'click', function () { primeAudioContext(); if (!seekBySeconds(-10)) setStatus("暂无可跳转音频"); });
+    on(forward10, 'click', function () { primeAudioContext(); if (!seekBySeconds(10)) setStatus("暂无可跳转音频"); });
     on(prev, 'click', function () {
       ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex - 1, true); }).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
@@ -3873,8 +3958,11 @@
             .then(function (j) {
               if (j && Array.isArray(j.segments_meta) && j.segments_meta.length) {
                 t.segments = j.segments_meta.map(function (s) {
-                  return { role: s.role || "", text: s.text || "" };
+                  return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
                 });
+                if (j.sample_rate) t.sampleRate = j.sample_rate;
+                if (j.duration_s) t.duration_s = j.duration_s;
+                if (j.metrics) t.metrics = j.metrics;
                 debugLog("✅ 补回 " + t.segments.length + " 段 segments,字幕启动", "#9f9");
                 // 现在启动字幕
                 if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === t) {
@@ -3977,6 +4065,19 @@
       if (seekProgrammaticUpdate) return;
       var dur = Number(audio && audio.duration);
       if (audio && isFinite(dur) && dur > 0) audio.currentTime = Number(seek.value || 0) / 1000 * dur;
+      else {
+        var t = currentTrack();
+        var hint = trackDurationHintSec(t);
+        if (hint > 0 && cur) cur.textContent = formatTime(Number(seek.value || 0) / 1000 * hint);
+      }
+    });
+    on(seek, 'change', function () {
+      if (seekProgrammaticUpdate) return;
+      var dur = Number(audio && audio.duration);
+      if (audio && isFinite(dur) && dur > 0) return;
+      var t = currentTrack();
+      var hint = trackDurationHintSec(t);
+      if (hint > 0) seekToSeconds(Number(seek.value || 0) / 1000 * hint, { noticeTitle: "拖动进度" });
     });
 
     updateTrackButtons();

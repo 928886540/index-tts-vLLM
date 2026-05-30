@@ -199,7 +199,20 @@ class UnifiedVoice(nn.Module):
         conds = self.emo_perceiver_encoder(speech_conditioning_input, conds_mask)  # (b, 1, d)
         return conds.squeeze(1)
 
-    async def inference_speech(self, speech_condition, text_inputs, emo_speech_condition=None, cond_lengths=None, emo_cond_lengths=None, emo_vec=None, use_speed=False):
+    async def inference_speech(
+        self,
+        speech_condition,
+        text_inputs,
+        emo_speech_condition=None,
+        cond_lengths=None,
+        emo_cond_lengths=None,
+        emo_vec=None,
+        use_speed=False,
+        top_p=None,
+        top_k=None,
+        temperature=None,
+        repetition_penalty=None,
+    ):
         if speech_condition.ndim == 2:
             speech_condition = speech_condition.unsqueeze(0)
         if emo_speech_condition is None:
@@ -236,7 +249,18 @@ class UnifiedVoice(nn.Module):
         multi_modal_data = {"audio": {"audio_embeds": [inputs_embeds.squeeze(0).cpu()]}}
         tokens_prompt = TokensPrompt(prompt=fake_inputs, multi_modal_data=multi_modal_data)
         # tokens_prompt = TokensPrompt(prompt_token_ids=fake_inputs, multi_modal_data=multi_modal_data)
-        output_generator = self.llm.generate(tokens_prompt, sampling_params=self.sampling_params, request_id=uuid.uuid4().hex)
+        sampling_params = self.sampling_params
+        if top_p is not None or top_k is not None or temperature is not None or repetition_penalty is not None:
+            sampling_params = SamplingParams(
+                temperature=float(temperature if temperature is not None else self.sampling_params.temperature),
+                top_p=float(top_p if top_p is not None else self.sampling_params.top_p),
+                top_k=int(top_k if top_k is not None else self.sampling_params.top_k),
+                repetition_penalty=float(repetition_penalty if repetition_penalty is not None else self.sampling_params.repetition_penalty),
+                max_tokens=self.sampling_params.max_tokens,
+                stop_token_ids=[self.stop_mel_token],
+                include_stop_str_in_output=True,
+            )
+        output_generator = self.llm.generate(tokens_prompt, sampling_params=sampling_params, request_id=uuid.uuid4().hex)
         # latent = []
         async for output in output_generator:
             # latent.append(output.hidden_states.clone())

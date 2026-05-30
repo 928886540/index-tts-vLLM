@@ -338,6 +338,10 @@ class IndexTTS2:
         )
         diffusion_steps = int(generation_kwargs.pop("diffusion_steps", 16))
         s2mel_cfg_rate = float(generation_kwargs.pop("s2mel_cfg_rate", 0.7))
+        top_p = float(generation_kwargs.pop("top_p", 0.8))
+        top_k = int(generation_kwargs.pop("top_k", 30))
+        temperature = float(generation_kwargs.pop("temperature", 0.78))
+        repetition_penalty = float(generation_kwargs.pop("repetition_penalty", 2.0))
         stream_chunk_callback = generation_kwargs.pop("stream_chunk_callback", None)
         stop_generation_callback = generation_kwargs.pop("stop_generation_callback", None)
         quick_streaming_tokens = int(generation_kwargs.pop("quick_streaming_tokens", 0))
@@ -363,6 +367,10 @@ class IndexTTS2:
             "max_text_tokens_per_sentence": max_text_tokens_per_sentence,
             "diffusion_steps": diffusion_steps,
             "s2mel_cfg_rate": s2mel_cfg_rate,
+            "top_p": top_p,
+            "top_k": top_k,
+            "temperature": temperature,
+            "repetition_penalty": repetition_penalty,
         }
 
         def trim_audio_for_prompt(audio_data, sample_rate, max_seconds):
@@ -603,6 +611,10 @@ class IndexTTS2:
                     cond_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
                     emo_cond_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
                     emo_vec=emovec,
+                    top_p=top_p,
+                    top_k=top_k,
+                    temperature=temperature,
+                    repetition_penalty=repetition_penalty,
                 )
                 if should_stop_generation():
                     stopped = True

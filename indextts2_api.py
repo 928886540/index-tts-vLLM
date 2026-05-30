@@ -206,15 +206,15 @@ class TTS_Request(BaseModel):
     ref_audio_path: str = None
     emo_ref_audio_path: str = None
     top_k: int = 30
-    top_p: float = 0.78
-    temperature: float = 0.72
+    top_p: float = 0.8
+    temperature: float = 0.78
     emo_alpha: float = 0.55
     emo_vec: list = []
     normalize_emo_vec: bool = False
     speed_factor: float = 1.0
     seed: int = -1
     parallel_infer: bool = True
-    repetition_penalty: float = 10
+    repetition_penalty: float = 2.0
     bypass_cache: bool = False
     diffusion_steps: Optional[int] = None
     prompt_audio_seconds: Optional[float] = None
@@ -249,10 +249,10 @@ class TTS_Dialogue_Request(BaseModel):
     voices: Dict[str, str]
     performance_mode: str = "expressive"
     interval_ms: int = 350
-    top_p: float = 0.78
+    top_p: float = 0.8
     top_k: int = 30
-    temperature: float = 0.72
-    repetition_penalty: float = 10
+    temperature: float = 0.78
+    repetition_penalty: float = 2.0
     emo_alpha: float = 0.55  # default if a segment doesn't override
     diffusion_steps: Optional[int] = None
     prompt_audio_seconds: Optional[float] = None
@@ -318,34 +318,33 @@ STREAM_DIFFUSION_STEPS = 8
 STREAM_PROMPT_AUDIO_SECONDS = 8
 STREAM_MODE_SETTINGS = {
     "fast": {
-        "target_tokens": 32,
-        "hard_tokens": 40,
-        "first_tokens": 8,
+        "target_tokens": 40,
+        "hard_tokens": 56,
+        "first_tokens": 10,
         "min_tokens": 12,
-        "diffusion_steps": 6,
+        "diffusion_steps": 8,
         "prompt_audio_seconds": 6,
         # ⚠️ CFG=0 会让本模型 s2mel 输出近静音（极速档曾因此“进度在走但没声音”）。
-        # 必须 cfg>0；实时靠 diffusion=6 + 短参考/短段做到 RTF<1，不靠关 CFG。
+        # 必须 cfg>0；实时靠短参考/短段控制 RTF，不靠关 CFG。
         "s2mel_cfg_rate": 0.7,
     },
     "balanced": {
-        "target_tokens": 48,
-        "hard_tokens": 64,
-        "first_tokens": 12,
+        "target_tokens": 52,
+        "hard_tokens": 68,
+        "first_tokens": 14,
         "min_tokens": 16,
-        "diffusion_steps": 9,
+        "diffusion_steps": 12,
         "prompt_audio_seconds": 8,
         "s2mel_cfg_rate": 0.7,
     },
     "expressive": {
-        "target_tokens": 56,
-        "hard_tokens": 72,
-        "first_tokens": 16,
+        "target_tokens": 64,
+        "hard_tokens": 84,
+        "first_tokens": 18,
         "min_tokens": STREAM_MIN_SEGMENT_TOKENS,
-        # 画质优先：建议“生成→落盘→播落盘”，不要指望实时（RTF>1 必然 underrun）。
-        # diffusion 14→12、参考 10→8s 收一点 s2mel；噪声不在步数，硬堆步数没用。
-        "diffusion_steps": 12,
-        "prompt_audio_seconds": 8,
+        # 质量优先：接近模型默认 16 步，适合生成后播落盘，实时可能 RTF>1。
+        "diffusion_steps": 16,
+        "prompt_audio_seconds": 10,
         "s2mel_cfg_rate": 0.7,
     },
 }
@@ -568,10 +567,10 @@ async def _prepare_dialogue_for_streaming(req: dict):
     default_emo_alpha = float(req.get("emo_alpha", 0.55))
     performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.78)),
+        "top_p": float(req.get("top_p", 0.8)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.72)),
-        "repetition_penalty": float(req.get("repetition_penalty", 10)),
+        "temperature": float(req.get("temperature", 0.78)),
+        "repetition_penalty": float(req.get("repetition_penalty", 2.0)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
     sampling_kwargs = _apply_s2mel_test_overrides(req, sampling_kwargs)
@@ -790,7 +789,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                     "style": _segment_style_name(seg) or "neutral",
                     "style_alpha": seg_alpha if style_audio else None,
                     "style_audio": style_audio,
+                    "sample_rate": job.sample_rate,
                     "start_offset_bytes": seg_start_offset,
+                    "start_s": (seg_start_offset / (job.sample_rate * 2)) if job.sample_rate else 0.0,
                     "duration_s": seg_duration,
                     "rtf": seg_metric["rtf"],
                     "wall_s": seg_metric["wall_s"],
@@ -1051,10 +1052,10 @@ def _single_tts_cache_payload(req: dict) -> dict:
         "emo_vec": req.get("emo_vec") or [],
         "normalize_emo_vec": bool(req.get("normalize_emo_vec", False)),
         "top_k": int(req.get("top_k", 30)),
-        "top_p": float(req.get("top_p", 0.78)),
-        "temperature": float(req.get("temperature", 0.72)),
+        "top_p": float(req.get("top_p", 0.8)),
+        "temperature": float(req.get("temperature", 0.78)),
         "emo_alpha": float(req.get("emo_alpha", 0.55)),
-        "repetition_penalty": float(req.get("repetition_penalty", 10)),
+        "repetition_penalty": float(req.get("repetition_penalty", 2.0)),
         "diffusion_steps": int(req.get("diffusion_steps") or 0),
         "prompt_audio_seconds": float(req.get("prompt_audio_seconds") or 0),
         "segment_tokens": int(req.get("segment_tokens") or 0),
@@ -1169,10 +1170,10 @@ async def tts_stream_handle(req: dict):
                     use_emo_text=use_emo_text,
                     emo_alpha=float(req.get("emo_alpha", 0.55)),
                     emo_vector=emo_vec,
-                    top_p=float(req.get("top_p", 0.78)),
+                    top_p=float(req.get("top_p", 0.8)),
                     top_k=int(req.get("top_k", 30)),
-                    temperature=float(req.get("temperature", 0.72)),
-                    repetition_penalty=float(req.get("repetition_penalty", 10)),
+                    temperature=float(req.get("temperature", 0.78)),
+                    repetition_penalty=float(req.get("repetition_penalty", 2.0)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
                     **_apply_s2mel_test_overrides(req, _stream_infer_kwargs()),
@@ -1273,10 +1274,10 @@ async def tts_cache_stream_handle(req: dict):
                     use_emo_text=use_emo_text,
                     emo_alpha=float(req.get("emo_alpha", 0.55)),
                     emo_vector=emo_vec,
-                    top_p=float(req.get("top_p", 0.78)),
+                    top_p=float(req.get("top_p", 0.8)),
                     top_k=int(req.get("top_k", 30)),
-                    temperature=float(req.get("temperature", 0.72)),
-                    repetition_penalty=float(req.get("repetition_penalty", 10)),
+                    temperature=float(req.get("temperature", 0.78)),
+                    repetition_penalty=float(req.get("repetition_penalty", 2.0)),
                     output_path=None,
                     stream_chunk_callback=on_chunk,
                     **_apply_s2mel_test_overrides(req, _stream_infer_kwargs()),
@@ -1386,10 +1387,10 @@ async def tts_dialogue_stream_handle(req: dict):
     default_emo_alpha = float(req.get("emo_alpha", 0.55))
     performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.78)),
+        "top_p": float(req.get("top_p", 0.8)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.72)),
-        "repetition_penalty": float(req.get("repetition_penalty", 10)),
+        "temperature": float(req.get("temperature", 0.78)),
+        "repetition_penalty": float(req.get("repetition_penalty", 2.0)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
     sampling_kwargs = _apply_s2mel_test_overrides(req, sampling_kwargs)
@@ -1531,10 +1532,10 @@ async def tts_dialogue_cache_stream_handle(req: dict):
     default_emo_alpha = float(req.get("emo_alpha", 0.55))
     performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
     sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.78)),
+        "top_p": float(req.get("top_p", 0.8)),
         "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.72)),
-        "repetition_penalty": float(req.get("repetition_penalty", 10)),
+        "temperature": float(req.get("temperature", 0.78)),
+        "repetition_penalty": float(req.get("repetition_penalty", 2.0)),
         **_stream_infer_kwargs(performance_mode=performance_mode),
     }
     sampling_kwargs = _apply_s2mel_test_overrides(req, sampling_kwargs)
@@ -2106,11 +2107,11 @@ async def cache_delete_single_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.78,
-    temperature: float = 0.72,
+    top_p: float = 0.8,
+    temperature: float = 0.78,
     emo_alpha: float = 0.55,
     normalize_emo_vec: bool = False,
-    repetition_penalty: float = 10,
+    repetition_penalty: float = 2.0,
     bypass_cache: bool = False,
 ):
     """Delete one single-voice TTS snapshot using the same params as /tts_cache_stream."""
@@ -2152,14 +2153,14 @@ async def tts_get_endpoint(
     ref_audio_path: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.78,
-    temperature: float = 0.72,
+    top_p: float = 0.8,
+    temperature: float = 0.78,
     emo_alpha: float = 0.55,
     normalize_emo_vec: bool = False,
     speed_factor: float = 1.0,
     seed: int = -1,
     parallel_infer: bool = True,
-    repetition_penalty: float = 10,
+    repetition_penalty: float = 2.0,
 ):
     req = {
         "text": text,
@@ -2193,10 +2194,10 @@ async def tts_stream_get_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.78,
-    temperature: float = 0.72,
+    top_p: float = 0.8,
+    temperature: float = 0.78,
     emo_alpha: float = 0.55,
-    repetition_penalty: float = 10,
+    repetition_penalty: float = 2.0,
 ):
     """Streaming TTS for TAVO regex injection.
 
@@ -2233,11 +2234,11 @@ async def tts_cache_stream_get_endpoint(
     emo_text: str = None,
     emo_ref_audio_path: str = None,
     top_k: int = 30,
-    top_p: float = 0.78,
-    temperature: float = 0.72,
+    top_p: float = 0.8,
+    temperature: float = 0.78,
     emo_alpha: float = 0.55,
     normalize_emo_vec: bool = False,
-    repetition_penalty: float = 10,
+    repetition_penalty: float = 2.0,
 ):
     """Streaming TTS with local snapshot cache for lazy TAVO playback."""
     req = {
@@ -2470,8 +2471,8 @@ async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
             "default":  "voice_a"          // fallback for any unmapped role
           },
           "interval_ms": 350,
-          "top_p": 0.78, "top_k": 30, "temperature": 0.72,
-          "repetition_penalty": 10,
+          "top_p": 0.8, "top_k": 30, "temperature": 0.78,
+          "repetition_penalty": 2.0,
           "emo_alpha": 0.55
         }
 
