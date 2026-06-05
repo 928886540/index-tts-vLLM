@@ -583,7 +583,23 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
       const cardRect = card ? card.getBoundingClientRect() : null;
       const panelRect = panel ? panel.getBoundingClientRect() : null;
       const closeRect = close ? close.getBoundingClientRect() : null;
-      return Array.from(document.querySelectorAll(".idx-role-row")).map((row) => {
+      const gear = document.querySelector('[data-role="gear"]');
+      const playbackToggle = document.querySelector('[data-role="playback-mode-toggle"]');
+      const headerCounter = document.querySelector('[data-role="counter"]');
+      const normalRows = Array.from(document.querySelectorAll('[data-role="normal-voices"] .idx-normal-voice-row')).map((row) => {
+        const name = row.querySelector(".idx-role-name");
+        const btn = row.querySelector(".idx-voice-btn");
+        return {
+          role: name ? name.value : "",
+          readonly: !!(name && name.readOnly),
+          deletable: !!row.querySelector(".idx-role-del"),
+          locked: !!row.querySelector(".idx-role-lock"),
+          voiceRole: btn ? (btn.getAttribute("data-role") || "") : "",
+          voiceTag: btn ? btn.tagName : "",
+          buttonText: btn ? (btn.textContent || "").trim() : ""
+        };
+      });
+      return Array.from(document.querySelectorAll('[data-role="roles-list"] .idx-role-row')).map((row) => {
         const name = row.querySelector(".idx-role-name");
         return {
           role: name ? name.value : "",
@@ -600,13 +616,27 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
         runtimeParts: fetches.filter((r) => /\/static\/tavo\.runtime\.parts\//.test(r.url)).length,
         subtitleHeight: sub ? getComputedStyle(sub).height : null,
         status: status ? status.textContent : "",
-        playbackToggleText: (document.querySelector('[data-role="playback-mode-toggle"]') || {}).textContent || "",
+        playbackToggleText: (playbackToggle || {}).textContent || "",
         modeLabels: Array.from(document.querySelectorAll(".idx-mode")).map((b) => (b.textContent || "").trim()),
+        headerControls: [headerCounter, playbackToggle, gear].map((el) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          const s = getComputedStyle(el);
+          return {
+            left: r.left,
+            top: r.top,
+            width: r.width,
+            height: r.height,
+            borderColor: s.borderColor,
+            backgroundColor: s.backgroundColor
+          };
+        }),
         card: !!document.querySelector(".idx-card"),
         panelOpen: !!document.querySelector('[data-role="panel"][open]'),
         cardRect: cardRect ? { left: cardRect.left, top: cardRect.top, width: cardRect.width, height: cardRect.height } : null,
         panelRect: panelRect ? { left: panelRect.left, top: panelRect.top, width: panelRect.width, height: panelRect.height } : null,
         closeRect: closeRect ? { width: closeRect.width, height: closeRect.height } : null,
+        normalRows,
         roleMapping: []
       });
     });
@@ -628,8 +658,35 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
       throw new Error("settings close button should be a compact icon button: " + JSON.stringify(afterRuntime.closeRect));
     }
     if (afterRuntime.playbackToggleText.trim() !== "LIVE") throw new Error("playback toggle should default to LIVE: " + JSON.stringify(afterRuntime));
+    if (!afterRuntime.headerControls || afterRuntime.headerControls.some((x) => !x)) {
+      throw new Error("header controls should all exist: " + JSON.stringify(afterRuntime.headerControls));
+    }
+    const headerHeights = afterRuntime.headerControls.map((x) => x.height);
+    const headerTops = afterRuntime.headerControls.map((x) => x.top);
+    if (Math.max(...headerHeights) - Math.min(...headerHeights) > 2 || Math.max(...headerTops) - Math.min(...headerTops) > 2) {
+      throw new Error("header controls should share height and vertical alignment: " + JSON.stringify(afterRuntime.headerControls));
+    }
+    if (afterRuntime.headerControls[2].width - afterRuntime.headerControls[2].height > 2) {
+      throw new Error("settings button should stay a compact square icon button: " + JSON.stringify(afterRuntime.headerControls[2]));
+    }
     if (!afterRuntime.modeLabels.some((x) => /普通模式/.test(x)) || !afterRuntime.modeLabels.some((x) => /AI模式/.test(x))) {
       throw new Error("settings should expose 普通模式/AI模式 labels: " + JSON.stringify(afterRuntime.modeLabels));
+    }
+    const normalRows = afterRuntime.normalRows || [];
+    if (normalRows.length !== 3 || normalRows.map((r) => r.role).join("/") !== "默认/旁白/对话") {
+      throw new Error("normal mode voices should use fixed role-style rows: " + JSON.stringify(normalRows));
+    }
+    if (normalRows.some((r) => !r.readonly || r.deletable || !r.locked)) {
+      throw new Error("normal mode voice rows should be locked and non-deletable: " + JSON.stringify(normalRows));
+    }
+    if (normalRows[0].voiceRole !== "default-voice-label" || normalRows[0].voiceTag === "BUTTON") {
+      throw new Error("default normal voice row should be locked display-only: " + JSON.stringify(normalRows));
+    }
+    if (normalRows[1].voiceRole !== "normal-narrator-voice-btn" || normalRows[2].voiceRole !== "normal-dialogue-voice-btn") {
+      throw new Error("only narrator/dialogue normal rows should expose voice picker buttons: " + JSON.stringify(normalRows));
+    }
+    if (await page.locator('[data-role="default-voice-btn"]').count()) {
+      throw new Error("default normal voice should not expose a picker button");
     }
 
     const roleMapping = afterRuntime.roleMapping;
@@ -640,7 +697,7 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
       throw new Error("default role mapping still contains literal placeholder '角色': " + JSON.stringify(roleMapping));
     }
 
-    await page.click('[data-role="default-voice-btn"]');
+    await page.click('[data-role="normal-narrator-voice-btn"]');
     await page.waitForSelector('[data-role="voice-picker"][open]', { timeout: 5000 });
     await page.waitForFunction(() => {
       const fetches = window.__idxTest && window.__idxTest.getFetchLog ? window.__idxTest.getFetchLog() : [];
@@ -654,7 +711,7 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
     const afterPicker = await page.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
       const grid = document.querySelector('[data-role="picker-grid"]');
-      const defBtn = document.querySelector('[data-role="default-voice-btn"]');
+      const narratorBtn = document.querySelector('[data-role="normal-narrator-voice-btn"]');
       const picker = document.querySelector('[data-role="voice-picker"][open]') || document.querySelector('[data-role="voice-picker"]');
       const pickerRect = picker ? picker.getBoundingClientRect() : null;
       const pickerStyle = picker ? getComputedStyle(picker) : null;
@@ -662,7 +719,7 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
         voices: fetches.filter((r) => /\/voices(?:[?#]|$)/.test(r.url)).length,
         items: grid ? grid.querySelectorAll(".idx-picker-item").length : 0,
         gridText: grid ? grid.textContent.trim().slice(0, 80) : "",
-        defaultVoiceText: defBtn ? defBtn.textContent.trim() : "",
+        narratorVoiceText: narratorBtn ? narratorBtn.textContent.trim() : "",
         pickerOpen: !!(picker && picker.open),
         pickerDisplay: pickerStyle ? pickerStyle.display : "",
         pickerRect: pickerRect ? { left: pickerRect.left, top: pickerRect.top, width: pickerRect.width, height: pickerRect.height } : null

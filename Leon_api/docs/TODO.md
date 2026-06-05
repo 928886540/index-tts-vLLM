@@ -11,7 +11,7 @@
   - verify API startup on `9880`;
   - `static/tavo.js` now matches the desired live-card boundary in code: live is transient, saved is native `<audio>`;
   - `static/tavo.js` is now a light loader; runtime lives in `static/tavo.runtime.js` + `static/tavo.runtime.parts/`;
-  - update Tavo regex/cache-busting URL to `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-normal-generate-v1`;
+  - update Tavo regex/cache-busting URL to `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ui-unify-v2`;
   - run a short end-to-end generation without ComfyUI occupying GPU.
 
 - Resource and RTF baseline:
@@ -29,6 +29,10 @@
   - live `code=4` fallback implemented: live stream errors wait for saved cache instead of poisoning the audio element;
   - failed/missing/deleted jobs still need real Tavo validation to confirm they do not become `<audio>` sources;
   - error UI should show backend failure, not generic audio format errors.
+
+- Human-readable cache index:
+  - code now writes one primary-role readable entry under `outputs/cache/by_role/<主角色>/<timestamp>_<cache_key>.wav`;
+  - still run one real generation to confirm the generated role folder and matching JSON look right with actual Tavo metadata.
 
 ## P1
 

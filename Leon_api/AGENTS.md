@@ -47,6 +47,7 @@ For long tasks, update `docs/AGENT_STATE.md` after each stable milestone. If con
 
 - This is a local IndexTTS2 + vLLM + Tavo integration workspace, not a hosted SaaS service.
 - `Leon_api/` is the collaboration and handoff area. The production runtime code lives at the repository root.
+- Hard startup rule: Codex must use the LEON launcher EXE under `Leon_api` env-check folder for service startup/restart workflows, not direct `go-API-VLLM-NoQwen.bat`. The launcher must not auto-start the backend on open; users manually click the launcher start button.
 - Do not delete or reorganize `prompts/`, `prompts/library/`, or reference audio assets unless the user explicitly asks.
 - Do not run long TTS generation, batch audio tests, or restart the API while the user may be actively using it unless they asked for it or approved it.
 - Prefer root-cause analysis over broad fallback behavior. If adding a workaround, label it as a workaround.

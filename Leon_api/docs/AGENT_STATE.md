@@ -35,6 +35,7 @@ Completed in code:
 - Replaced user-facing `单音色/多音色` with `普通模式/AI模式`. 普通模式 sends raw text plus default/旁白/对白 voices to the backend deterministic splitter with `parse_mode=normal`; AI模式 sends `parse_mode=ai` and LLM config to backend-owned parsing.
 - Added the player `LIVE/生成` quick switch. LIVE keeps the transient streaming card; 生成 creates a background job, persists the pending cache key, polls `/tts_dialogue_job_status/{cache_key}`, and restores it after re-entering the message.
 - Deleting pending/live tracks now aborts frontend job creation/stream readers, calls backend DELETE when a cache key exists, removes pending Tavo storage, and the backend reports `cancelled` instead of turning cancellation into a failed LLM/TTS job.
+- Added a human-readable cache index. The stable API files remain `outputs/cache/{cache_key}.wav/json`; each saved cache also writes one primary-role entry under `outputs/cache/by_role/<主角色>/<timestamp>_<cache_key>.wav/json` for manual backtracking.
 - Kept IndexTTS2 business rules in the runtime parts: saved/cache audio still uses native `<audio>`, live/pending tracks stay transient, and LLM role ownership stays with the LLM output.
 - Updated Playwright smoke to assert the lazy entry does not load runtime parts, request `/voices`, or create TTS jobs before user interaction.
 
@@ -45,6 +46,7 @@ node --check static\tavo.js
 node --check static\tavo.runtime.js
 node --check Leon_api\dev_tools\test_tavo_widget_playwright.js
 python -m py_compile indextts2_api.py indextts\infer_vllm_v2.py indextts\gpt\model_vllm_v2.py
+D:\apiWorkSpace\index-tts2-vLLM\indextts2runtime\python.exe Leon_api\dev_tools\test_snapshot_cache_readable.py
 node Leon_api\dev_tools\test_tavo_widget_playwright.js
 ```
 
@@ -60,8 +62,47 @@ Screenshots saved for layout evidence:
 Tavo regex cache-busting URL should be updated to:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-normal-generate-v1"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ui-unify-v2"></script>
 ```
+
+## Latest Packaging Snapshot: LEON Launcher
+
+Updated: 2026-06-05
+
+Created a local Windows launcher workspace under `Leon_api/环境检查/`.
+
+Files:
+
+- `LEON启动器.exe`: user-facing double-click entry. It is a small C# WinExe bootstrapper that loads the WinForms PowerShell launcher from the same folder and bypasses `.ps1` file association issues.
+- `LEON启动器.bootstrap.cs`: maintainable source for rebuilding `LEON启动器.exe` with the built-in .NET Framework `csc.exe`.
+- `leon-launcher.ico`: launcher icon generated from the provided avatar and embedded into the EXE.
+- `一键环境检查和启动.bat`: backup entry only.
+- `LEON启动器.ps1`: WinForms launcher with first-open environment check, manual check/repair, service start/stop, backend log view, voice list refresh, normal-mode multi-voice test, and Tavo setup instructions.
+- `README.md`: short usage notes for the launcher folder.
+- `leon-avatar.jpeg`: copied avatar source used as launcher asset input.
+- `leon-launcher-banner-avatar-ai.png`: generated launcher banner using the provided avatar.
+
+Important behavior:
+
+- Mandatory startup method: use `Leon_api\环境检查\LEON启动器.exe` as the user/Codex entry for startup and restart workflows. Do not directly run `go-API-VLLM-NoQwen.bat` from Codex unless the user explicitly asks for low-level troubleshooting.
+- The launcher must not auto-start the backend when opened. It performs environment checks and waits for the user to click the launcher start button.
+- Internally, the launcher start button calls the confirmed root BAT: `go-API-VLLM-NoQwen.bat`. Treat that BAT as an implementation detail, not the operator entry. `一键环境检查和启动.bat` is backup only.
+- Checks include administrator status, Chinese path, `indextts2runtime\python.exe`, NVIDIA driver, CUDA Toolkit / `nvcc`, MSVC `cl.exe`, runtime-aware SVML compatibility, Torch CUDA / vLLM / FastAPI / ninja imports, `patch_vllm` registration, required checkpoint files, voice library count, API port `9880`, and startup BAT presence.
+- One-click repair can copy the bundled `svml_dispmd.dll` into the project runtime only when import logs indicate SVML/LLVM/DLL load trouble, launch `winget` installs for Visual Studio Build Tools and NVIDIA CUDA Toolkit, and install `ninja` into the project runtime.
+- Voice testing uses `/voices`, `/tts_dialogue_stream_job`, `/tts_dialogue_job_status/{cache_key}`, and `/cache_audio/{cache_key}` with `parse_mode=normal`.
+- Tavo instructions use the current cache-busted script URL: `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ui-unify-v2`.
+- No image API key or OpenAI-compatible key is written into launcher files or docs.
+- `LEON启动器.ps1` is UTF-8 with BOM so Windows PowerShell 5.1 can parse Chinese text directly.
+
+Verified:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '$errs=$null; $tokens=$null; [System.Management.Automation.Language.Parser]::ParseFile("D:\apiWorkSpace\index-tts2-vLLM\Leon_api\环境检查\LEON启动器.ps1",[ref]$tokens,[ref]$errs) | Out-Null; if($errs){ exit 1 }'
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '$env:LEON_LAUNCHER_SCRIPT="D:\apiWorkSpace\index-tts2-vLLM\Leon_api\环境检查\LEON启动器.ps1"; $p=$env:LEON_LAUNCHER_SCRIPT; $utf8=New-Object System.Text.UTF8Encoding($false); $code=[System.IO.File]::ReadAllText($p,$utf8); Set-Location "D:\apiWorkSpace\index-tts2-vLLM\Leon_api\环境检查"; Invoke-Expression $code'
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; $p = Start-Process -FilePath "D:\apiWorkSpace\index-tts2-vLLM\Leon_api\环境检查\LEON启动器.exe" -WorkingDirectory "D:\apiWorkSpace\index-tts2-vLLM\Leon_api\环境检查" -Wait -PassThru; $p.ExitCode
+```
+
+The generated EXE SHA256 is `ACA06C44076D29694EBE9DE0D6AFAEA6FD98F2EEF82EB354AA63BDC5C2794416`.
 
 ## Known Runtime Situation
 

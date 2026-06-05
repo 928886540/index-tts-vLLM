@@ -1,0 +1,5 @@
+观察到部分用户（特别是win10系统的）存在缺失运行依赖的问题，导致api崩溃。
+
+解决方法：
+https://www.dll-files.com/svml_dispmd.dll.html
+下载19.0.0.0的svml_dispmd.dll（网盘里已经提供，可以直接下载）放至C:\Windows\System32下

@@ -83,17 +83,17 @@ node Leon_api\dev_tools\test_tavo_widget_playwright.js
 
 仓库目录：`D:\apiWorkSpace\index-tts2-vLLM`
 
-前台启动（占当前窗口）：
+以后用户/Codex 启动或重启服务都统一走 EXE 启动器：
 
-```powershell
-. .\indextts2runtime\python.exe indextts2_api.py -a 0.0.0.0 -p 9880 --fp16 --cuda_kernel
+```text
+Leon_api\环境检查\LEON启动器.exe
 ```
 
-后台启动（不占当前窗口）：
+启动器会先做环境检查和展示界面，不允许打开后自动启动后端。需要用户手动点击启动器里的 `启动服务`。
 
-```powershell
-Start-Process -FilePath "D:\apiWorkSpace\index-tts2-vLLM\indextts2runtime\python.exe" -ArgumentList "indextts2_api.py -a 0.0.0.0 -p 9880" -WorkingDirectory "D:\apiWorkSpace\index-tts2-vLLM"
-```
+`go-API-VLLM-NoQwen.bat` 只是启动器内部调用的实现细节；除非用户明确要求底层排障，Codex 不要直接运行它。
+
+不要再找所谓 `lan` 启动脚本；当前统一入口就是 `Leon_api\环境检查\LEON启动器.exe`。
 
 ## TAVO WebUI 测试固定方案
 
@@ -150,7 +150,7 @@ node Leon_api\dev_tools\test_tavo_widget_playwright.js
 正则里用最新版脚本：
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-normal-generate-v1"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ui-unify-v2"></script>
 ```
 
 ## 访问地址

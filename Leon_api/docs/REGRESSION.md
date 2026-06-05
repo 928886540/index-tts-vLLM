@@ -88,6 +88,8 @@ Current lazy-loader assertions:
 - settings panel is aligned with the player card and its close button is at least 30px square;
 - opening the voice picker requests `/voices`, renders voice items, and has at least 540px height on desktop smoke;
 - settings exposes `普通模式` / `AI模式` and the player quick toggle defaults to `LIVE`;
+- player header `0/0`, `LIVE/生成`, and settings controls share height and top alignment;
+- normal-mode voice rows use the same row layout as role mapping: 默认 is locked display-only, only 旁白/对话 open the picker;
 - subtitle height remains `136px`.
 
 ## Cache / Snapshot Regression
@@ -98,6 +100,7 @@ For a generated `cache_key`:
 curl.exe --noproxy "*" -I http://127.0.0.1:9880/cache_audio/<cache_key>
 curl.exe --noproxy "*" -s http://127.0.0.1:9880/tts_dialogue_job_status/<cache_key>
 curl.exe --noproxy "*" -H "Range: bytes=0-99" http://127.0.0.1:9880/cache_audio/<cache_key>
+D:\apiWorkSpace\index-tts2-vLLM\indextts2runtime\python.exe Leon_api\dev_tools\test_snapshot_cache_readable.py
 ```
 
 Expected:
@@ -105,6 +108,10 @@ Expected:
 - Completed cache audio returns 200 and supports byte-range reads when appropriate.
 - Job status contains state, cache information, segment metadata, and metrics.
 - Missing cache should be reported as missing, not treated as playable audio.
+- Root cache files remain at `outputs/cache/<cache_key>.wav` and `.json`; `/cache_audio/<cache_key>` must keep using this stable key path.
+- A readable index entry should also exist at `outputs/cache/by_role/<主角色>/<timestamp>_<cache_key>.wav` with a matching `.json`.
+- Only one primary-role readable entry is expected per cache key. Prefer a non-generic role over `旁白` / `对白` / `default`; if none exists, use the most frequent available role.
+- Cache hit metadata and cache deletion/pruning should update or remove the readable JSON/WAV together with the root cache.
 
 ## History Count Guard
 
@@ -213,8 +220,23 @@ For 普通模式:
 
 - Frontend submits `parse_mode=normal`.
 - Frontend submits `voices.default`, `voices.旁白`, and `voices.对白`; if only default is configured, 旁白/对白 should map to default.
+- Settings UI shows 默认/旁白/对话 as fixed rows; 默认 is locked display-only and 旁白/对话 are picker buttons.
 - Frontend does not submit LLM endpoint/model/key in normal mode.
 - Backend strips tags/script/style/template content, removes emoji/control noise, splits quoted dialogue into `对白`, and maps the rest to `旁白`.
+
+## Launcher Environment Guard
+
+For `Leon_api/环境检查/LEON启动器.ps1`:
+
+- `LEON_LAUNCHER_SMOKE_TEST=1` should build and dispose the launcher without starting the API service.
+- The WinForms form should load `leon-launcher.ico` as `Form.Icon` and set a LEON AppUserModelID so the taskbar does not fall back to the PowerShell identity where Windows supports it.
+- Opening the launcher may run environment detection, but it must not call `Start-LeonService` automatically. Backend startup should require clicking the large lower-left `启动 LEON 服务` button.
+- The sidebar should not contain a second small `启动服务` button that competes with the primary start action.
+- The center first tab should be `首页日志`, receive launcher logs, and refresh backend logs from `/server_log/tail` when the API is available. The `首页 / 日志` sidebar button should return to this view after using other launcher functions.
+- The launcher may call `/warmup` only after a user-triggered service start reaches `/health`; it must not warm the model just because the launcher window opened.
+- Backend `/warmup` should run a tiny inference under `tts_stream_lock`, return warmup state through `GET /warmup`, and avoid rerunning unless `force=true`.
+- The SVML check must prefer runtime evidence over global DLL presence. If `indextts2runtime\python.exe` can import `torch` and `vllm`, the `Intel SVML 兼容兜底` row should be OK even when `svml_dispmd.dll` is absent from `C:\Windows\System32` and global PATH.
+- One-click repair should copy bundled `svml_dispmd.dll` into the project runtime only when Torch/vLLM import output indicates SVML, LLVM, or DLL load failure. It should not blindly write `svml_dispmd.dll` to `C:\Windows\System32`.
 
 ## Secret Scan
 

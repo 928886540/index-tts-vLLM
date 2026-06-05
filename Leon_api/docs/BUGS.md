@@ -270,7 +270,7 @@ Guard: Settings and picker close buttons use the same compact style and open cen
 
 ## BUG-014: cache audio files need human-readable role folders and timestamp names
 
-Status: open, recorded
+Status: fixed in code, needs real generation validation
 
 Reported: 2026-06-05
 
@@ -278,10 +278,80 @@ Repro: User wants generated audio cache files to be easier to inspect and backtr
 
 Evidence: Current snapshot cache stores files as `outputs/cache/{sha1}.wav` and `{sha1}.json`, which is stable for API lookup but hard to browse manually.
 
-Hypothesis: Keep the original SHA1 cache key as the API identity, but add a human-readable storage/index layer grouped by role or character. File names should start with a timestamp, include the original key, and sort newest-first by timestamp so old generations are easy to review.
+Hypothesis: Keep the original SHA1 cache key as the API identity, but add a human-readable storage/index layer grouped by role or character. File names should start with a timestamp, include the original key, and sort by timestamp so old generations are easy to review.
 
 Root cause: Current cache design optimizes deterministic lookup, not manual audit/history browsing.
 
-Fix: pending. Do this after the Tavo normal/AI/live/generate lifecycle change is stable. Do not break existing `/cache_audio/{key}` lookup or saved Tavo history keys.
+Fix: `indextts/snapshot_cache.py` now keeps the legacy root cache files (`outputs/cache/{key}.wav` and `{key}.json`) as the API identity for `/cache_audio/{key}`, then creates one readable role-indexed entry under `outputs/cache/by_role/<主角色>/<timestamp>_<key>.wav` plus matching JSON metadata. The primary role is chosen from metadata by preferring non-generic roles over `旁白` / `对白` / `default`, then by segment frequency. The audio entry uses an NTFS hardlink when possible and falls back to copy. Cache hits sync hit metadata into the readable JSON, and delete/prune remove the readable entry with the root cache.
 
-Guard: Different roles/characters should get separate folders. The original cache key must remain in the filename/metadata. Timestamp naming must make directory listing readable in reverse chronological order, while API lookup by original key still works.
+Guard: Different primary roles/characters should get separate folders. The original cache key must remain in the filename/metadata. Sorting filenames by name descending should put the newest timestamp first. API lookup by original key must still work through `/cache_audio/{key}` and must not depend on the readable folder.
+
+## BUG-015: Tavo header controls and normal-mode voice UI are visually inconsistent
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-05
+
+Repro: User showed the player header where `0/0`, `LIVE`, and the settings icon use different visual weights, sizes, and colors. User also showed the 普通模式音色 section, where default/narrator/dialogue voice buttons are plain stacked buttons instead of matching the role voice mapping rows.
+
+Evidence: `static/tavo.ui.skin.default.css` and `static/tavo.runtime.parts/05_style_config.js` style `.idx-card-counter`, `.idx-playback-toggle`, and `.idx-gear` separately. `static/tavo.runtime.parts/40_mount_shell.js` renders normal-mode voices as three standalone `.idx-voice-btn` buttons, unlike AI role mapping rows.
+
+Hypothesis: The normal/generate feature added new controls with one-off styling instead of reusing the existing player token and role-row components.
+
+Root cause: The LIVE/generate quick switch and normal-mode voice controls were added with one-off UI surfaces. The header controls did not share one sizing/alignment rule, and normal mode used standalone picker buttons instead of the existing role-row layout. The first fix also made 默认/旁白/对话 all look equally selectable, but the intended model is that 默认音色 is the locked base voice and only 旁白/对话 are configurable overrides.
+
+Fix: `static/tavo.runtime.parts/40_mount_shell.js` now renders 普通模式音色 as three role-style rows. 默认 is a locked display-only row (`default-voice-label`), while 旁白 and 对话 are the only voice picker buttons. `50_settings_fields.js` updates those labels without reading normal rows into the AI role list. `54_voice_picker.js` ignores the read-only default row and scopes role-row events to `[data-role="roles-list"]`. Header styles in `static/tavo.ui.skin.default.css` and fallback CSS unify the counter, LIVE/生成 toggle, and settings icon height/top/background/icon scale. Cache busting is bumped to `20260605-ui-unify-v2`.
+
+Guard: Player header controls should share the same top, height, glass background, border weight, and icon scale. Normal-mode voice settings must use role-row layout with `默认/旁白/对话`; 默认 must be display-only and not expose `[data-role="default-voice-btn"]`, while 旁白 and 对话 expose picker buttons. Normal-mode rows must not be saved into AI role mappings.
+
+## BUG-016: Launcher SVML check can warn even when the runtime works
+
+Status: fixed, needs launcher smoke validation on another clean machine
+
+Reported: 2026-06-05
+
+Repro: User noted that the project has already been running, so a launcher warning that `svml_dispmd.dll` is missing is misleading. If the current runtime can import and run vLLM/Torch, then the environment either does not need the standalone DLL on that path or resolves the dependency through another route.
+
+Evidence: `where.exe svml_dispmd.dll` and `ctypes.WinDLL('svml_dispmd.dll')` both fail on the current machine, and the only project copy is the bundled fallback under `Leon_api/LLVM ERROR报错解决/`. Despite that, `indextts2runtime\python.exe` can import `torch 2.7.1+cu128`, `vllm 0.10.3.dev0`, `triton 3.3.1`, `llvmlite 0.44.0`, and `numba 0.61.2`. The live API on `127.0.0.1:9880` reports healthy, the running process loads both BigVGAN CUDA extension modules, and `dumpbin /DEPENDENTS` shows no `svml_dispmd.dll` dependency for the active BigVGAN `.pyd`, `llvmlite.dll`, `numba` runtime, or `triton` runtime.
+
+Hypothesis: The launcher over-reported optional Intel SVML compatibility risk as if it were a direct missing dependency. The better check should prefer runtime evidence: search the project runtime DLL paths, then run the same Python import probe used for Torch/vLLM checks, and only warn strongly when vLLM/Torch import fails with SVML/LLVM/DLL evidence.
+
+Root cause: The original launcher check treated global DLL absence (`System32` / PATH) as a warning by itself. That does not match the real backend chain, where Torch/vLLM/BigVGAN CUDA can run without a standalone globally loadable `svml_dispmd.dll` on this machine.
+
+Fix: `LEON启动器.ps1` now uses a runtime-aware probe. If the project runtime can import Torch and vLLM, the SVML compatibility row is OK even when the standalone DLL is absent globally. One-click repair only copies the bundled DLL into the project runtime when the import probe output indicates SVML, LLVM, or DLL load failure. The row label was also changed to `Intel SVML 兼容兜底` to avoid presenting it as a mandatory core dependency.
+
+Guard: A machine where `indextts2runtime\python.exe` can import `torch` and `vllm` should not show the SVML row as missing just because `svml_dispmd.dll` is absent from `System32` or global PATH. If import fails and the error mentions `svml_dispmd.dll`, LLVM, or DLL load failure, the launcher should surface that as a real repair target.
+
+## BUG-017: Launcher taskbar icon and startup action are unclear
+
+Status: fixed in launcher, needs visual confirmation on the real desktop
+
+Reported: 2026-06-05
+
+Repro: User opened `LEON启动器.exe` and saw a PowerShell icon in the taskbar. User also asked that the launcher should not feel like it starts automatically on open, and should provide a large start button in the lower-left corner.
+
+Evidence: The EXE is a C# bootstrapper that launches the PowerShell WinForms script. The PowerShell form did not explicitly set a form icon or AppUserModelID, so Windows can show/group it as a PowerShell window. The left sidebar also had a normal-sized `启动服务` button mixed with other utility actions.
+
+Hypothesis: The launcher needs to set its own form/taskbar identity inside the PowerShell-hosted WinForms process, and the service start action needs to be visually separated as the primary manual action.
+
+Root cause: `LEON启动器.exe` is a small bootstrapper that starts the PowerShell-hosted WinForms UI. The EXE file has an icon, but the actual taskbar window belongs to the PowerShell process unless the form sets its own icon/taskbar identity. The service start button was also just one normal sidebar button, so it did not read as the explicit manual primary action.
+
+Fix: `LEON启动器.ps1` now sets `SetCurrentProcessExplicitAppUserModelID("LEON.IndexTTS2.Launcher")` when available and assigns `leon-launcher.ico` to the WinForms `Form.Icon`. The small sidebar `启动服务` entry was removed and replaced with a large lower-left `启动 LEON 服务` button. Opening the launcher still runs environment detection only; backend startup remains tied to clicking the large start button.
+
+Guard: Opening the launcher should show the LEON icon in the taskbar/Alt-Tab where Windows honors the WinForms icon, should run only environment detection automatically, and should require the user to click a large lower-left `启动 LEON 服务` button before starting the backend.
+
+## BUG-018: Launcher home should show logs and startup should warm the model
+
+Status: fixed in code, warmup requires next API restart to become active
+
+Reported: 2026-06-05
+
+Repro: User asked for console/backend logs to appear in the center area by default, with a home button to return to logs after visiting other functions. User also asked whether first startup preheats the model, because the first generation can stall on model/kernel warmup.
+
+Evidence: The launcher had a small bottom launcher-log area and a separate `后台日志` tab, so the default center page was environment checks rather than logs. Backend `/health` only returns `{"status":"ok"}` and does not call `tts_pipeline.infer()`, so it proves liveness/model load but does not pre-run vLLM/Torch/BigVGAN inference kernels.
+
+Root cause: Launcher logs and backend logs were split across a small bottom area and a non-default tab. API startup initialized `IndexTTS2`, but no tiny inference was run after startup, leaving first-use CUDA/vLLM/BigVGAN overhead for the first real user generation.
+
+Fix: `LEON启动器.ps1` now uses the center first tab as `首页日志`, writes launcher logs there, pulls `/server_log/tail` when the API is available, and adds a sidebar `首页 / 日志` button. `indextts2_api.py` adds `GET/POST /warmup`; `POST /warmup` runs one very short inference under `tts_stream_lock` using a voice-library sample and fast settings. The launcher calls warmup only after the user clicks `启动 LEON 服务` and the API becomes ready; opening the launcher still does not start or warm the backend automatically.
+
+Guard: Opening the launcher should default to the center log view. Switching to environment, voice, or Tavo pages should not hide the ability to return via `首页 / 日志`. Startup should call `/warmup` only after the API reports ready from a user-triggered service start, and `/warmup` should be guarded by `tts_stream_lock` so it does not race real generation.

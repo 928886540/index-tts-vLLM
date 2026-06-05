@@ -2,11 +2,11 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260605-normal-generate-v1";
+  var LOADER_VERSION = "20260605-ui-unify-v2";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
-  var PICKER_TRIGGER_SELECTOR = '[data-role="default-voice-btn"],.idx-role-row .idx-voice-btn,.idx-picker-item,.idx-picker-apply';
+  var PICKER_TRIGGER_SELECTOR = '[data-role="normal-narrator-voice-btn"],[data-role="normal-dialogue-voice-btn"],[data-role="roles-list"] .idx-voice-btn,.idx-picker-item,.idx-picker-apply';
 
   function deriveBaseUrl(src) {
     var raw = String(src || "").trim();

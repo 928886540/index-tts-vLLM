@@ -30,7 +30,7 @@
       try { audio.playbackRate = cfg.speedFactor; } catch (_) {}
       // cfg.roleVoiceList 由 renderRoleList 实时维护(addRoleRow/setRowVoice 等),
       // 这里把行里的角色名/音色同步抓一遍(防止用户没失焦就保存)。
-      var rows = $all(panel, '.idx-role-row');
+      var rows = rolesListEl ? $all(rolesListEl, '.idx-role-row') : [];
       var newList = [];
       rows.forEach(function (row) {
         var nameEl = first(row, '.idx-role-name');
@@ -109,12 +109,23 @@
       var def = String(cfg.defaultVoice || "").trim();
       var narrator = voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], def, cfg.currentCharacterName);
       var dialogue = voiceForRoleInList(cfg.roleVoiceList, ["对白", "dialogue", "台词"], def, cfg.currentCharacterName);
-      var defBtn = first(panel, '[data-role="default-voice-btn"]');
+      var defBtn = first(panel, '[data-role="default-voice-label"]');
       var narratorBtn = first(panel, '[data-role="normal-narrator-voice-btn"]');
       var dialogueBtn = first(panel, '[data-role="normal-dialogue-voice-btn"]');
-      if (defBtn) defBtn.textContent = def ? ("默认：" + def) : "默认音色…";
-      if (narratorBtn) narratorBtn.textContent = narrator ? ("旁白：" + narrator) : (def ? ("旁白：默认 " + def) : "旁白音色…");
-      if (dialogueBtn) dialogueBtn.textContent = dialogue ? ("对白：" + dialogue) : (def ? ("对白：默认 " + def) : "对白音色…");
+      if (defBtn) {
+        defBtn.textContent = def ? shortName(def) : "未设置默认音色";
+        defBtn.title = def || "默认音色未设置";
+      }
+      if (narratorBtn) {
+        var narratorOwn = narrator && narrator !== def;
+        narratorBtn.textContent = narratorOwn ? shortName(narrator) : (def ? ("继承默认：" + shortName(def)) : "选择旁白音色…");
+        narratorBtn.title = narratorOwn ? narrator : (def ? ("继承默认：" + def) : "选择旁白音色");
+      }
+      if (dialogueBtn) {
+        var dialogueOwn = dialogue && dialogue !== def;
+        dialogueBtn.textContent = dialogueOwn ? shortName(dialogue) : (def ? ("继承默认：" + shortName(def)) : "选择对话音色…");
+        dialogueBtn.title = dialogueOwn ? dialogue : (def ? ("继承默认：" + def) : "选择对话音色");
+      }
     }
     function syncUI() {
       cfg.mode = normalizeModeName(cfg.mode);

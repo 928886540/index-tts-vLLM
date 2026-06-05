@@ -227,6 +227,12 @@ class TTS_Request(BaseModel):
     s2mel_cfg_rate: Optional[float] = None
 
 
+class Warmup_Request(BaseModel):
+    voice: Optional[str] = None
+    text: Optional[str] = None
+    force: bool = False
+
+
 # Phase 2 dialogue request models.
 # `segments` is still accepted for old callers that pre-parse text. The Tavo
 # intelligent path should send raw `text` plus LLM config and let the backend
@@ -444,6 +450,13 @@ def _apply_s2mel_test_overrides(req: dict, sampling_kwargs: dict) -> dict:
 tts_stream_lock = asyncio.Lock()
 STREAM_JOBS: Dict[str, dict] = {}
 STREAM_JOB_TTL_SECONDS = 600
+WARMUP_STATE = {
+    "status": "idle",
+    "voice": None,
+    "elapsed_s": None,
+    "updated_at": None,
+    "error": None,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1552,6 +1565,69 @@ def _resolve_ref_audio(req: dict):
     return None
 
 
+def _pick_warmup_voice(name_or_path: Optional[str] = None) -> Optional[str]:
+    resolved = _resolve_voice(name_or_path or "") if name_or_path else None
+    if resolved:
+        return resolved
+    try:
+        from indextts import voice_library
+        for item in voice_library.list_voices():
+            path = item.get("path") or item.get("name")
+            resolved = _resolve_voice(path)
+            if resolved:
+                return resolved
+    except Exception:
+        pass
+    return None
+
+
+async def _run_model_warmup(voice: Optional[str] = None, text: Optional[str] = None, force: bool = False) -> dict:
+    if WARMUP_STATE.get("status") == "ok" and not force:
+        return {**WARMUP_STATE, "status": "already_warmed"}
+    if WARMUP_STATE.get("status") == "running" and not force:
+        return {**WARMUP_STATE, "status": "running"}
+
+    pipeline = globals().get("tts_pipeline")
+    if pipeline is None:
+        return {"status": "failed", "error": "tts_pipeline is not initialized"}
+
+    voice_path = _pick_warmup_voice(voice)
+    if not voice_path:
+        return {"status": "failed", "error": "no usable voice found for warmup"}
+
+    warmup_text = (text or "你好。")[:24]
+    started = time.perf_counter()
+    WARMUP_STATE.update({"status": "running", "voice": voice_path, "updated_at": time.time(), "error": None})
+    print(f">> warmup start voice={voice_path} text={warmup_text!r}")
+    try:
+        async with tts_stream_lock:
+            await pipeline.infer(
+                spk_audio_prompt=voice_path,
+                emo_audio_prompt=None,
+                text=warmup_text,
+                emo_text=None,
+                use_emo_text=False,
+                emo_alpha=0.55,
+                emo_vector=None,
+                top_p=0.8,
+                top_k=30,
+                temperature=0.7,
+                repetition_penalty=1.2,
+                output_path=None,
+                **_stream_infer_kwargs(performance_mode="fast"),
+            )
+        elapsed = round(time.perf_counter() - started, 3)
+        WARMUP_STATE.update({"status": "ok", "elapsed_s": elapsed, "updated_at": time.time(), "error": None})
+        print(f">> warmup done elapsed={elapsed}s voice={voice_path}")
+        return {**WARMUP_STATE}
+    except Exception as e:
+        elapsed = round(time.perf_counter() - started, 3)
+        WARMUP_STATE.update({"status": "failed", "elapsed_s": elapsed, "updated_at": time.time(), "error": str(e)})
+        print(f">> warmup failed elapsed={elapsed}s error={e}")
+        traceback.print_exc()
+        return {**WARMUP_STATE}
+
+
 STYLE_VOICE_MAP = {
     "neutral": "",
     "none": "",
@@ -2291,6 +2367,25 @@ async def control(command: str = None):
 async def health():
     """Lightweight liveness probe for TAVO clients / monitoring."""
     return JSONResponse(content={"status": "ok"})
+
+
+@APP.get("/warmup")
+async def warmup_status():
+    """Return model warmup state without running inference."""
+    return JSONResponse(content={**WARMUP_STATE})
+
+
+@APP.post("/warmup")
+async def warmup_endpoint(request: Optional[Warmup_Request] = None):
+    """Run one tiny inference to absorb first-use CUDA/vLLM/BigVGAN overhead."""
+    req = request.dict() if request is not None else {}
+    result = await _run_model_warmup(
+        voice=req.get("voice"),
+        text=req.get("text"),
+        force=bool(req.get("force", False)),
+    )
+    status_code = 200 if result.get("status") in ("ok", "already_warmed", "running") else 400
+    return JSONResponse(status_code=status_code, content=result)
 
 
 @APP.get("/diagnostics/perf")
@@ -3130,6 +3225,7 @@ if __name__ == "__main__":
         print(f"  - POST     /parse_text           (optional OpenAI-compatible LLM proxy)")
         print(f"  - GET      /static/tavo.js       (single-file TAVO bridge)")
         print(f"  - GET      /health               (liveness probe)")
+        print(f"  - GET/POST /warmup              (one tiny inference to preheat kernels)")
         if host in ("127.0.0.1", "localhost"):
             print("  [NOTE] Bound to localhost only. For LAN/TAVO use, pass `-a 0.0.0.0`.")
         uvicorn.run(app=APP, host=host, port=port)
