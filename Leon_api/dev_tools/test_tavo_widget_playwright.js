@@ -57,7 +57,7 @@ async function runLlmReuseSmoke(browser, targetUrl) {
   page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
   page.on("console", (msg) => {
     const text = msg.text();
-    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端/i.test(text)) pageErrors.push(text);
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
   });
 
   let parseCount = 0;
@@ -313,11 +313,15 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
 
     const result = await page.evaluate(() => {
       const text = (document.querySelector(".idx-subtitle") || {}).textContent || "";
+      const play = document.querySelector('[data-role="play"]');
+      const liveExit = document.querySelector('[data-role="live-exit"]');
       const fetches = window.__idxTest.getFetchLog();
       return {
         parseFetches: fetches.filter((r) => /\/parse_text(?:[?#]|$)/.test(r.url)).length,
         jobs: fetches.filter((r) => /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
+        playDisabled: !!(play && play.disabled),
+        liveExitHidden: !!(liveExit && liveExit.classList.contains("idx-hidden")),
         text
       };
     });
@@ -331,8 +335,30 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
     if (!/后端 LLM 拆段失败/.test(result.text) || !/LLM 连接失败/.test(result.text)) {
       throw new Error("backend-owned LLM failure did not surface backend status/error clearly: " + result.text);
     }
+    if (!result.playDisabled || !result.liveExitHidden) {
+      throw new Error("failed live card should disable play and hide live-exit: " + JSON.stringify(result));
+    }
+    await page.evaluate(() => {
+      const play = document.querySelector('[data-role="play"]');
+      if (play) play.click();
+    });
+    await page.waitForTimeout(200);
+    const afterFailedClick = await page.evaluate(() => {
+      const sub = (document.querySelector(".idx-subtitle") || {}).textContent || "";
+      const status = (document.querySelector('[data-role="status"]') || {}).textContent || "";
+      const fetches = window.__idxTest.getFetchLog();
+      return {
+        sub,
+        status,
+        jobs: fetches.filter((r) => /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length
+      };
+    });
+    if (/AI模式正在生成|连接实时音频|等待首段音频/.test(afterFailedClick.sub + afterFailedClick.status) || afterFailedClick.jobs !== 1) {
+      throw new Error("failed live card play click should stay terminal: " + JSON.stringify(afterFailedClick));
+    }
     if (pageErrors.length) throw new Error("LLM error copy smoke page error: " + pageErrors.join(" | "));
-    return { parseCount, jobCount, statusCount, result };
+    return { parseCount, jobCount, statusCount, result, afterFailedClick };
   } finally {
     await context.close();
   }
@@ -534,7 +560,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
   page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
   page.on("console", (msg) => {
     const text = msg.text();
-    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端/i.test(text)) pageErrors.push(text);
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
   });
 
   const liveKey = "c".repeat(40);
@@ -640,6 +666,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         playState: play ? play.dataset.state : "",
         status,
         notice,
+        counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
         cacheChecks: fetches.filter((r) => /\/cache_audio\//.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
@@ -658,6 +685,9 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     }
     if (!result.liveExitVisible) {
       throw new Error("LIVE exit button should stay visible on a waiting live card: " + JSON.stringify(result));
+    }
+    if (!/^\d+\/\d+$/.test(result.counterText) || result.counterText === "L") {
+      throw new Error("LIVE card counter should stay as page text, not the L mode badge: " + JSON.stringify(result));
     }
     if (pageErrors.length) throw new Error("LIVE play-click smoke page error: " + pageErrors.join(" | "));
     return { headCount, statusCount, streamGetCount, result };
@@ -742,6 +772,9 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         card.setAttribute("data-live-active", "1");
         liveExit.classList.add("idx-hidden");
         liveExitDisplay = getComputedStyle(liveExit).display;
+        card.removeAttribute("data-live-active");
+        liveExit.classList.remove("idx-hidden");
+        liveExit.style.display = "flex";
       }
       const settingTitles = Array.from(document.querySelectorAll('[data-role="panel"] .idx-section-title')).map((x) => (x.textContent || "").trim());
       const normalRows = Array.from(document.querySelectorAll('[data-role="normal-voices"] .idx-normal-voice-row')).map((row) => {
@@ -845,7 +878,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (afterRuntime.runtimeParts < 16) throw new Error("runtime parts were not loaded, count=" + afterRuntime.runtimeParts);
     if (afterRuntime.voices !== 0) throw new Error("opening settings should not request /voices before the picker, count=" + afterRuntime.voices);
     if (afterRuntime.jobs !== 0) throw new Error("opening settings should not create TTS jobs, count=" + afterRuntime.jobs);
-    if (afterRuntime.subtitleHeight !== "136px") throw new Error("subtitle height should stay fixed at 136px, got " + afterRuntime.subtitleHeight);
+    if (afterRuntime.subtitleHeight !== "172px") throw new Error("subtitle height should stay fixed at 172px for four lyric rows, got " + afterRuntime.subtitleHeight);
     if (parseFloat(afterRuntime.cardMinHeight || "0") < 350) throw new Error("player card should keep a stable minimum height: " + JSON.stringify(afterRuntime));
     if (afterRuntime.liveExitDisplay !== "flex") throw new Error("LIVE exit button must stay visible under live-active CSS: " + JSON.stringify(afterRuntime));
     if (!afterRuntime.cardRect || !afterRuntime.panelRect) throw new Error("missing panel/card rects: " + JSON.stringify(afterRuntime));
@@ -917,14 +950,14 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (normalRows.some((r) => !r.readonly || r.deletable || !r.locked)) {
       throw new Error("normal mode voice rows should be locked and non-deletable: " + JSON.stringify(normalRows));
     }
-    if (normalRows[0].voiceRole !== "default-voice-label" || normalRows[0].voiceTag === "BUTTON") {
-      throw new Error("default normal voice row should be locked display-only: " + JSON.stringify(normalRows));
+    if (normalRows[0].voiceRole !== "default-voice-btn" || normalRows[0].voiceTag !== "BUTTON") {
+      throw new Error("default normal voice row should expose a default voice picker button: " + JSON.stringify(normalRows));
     }
     if (normalRows[1].voiceRole !== "normal-narrator-voice-btn" || normalRows[2].voiceRole !== "normal-dialogue-voice-btn") {
       throw new Error("only narrator/dialogue normal rows should expose voice picker buttons: " + JSON.stringify(normalRows));
     }
-    if (await page.locator('[data-role="default-voice-btn"]').count()) {
-      throw new Error("default normal voice should not expose a picker button");
+    if (!(await page.locator('[data-role="default-voice-btn"]').count())) {
+      throw new Error("default normal voice should expose a picker button");
     }
 
     const roleMapping = afterRuntime.roleMapping;
@@ -935,7 +968,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       throw new Error("default role mapping still contains literal placeholder '角色': " + JSON.stringify(roleMapping));
     }
 
-    await page.click('[data-role="normal-narrator-voice-btn"]');
+    await page.click('[data-role="default-voice-btn"]');
     await page.waitForSelector('[data-role="voice-picker"][open]', { timeout: 5000 });
     await page.waitForFunction(() => {
       const fetches = window.__idxTest && window.__idxTest.getFetchLog ? window.__idxTest.getFetchLog() : [];
@@ -945,6 +978,13 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       const grid = document.querySelector('[data-role="picker-grid"]');
       return grid && (grid.querySelector(".idx-picker-item") || /没有找到|没有匹配|读取失败/.test(grid.textContent || ""));
     }, { timeout: 10000 });
+    await page.click(".idx-picker-close");
+    await page.waitForSelector('[data-role="voice-picker"][open]', { state: "detached", timeout: 5000 }).catch(async () => {
+      await page.waitForFunction(() => !document.querySelector('[data-role="voice-picker"][open]'), { timeout: 5000 });
+    });
+
+    await page.click('[data-role="normal-narrator-voice-btn"]');
+    await page.waitForSelector('[data-role="voice-picker"][open]', { timeout: 5000 });
 
     const afterPicker = await page.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();

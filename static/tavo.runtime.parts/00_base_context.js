@@ -5,7 +5,7 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
   var script = (typeof window !== "undefined" && window.__indextts_tavo_runtime_script_override) || document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v5";
   var CONFIG_KEY = "indextts_tavo_config_v3";
-  var CONFIG_VERSION = 11;
+  var CONFIG_VERSION = 12;
   var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
   // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";

@@ -102,7 +102,7 @@ Current lazy-loader assertions:
 - live exit is circular and play-sized;
 - clicking play on a waiting LIVE card checks cache/status and must not immediately show `已暂停`;
 - normal-mode voice rows use the same row layout as role mapping: 默认 is locked display-only, only 旁白/对话 open the picker;
-- subtitle height remains `136px`.
+- subtitle height remains `172px` for four visible lyric rows.
 
 ## Cache / Snapshot Regression
 
@@ -161,10 +161,11 @@ For a running live dialogue job:
 
 1. The card shows only play/pause and live exit as active controls. CSS must not hide `.idx-live-exit` under `data-live-active=1`.
 2. Previous, next, add, delete, rewind, forward, seek drag, subtitle click seek, and MediaSession seek do not act on the live track.
-3. Clicking play on a waiting/pending LIVE card immediately shows a checking/waiting state, checks `/cache_audio/<cache_key>` or `/tts_dialogue_job_status/<cache_key>`, and must not immediately flip to `已暂停`; actively playing WebAudio may still pause.
-4. Clicking live exit first checks status once; if status is `done`, the card becomes saved, otherwise the frontend calls `DELETE /tts_dialogue_stream_job/<cache_key>`.
-5. Exiting live removes only the transient live card and keeps existing saved history count unchanged.
-6. After status becomes `done`, the same card switches to a normal saved card with `/cache_audio/<cache_key>`. If foreground LIVE polling sees `/cache_audio/<cache_key>` is already readable via `HEAD`, it may switch to saved before the status endpoint catches up; this fallback must not run for failed/cancelled/background-generate jobs.
+3. Clicking play on a waiting/pending LIVE card immediately shows a realtime-audio connection state and uses WebAudio by default unless `noWebAudioLive=1`, `nativeLive=1`, or `elementLive=1` changes that path. It must not immediately fall back to saved/cache wording.
+4. Clicking play again while LIVE is loading, buffering, streaming, or playing should pause/stop the current live connection cleanly; it must not create a second job or flip through confusing saved-cache states.
+5. Clicking live exit first checks status once; if status is `done`, the card becomes saved, otherwise the frontend calls `DELETE /tts_dialogue_stream_job/<cache_key>`.
+6. Exiting live removes only the transient live card and keeps existing saved history count unchanged.
+7. After status becomes `done`, the same card switches to a normal saved card with `/cache_audio/<cache_key>`. If foreground LIVE polling sees `/cache_audio/<cache_key>` is already readable via `HEAD`, it may switch to saved before the status endpoint catches up; this fallback must not run for failed/cancelled/background-generate jobs.
 
 For a background `生成` dialogue job:
 
@@ -172,6 +173,8 @@ For a background `生成` dialogue job:
 2. The frontend polls `/tts_dialogue_job_status/<cache_key>`.
 3. Deleting the pending card calls `DELETE /tts_dialogue_stream_job/<cache_key>` and clears pending storage.
 4. Returning to the message restores pending jobs and continues polling until saved/failed/cancelled.
+5. A `D` job must not be pushed into the active `generatedTracks` list as a special card. It should join saved history only after done, then behave like ordinary history audio.
+6. Previous/next should cycle through saved tracks: from `14/14` next goes to `1/14`, and from `1/14` previous goes to `14/14`.
 
 ## Saved Audio Background Guard
 
@@ -182,6 +185,8 @@ For saved/cache audio playback:
 - The live WebAudio/live fallback path must not replace saved playback with WebAudio.
 - `loadedmetadata` and `timeupdate` may disable seek for live tracks only; they must leave saved tracks seekable when duration is known.
 - A live stream code=4 must clear/fallback the live stream without poisoning the saved audio element for the next saved track.
+- Offline save/read failure must not block online `/cache_audio/<cache_key>` playback. If a local blob fails, clear it and try online; if online direct media playback fails, show a readable WebView/source message and try a temporary fetched blob.
+- UI must not show raw browser media numeric errors such as `code=4` to the user.
 
 ## Role / Voice Mapping Guard
 
@@ -213,6 +218,8 @@ For any playback lifecycle change, validate in real Tavo or emulator:
 - failed stream does not poison the audio element;
 - subtitles remain aligned after resume.
 - live streaming may wait for saved cache on mobile WebView; saved playback quality/background behavior is the non-regression priority.
+- failed/cancelled LIVE cards must hide the LIVE exit button and play must not re-enter loading/generating.
+- displayed current time must not exceed displayed total duration; subtitles should remain on the final line after playback end.
 
 ## LLM Parse Guard
 
@@ -232,7 +239,7 @@ For 普通模式:
 
 - Frontend submits `parse_mode=normal`.
 - Frontend submits `voices.default`, `voices.旁白`, and `voices.对白`; if only default is configured, 旁白/对白 should map to default.
-- Settings UI shows 默认/旁白/对话 as fixed rows; 默认 is locked display-only and 旁白/对话 are picker buttons.
+- Settings UI shows 默认/旁白/对话 as fixed rows; 默认/旁白/对话 all use picker buttons, and 默认 acts as fallback for unmapped roles.
 - Frontend does not submit LLM endpoint/model/key in normal mode.
 - Backend strips tags/script/style/template content, removes emoji/control noise, splits quoted dialogue into `对白`, and maps the rest to `旁白`.
 

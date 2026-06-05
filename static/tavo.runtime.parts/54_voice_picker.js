@@ -203,7 +203,8 @@
       var start = (pickerState.page - 1) * pickerState.pageSize;
       var page = filtered.slice(start, start + pickerState.pageSize);
       var selectedVoice = "";
-      if (pickerState.rowIdx === -3) selectedVoice = voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], cfg.defaultVoice || "", cfg.currentCharacterName);
+      if (pickerState.rowIdx === -2) selectedVoice = cfg.defaultVoice || "";
+      else if (pickerState.rowIdx === -3) selectedVoice = voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], cfg.defaultVoice || "", cfg.currentCharacterName);
       else if (pickerState.rowIdx === -4) selectedVoice = voiceForRoleInList(cfg.roleVoiceList, ["对白", "dialogue", "台词"], cfg.defaultVoice || "", cfg.currentCharacterName);
       else if (pickerState.rowIdx >= 0 && cfg.roleVoiceList && cfg.roleVoiceList[pickerState.rowIdx]) selectedVoice = cfg.roleVoiceList[pickerState.rowIdx].voice || "";
       pickerGridEl.innerHTML = page.map(function (v) {
@@ -224,7 +225,12 @@
         var voiceName = item.dataset.voice;
         function applyVoice() {
           stopPickerPreview();
-          if (pickerState.rowIdx === -3) {
+          if (pickerState.rowIdx === -2) {
+            cfg.defaultVoice = voiceName;
+            updateNormalVoiceButtons();
+            syncUI();
+            saveConfig(cfg, characterId).catch(function(){});
+          } else if (pickerState.rowIdx === -3) {
             cfg.roleVoiceList = setVoiceForRoleInList(cfg.roleVoiceList, "旁白", voiceName, cfg.currentCharacterName);
             updateNormalVoiceButtons();
             saveConfig(cfg, characterId).catch(function(){});
@@ -260,6 +266,7 @@
     on(panel, 'click', function (e) {
       var t = e.target; if (!t || !t.closest) return;
       if (t.closest('[data-role="add-role"]')) { e.preventDefault(); addRoleRow(); return; }
+      if (t.closest('[data-role="default-voice-btn"]')) { e.preventDefault(); openVoicePicker(-2).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); return; }
       if (t.closest('.idx-voice-readonly')) { e.preventDefault(); return; }
       if (t.closest('[data-role="normal-narrator-voice-btn"]')) { e.preventDefault(); openVoicePicker(-3).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); return; }
       if (t.closest('[data-role="normal-dialogue-voice-btn"]')) { e.preventDefault(); openVoicePicker(-4).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); return; }

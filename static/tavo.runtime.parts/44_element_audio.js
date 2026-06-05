@@ -4,13 +4,13 @@
       if (!isSavedTrack(track) && isLiveTrack(track) && liveStreamUrlForTrack(track) && !shouldUseElementForLiveTrack(track, startSec)) {
         return waitForSavedLiveTrack(track, "element live cache fallback", {
           resumeSec: startSec,
-          title: "等待保存音频…",
-          detail: "当前 WebView 不直接播放直播 WAV，生成完成后切到完整音频"
+          title: "等待完整音频…",
+          detail: "当前 WebView 不直接播放实时音频，生成完成后切到完整音频"
         });
       }
       stopWebAudioPlayback("switch");
       var url = trackPlayableUrl(track);
-      var sourceKind = isSavedTrack(track) ? "saved" : (url === track.streamUrl ? "stream" : "audio");
+      var sourceKind = isSavedTrack(track) ? (url === track.offlineUrl ? "offline" : "saved") : (url === track.streamUrl ? "stream" : "audio");
       var liveOffsetSec = 0;
       if (!isSavedTrack(track) && isLiveTrack(track) && liveStreamUrlForTrack(track)) {
         liveOffsetSec = Math.max(0, Number(startSec || 0) || 0);
@@ -60,11 +60,75 @@
       var msg = err && err.message ? String(err.message) : String(err || "");
       return name === "NotSupportedError" || /not supported/i.test(msg);
     }
+    function mediaErrorText(err) {
+      var code = 0;
+      try { code = err ? Number(err.code || 0) : 0; } catch (_) { code = 0; }
+      if (code === 1) return "播放被浏览器中止";
+      if (code === 2) return "网络中断，音频没有下载完整";
+      if (code === 3) return "音频下载到了，但浏览器解码失败";
+      if (code === 4) return "这个音频源当前 WebView 不支持或读不到";
+      return "音频加载失败";
+    }
+    function recoverSavedAudioElementError(track, detail) {
+      if (!track || !isSavedTrack(track)) return false;
+      var src = "";
+      try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
+      var resumeSec = trackResumeSec(track);
+      var sourceKind = "";
+      try { sourceKind = audio.dataset.idxSourceKind || ""; } catch (_) {}
+      if ((sourceKind === "offline" || (track.offlineUrl && src === track.offlineUrl)) && track.cacheUrl) {
+        revokeOfflineObjectUrl(track);
+        track.offlineReady = false;
+        track.offlineWanted = true;
+        setTrackOfflineState(track, "failed");
+        setStatus("本地离线音频不可用，改播在线音频");
+        showTrackNotice(track, "本地离线音频不可用", "正在切换到在线历史音频");
+        debugLog("⚠️ 本地离线音频播放失败，改播在线 cache_audio。" + detail, "#fc9");
+        startElementAudioFrom(track, resumeSec);
+        return true;
+      }
+      if (track.cacheUrl && !track.onlineBlobRetryDone) {
+        track.onlineBlobRetryDone = true;
+        setStatus("在线音频直连失败，尝试临时缓存播放");
+        showTrackNotice(track, "正在换一种方式播放", "直接播放失败，改为先读取音频再播放");
+        debugLog("⚠️ 在线 audio 元素直连失败，尝试 fetch blob fallback。" + detail + " src=" + src, "#fc9");
+        (async function () {
+          try {
+            var res = await fetch(track.cacheUrl, { cache: "no-store" });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            var blob = await res.blob();
+            if (!blob || !blob.size) throw new Error("空音频");
+            if (track.onlineBlobUrl) {
+              try { URL.revokeObjectURL(track.onlineBlobUrl); } catch (_) {}
+            }
+            track.onlineBlobUrl = URL.createObjectURL(blob);
+            audio.src = track.onlineBlobUrl;
+            markElementAudioTrack(track, "saved-blob");
+            try { audio.load(); } catch (_) {}
+            if (seek) seek.disabled = false;
+            setAudioPlaybackRate();
+            setTrackPlaybackState(track, "loading");
+            setPlayState("loading");
+            await audio.play();
+          } catch (e) {
+            setTrackPlaybackState(track, "error");
+            setPlayState("idle");
+            var msg = "在线音频读取失败。服务端已有文件，但当前 Tavo WebView 没法读取这条音频。";
+            setStatus("播放失败");
+            showTrackNotice(track, "播放失败", msg);
+            setError(msg);
+            debugLog("❌ fetch blob fallback 失败: " + (e && e.message ? e.message : e), "#f99");
+          }
+        })();
+        return true;
+      }
+      return false;
+    }
     function handleAudioPlayReject(label, err, fallbackStatus) {
       if (err && err.name === "AbortError") return;
       if (isUnsupportedPlayError(err)) {
-        debugLog("⚠️ " + label + " audio.play() 不支持: " + (err && err.message ? err.message : err), "#fc9");
-        setStatus(fallbackStatus || "当前 WebView 不支持 audio 直播，等待 Web Audio/请点播放");
+        debugLog("⚠️ " + label + " audio.play() 不支持，已等待用户重试: " + (err && err.message ? err.message : err), "#fc9");
+        setStatus(fallbackStatus || "当前 WebView 暂时没放行播放，请再点一次播放");
         return;
       }
       debugLog("❌ " + label + " audio.play() reject: " + err, "#f99");
@@ -85,9 +149,9 @@
     }
     function updateTrackButtons() {
       var track = currentTrack();
-      var live = isCancelableLiveTrack(track);
-      var background = live && (track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate");
-      var liveControlsOnly = live && !background;
+      var live = isLiveExitTrack(track);
+      var terminal = !!(track && isTerminalTrack(track));
+      var liveControlsOnly = live;
       try {
         var card = first(root, ".idx-card") || root;
         if (card) {
@@ -98,13 +162,19 @@
       [prev, next, rewind10, forward10, add].forEach(function (el) { setHidden(el, live); });
       setHidden(del, liveControlsOnly);
       setHidden(liveExit, !liveControlsOnly);
-      if (prev) prev.disabled = live || currentTrackIndex <= 0;
-      if (next) next.disabled = live || currentTrackIndex < 0 || currentTrackIndex >= generatedTracks.length - 1;
+      var visibleCount = visibleTrackCards().length || (!tracksLoaded ? Number(knownHistoryCount || 0) : 0);
+      if (prev) prev.disabled = live || visibleCount <= 1;
+      if (next) next.disabled = live || visibleCount <= 1;
       var canSeekTrack = !!(track && isSavedTrack(track) && (trackPlayableUrl(track) || track.webAudioPlaying));
       if (rewind10) rewind10.disabled = live || !canSeekTrack;
       if (forward10) forward10.disabled = live || !canSeekTrack;
       if (del) del.disabled = liveControlsOnly || currentTrackIndex < 0 || !track;
       if (liveExit) liveExit.disabled = !liveControlsOnly;
+      if (play) {
+        play.disabled = terminal;
+        play.setAttribute("title", terminal ? (trackState(track) === "cancelled" ? "任务已取消，点 + 重新生成" : "生成失败，点 + 重新生成") : "播放");
+        play.setAttribute("aria-label", terminal ? (trackState(track) === "cancelled" ? "任务已取消" : "生成失败") : "播放");
+      }
       updateTrackCounter();
     }
     function clearWebAudioProgressTimer() {

@@ -18,20 +18,22 @@
     function playbackLabelForRole(role, track) {
       role = String(role || "").trim() || (normalizeModeName((track && track.mode) || cfg.mode) === "ai" ? "AI模式" : "普通模式");
       var voice = voiceNameForRole(role, track);
-      return displayRoleName(role) + (voice ? " / " + shortName(voice) : "");
+      return voice ? shortName(voice) : "音色未设置";
     }
     function trackPlaybackLabel(track) {
-      if (!track) return shortName(cfg.defaultVoice);
+      if (!track) return cfg.defaultVoice ? shortName(cfg.defaultVoice) : "音色未设置";
       var mode = normalizeModeName(track.mode);
       if (mode === "ai" || mode === "normal") {
         var role = lastSpeakerRole || ((track.segments && track.segments[0] && track.segments[0].role) || "");
         if (role) return playbackLabelForRole(role, track);
-        return mode === "ai" ? "AI模式" : "普通模式";
+        var voice = (track.voicesMap && (track.voicesMap.default || track.voicesMap["旁白"] || track.voicesMap["对白"])) || cfg.defaultVoice;
+        return voice ? shortName(voice) : (mode === "ai" ? "AI模式" : "普通模式");
       }
-      return shortName((track && track.voice) || cfg.defaultVoice);
+      var singleVoice = (track && track.voice) || cfg.defaultVoice;
+      return singleVoice ? shortName(singleVoice) : "音色未设置";
     }
     function setPlayingStatusForRole(role, track) {
-      setStatus("正在播放：" + playbackLabelForRole(role, track || currentTrack()));
+      setStatus(playbackLabelForRole(role, track || currentTrack()));
     }
     function setAudioPlaybackRate() {
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25); } catch (_) {}
@@ -67,7 +69,7 @@
     function elementPlaybackTimeSec(track) {
       var current = 0;
       try { current = Math.max(0, Number(audio.currentTime || 0) || 0); } catch (_) { current = 0; }
-      return (isElementUsingTrackStream(track) ? liveElementOffsetSec(track) : 0) + current;
+      return clampPlaybackTimeSec(track, (isElementUsingTrackStream(track) ? liveElementOffsetSec(track) : 0) + current);
     }
     function trackResumeSec(track) {
       if (!track) return 0;
@@ -103,6 +105,22 @@
       });
       return maxEnd;
     }
+    function clampPlaybackTimeSec(track, sec) {
+      sec = Math.max(0, Number(sec || 0) || 0);
+      var dur = trackDurationHintSec(track);
+      var audioDur = Number(audio && audio.duration);
+      if (!isElementUsingTrackStream(track) && isFinite(audioDur) && audioDur > 0) {
+        dur = dur > 0 ? Math.max(dur, audioDur) : audioDur;
+      }
+      if (dur > 0 && sec > dur) return dur;
+      return sec;
+    }
+    function progressDurationSec(track) {
+      var dur = Number(audio && audio.duration);
+      var hint = trackDurationHintSec(track);
+      if (isFinite(dur) && dur > 0) return hint > dur + 0.5 ? hint : dur;
+      return hint > 0 ? hint : 0;
+    }
     function seekToSeconds(pos, opts) {
       opts = opts || {};
       var track = currentTrack();
@@ -125,8 +143,8 @@
       if (track && isLiveTrack(track) && !shouldUseWebAudioForLiveTrack(track) && liveStreamUrlForTrack(track)) {
         return waitForSavedLiveTrack(track, "seek live cache fallback", {
           resumeSec: pos,
-          title: "等待保存音频…",
-          detail: "直播音频不支持拖动，生成完成后从完整音频播放"
+          title: "等待完整音频…",
+          detail: "实时音频不支持拖动，生成完成后从完整音频播放"
         });
       }
       if (track && (track.webAudioPlaying || isLiveTrack(track) || liveStreamUrlForTrack(track))) {

@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260605-ld-live-v1";
+  var LOADER_VERSION = "20260606-live-audio-v5";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
@@ -120,8 +120,10 @@
   function persistedTrackLooksSaved(t) {
     if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
     var state = String(t.state || "").trim();
+    var status = String(t.status || "").trim();
+    var serverState = String(t.serverState || "").trim();
     var cacheState = String(t.cacheState || t.remoteCacheState || "").trim();
-    if (state === "failed" || state === "cancelled") return false;
+    if (state === "failed" || state === "cancelled" || status === "failed" || status === "cancelled" || serverState === "failed" || serverState === "cancelled") return false;
     return state === "saved" || cacheState === "ready" || !!(t.cacheReady || t.fromHistory || t.status === "ready");
   }
 

@@ -25,6 +25,24 @@ Notes:
 - When the bug is fixed, record the actual root cause, the code/files changed, and the regression guard.
 - If a fixed bug returns, update the same entry and add a stricter guard in `docs/REGRESSION.md`.
 
+## BUG-021: API restart can leave half-started vLLM Python processes and launcher window cannot maximize
+
+Status: open, investigating
+
+Reported: 2026-06-05
+
+Repro: User killed Python processes and retried startup, but port `9880` still did not become healthy. User also reported the LEON launcher window cannot be enlarged.
+
+Evidence: `nvidia-smi` showed two compute processes from `...\indextts2runtime\python.exe` still holding GPU memory while `9880` had no LISTEN socket. Recent startup logs stop around vLLM engine initialization and do not reach `>> GPT weights restored` or `IndexTTS API listening`. `LEON启动器.ps1` sets a fixed splitter (`$main.IsSplitterFixed = $true`), and the form setup did not explicitly enable resizing/maximize behavior.
+
+Hypothesis: The restart mutex path can wait behind a stale launcher/restart chain instead of clearing half-started project processes. vLLM Windows spawn/IPC can leave child processes alive without a healthy API listener. The launcher UI also needs explicit resizable form settings and an unfixed splitter.
+
+Root cause: pending.
+
+Fix: pending.
+
+Guard: Restarting should kill stale same-repo API/control-chain processes before launching a new instance. After startup, `9880` must pass `/health`, and no stale project Python should remain if startup fails. The launcher window should be sizable and maximizable, with the main splitter draggable.
+
 ## BUG-001: IndexTTS2 resource pressure can make RTF spike
 
 Status: open, accepted product risk
@@ -427,3 +445,35 @@ Fix: `40_mount_shell.js` renders the playback mode as a single-letter `L` / `D` 
 Guard: Playwright should assert the identity row and the two top buttons are aligned, the playback mode control is icon-sized and shows only `L` or `D`, no playback dropdown exists, the role status is single-line ellipsis, the live exit control is circular and play-sized, and clicking play on a pending/live card immediately enters a visible wait/check state without creating a second job or immediately showing `已暂停`.
 
 Audit note: the first Playwright guard for live-exit size accidentally removed `data-live-active` after forcing `.idx-hidden`, so it could measure the hidden live-exit button as `0x0` and fail even when production CSS was correct. The test now keeps `data-live-active=1` while measuring the forced visible button.
+
+## BUG-023: Tavo LIVE, history controls, and saved-audio fallback regressions
+
+Status: fixed in code, needs real Tavo validation; backend LLM status wording needs next API restart
+
+Reported: 2026-06-06
+
+Repro: User reported that the delete button disappeared, `D` background generation entered the special pending card and blocked normal previous/next history browsing, previous/next did not loop from last to first, LIVE still showed LLM-analysis wording despite parse reuse, clicking the LIVE play button fell into confusing saved-audio fallback messages, live playback reached later segments without foreground audio, the player card became too short, the four home buttons were cramped, offline save failure appeared to block online playback, and browser media `code=4` was shown raw.
+
+Evidence: `showSubtitleNotice()` replaced the subtitle panel with `innerHTML`, which removed the delete button and history counter mounted inside that panel. Generate-mode placeholder tracks were pushed into `generatedTracks`, so `D` jobs became active special cards instead of background jobs. Default LIVE only used WebAudio when `webAudioLive=1` was present, otherwise it waited for cache audio. Saved audio errors surfaced raw media error code details. The reported cache key returned `200 audio/wav` locally and through the public tunnel, proving the generated file existed and the failure was in frontend playback/fallback handling.
+
+Root cause: Recent player-state changes mixed three product states: LIVE streaming, background `D` generation, and saved history playback. Subtitle status rendering also destroyed persistent panel controls. The offline-cache path treated local save/read failures too close to the online playback path, and media element errors were not translated or recovered.
+
+Fix: `D` generation is detached from the active track list until the job is saved, then it appends as a normal saved history card. Previous/next now cycles across saved history. Subtitle notices preserve delete/counter controls. LIVE defaults to WebAudio streaming unless explicitly disabled or native live is requested. LIVE play clicks now pause when already loading/buffering/streaming instead of re-entering saved-cache fallback. Saved playback clears broken offline blobs, falls back to online `/cache_audio`, then tries a temporary fetched blob if direct media playback fails. Media error code 4 is translated into a human-readable WebView/source message. The card height is fixed and the generate button is spaced away from the central controls. Backend LLM parse status now says it is checking reuse first, reports cache hits as reused, and only says it is calling LLM on a cache miss.
+
+Guard: Delete and counter must survive every subtitle notice/subtitle render. `D` jobs must not become the active special card or block saved-history browsing. Previous/next must loop through saved tracks. LIVE should start WebAudio by default and should not show saved-audio fallback wording unless realtime playback actually fails. Offline save failure must not block online playback. Browser media errors must be shown as readable playback/source messages, not raw numeric codes.
+
+## BUG-024: Tavo failed LIVE cards, default voice fallback, progress overflow, and user-facing metrics
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-06
+
+Repro: User screenshots showed a failed `6/6` card still exposing the LIVE exit button. Tapping play on the same card changed the UI back to `AI模式正在生成...`. Another screenshot showed `00:09 / 00:03` and broken subtitle progress. User also asked not to show RTF/steps/first-audio technical metrics, requested a higher D-mode quality tier, and pointed out that normal/single default voice was not configurable.
+
+Evidence: `isLiveExitTrack()` returned true for any non-saved LIVE card and did not exclude `failed/cancelled`; failed tracks could retain stale `url/streamUrl`, so play/select paths could treat them as playable. `formatJobMetrics()` sent RTF/steps/首音 details into subtitle notices. The normal-mode default voice row was a read-only `span`. Frontend quality options stopped at `expressive`, and backend clamps forced custom diffusion/prompt settings back to `16/12`.
+
+Root cause: Frontend card state mixed coarse job state with stale playback fields. Failed/cancelled was not a terminal UI state, default voice was displayed but not editable, and the playback timer trusted raw element/WebAudio time without clamping to known duration.
+
+Fix: Failed/cancelled tracks now clear live flags, disable stale playable URLs, hide LIVE exit, and play only shows the terminal failure/cancelled notice. `trackState()` now lets backend terminal status override stale `state=live`, so a failed card cannot keep live controls after status polling. Default voice is a picker button and is sent as the `default` voice fallback for normal/AI generation. Playback time and subtitle ticks are clamped to known duration/audio metadata. User-visible job metrics no longer include RTF/steps/首音. Added `ultra` / `落盘高质量` with frontend `20 steps / 14s prompt / 96 tokens` and backend clamp support up to `24 steps / 16s prompt`. Cache busting is bumped to `20260606-live-audio-v5`.
+
+Guard: Failed/cancelled cards must not show the LIVE exit button or re-enter loading/generating on play. Current time must never exceed displayed total time. Subtitles must stop at the final line after playback end. Default voice must be selectable in normal-mode settings and serve as role fallback. Technical performance metrics should stay out of the user-facing card UI.

@@ -2,7 +2,8 @@ param(
     [int]$Port = 9880,
     [string]$HostAddress = "0.0.0.0",
     [int]$MaxWaitSeconds = 240,
-    [int]$Retries = 3
+    [int]$Retries = 3,
+    [double]$VllmGpuMemoryUtilization = -1
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,24 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $LogDir = Join-Path $Root "Leon_api\dev_tools"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Set-Location $Root
+
+$InvariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
+if ($VllmGpuMemoryUtilization -le 0) {
+    $configuredGpuUtil = $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION
+    if (-not [string]::IsNullOrWhiteSpace($configuredGpuUtil)) {
+        $parsedGpuUtil = 0.0
+        if ([double]::TryParse($configuredGpuUtil, [System.Globalization.NumberStyles]::Float, $InvariantCulture, [ref]$parsedGpuUtil) -and $parsedGpuUtil -gt 0) {
+            $VllmGpuMemoryUtilization = $parsedGpuUtil
+        }
+        else {
+            Write-Host "[indextts-restart] Ignoring invalid INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION=$configuredGpuUtil"
+        }
+    }
+}
+if ($VllmGpuMemoryUtilization -le 0) {
+    $VllmGpuMemoryUtilization = 0.18
+}
+$VllmGpuMemoryUtilizationText = $VllmGpuMemoryUtilization.ToString("0.###", $InvariantCulture)
 
 function Write-Step {
     param([string]$Message)
@@ -44,7 +63,12 @@ function Get-ListeningPidsForPort {
 
 function Get-ProcessInfo {
     param([int]$ProcessId)
-    return Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+    try {
+        return Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop
+    }
+    catch {
+        return $null
+    }
 }
 
 function Test-IsProjectProcess {
@@ -58,8 +82,13 @@ function Test-IsProjectProcess {
 
 function Get-ChildProcessIds {
     param([int]$ParentProcessId)
-    $children = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.ParentProcessId -eq $ParentProcessId }
+    try {
+        $children = Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object { $_.ParentProcessId -eq $ParentProcessId }
+    }
+    catch {
+        return
+    }
     foreach ($child in $children) {
         Get-ChildProcessIds -ParentProcessId $child.ProcessId
         [int]$child.ProcessId
@@ -76,12 +105,41 @@ function Stop-ProcessTree {
     Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
 }
 
+function Get-GpuProjectPythonPids {
+    if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
+        return @()
+    }
+
+    $pids = @()
+    try {
+        $lines = & nvidia-smi 2>$null
+        foreach ($line in $lines) {
+            if ($line -match "^\|\s*\d+\s+\S+\s+\S+\s+(\d+)\s+C\s+.*indextts2runtime\\python\.exe") {
+                $pids += [int]$Matches[1]
+            }
+        }
+    }
+    catch {
+        return @()
+    }
+    return $pids | Sort-Object -Unique
+}
+
 function Stop-OldProjectApi {
     $targets = @{}
 
-    Get-CimInstance Win32_Process -Filter "name = 'python.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { Test-IsProjectProcess $_ } |
-        ForEach-Object { $targets[[int]$_.ProcessId] = "project python" }
+    try {
+        Get-CimInstance Win32_Process -Filter "name = 'python.exe'" -ErrorAction Stop |
+            Where-Object { Test-IsProjectProcess $_ } |
+            ForEach-Object { $targets[[int]$_.ProcessId] = "project python" }
+    }
+    catch {
+        Write-Step "Win32_Process scan unavailable; using port/GPU fallbacks."
+    }
+
+    foreach ($gpuPid in @(Get-GpuProjectPythonPids)) {
+        $targets[$gpuPid] = "project GPU python"
+    }
 
     foreach ($checkPort in @($Port, 29550)) {
         foreach ($listenerPid in @(Get-ListeningPidsForPort -TargetPort $checkPort)) {
@@ -102,6 +160,20 @@ function Stop-OldProjectApi {
 
     if ($targets.Count -gt 0) {
         Start-Sleep -Seconds 3
+    }
+}
+
+function Clear-StaleTorchExtensionLocks {
+    $lockPaths = @(
+        (Join-Path $Root "indextts\BigVGAN\alias_free_activation\cuda\build\lock"),
+        (Join-Path $Root "indextts\s2mel\modules\bigvgan\alias_free_activation\cuda\build\lock")
+    )
+
+    foreach ($lockPath in $lockPaths) {
+        if (Test-Path -LiteralPath $lockPath) {
+            Write-Step "Removing stale torch extension lock: $lockPath"
+            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -173,11 +245,13 @@ function Start-ApiProcess {
 
     $env:INDEXTTS_VLLM_RPC_PORT = [string](Get-FreeTcpPort)
     Write-Step "Using vLLM RPC port $env:INDEXTTS_VLLM_RPC_PORT"
+    Write-Step "Using vLLM gpu_memory_utilization $VllmGpuMemoryUtilizationText"
 
     $args = @(
         "indextts2_api.py",
         "-a", $HostAddress,
         "-p", [string]$Port,
+        "--vllm_gpu_memory_utilization", $VllmGpuMemoryUtilizationText,
         "--cuda_kernel",
         "--fp16",
         "--no_qwen_emo"
@@ -273,18 +347,14 @@ $restartMutex = New-Object System.Threading.Mutex($false, $restartMutexName)
 $restartMutexAcquired = $false
 
 try {
-    $restartMutexAcquired = $restartMutex.WaitOne(0)
+    try {
+        $restartMutexAcquired = $restartMutex.WaitOne(0)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $restartMutexAcquired = $true
+    }
     if (-not $restartMutexAcquired) {
-        Write-Step "Another API startup/restart is already running; waiting for /health instead of starting a second instance."
-        for ($elapsed = 0; $elapsed -le $MaxWaitSeconds; $elapsed += 2) {
-            if (Test-ApiHealth) {
-                Write-Step "API ready from existing startup: http://127.0.0.1:$Port/health"
-                exit 0
-            }
-            Start-Sleep -Seconds 2
-        }
-        Write-Error "Another API startup/restart is still running and /health did not become ready within ${MaxWaitSeconds}s."
-        exit 1
+        Write-Step "Startup mutex is already held; clearing old project processes and continuing."
     }
 
     Initialize-ApiEnvironment
@@ -292,6 +362,7 @@ try {
     for ($attempt = 1; $attempt -le $Retries; $attempt++) {
         Write-Step "Restart attempt $attempt/$Retries"
         Stop-OldProjectApi
+        Clear-StaleTorchExtensionLocks
         $run = Start-ApiProcess -Attempt $attempt
 
         if (Wait-ApiReady -Run $run) {

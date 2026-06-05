@@ -27,9 +27,16 @@
     function tryResumeOrPauseInGesture() {
       try {
         var t = currentTrack();
-        if (t && isCancelableLiveTrack(t) && t.webAudioPlaying) {
-          pauseLiveTrack(t);
-          return true;
+        if (t && isTerminalTrack(t)) {
+          clearElementAudioSrc();
+          return false;
+        }
+        if (t && isCancelableLiveTrack(t)) {
+          var ps = String(t.playbackState || "");
+          if (ps === "playing" && (t.webAudioPlaying || isElementPlayingTrackStream(t))) {
+            pauseLiveTrack(t);
+            return true;
+          }
         }
         if (!t || !elementAudioBelongsToTrack(t)) return false;
         if (!(audio.currentSrc || audio.src) || audio.ended) return false;
@@ -46,7 +53,7 @@
     function busyGenerationStatus(track, action) {
       var background = track && (track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate");
       if (action === "seek") return background ? "后台生成中，完成后才能拖动" : "流式生成中不能拖动";
-      return background ? "后台生成中，先删除或等待落盘" : "流式生成中，先退出或等待保存";
+      return background ? "后台生成中，先删除或等待完成" : "流式生成中，可点播放暂停或等待完成";
     }
     on(play, 'pointerdown', function () { primeAudioContext(); });
     on(add, 'pointerdown', function () { primeAudioContext(); });
@@ -60,11 +67,19 @@
       primeAudioContext();
       if (tryResumeOrPauseInGesture()) return;
       var live = currentTrack();
+      if (live && isTerminalTrack(live)) {
+        // 失败/取消是终态，播放键不能再把旧任务拉回生成中。
+        setPlayState("idle");
+        setStatus(trackState(live) === "cancelled" ? "任务已取消" : "生成失败");
+        showTrackNotice(live, trackState(live) === "cancelled" ? "任务已取消" : "生成失败", live.error || "点 + 重新生成");
+        updateTrackButtons();
+        return;
+      }
       if (isCancelableLiveTrack(live)) {
         setTrackPlaybackState(live, "loading");
         setPlayState("loading");
-        setStatus("检查音频状态…");
-        showTrackNotice(live, "检查音频状态…", live.cacheKey ? "如果已落盘会直接播放，否则继续等待保存" : "正在等待后端创建音频任务");
+        setStatus("连接实时音频…");
+        showTrackNotice(live, "连接实时音频…", live.cacheKey ? "继续实时播放；完整音频会自动进入历史" : "正在等待后端创建音频任务");
       }
       generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
@@ -89,12 +104,12 @@
     on(prev, 'click', function () {
       var t = currentTrack();
       if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t)); return; }
-      ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex - 1, true); }).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
+      selectSavedTrackByDelta(-1, true).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
     on(next, 'click', function () {
       var t = currentTrack();
       if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t)); return; }
-      ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex + 1, true); }).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
+      selectSavedTrackByDelta(1, true).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
     on(del, 'click', function () { clearCurrentTrack().catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(liveExit, 'click', function () { exitCurrentLiveTrack("live exit").catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
@@ -130,7 +145,7 @@
     on(audio, 'play', function () {
       var t = currentTrack();
       if (t) setTrackPlaybackState(t, "playing");
-      setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(t));
+      setPlayState("playing"); setStatus(trackPlaybackLabel(t));
       // 系统媒体面板基础信息(后台/锁屏可见,可控制播放/前后 10 秒)
       try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
       // 桌面 / <audio> 路径的字幕：普通/AI dialogue track 有 segments 时启动。
@@ -181,10 +196,10 @@
         if (t) setTrackPlaybackState(t, "playing");
         setPlayState("playing");
         // 多音色模式下当前播放的音色不固定,不要写 cfg.defaultVoice
-        setStatus("正在播放：" + trackPlaybackLabel(t));
+        setStatus(trackPlaybackLabel(t));
       }
     });
-    on(audio, 'playing', function () { var t = currentTrack(); if (t) setTrackPlaybackState(t, "playing"); setError(""); setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(t)); });
+    on(audio, 'playing', function () { var t = currentTrack(); if (t) setTrackPlaybackState(t, "playing"); setError(""); setPlayState("playing"); setStatus(trackPlaybackLabel(t)); });
     on(audio, 'pause', function () { var t = currentTrack(); if (t && !audio.ended) setTrackPlaybackState(t, "paused"); setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); stopSubtitle(); });
     on(audio, 'ended', function () {
       var t = currentTrack();
@@ -208,16 +223,20 @@
       }
       var detail = "";
       try {
-        if (audio.error) detail = " code=" + audio.error.code + (audio.error.message ? " message=" + audio.error.message : "");
+        if (audio.error) detail = "（" + mediaErrorText(audio.error) + "）";
       } catch (_) {}
+      if (active && isSavedTrack(active) && recoverSavedAudioElementError(active, detail)) {
+        stopSubtitle();
+        return;
+      }
       if (active && isLiveTrack(active) && liveStreamUrlForTrack(active)) {
         var errCode = 0;
         try { errCode = audio.error ? Number(audio.error.code || 0) : 0; } catch (_) { errCode = 0; }
         if (errCode === 4 || isElementUsingTrackStream(active)) {
-          debugLog("⚠️ live stream audio 元素不兼容" + detail + "，等待 cache_audio 落盘 src=" + (audio.currentSrc || audio.src || ""), "#fc9");
+          debugLog("⚠️ live stream audio 元素不可用" + detail + "，等待完整音频 src=" + (audio.currentSrc || audio.src || ""), "#fc9");
           waitForSavedLiveTrack(active, "audio error live cache fallback", {
             resumeSec: trackResumeSec(active),
-            title: "等待保存音频…",
+            title: "等待完整音频…",
             detail: "当前 WebView 不支持这条实时音频流，生成完成后自动切到完整音频"
           });
           stopSubtitle();
@@ -227,8 +246,8 @@
       if (active) setTrackPlaybackState(active, "error");
       setPlayState("idle");
       setStatus("播放失败");
-      setError("音频加载失败。" + detail + " 请检查服务地址、音色和后端日志。");
-      debugLog("❌ audio error" + detail + " src=" + (audio.currentSrc || audio.src || ""), "#f99");
+      setError((detail || "音频加载失败") + "。请检查服务地址、音色和后端日志。");
+      debugLog("❌ audio error " + (detail || "") + " src=" + (audio.currentSrc || audio.src || ""), "#f99");
       stopSubtitle();
     });
     on(audio, 'loadedmetadata', function () {
@@ -236,9 +255,9 @@
       setAudioPlaybackRate();
       var t = currentTrack();
       if (seek) seek.disabled = isCancelableLiveTrack(t);
-      var hint = trackDurationHintSec(t);
       var dur = Number(audio.duration);
-      if (total) total.textContent = (isFinite(dur) && dur > 0) ? formatTime(dur) : (hint > 0 ? formatTime(hint) : "--:--");
+      var progressDur = progressDurationSec(t);
+      if (total) total.textContent = progressDur > 0 ? formatTime(progressDur) : "--:--";
       debugLog("📐 audio metadata loaded: duration=" + (isFinite(dur) ? dur.toFixed(2) : String(audio.duration)) + "s seekable=" + (audio.seekable.length > 0 ? audio.seekable.end(0).toFixed(2) : "0"), "#9ff");
     });
     on(audio, 'seeking', function () { debugLog("⏩ seeking → " + audio.currentTime.toFixed(2), "#9ff"); });
@@ -257,10 +276,7 @@
       var activeTrack = currentTrack();
       var pos = elementPlaybackTimeSec(activeTrack);
       if (activeTrack) activeTrack.lastElementSec = pos;
-      var dur = Number(audio.duration);
-      var hasDur = isFinite(dur) && dur > 0;
-      var hint = trackDurationHintSec(activeTrack);
-      var progressDur = hasDur ? dur : hint;
+      var progressDur = progressDurationSec(activeTrack);
       if (cur) cur.textContent = formatTime(pos);
       if (total) total.textContent = progressDur > 0 ? formatTime(progressDur) : "--:--";
       if (seek) {

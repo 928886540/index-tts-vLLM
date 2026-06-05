@@ -50,7 +50,7 @@ Home player UI changes now in code:
 Current cache-busted Tavo URL:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v5"></script>
 ```
 
 Current validation for this `L`/`D` follow-up:
@@ -100,7 +100,7 @@ Screenshots saved for layout evidence:
 Tavo regex cache-busting URL should be updated to:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v5"></script>
 ```
 
 ## Latest Packaging Snapshot: LEON Launcher
@@ -128,7 +128,7 @@ Important behavior:
 - Checks include administrator status, Chinese path, `indextts2runtime\python.exe`, NVIDIA driver, CUDA Toolkit / `nvcc`, MSVC `cl.exe`, runtime-aware SVML compatibility, Torch CUDA / vLLM / FastAPI / ninja imports, `patch_vllm` registration, required checkpoint files, voice library count, API port `9880`, and startup BAT presence.
 - One-click repair can copy the bundled `svml_dispmd.dll` into the project runtime only when import logs indicate SVML/LLVM/DLL load trouble, launch `winget` installs for Visual Studio Build Tools and NVIDIA CUDA Toolkit, and install `ninja` into the project runtime.
 - Voice testing uses `/voices`, `/tts_dialogue_stream_job`, `/tts_dialogue_job_status/{cache_key}`, and `/cache_audio/{cache_key}` with `parse_mode=normal`.
-- Tavo instructions use the current cache-busted script URL: `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1`.
+- Tavo instructions use the current cache-busted script URL: `https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v5`.
 - No image API key or OpenAI-compatible key is written into launcher files or docs.
 - `LEON启动器.ps1` is UTF-8 with BOM so Windows PowerShell 5.1 can parse Chinese text directly.
 
@@ -257,7 +257,7 @@ Fixes now in code:
 - Foreground LIVE polling can confirm `/cache_audio/{cache_key}` with `HEAD` and switch to saved if the file is already readable but `job_status` lags. This fallback is disabled for failed/cancelled/background-generate jobs.
 - Player card/control height is stabilized to reduce pending/live/saved layout jumps.
 - Settings order is now: `文本模式`, `合成质量`, voice mapping, `播放 / 离线`.
-- Cache-busted Tavo URL is now `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1`.
+- Cache-busted Tavo URL is now `https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v5`.
 
 RTF evidence from recent real cache metadata:
 

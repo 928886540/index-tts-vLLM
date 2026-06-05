@@ -370,6 +370,16 @@ STREAM_MODE_SETTINGS = {
         "prompt_audio_seconds": 12,
         "s2mel_cfg_rate": 0.7,
     },
+    "ultra": {
+        "target_tokens": 96,
+        "hard_tokens": 116,
+        "first_tokens": 32,
+        "min_tokens": 28,
+        # 落盘高质量：给 D 模式用，牺牲速度换更稳的扩散细节。
+        "diffusion_steps": 20,
+        "prompt_audio_seconds": 14,
+        "s2mel_cfg_rate": 0.7,
+    },
 }
 
 
@@ -383,7 +393,8 @@ def _stream_mode_settings(mode: str = "expressive") -> dict:
 def _stream_infer_kwargs(requested_segment_tokens: int = None, performance_mode: str = "expressive") -> dict:
     settings = _stream_mode_settings(performance_mode)
     target_tokens = int(requested_segment_tokens or settings["target_tokens"])
-    target_tokens = max(8, min(target_tokens, STREAM_TARGET_SEGMENT_TOKENS))
+    max_target_tokens = max(STREAM_TARGET_SEGMENT_TOKENS, int(settings.get("target_tokens") or STREAM_TARGET_SEGMENT_TOKENS))
+    target_tokens = max(8, min(target_tokens, max_target_tokens))
     hard_tokens = int(settings["hard_tokens"])
     first_tokens = min(int(settings["first_tokens"]), target_tokens)
     min_tokens = min(int(settings["min_tokens"]), target_tokens)
@@ -421,9 +432,9 @@ def _clamp_int(value, default: int, min_value: int, max_value: int) -> int:
 def _apply_s2mel_test_overrides(req: dict, sampling_kwargs: dict) -> dict:
     """Apply optional generation knobs without changing defaults."""
     if req.get("diffusion_steps") is not None:
-        sampling_kwargs["diffusion_steps"] = _clamp_int(req.get("diffusion_steps"), sampling_kwargs.get("diffusion_steps", 6), 2, 16)
+        sampling_kwargs["diffusion_steps"] = _clamp_int(req.get("diffusion_steps"), sampling_kwargs.get("diffusion_steps", 6), 2, 24)
     if req.get("prompt_audio_seconds") is not None:
-        prompt_seconds = _clamp_float(req.get("prompt_audio_seconds"), sampling_kwargs.get("max_prompt_audio_seconds", 8), 2.0, 12.0)
+        prompt_seconds = _clamp_float(req.get("prompt_audio_seconds"), sampling_kwargs.get("max_prompt_audio_seconds", 8), 2.0, 16.0)
         sampling_kwargs["max_prompt_audio_seconds"] = prompt_seconds
         sampling_kwargs["max_emo_audio_seconds"] = prompt_seconds
     if req.get("segment_tokens") is not None:
@@ -966,6 +977,8 @@ async def _parse_dialogue_text_in_backend(prepared: dict, job: "_LiveStreamingJo
         if cached:
             job.metrics["llm_parse_cached"] = True
             job.metrics["llm_segments"] = len(cached)
+            job.metrics["phase"] = "llm_parse_cache"
+            job.metrics["message"] = "已复用上次 LLM 拆段"
             return cached
 
     from indextts import llm_proxy
@@ -982,7 +995,7 @@ async def _parse_dialogue_text_in_backend(prepared: dict, job: "_LiveStreamingJo
         max_tokens = _llm_max_tokens_for_text(req.get("text") or "")
     job.metrics["state"] = "parsing"
     job.metrics["phase"] = "llm_parse"
-    job.metrics["message"] = "后端正在调用 LLM 拆分文本"
+    job.metrics["message"] = "复用未命中，正在调用 LLM 拆分文本" if parse_cfg.get("reuse") else "后端正在调用 LLM 拆分文本"
     result = await asyncio.to_thread(
         llm_proxy.parse_text_openai_compatible,
         text=req.get("text") or "",
@@ -1251,7 +1264,8 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
         if prepared.get("needs_parse"):
             job.metrics["state"] = "parsing"
             job.metrics["phase"] = "llm_parse"
-            job.metrics["message"] = "后端正在分析文本"
+            parse_cfg = prepared.get("parse") or {}
+            job.metrics["message"] = "正在检查 LLM 拆段复用" if parse_cfg.get("reuse") else "后端正在分析文本"
             segments = await _parse_dialogue_text_in_backend(prepared, job)
             _attach_dialogue_segments_to_prepared(prepared, segments)
             if job.cancelled:

@@ -94,13 +94,23 @@ class IndexTTS2:
         self.dtype = torch.float16 if self.is_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
 
+        print(">> constructing GPT wrapper", flush=True)
+        self.gpt = UnifiedVoice(None, **self.cfg.gpt)
+        self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
+        print(">> loading GPT checkpoint:", self.gpt_path, flush=True)
+        load_checkpoint(self.gpt, self.gpt_path)
+        print(">> moving GPT wrapper to device:", self.device, flush=True)
+        self.gpt = self.gpt.to(self.device)
+        self.gpt.eval()
+        print(">> GPT wrapper ready on device", flush=True)
+
         from vllm.engine.arg_utils import AsyncEngineArgs
         from vllm.v1.engine.async_llm import AsyncLLM
 
         vllm_dir = os.path.join(model_dir, "gpt")
         vllm_rpc_port = _pick_vllm_rpc_port()
-        print(f">> vLLM data_parallel_rpc_port: {vllm_rpc_port}")
-        print(f">> vLLM gpu_memory_utilization={gpu_memory_utilization}, enforce_eager={vllm_enforce_eager}")
+        print(f">> vLLM data_parallel_rpc_port: {vllm_rpc_port}", flush=True)
+        print(f">> vLLM gpu_memory_utilization={gpu_memory_utilization}, enforce_eager={vllm_enforce_eager}", flush=True)
         engine_args = AsyncEngineArgs(
             model=vllm_dir,
             tensor_parallel_size=1,
@@ -117,22 +127,14 @@ class IndexTTS2:
             enforce_eager=bool(vllm_enforce_eager),
         )
         indextts_vllm = AsyncLLM.from_engine_args(engine_args)
+        print(">> vLLM AsyncLLM ready", flush=True)
+        self.gpt.llm = indextts_vllm
+        print(">> GPT weights restored from:", self.gpt_path, flush=True)
 
         if use_qwen_emo:
             self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
         else:
             self.qwen_emo = None
-
-        self.gpt = UnifiedVoice(indextts_vllm, **self.cfg.gpt)
-        self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
-        load_checkpoint(self.gpt, self.gpt_path)
-        self.gpt = self.gpt.to(self.device)
-        # if self.is_fp16:
-        #     self.gpt.eval().half()
-        # else:
-        #     self.gpt.eval()
-        self.gpt.eval()
-        print(">> GPT weights restored from:", self.gpt_path)
 
         if self.use_cuda_kernel:
             # preload the CUDA kernel for BigVGAN

@@ -33,8 +33,10 @@
   function persistedTrackLooksSaved(t) {
     if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
     var state = String(t.state || "").trim();
+    var status = String(t.status || "").trim();
+    var serverState = String(t.serverState || "").trim();
     var cacheState = String(t.cacheState || t.remoteCacheState || "").trim();
-    if (state === "failed" || state === "cancelled") return false;
+    if (state === "failed" || state === "cancelled" || status === "failed" || status === "cancelled" || serverState === "failed" || serverState === "cancelled") return false;
     return state === "saved" || cacheState === "ready" || !!(t.cacheReady || t.fromHistory || t.status === "ready");
   }
   function persistableHistoryTracks(tracks) {
@@ -99,6 +101,7 @@
     mode = String(mode || "balanced").trim();
     if (mode === "fast") return { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10 };
     if (mode === "balanced") return { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18 };
+    if (mode === "ultra") return { diffusion_steps: 20, prompt_audio_seconds: 14, segment_tokens: 96, first_tokens: 32 };
     return { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24 };
   }
   function applyGenerationParamsToSearchParams(p, cfg) {

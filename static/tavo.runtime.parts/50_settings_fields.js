@@ -23,7 +23,7 @@
       cfg.intervalMs = Number(getField("intervalMs", cfg.intervalMs || 50) || 50);
       cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.0), 1.0, 0.85, 1.25);
       cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "balanced") || "balanced").trim();
-      if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
+      if (["fast", "balanced", "expressive", "ultra"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
       cfg.mode = normalizeModeName(cfg.mode);
       cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode);
       cfg.offlineAudioEnabled = getCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
@@ -90,6 +90,7 @@
       if (cfg.mode === "normal") {
         return cfg.defaultVoice ? "" : "请先在“普通模式音色”里选择默认音色。";
       }
+      if (cfg.defaultVoice) return "";
       var missing = [];
       var list = normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName);
       ["旁白", "用户"].forEach(function (name) {
@@ -109,12 +110,12 @@
       var def = String(cfg.defaultVoice || "").trim();
       var narrator = voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], def, cfg.currentCharacterName);
       var dialogue = voiceForRoleInList(cfg.roleVoiceList, ["对白", "dialogue", "台词"], def, cfg.currentCharacterName);
-      var defBtn = first(panel, '[data-role="default-voice-label"]');
+      var defBtn = first(panel, '[data-role="default-voice-btn"]') || first(panel, '[data-role="default-voice-label"]');
       var narratorBtn = first(panel, '[data-role="normal-narrator-voice-btn"]');
       var dialogueBtn = first(panel, '[data-role="normal-dialogue-voice-btn"]');
       if (defBtn) {
-        defBtn.textContent = def ? shortName(def) : "未设置默认音色";
-        defBtn.title = def || "默认音色未设置";
+        defBtn.textContent = def ? shortName(def) : "选择默认音色…";
+        defBtn.title = def || "选择默认音色";
       }
       if (narratorBtn) {
         var narratorOwn = narrator && narrator !== def;

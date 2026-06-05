@@ -217,7 +217,7 @@
     var flushBytes = Math.max(8192, Math.floor(bytesPerSec * 0.50));
     flushBytes = flushBytes - (flushBytes % blockAlign);
     if (flushBytes < blockAlign) flushBytes = blockAlign;
-    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * 5.00));
+    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * 0.75));
     startBufferBytes = startBufferBytes - (startBufferBytes % blockAlign);
     if (startBufferBytes < flushBytes) startBufferBytes = flushBytes;
     var interrupted = false;

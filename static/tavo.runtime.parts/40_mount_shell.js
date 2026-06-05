@@ -24,13 +24,13 @@
         + '<div class="idx-modes"><button class="idx-mode" data-mode="normal" type="button"><strong>普通模式</strong><span>后端规则拆旁白/对白</span></button><button class="idx-mode" data-mode="ai" type="button"><strong>AI模式</strong><span>后端 LLM 拆旁白/人物</span></button></div>'
         + '<div class="idx-section-title">合成质量</div>'
         + '<div class="idx-grid">'
-          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option></select></label>'
+          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option><option value="ultra">落盘高质量</option></select></label>'
           + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.00"></label>'
         + '</div>'
         + '<div class="idx-normal-only"><div class="idx-section-title">普通模式音色</div><div class="idx-normal-voices" data-role="normal-voices">'
           + '<div class="idx-role-row idx-role-protected idx-normal-voice-row" data-normal-role="default">'
             + '<input class="idx-role-name" type="text" value="默认" readonly>'
-            + '<span class="idx-voice-btn idx-voice-readonly" data-role="default-voice-label" aria-disabled="true">默认音色</span>'
+            + '<button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择默认音色…</button>'
             + '<span class="idx-role-lock" title="默认槽位,不可删除">🔒</span>'
           + '</div>'
           + '<div class="idx-role-row idx-role-protected idx-normal-voice-row" data-normal-role="narrator">'
@@ -150,6 +150,7 @@
     var voicePill = first(root, '[data-role="voice-pill"]');
     var modePill = first(root, '[data-role="mode-pill"]');
     var generatedTracks = [];
+    var detachedBackgroundJobs = [];
     var currentTrackIndex = -1;
     var currentCacheKey = "";
     var webAudioController = null;
@@ -172,25 +173,24 @@
       } catch (_) {}
     }
     function historyStatusText() {
-      var total = persistableHistoryTracks(generatedTracks).length;
+      var visibleList = visibleTrackCards();
+      var total = visibleList.length;
       if (!total && !tracksLoaded && knownHistoryCount > 0) return "历史音频 " + knownHistoryCount + " 条";
       var active = currentTrack();
-      if (isCancelableLiveTrack(active)) return (active.backgroundOnly || normalizePlaybackMode(active.playbackMode) === "generate" ? "后台生成中" : "流式生成中") + " · 历史音频 " + total + " 条";
+      if (isLiveExitTrack(active)) return "流式生成中 · 当前 " + Math.max(1, visibleList.indexOf(active) + 1) + "/" + Math.max(1, total);
       if (!total) return "历史音频 0 条";
-      var savedList = persistableHistoryTracks(generatedTracks);
-      var idx = active ? (savedList.indexOf(active) + 1) : total;
+      var idx = active ? (visibleList.indexOf(active) + 1) : total;
       if (idx <= 0) idx = total;
       return "历史音频 " + total + " 条 · 当前 " + idx + "/" + total;
     }
+    function visibleTrackCards() {
+      return (generatedTracks || []).filter(function (t) { return !!(t && !t.deleted); });
+    }
     function updateTrackCounter() {
       var active = currentTrack();
-      if (counter && isCancelableLiveTrack(active)) {
-        counter.textContent = playbackModeLetter(active.playbackMode);
-        return;
-      }
-      var savedList = persistableHistoryTracks(generatedTracks);
-      var total = savedList.length || (!tracksLoaded ? knownHistoryCount : 0);
-      var idx = total && active ? (savedList.indexOf(active) + 1) : 0;
+      var visibleList = visibleTrackCards();
+      var total = visibleList.length || (!tracksLoaded ? knownHistoryCount : 0);
+      var idx = total && active ? (visibleList.indexOf(active) + 1) : 0;
       if (idx < 0) idx = 0;
       if (counter) counter.textContent = idx + "/" + total;
     }

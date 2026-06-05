@@ -10,7 +10,7 @@
       track.playSavedWhenReady = false;
       setPlayState("idle");
       setStatus("已暂停");
-      showTrackNotice(track, "已暂停", track.cacheKey ? "不会自动恢复流式；保存完成后点播放会检查历史音频" : "已停止等待");
+      showTrackNotice(track, "已暂停", track.cacheKey ? "不会自动恢复流式；完整音频就绪后点播放会检查历史音频" : "已停止等待");
     }
 
     async function generate(force) {
@@ -29,7 +29,9 @@
         if (currentTrackIndex < 0) currentTrackIndex = generatedTracks.length - 1;
         var existingTrack = currentTrack();
         if (!existingTrack) return;
-        if (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (elementAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended)) {
+        var existingIsPlaying = String(existingTrack.playbackState || "") === "playing"
+          && (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (elementAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended));
+        if (existingIsPlaying) {
           if (isSavedTrack(existingTrack)) {
             try {
               existingTrack.lastElementSec = Math.max(0, Number(audio.currentTime || 0) || 0);
@@ -42,6 +44,15 @@
           } else {
             pauseLiveTrack(existingTrack);
           }
+          return;
+        }
+        var existingState = trackState(existingTrack);
+        if (existingState === "failed" || existingState === "cancelled") {
+          setTrackPlaybackState(existingTrack, existingState === "failed" ? "error" : "cancelled");
+          setPlayState("idle");
+          setStatus(existingState === "cancelled" ? "任务已取消" : "生成失败");
+          showTrackNotice(existingTrack, existingState === "cancelled" ? "任务已取消" : "生成失败", existingTrack.error || "点 + 重新生成");
+          updateTrackButtons();
           return;
         }
         if (shouldUseElementForSavedTrack(existingTrack)) {
@@ -85,12 +96,12 @@
             existingTrack.allowStreamPlay = false;
             setTrackPlaybackState(existingTrack, "loading");
             setPlayState("loading");
-            setStatus(manualResumeSec > 0 ? "检查断点音频…" : "检查音频状态…");
-            showTrackNotice(existingTrack, manualResumeSec > 0 ? "检查断点音频" : "检查音频状态", manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续检查，完成后播放完整音频") : "如果已落盘会直接播放，否则继续等待保存");
+            setStatus(manualResumeSec > 0 ? "连接断点音频…" : "连接实时音频…");
+            showTrackNotice(existingTrack, manualResumeSec > 0 ? "连接断点音频" : "连接实时音频", manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续实时播放") : "继续实时播放；完整音频会自动进入历史");
             await playLiveTrack(existingTrack, liveUrl, {
-              noticeTitle: manualResumeSec > 0 ? "等待保存音频…" : "等待保存音频…",
-              noticeDetail: manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续；完整音频保存后自动播放") : "完整音频保存后自动播放",
-              waitDetail: "等待后端继续合成并落盘",
+              noticeTitle: manualResumeSec > 0 ? "连接断点音频…" : "连接实时音频…",
+              noticeDetail: manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续") : "正在连接实时音频",
+              waitDetail: "等待后端返回实时音频",
               startOffsetSec: manualResumeSec
             });
             return;
@@ -98,7 +109,7 @@
           setTrackPlaybackState(existingTrack, "error");
           setPlayState("idle");
           setStatus(existingTrack.cacheKey ? "音频已失效，点 + 重新生成" : "还没有音频，点 + 生成");
-          showTrackNotice(existingTrack, existingTrack.cacheKey ? "需要重新生成" : "还没有音频", existingTrack.cacheKey ? "原流式任务已结束且无保存音频，点 + 重新生成" : "点 + 号开始生成");
+          showTrackNotice(existingTrack, existingTrack.cacheKey ? "需要重新生成" : "还没有音频", existingTrack.cacheKey ? "原实时任务已结束且没有完整音频，点 + 重新生成" : "点 + 号开始生成");
           return;
         }
         if (audio.src) {
@@ -127,6 +138,21 @@
 
       var parseMode = normalizeModeName(cfg.mode);
       var playbackMode = normalizePlaybackMode(cfg.playbackMode);
+      var backgroundDetached = playbackMode === "generate";
+      var aiParseHint = cfg.reuseLlmParse !== false ? "后端会先检查 LLM 拆段复用" : "后端会做 LLM 拆段";
+      var aiSubmitTitle = cfg.reuseLlmParse !== false ? "提交到后端检查拆段…" : "提交到后端分析…";
+      var aiSubmitDetail = cfg.reuseLlmParse !== false ? "后端先查复用，未命中才调用 LLM" : "LLM 拆段由后端控制，可随时删除任务";
+      function showGenerationProgress(track, titleText, detailText) {
+        if (backgroundDetached && currentTrack() !== track) {
+          if (!currentTrack()) {
+            setStatus(titleText);
+            showTrackNotice(null, titleText, detailText);
+          }
+          return;
+        }
+        setStatus(titleText);
+        showTrackNotice(track, titleText, detailText);
+      }
       if (parseMode === "ai" && (!cfg.llmEndpoint || !cfg.llmModel)) throw new Error("AI模式需要填写 LLM 接口地址和模型。");
       var voicesMap = parseMode === "normal" ? normalModeVoicesMap(cfg) : rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
       var rolesHint = parseMode === "normal"
@@ -142,7 +168,7 @@
         mode: parseMode,
         parseMode: parseMode,
         playbackMode: playbackMode,
-        backgroundOnly: playbackMode === "generate",
+        backgroundOnly: false,
         segments: [],
         voicesMap: voicesMap,
         state: "pending",
@@ -152,15 +178,27 @@
         allowStreamPlay: false
       };
       setTrackState(placeholder, "pending");
-      generatedTracks.push(placeholder);
-      currentTrackIndex = generatedTracks.length - 1;
-      try { audio.pause(); } catch (_) {}
-      clearElementAudioSrc();
-      await selectTrack(currentTrackIndex, false);
-      setStatus(playbackMode === "generate" ? "准备后台生成…" : "准备生成…");
-      showTrackNotice(placeholder, playbackMode === "generate" ? "准备后台生成…" : "准备生成…", parseMode === "ai" ? "后端会先做 LLM 拆段" : "后端会按旁白/对白规则拆段");
-      debugLog("🎵 新建占位卡片 mode=" + parseMode + " playback=" + playbackMode + " index=" + currentTrackIndex, "#9ff");
-      setPlayState("loading");
+      if (backgroundDetached) {
+        tracksLoaded = true;
+        generatedTracks.push(placeholder);
+        var backgroundIndex = generatedTracks.length - 1;
+        if (currentTrackIndex < 0) {
+          currentTrackIndex = backgroundIndex;
+          await selectTrack(currentTrackIndex, false);
+        }
+        showGenerationProgress(placeholder, "准备后台生成…", parseMode === "ai" ? aiParseHint : "后端会按旁白/对白规则拆段");
+        updateTrackButtons();
+        debugLog("🎵 新建落盘普通卡片 mode=" + parseMode + " playback=" + playbackMode + " index=" + backgroundIndex, "#9ff");
+      } else {
+        generatedTracks.push(placeholder);
+        currentTrackIndex = generatedTracks.length - 1;
+        try { audio.pause(); } catch (_) {}
+        clearElementAudioSrc();
+        await selectTrack(currentTrackIndex, false);
+        showGenerationProgress(placeholder, "准备生成…", parseMode === "ai" ? aiParseHint : "后端会按旁白/对白规则拆段");
+        debugLog("🎵 新建占位卡片 mode=" + parseMode + " playback=" + playbackMode + " index=" + currentTrackIndex, "#9ff");
+        setPlayState("loading");
+      }
       try {
         var base = cleanBase(cfg.apiBase);
         var t0 = Date.now();
@@ -193,8 +231,7 @@
         debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
         startServerLogPolling(base);
         if (placeholder.deleted) throw Object.assign(new Error("生成已取消"), { name: "AbortError" });
-        setStatus(parseMode === "ai" ? "提交到后端分析…" : "提交到后端拆段…");
-        showTrackNotice(placeholder, parseMode === "ai" ? "提交到后端分析…" : "提交到后端拆段…", playbackMode === "generate" ? "后台生成完整音频，不连接流式播放" : "拿到任务后开始等待音频");
+        showGenerationProgress(placeholder, parseMode === "ai" ? aiSubmitTitle : "提交到后端拆段…", playbackMode === "generate" ? "后台生成完整音频，不连接流式播放" : "拿到任务后开始等待音频");
         var jobInfo;
         var jobCreateController = (typeof AbortController === "function") ? new AbortController() : null;
         placeholder.jobCreateAbortController = jobCreateController;
@@ -202,8 +239,7 @@
         var ttsTimer = setInterval(function () {
           if (placeholder.deleted) return;
           var sec = Math.floor((Date.now() - ttsStart) / 1000);
-          setStatus((playbackMode === "generate" ? "后台生成提交中 " : "后端处理中 ") + sec + "s…");
-          showTrackNotice(placeholder, (playbackMode === "generate" ? "后台生成提交中 " : "后端处理中 ") + sec + "s…", parseMode === "ai" ? "LLM 拆段由后端控制，可随时删除任务" : "普通模式规则拆段，可随时删除任务");
+          showGenerationProgress(placeholder, (playbackMode === "generate" ? "后台生成提交中 " : "后端处理中 ") + sec + "s…", parseMode === "ai" ? aiSubmitDetail : "普通模式规则拆段，可随时删除任务");
         }, 1000);
         try {
           debugLog("📡 提交 dialogue job: parse_mode=" + parseMode + " playback=" + playbackMode, "#ffd479");
@@ -227,14 +263,14 @@
         placeholder.stalledCount = 0;
         placeholder.streamHealth = "ok";
         placeholder.savePromptAsked = false;
-        placeholder.backgroundOnly = playbackMode === "generate";
+        placeholder.backgroundOnly = false;
         placeholder.playbackMode = playbackMode;
         placeholder.allowStreamPlay = playbackMode === "live" && !jobInfo.cached;
         placeholder.url = jobInfo.cached ? jobInfo.cacheUrl : (playbackMode === "live" ? jobInfo.streamUrl : "");
-        setTrackState(placeholder, jobInfo.cached ? "saved" : (placeholder.backgroundOnly ? "pending" : "live"));
+        setTrackState(placeholder, jobInfo.cached ? "saved" : (backgroundDetached ? "pending" : "live"));
         currentCacheKey = jobInfo.cacheKey;
         updateTrackButtons();
-        if (messageId && placeholder.backgroundOnly && !jobInfo.cached) {
+        if (messageId && backgroundDetached && !jobInfo.cached) {
           savePendingJobForTrack(placeholder).catch(function(){});
           debugLog("💾 已记录后台生成 pending cacheKey=" + jobInfo.cacheKey, "#9ff");
         }
@@ -242,12 +278,14 @@
           await removePendingJobForTrack(placeholder).catch(function(){});
           await prepareOfflineAudio(placeholder, "cached hit", { saveMissing: true });
           knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
-          setStatus(playbackMode === "generate" ? "已有音频" : "已有音频，正在播放");
-          showTrackNotice(placeholder, placeholder.offlineUrl ? "本地离线音频" : "已有音频", playbackMode === "generate" ? "点播放开始播放完整音频" : "已加载音频，支持拖动");
+          showGenerationProgress(placeholder, playbackMode === "generate" ? ("已有音频 · 历史音频 " + knownHistoryCount + " 条") : "已有音频，正在播放", playbackMode === "generate" ? "已加入普通历史音频" : "已加载音频，支持拖动");
           debugLog(placeholder.offlineUrl ? "⚡ 命中本地离线音频" : "⚡ 命中服务端缓存", "#9f9");
           if (playbackMode === "live") {
             setPlayState("loading");
             startElementAudioFrom(placeholder, 0);
+          } else if (backgroundDetached) {
+            attachCacheAudio(placeholder, { deferElement: true });
+            if (currentTrack() === placeholder) setPlayState("idle");
           } else {
             setPlayState("idle");
             attachCacheAudio(placeholder, { deferElement: true });
@@ -257,33 +295,49 @@
           return;
         }
         pollCacheUpgrade(placeholder, playbackMode === "generate" ? "background generate" : "live snapshot");
-        if (placeholder.backgroundOnly) {
-          setPlayState("idle");
-          setStatus("后台生成中…");
-          showTrackNotice(placeholder, "后台生成中…", "可以退出 Tavo，回来后会继续检查音频是否落盘");
+        if (backgroundDetached) {
+          showGenerationProgress(placeholder, "后台生成中…", "可以退出 Tavo，回来后会继续检查音频是否落盘");
           stopServerLogPolling();
           return;
         }
+        if (parseMode === "ai" && placeholder.cacheKey) {
+          await refreshTrackFromStatus(placeholder, "pre-live status");
+          if (isSavedTrack(placeholder)) {
+            setPlayState("loading");
+            startElementAudioFrom(placeholder, 0);
+            stopServerLogPolling();
+            return;
+          }
+          var preLiveState = trackState(placeholder);
+          if (preLiveState === "failed" || preLiveState === "cancelled") {
+            setPlayState("idle");
+            setStatus(preLiveState === "cancelled" ? "任务已取消" : "生成失败");
+            showTrackNotice(placeholder, preLiveState === "cancelled" ? "任务已取消" : "生成失败", placeholder.error || "后端任务未能生成音频");
+            updateTrackButtons();
+            stopServerLogPolling();
+            return;
+          }
+        }
         if (placeholder.pausedByUser) {
-          setStatus("已暂停，后台保存中");
-          showTrackNotice(placeholder, "已暂停", "合成还在后台进行，保存后会成为历史音频");
+          setStatus("已暂停，后台合成中");
+          showTrackNotice(placeholder, "已暂停", "合成还在后台进行，完成后会成为历史音频");
           stopServerLogPolling();
           return;
         }
         setStatus("等待首段音频…");
-        showTrackNotice(placeholder, "等待首段音频…", "正在合成，完成后也会自动落盘");
+        showTrackNotice(placeholder, "等待首段音频…", "正在合成，完整音频会自动进入历史");
         setPlayState("loading");
         placeholder.allowStreamPlay = false;
         if (shouldUseWebAudioForLiveTrack(placeholder)) {
           debugLog("▶️ live track 使用 Web Audio API 真流式", "#ffd479");
-          await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，完成后也会自动落盘", waitDetail: "正在合成第一段" });
+          await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，完整音频会自动进入历史", waitDetail: "正在合成第一段" });
           if (isSavedTrack(placeholder)) attachCacheAudio(placeholder, { deferElement: true });
           stopServerLogPolling();
           return;
         }
         var totalSec = Math.floor((Date.now() - t0) / 1000);
         debugLog("▶️ 启动 live 播放路径, 截至此处用时 " + totalSec + "s", "#9f9");
-        await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，完成后也会自动落盘", waitDetail: "正在合成第一段" });
+        await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，完整音频会自动进入历史", waitDetail: "正在合成第一段" });
         try {
           audio.addEventListener("ended", stopServerLogPolling, { once: true });
           audio.addEventListener("error", stopServerLogPolling, { once: true });
@@ -292,29 +346,34 @@
       } catch (e) {
         var msg = String((e && e.message) || e || "");
         var isAbort = (e && e.name === 'AbortError') || /aborted/i.test(msg);
-        setPlayState("idle");
+        var affectsCurrentCard = !backgroundDetached || currentTrack() === placeholder || !currentTrack();
+        if (affectsCurrentCard) setPlayState("idle");
         stopServerLogPolling();
         // 切卡/切角色导致的 AbortError 是正常用户操作,不弹红色错误
         if (isAbort) {
-          setStatus("已取消");
+          setStatus(backgroundDetached ? "后台生成已取消" : "已取消");
           debugLog("⏸ 生成被中断(切卡/切角色等): " + msg, "#fc9");
         } else {
-          setStatus("生成失败");
-          setError(msg);
+          setStatus(backgroundDetached ? "后台生成失败" : "生成失败");
+          if (backgroundDetached && !affectsCurrentCard) {
+            if (!currentTrack()) showTrackNotice(null, "后台生成失败", msg);
+          } else {
+            setError(msg);
+          }
           debugLog("❌ 错误: " + msg, "#f99");
         }
-        // 生成失败 → 从列表里删掉占位卡片,避免留死卡
+        // 生成失败不自动删卡；D 只有用户点删除才删后端任务/音频。
         if (placeholder) {
-          var idx = generatedTracks.indexOf(placeholder);
-          if (idx >= 0) {
-            generatedTracks.splice(idx, 1);
-            if (currentTrackIndex >= generatedTracks.length) currentTrackIndex = generatedTracks.length - 1;
-            updateTrackButtons();
-            debugLog("🗑 移除失败的占位卡片", "#fc9");
+          if (!placeholder.deleted) {
+            placeholder.error = msg;
+            setTrackState(placeholder, isAbort ? "cancelled" : "failed");
+            if (currentTrack() === placeholder) showTrackNotice(placeholder, isAbort ? "已取消" : "生成失败", msg || "点删除可移除这张卡片");
           }
           removePendingJobForTrack(placeholder).catch(function(){});
+          forgetDetachedBackgroundJob(placeholder);
           if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-          if (!generatedTracks.length) {
+          updateTrackButtons();
+          if (!generatedTracks.length && !backgroundDetached) {
             currentCacheKey = "";
             if (seek) { seek.disabled = true; seek.value = "0"; }
             if (cur) cur.textContent = "00:00";

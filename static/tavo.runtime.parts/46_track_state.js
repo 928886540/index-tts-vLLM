@@ -1,8 +1,23 @@
 // IndexTTS Tavo runtime part: 46_track_state.js // Role: track state, offline cache, live playback helpers // This fragment is concatenated by static/tavo.runtime.js; it is not a standalone script.
     function ensureTrackStates(track) {
       if (!track) return null;
-      var state = oneOf(track.state, ["pending", "live", "saved", "failed", "cancelled"], inferLegacyTrackState(track));
+      var inferred = inferLegacyTrackState(track);
+      var state = oneOf(track.state, ["pending", "live", "saved", "failed", "cancelled"], "");
+      // 后端终态/落盘证据必须压过旧 UI state，避免 failed+live 混在同一张卡上。
+      if (!state || inferred === "failed" || inferred === "cancelled" || inferred === "saved") state = inferred;
       track.state = state; // legacy coarse state, persisted for old cards.
+      if (state === "failed" || state === "cancelled") {
+        track.pendingBlob = false;
+        track.streaming = false;
+        track.allowStreamPlay = false;
+        track.playSavedWhenReady = false;
+        track.cachePollStarted = false;
+        if (state === "cancelled") track.cancelled = true;
+      } else if (state === "saved") {
+        track.pendingBlob = false;
+        track.streaming = false;
+        track.allowStreamPlay = false;
+      }
       track.serverState = oneOf(track.serverState, ["pending", "running", "done", "failed", "cancelled"],
         state === "saved" ? "done" : (state === "cancelled" ? "cancelled" : (state === "failed" ? "failed" : (state === "live" ? "running" : "pending"))));
       var cacheState = track.cacheState || track.remoteCacheState;
@@ -82,6 +97,9 @@
         track.status = "failed";
         track.pendingBlob = false;
         track.streaming = false;
+        track.allowStreamPlay = false;
+        track.playSavedWhenReady = false;
+        track.cachePollStarted = false;
         setTrackServerState(track, "failed");
         setTrackCacheState(track, "failed");
         setTrackPlaybackState(track, "error");
@@ -90,6 +108,9 @@
         track.cancelled = true;
         track.pendingBlob = false;
         track.streaming = false;
+        track.allowStreamPlay = false;
+        track.playSavedWhenReady = false;
+        track.cachePollStarted = false;
         setTrackServerState(track, "cancelled");
         setTrackCacheState(track, "none");
         setTrackPlaybackState(track, "cancelled");
@@ -108,13 +129,28 @@
       ensureTrackStates(track);
       return track.state;
     }
+    function isTerminalTrack(track) {
+      var state = trackState(track);
+      return state === "failed" || state === "cancelled";
+    }
     function isSavedTrack(track) { return trackState(track) === "saved"; }
     function isLiveTrack(track) { return trackState(track) === "live"; }
+    function isLiveExitTrack(track) {
+      return isCancelableLiveTrack(track);
+    }
     function isCancelableLiveTrack(track) {
       if (!track || track.deleted || isSavedTrack(track)) return false;
+      if (normalizePlaybackMode(track.playbackMode) !== "live" || track.backgroundOnly) return false;
       var state = trackState(track);
       if (state === "failed" || state === "cancelled") return false;
       return state === "live" || state === "pending" || !!(track.pendingBlob || track.streaming || track.cachePollStarted);
+    }
+    function isPendingGenerateTrack(track) {
+      if (!track || track.deleted || isSavedTrack(track)) return false;
+      if (normalizePlaybackMode(track.playbackMode) !== "generate") return false;
+      var state = trackState(track);
+      if (state === "failed" || state === "cancelled") return false;
+      return state === "pending" || !!(track.pendingBlob || track.cachePollStarted);
     }
     function isFinishedLiveTrack(track) {
       if (!track || isSavedTrack(track) || track.deleted || track.cancelled) return false;
@@ -122,9 +158,11 @@
     }
     function trackPlayableUrl(track) {
       if (!track) return "";
+      var state = trackState(track);
+      if (track.deleted || state === "failed" || state === "cancelled") return "";
       if (cfg.offlineAudioEnabled && track.offlineUrl) return track.offlineUrl;
-      if (isSavedTrack(track)) return track.url || track.cacheUrl || track.streamUrl || "";
-      if (isLiveTrack(track)) return track.streamUrl || track.url || "";
+      if (state === "saved") return track.url || track.cacheUrl || track.streamUrl || "";
+      if (state === "live") return track.streamUrl || track.url || "";
       return track.url || "";
     }
     function liveStreamUrlForTrack(track) {
@@ -188,6 +226,7 @@
       if (!key) return false;
       var rec = await getOfflineAudioRecord(key);
       if (!rec || !rec.blob) {
+        revokeOfflineObjectUrl(track);
         track.offlineReady = false;
         setTrackOfflineState(track, "missing");
         return false;
@@ -250,7 +289,7 @@
       } catch (e) {
         track.offlineWanted = true;
         setTrackOfflineState(track, "failed");
-        debugLog("⚠️ " + (label || "offline") + " 离线保存失败，稍后播放在线音频时补偿: " + (e && e.message ? e.message : e), "#fc9");
+        debugLog("⚠️ " + (label || "offline") + " 离线保存失败；不影响在线播放: " + (e && e.message ? e.message : e), "#fc9");
         if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
         return false;
       } finally {
@@ -298,7 +337,9 @@
     }
     function shouldUseWebAudioForLiveTrack(track) {
       if (!(track && track.mode !== "single" && isLiveTrack(track) && track.streamUrl)) return false;
-      return scriptFlagEnabled("webAudioLive");
+      if (scriptFlagEnabled("noWebAudioLive")) return false;
+      if (scriptFlagEnabled("nativeLive") || scriptFlagEnabled("elementLive")) return false;
+      return true;
     }
     function shouldUseElementForLiveTrack(track, startOffsetSec) {
       if (!(track && isLiveTrack(track) && liveStreamUrlForTrack(track))) return false;
@@ -320,8 +361,8 @@
       setTrackStreamHealth(track, "stalled");
       setTrackPlaybackState(track, "buffering");
       setPlayState("loading");
-      setStatus(opts.status || "实时播放不兼容，等待保存音频…");
-      showTrackNotice(track, opts.title || "等待保存音频…", opts.detail || "Tavo WebView 不直接播放直播 WAV，生成完成后切到完整音频");
+      setStatus(opts.status || "实时播放不可用，等待完整音频…");
+      showTrackNotice(track, opts.title || "等待完整音频…", opts.detail || "实时播放不可用，生成完成后切到完整音频");
       pollCacheUpgrade(track, label || "live cache fallback");
       if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
       return true;
@@ -330,7 +371,7 @@
       return isSavedTrack(track);
     }
     function savedTrackLabel(track) {
-      return shouldUseElementForSavedTrack(track) ? "音频已保存" : "音频已就绪";
+      return shouldUseElementForSavedTrack(track) ? "完整音频已就绪" : "音频已就绪";
     }
     function waitingLabelForTrack(track) {
       if (shouldUseElementForSavedTrack(track)) return "缓冲中…";
@@ -343,36 +384,12 @@
     function qualityModeLabel(mode) {
       mode = String(mode || "");
       if (mode === "fast") return "极速";
+      if (mode === "ultra") return "落盘高质量";
       if (mode === "expressive") return "质量优先";
       return "平衡";
     }
     function formatJobMetrics(metrics) {
-      if (!metrics) return "";
-      function num(v) { v = Number(v); return isFinite(v) ? v : null; }
-      var parts = [];
-      var first = num(metrics.first_pcm_s);
-      var total = num(metrics.total_wall_s);
-      var dur = num(metrics.audio_duration_s);
-      var rtf = num(metrics.rtf);
-      var wallRtf = num(metrics.wall_rtf);
-      var steps = num(metrics.diffusion_steps);
-      var firstTokens = num(metrics.first_tokens);
-      var s2mel = num(metrics.s2mel_s);
-      var condition = num(metrics.condition_s);
-      var done = num(metrics.segments_done);
-      var all = num(metrics.segments_total);
-      if (metrics.performance_mode) parts.push("档位 " + qualityModeLabel(metrics.performance_mode));
-      if (steps != null) parts.push("steps " + steps);
-      if (firstTokens != null) parts.push("首段 " + firstTokens);
-      if (first != null) parts.push("首音 " + first.toFixed(1) + "s");
-      if (rtf != null) parts.push("RTF " + rtf.toFixed(2));
-      if (wallRtf != null && wallRtf !== rtf) parts.push("全程RTF " + wallRtf.toFixed(2));
-      if (s2mel != null && s2mel > 0) parts.push("s2mel " + s2mel.toFixed(1) + "s");
-      if (condition != null && condition > 0) parts.push("条件 " + condition.toFixed(1) + "s");
-      if (dur != null && dur > 0) parts.push("音频 " + dur.toFixed(1) + "s");
-      if (total != null) parts.push("总耗时 " + total.toFixed(1) + "s");
-      if (done != null && all != null && all > 0) parts.push("段 " + done + "/" + all);
-      return parts.join(" · ");
+      return "";
     }
     async function askPlaySavedTrack(track) {
       if (!track || track.savePromptAsked || currentTrack() !== track || !isSavedTrack(track)) return;
@@ -381,14 +398,14 @@
       try {
         if (window.tavo && tavo.utils && typeof tavo.utils.select === "function") {
           choice = await tavo.utils.select([
-            { value: "play", label: "直接播放", description: "从当前位置切到已保存音频，支持拖动进度条" },
+            { value: "play", label: "切换播放", description: "从当前位置切到完整音频，支持拖动进度条" },
             { value: "wait", label: "继续等待", description: "保持当前流式播放，不切换" }
-          ], "音频已保存，是否直接播放？", "play");
+          ], "完整音频已就绪，是否切换播放？", "play");
         } else if (typeof window.confirm === "function") {
-          choice = window.confirm("音频已保存，是否直接播放已保存音频？") ? "play" : "wait";
+          choice = window.confirm("完整音频已就绪，是否切换播放？") ? "play" : "wait";
         }
       } catch (e) {
-        debugLog("⚠️ 保存音频弹窗失败: " + (e && e.message ? e.message : e), "#fc9");
+        debugLog("⚠️ 完整音频弹窗失败: " + (e && e.message ? e.message : e), "#fc9");
       }
       if (choice !== "play" || currentTrack() !== track || !isSavedTrack(track)) return;
       var resumeSec = 0;
@@ -443,6 +460,7 @@
             sec = Math.max(0, fallbackOffsetSec + ((now - startedAt) / 1000) * playbackRate);
           }
         } catch (_) { sec = 0; }
+        sec = clampPlaybackTimeSec(track, sec);
         if (cur) cur.textContent = formatTime(sec);
         var durHint = trackDurationHintSec(track);
         if (total) total.textContent = durHint > 0 ? formatTime(durHint) : "--:--";
@@ -479,6 +497,10 @@
       function stopWaitTimer() {
         if (waitTimer) { try { clearInterval(waitTimer); } catch (_) {} waitTimer = null; }
       }
+      function webAudioShouldYieldToTrackState() {
+        var st = trackState(track);
+        return !!(track.deleted || st === "failed" || st === "cancelled" || (st === "saved" && !track.webAudioPlaying));
+      }
       track.webAudioPlaying = false;
       setTrackStreamHealth(track, "ok");
       clearElementAudioSrc();
@@ -492,6 +514,7 @@
       showTrackNotice(track, opts.noticeTitle || "正在连接音频…", opts.noticeDetail || "等待后端返回声音");
       waitTimer = setInterval(function () {
         if (token !== webAudioPlayToken) { stopWaitTimer(); return; }
+        if (webAudioShouldYieldToTrackState()) { stopWaitTimer(); return; }
         if (track.webAudioPlaying) return;
         var sec = Math.max(1, Math.floor((Date.now() - waitStartedAt) / 1000));
         if (sec >= 90) {
@@ -519,6 +542,10 @@
           },
           onStateChange: function (state) {
             if (token !== webAudioPlayToken) return;
+            if (webAudioShouldYieldToTrackState()) {
+              if (state !== "stopped") debugLog("↪️ 忽略 Web Audio 状态 " + state + "：任务状态已是 " + trackState(track), "#fc9");
+              return;
+            }
             if (state === "connecting") {
               setTrackPlaybackState(track, "loading");
               setStatus("正在连接音频…");
@@ -547,7 +574,7 @@
               track.webAudioPlaying = true;
               setTrackPlaybackState(track, "playing");
               setPlayState("playing");
-              setStatus("正在播放：" + trackPlaybackLabel(track));
+              setStatus(trackPlaybackLabel(track));
               setError("");
               debugLog("▶️ Web Audio 播放时钟已启动", "#9f9");
               startedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -570,8 +597,8 @@
               if (track.cacheKey && track.stalledCount >= 4 && !streamTooSlowFallback) {
                 streamTooSlowFallback = true;
                 track.playSavedWhenReady = true;
-                setStatus("实时生成跟不上，等待保存音频…");
-                showTrackNotice(track, "实时生成跟不上", "停止流式，等完整音频保存后自动播放");
+                setStatus("实时生成跟不上，等待完整音频…");
+                showTrackNotice(track, "实时生成跟不上", "停止流式，等完整音频完成后自动播放");
                 debugLog("⚠️ Web Audio 连续缓冲，切到落盘后播放 cacheKey=" + track.cacheKey, "#fc9");
                 if (webAudioController && typeof webAudioController.stop === "function") {
                   try { webAudioController.stop("stream too slow"); } catch (_) {}
@@ -580,7 +607,7 @@
             } else if (state === "resumed") {
               setTrackPlaybackState(track, "playing");
               setPlayState("playing");
-              setStatus("正在播放：" + trackPlaybackLabel(track));
+              setStatus(trackPlaybackLabel(track));
             } else if (state === "interrupted") {
               stopWaitTimer();
               setTrackStreamHealth(track, "interrupted");
@@ -606,12 +633,12 @@
               setPlayState("idle");
               stopSubtitle();
               if ((track.streamInterrupted || track.streamHealth === "interrupted") && !isSavedTrack(track)) {
-                setStatus("网络中断，等待音频保存…");
-                showTrackNotice(track, "网络中断，等待音频保存…", "保存完成后会询问是否直接播放");
+                setStatus("网络中断，等待完整音频…");
+                showTrackNotice(track, "网络中断，等待完整音频…", "完整音频就绪后可切换播放");
               } else {
                 var saved = shouldUseElementForSavedTrack(track);
-                setStatus(saved ? "播放完成，音频已保存" : "播放完成，等待音频保存…");
-                showTrackNotice(track, "播放完成", saved ? "点播放可重播" : "正在后台保存");
+                setStatus(saved ? "播放完成，完整音频已就绪" : "播放完成，等待完整音频…");
+                showTrackNotice(track, "播放完成", saved ? "点播放可重播" : "正在后台整理完整音频");
               }
             }
           },
@@ -628,11 +655,22 @@
         webAudioController = null;
         clearWebAudioProgressTimer();
         stopSubtitle();
+        var st = trackState(track);
+        if (track.deleted || st === "failed" || st === "cancelled") {
+          debugLog("↪️ 忽略 Web Audio 流式异常，任务状态已是 " + st + ": " + msg, "#fc9");
+          return false;
+        }
+        if (st === "saved") {
+          setPlayState("idle");
+          setStatus("完整音频已就绪");
+          showTrackNotice(track, "完整音频已就绪", "点播放可重播，支持拖动进度条");
+          return false;
+        }
         if (streamTooSlowFallback) {
           setTrackStreamHealth(track, "stalled");
           setTrackPlaybackState(track, "buffering");
           setPlayState("loading");
-          setStatus("实时生成跟不上，等待保存音频…");
+          setStatus("实时生成跟不上，等待完整音频…");
           pollCacheUpgrade(track, "slow stream fallback");
           return false;
         }
@@ -658,6 +696,15 @@
           debugLog("⚠️ Web Audio 连接中断，不恢复流式: " + msg, "#fc9");
           return false;
         }
+        if (track.cacheKey && (/\[step:fetch\]\s+HTTP\s+5\d\d/i.test(msg) || /decodeAudioData|WAV|wavHeader|data 段|不支持|not supported|noAudio/i.test(msg))) {
+          debugLog("⚠️ 实时流暂不可用，改等完整音频: " + msg, "#fc9");
+          waitForSavedLiveTrack(track, "web audio stream fallback", {
+            resumeSec: trackResumeSec(track),
+            title: "实时流暂不可用",
+            detail: "生成完成后自动切到完整音频"
+          });
+          return false;
+        }
         var friendly = friendlyPlaybackError(e);
         setTrackPlaybackState(track, "error");
         setPlayState("idle");
@@ -676,8 +723,8 @@
       if (!shouldUseElementForLiveTrack(track, startOffsetSec)) {
         return Promise.resolve(waitForSavedLiveTrack(track, "live cache fallback", {
           resumeSec: startOffsetSec,
-          title: opts.noticeTitle || "等待保存音频…",
-          detail: opts.noticeDetail || "Tavo WebView 不直接播放直播 WAV，生成完成后切到完整音频"
+          title: opts.noticeTitle || "等待完整音频…",
+          detail: opts.noticeDetail || "Tavo WebView 不直接播放实时音频，生成完成后切到完整音频"
         }));
       }
       stopWebAudioPlayback("replace");
@@ -753,7 +800,7 @@
           return true;
         }
         if (j && j.state === "failed") {
-          track.error = j.error || "服务端生成失败";
+          track.error = (j.metrics && j.metrics.message ? j.metrics.message + ": " : "") + (j.error || "服务端生成失败");
           setTrackState(track, "failed");
           removePendingJobForTrack(track).catch(function(){});
           updateTrackButtons();

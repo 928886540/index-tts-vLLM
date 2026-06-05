@@ -11,7 +11,7 @@
   - verify API startup on `9880`;
   - `static/tavo.js` now matches the desired live-card boundary in code: live is transient, saved is native `<audio>`;
   - `static/tavo.js` is now a light loader; runtime lives in `static/tavo.runtime.js` + `static/tavo.runtime.parts/`;
-  - update Tavo regex/cache-busting URL to `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1`;
+  - update Tavo regex/cache-busting URL to `https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v5`;
   - run a short end-to-end generation without ComfyUI occupying GPU.
 
 - Resource and RTF baseline:

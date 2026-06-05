@@ -21,6 +21,17 @@
         await refreshTrackFromStatus(track, "select snapshot");
         state = trackState(track);
       }
+      if (state === "failed" || state === "cancelled") {
+        // 终态卡片只展示结果和删除/重新生成入口，不能继续复用旧 live/audio 状态。
+        clearElementAudioSrc();
+        if (seek) { seek.disabled = true; seek.value = "0"; }
+        setTrackPlaybackState(track, state === "cancelled" ? "cancelled" : "error");
+        setPlayState("idle");
+        setStatus(state === "cancelled" ? "任务已取消" : "生成失败");
+        showTrackNotice(track, state === "cancelled" ? "任务已取消" : "生成失败", track.error || "点 + 重新生成");
+        updateTrackButtons();
+        return;
+      }
       await hydrateOfflineAudio(track, "select");
       srcUrl = trackPlayableUrl(track);
       debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.offlineUrl ? "offline" : srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
@@ -59,13 +70,13 @@
           if (autoplay) {
             waitForSavedLiveTrack(track, "select live cache fallback", {
               resumeSec: trackResumeSec(track),
-              title: "等待保存音频…",
-              detail: "实时直播音频在当前 WebView 不稳定，生成完成后切到完整音频"
+              title: "等待完整音频…",
+              detail: "实时音频在当前 WebView 不稳定，生成完成后切到完整音频"
             });
           } else {
             setTrackPlaybackState(track, "idle");
             setPlayState("idle");
-            setStatus("流式生成中，等待保存音频");
+            setStatus("流式生成中");
             showTrackNotice(track, "流式生成中", "完成后会切到可拖动的完整音频");
             pollCacheUpgrade(track, "select live cache fallback");
           }
@@ -99,8 +110,15 @@
       try { audio.removeAttribute('src'); audio.load(); } catch (_) {}
       if (seek) { seek.disabled = true; }
       if (state === "failed") {
+        setTrackPlaybackState(track, "error");
+        setPlayState("idle");
         showTrackNotice(track, "生成失败", track.error || "请重新生成一次");
         setStatus("生成失败");
+      } else if (state === "cancelled") {
+        setTrackPlaybackState(track, "cancelled");
+        setPlayState("idle");
+        showTrackNotice(track, "任务已取消", track.error || "点 + 重新生成");
+        setStatus("任务已取消");
       } else if (state === "live") {
         showTrackNotice(track, "流式生成中", "等待音频保存或继续播放");
         setStatus(historyStatusText());
@@ -119,13 +137,13 @@
         updateTrackButtons();
         if (track.webAudioPlaying && !opts.forceElement) return true;
         if (opts.deferElement) {
-          setStatus("音频已保存，可重播");
-          showTrackNotice(track, "音频已保存", formatJobMetrics(track.metrics) || "点播放可重播");
+          setStatus("完整音频已就绪，可重播");
+          showTrackNotice(track, "完整音频已就绪", formatJobMetrics(track.metrics) || "点播放可重播");
           return true;
         }
         if (isElementUsingTrackStream(track) && !opts.forceElement && !opts.autoplay) {
-          setStatus(isElementPlayingTrackStream(track) ? "音频已保存，继续流式播放" : "音频已保存，可重播");
-          showTrackNotice(track, "音频已保存", trackHasStreamIssue(track) ? "检测到流式卡顿，可选择切到已保存音频" : "当前流式播放不切换，结束后可重播");
+          setStatus(isElementPlayingTrackStream(track) ? "完整音频已就绪，继续流式播放" : "完整音频已就绪，可重播");
+          showTrackNotice(track, "完整音频已就绪", trackHasStreamIssue(track) ? "检测到流式卡顿，可切到完整音频" : "当前流式播放不切换，结束后可重播");
           return true;
         }
         try {
@@ -156,7 +174,7 @@
     }
     function pendingJobLooksActive(t) {
       if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
-      var state = String(t.state || "").trim();
+      var state = trackState(t);
       return state !== "saved" && state !== "failed" && state !== "cancelled" && state !== "done";
     }
     async function loadPendingJobsForMessage() {
@@ -230,7 +248,7 @@
         mode: mode,
         parseMode: mode,
         playbackMode: normalizePlaybackMode(t.playbackMode || "generate"),
-        backgroundOnly: t.backgroundOnly !== false,
+        backgroundOnly: false,
         segments: Array.isArray(t.segments) ? t.segments : [],
         voicesMap: t.voicesMap || null,
         metrics: t.metrics || null,
@@ -248,11 +266,51 @@
       ensureTrackStates(restored);
       return restored;
     }
+    function rememberDetachedBackgroundJob(track) {
+      if (!track || !track.cacheKey) return;
+      for (var i = 0; i < detachedBackgroundJobs.length; i++) {
+        if (detachedBackgroundJobs[i] && detachedBackgroundJobs[i].cacheKey === track.cacheKey) return;
+      }
+      detachedBackgroundJobs.push(track);
+    }
+    function forgetDetachedBackgroundJob(trackOrKey) {
+      var cacheKey = typeof trackOrKey === "string" ? trackOrKey : (trackOrKey && trackOrKey.cacheKey);
+      if (!cacheKey) return;
+      detachedBackgroundJobs = detachedBackgroundJobs.filter(function (t) { return !t || t.cacheKey !== cacheKey; });
+    }
+    function appendDetachedBackgroundTrackToHistory(trackEntry, label) {
+      if (!trackEntry || !trackEntry.cacheKey) return false;
+      var existingIdx = generatedTracks.findIndex(function (t) { return t && t.cacheKey === trackEntry.cacheKey; });
+      if (existingIdx >= 0) {
+        forgetDetachedBackgroundJob(trackEntry);
+        return false;
+      }
+      trackEntry.backgroundOnly = false;
+      trackEntry.pendingBlob = false;
+      trackEntry.streaming = false;
+      trackEntry.allowStreamPlay = false;
+      trackEntry.url = trackEntry.cacheUrl || trackEntry.url || "";
+      setTrackState(trackEntry, "saved");
+      generatedTracks.push(trackEntry);
+      tracksLoaded = true;
+      if (currentTrackIndex < 0) currentTrackIndex = generatedTracks.length - 1;
+      forgetDetachedBackgroundJob(trackEntry);
+      debugLog("✅ " + (label || "background") + " 完成后追加为普通历史卡片 index=" + generatedTracks.length, "#9f9");
+      return true;
+    }
     function pollCacheUpgrade(trackEntry, label) {
       if (!trackEntry || !trackEntry.cacheKey || trackEntry.cachePollStarted || isSavedTrack(trackEntry)) return;
       trackEntry.cachePollStarted = true;
       setTrackCacheState(trackEntry, "pending");
       label = label || "snapshot";
+      function jobStatusMessage(metrics) {
+        var phase = String((metrics && metrics.phase) || "");
+        var msg = String((metrics && metrics.message) || "");
+        if (phase === "llm_parse_cache") return "已复用 LLM 拆段";
+        if (phase === "llm_parse" && cfg.reuseLlmParse !== false && /调用|分析|LLM/i.test(msg)) return "检查 LLM 拆段复用";
+        if (msg) return msg;
+        return phase === "llm_parse" ? "后端正在拆分文本…" : (phase === "llm_parse_cache" ? "已复用 LLM 拆段" : "后端正在合成…");
+      }
       (async function () {
         var done = false;
         for (var i = 0; i < 240; i++) {
@@ -273,10 +331,10 @@
                 trackEntry.metrics = j.metrics;
                 if (currentTrack() === trackEntry && !isSavedTrack(trackEntry)) {
                   var phase = String(j.metrics.phase || "");
-                  var msg = String(j.metrics.message || "");
-                  if (phase === "llm_parse" || phase === "created" || phase === "tts_queue" || phase === "tts") {
-                    setStatus(msg || (phase === "llm_parse" ? "后端正在分析文本…" : "后端正在合成…"));
-                    showTrackNotice(trackEntry, msg || "后端处理中…", formatJobMetrics(j.metrics) || "状态由后端控制");
+                  if (phase === "llm_parse" || phase === "llm_parse_cache" || phase === "created" || phase === "tts_queue" || phase === "tts") {
+                    var uiMsg = jobStatusMessage(j.metrics);
+                    setStatus(uiMsg);
+                    showTrackNotice(trackEntry, uiMsg || "正在生成…", formatJobMetrics(j.metrics) || "请稍等");
                   }
                 }
               }
@@ -297,16 +355,19 @@
                 }
               }
               var cacheHeadReady = false;
-              if (j && j.state !== "done" && j.state !== "failed" && j.state !== "cancelled" && !trackEntry.backgroundOnly && normalizePlaybackMode(trackEntry.playbackMode) !== "generate" && trackEntry.cacheUrl) {
+              if (j && j.state !== "done" && j.state !== "failed" && j.state !== "cancelled" && normalizePlaybackMode(trackEntry.playbackMode) === "live" && trackEntry.cacheUrl) {
                 try {
                   var hs = await fetch(trackEntry.cacheUrl, { method: "HEAD", cache: "no-store" });
                   cacheHeadReady = !!(hs && hs.ok);
                 } catch (_) { cacheHeadReady = false; }
               }
               if (j && (j.state === "done" || cacheHeadReady)) {
+                var wasBackground = !!(trackEntry.backgroundOnly || normalizePlaybackMode(trackEntry.playbackMode) === "generate");
+                var wasDetached = generatedTracks.indexOf(trackEntry) < 0;
                 setTrackState(trackEntry, "saved");
+                var appendedDetached = wasDetached ? appendDetachedBackgroundTrackToHistory(trackEntry, label) : false;
                 var autoplaySaved = !!(trackEntry.playSavedWhenReady && currentTrack() === trackEntry);
-                if (trackEntry.backgroundOnly || normalizePlaybackMode(trackEntry.playbackMode) === "generate") autoplaySaved = false;
+                if (wasBackground) autoplaySaved = false;
                 trackEntry.playSavedWhenReady = false;
                 attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: trackEntry.webAudioPlaying && !autoplaySaved, autoplay: autoplaySaved });
                 scheduleOfflineAudioSave(trackEntry, label + " offline", 0);
@@ -315,10 +376,16 @@
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 removePendingJobForTrack(trackEntry).catch(function(){});
                 debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片" + (cacheHeadReady ? " (HEAD确认)" : ""), "#9f9");
-                if (autoplaySaved) setStatus("生成完成，正在播放保存音频");
-                else if (trackEntry.backgroundOnly || normalizePlaybackMode(trackEntry.playbackMode) === "generate") {
-                  setStatus("后台生成完成");
-                  if (currentTrack() === trackEntry) showTrackNotice(trackEntry, "后台生成完成", "点播放开始播放完整音频");
+                var isCurrent = currentTrack() === trackEntry;
+                if (autoplaySaved) setStatus("生成完成，正在播放完整音频");
+                else if (wasBackground) {
+                  if (isCurrent || !currentTrack()) setStatus("后台生成完成 · 历史音频 " + knownHistoryCount + " 条");
+                  if (isCurrent) {
+                    if (appendedDetached) await selectTrack(currentTrackIndex, false);
+                    else showTrackNotice(trackEntry, "后台生成完成", "点播放开始播放完整音频");
+                  } else if (!currentTrack()) {
+                    showTrackNotice(null, "后台生成完成", "点播放开始播放完整音频");
+                  }
                 }
                 var metricsLine = formatJobMetrics(trackEntry.metrics);
                 if (metricsLine) debugLog("📊 " + label + " 指标: " + metricsLine, "#9ff");
@@ -329,25 +396,43 @@
                 break;
               }
               if (j && j.state === "failed") {
+                var failedDetached = generatedTracks.indexOf(trackEntry) < 0;
                 var failMsg = (j.metrics && j.metrics.message ? j.metrics.message + ": " : "") + (j.error || "服务端生成失败");
                 trackEntry.error = failMsg;
                 setTrackState(trackEntry, "failed");
                 removePendingJobForTrack(trackEntry).catch(function(){});
-                setPlayState("idle");
-                setStatus("生成失败");
-                setError(failMsg);
-                showTrackNotice(trackEntry, "生成失败", failMsg);
+                forgetDetachedBackgroundJob(trackEntry);
+                if (currentTrack() === trackEntry || !currentTrack()) setStatus("生成失败");
+                if (failedDetached) {
+                  if (!currentTrack()) showTrackNotice(null, "后台生成失败", failMsg);
+                } else {
+                  if (currentTrack() === trackEntry) {
+                    setPlayState("idle");
+                    setError(failMsg);
+                    showTrackNotice(trackEntry, "生成失败", failMsg);
+                  }
+                }
+                updateTrackButtons();
                 debugLog("❌ 服务端任务失败: " + failMsg, "#f99");
                 done = true;
                 break;
               }
               if (j && j.state === "cancelled") {
+                var cancelledDetached = generatedTracks.indexOf(trackEntry) < 0;
                 trackEntry.cancelled = true;
                 setTrackState(trackEntry, "cancelled");
                 removePendingJobForTrack(trackEntry).catch(function(){});
-                setPlayState("idle");
-                setStatus("已取消");
-                showTrackNotice(trackEntry, "任务已取消", "后台任务已停止");
+                forgetDetachedBackgroundJob(trackEntry);
+                if (currentTrack() === trackEntry || !currentTrack()) setStatus("已取消");
+                if (cancelledDetached) {
+                  if (!currentTrack()) showTrackNotice(null, "任务已取消", "后台任务已停止");
+                } else {
+                  if (currentTrack() === trackEntry) {
+                    setPlayState("idle");
+                    showTrackNotice(trackEntry, "任务已取消", "后台任务已停止");
+                  }
+                }
+                updateTrackButtons();
                 debugLog("🛑 服务端任务已取消: " + trackEntry.cacheKey, "#fc9");
                 done = true;
                 break;
@@ -423,26 +508,37 @@
             if (restored) generatedTracks.push(restored);
           });
         }
+        var detachedPendingCount = 0;
         if (pending && pending.length) {
           pending.forEach(function (t) {
             var restored = restoreTrackFromPending(t, base);
             if (restored) {
-              generatedTracks.push(restored);
+              if (restored.backgroundOnly) {
+                detachedPendingCount += 1;
+                rememberDetachedBackgroundJob(restored);
+              } else {
+                generatedTracks.push(restored);
+              }
               pollCacheUpgrade(restored, "pending restore");
             }
           });
         }
         if (!generatedTracks.length) {
           updateTrackButtons();
-          setStatus(historyStatusText());
-          showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+          if (detachedPendingCount) {
+            setStatus("后台生成中 · 历史音频 " + knownHistoryCount + " 条");
+            showTrackNotice(null, "后台生成中", "完成后会加入普通历史音频");
+          } else {
+            setStatus(historyStatusText());
+            showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+          }
           return generatedTracks;
         }
         currentTrackIndex = generatedTracks.length - 1;
         updateTrackButtons();
         setStatus(historyStatusText());
-        showTrackNotice(currentTrack(), historyStatusText(), pending && pending.length ? "后台生成会继续检查落盘" : "点播放继续，或用左右按钮切换历史音频");
-        debugLog("📂 按需恢复 tracks: saved=" + (saved ? saved.length : 0) + " pending=" + (pending ? pending.length : 0), "#9ff");
+        showTrackNotice(currentTrack(), historyStatusText(), detachedPendingCount ? "后台生成会继续检查落盘" : "点播放继续，或用左右按钮切换历史音频");
+        debugLog("📂 按需恢复 tracks: saved=" + (saved ? saved.length : 0) + " pending=" + (pending ? pending.length : 0) + " detached=" + detachedPendingCount, "#9ff");
         return generatedTracks;
       })().catch(function (e) {
         tracksLoaded = false;
@@ -472,8 +568,27 @@
         }
       } catch (_) {}
     }
+    async function selectSavedTrackByDelta(delta, autoplay) {
+      await ensureTracksLoaded();
+      var visibleList = visibleTrackCards();
+      if (!visibleList.length) {
+        setStatus("历史音频 0 条");
+        showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+        updateTrackButtons();
+        return false;
+      }
+      var active = currentTrack();
+      var currentVisibleIndex = active ? visibleList.indexOf(active) : -1;
+      if (currentVisibleIndex < 0) currentVisibleIndex = delta < 0 ? 0 : -1;
+      var nextTrack = visibleList[(currentVisibleIndex + delta + visibleList.length) % visibleList.length];
+      var nextIndex = generatedTracks.indexOf(nextTrack);
+      if (nextIndex < 0) return false;
+      await selectTrack(nextIndex, autoplay);
+      return true;
+    }
     async function confirmDeleteTrack(track) {
       if (!track) return false;
+      if (!isSavedTrack(track)) return true;
       var label = generatedTracks.length ? ((currentTrackIndex + 1) + "/" + generatedTracks.length) : "当前音频";
       try {
         if (window.tavo && tavo.utils && typeof tavo.utils.select === "function") {
@@ -550,7 +665,7 @@
       }
     }
     async function cancelLiveTrack(track, reason) {
-      if (!isCancelableLiveTrack(track)) return false;
+      if (!track || track.deleted || isSavedTrack(track) || normalizePlaybackMode(track.playbackMode) !== "live") return false;
       var idx = generatedTracks.indexOf(track);
       try {
         if (track.jobCreateAbortController && typeof track.jobCreateAbortController.abort === "function") {
@@ -617,14 +732,10 @@
             await selectTrack(currentTrackIndex, false);
             return true;
           }
-          if (trackState(track) === "failed") {
-            updateTrackButtons();
-            return true;
-          }
         }
       }
       setStatus("正在退出流式…");
-      showTrackNotice(track, "正在退出流式…", "本次未完成任务会被删除");
+      showTrackNotice(track, "正在退出流式…", "完整音频未落盘，本次任务会被删除");
       await cancelLiveTrack(track, reason || "live exit");
       if (!generatedTracks.length) {
         showEmptyAfterLiveCancel(reason || "live exit");

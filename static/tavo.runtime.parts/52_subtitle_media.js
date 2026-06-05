@@ -11,11 +11,24 @@
       return avatarUrl || DEFAULT_AVATARS.character;
     }
     var subBox = first(root, '[data-role="subtitle"]');
+    function keepSubtitleChrome() {
+      if (!subBox) return;
+      try { if (del && del.parentNode !== subBox) subBox.appendChild(del); } catch (_) {}
+      try { if (counter && counter.parentNode !== subBox) subBox.appendChild(counter); } catch (_) {}
+    }
     function showSubtitleNotice(titleText, detailText) {
       if (!subBox) return;
       subBox.classList.remove('idx-hidden');
       var detailHtml = detailText ? escapeHtml(detailText).replace(/\n/g, "<br>") : "";
-      subBox.innerHTML = '<div class="idx-sub-notice"><strong>' + escapeHtml(titleText || "") + '</strong>' + (detailHtml ? '<span>' + detailHtml + '</span>' : '') + '</div>';
+      Array.prototype.slice.call(subBox.children).forEach(function (node) {
+        if (node === del || node === counter) return;
+        try { node.remove(); } catch (_) {}
+      });
+      keepSubtitleChrome();
+      var notice = document.createElement("div");
+      notice.className = "idx-sub-notice";
+      notice.innerHTML = '<strong>' + escapeHtml(titleText || "") + '</strong>' + (detailHtml ? '<span>' + detailHtml + '</span>' : '');
+      subBox.appendChild(notice);
     }
     function hideSubtitlePanel() {
       stopSubtitle();
@@ -25,6 +38,12 @@
       if (track) {
         track.noticeTitle = titleText || "";
         track.noticeDetail = detailText || "";
+      }
+      var title = String(titleText || "");
+      var allowLyricInterrupt = /失败|错误|不可用|取消|删除|退出/.test(title);
+      if (!allowLyricInterrupt) {
+        if (track && hasActiveSubtitleRows(track)) return;
+        if (!track && activeSubtitle && hasActiveSubtitleRows(activeSubtitle.track)) return;
       }
       if (currentTrack() === track || !track) showSubtitleNotice(titleText, detailText);
     }
@@ -58,7 +77,14 @@
 
     var activeSubtitle = null;
     var seekProgrammaticUpdate = false;
-    function clearSubtitleDom() { if (subBox) subBox.innerHTML = ""; }
+    function clearSubtitleDom() {
+      if (!subBox) return;
+      Array.prototype.slice.call(subBox.children).forEach(function (node) {
+        if (node === del || node === counter) return;
+        try { node.remove(); } catch (_) {}
+      });
+      keepSubtitleChrome();
+    }
     function stopSubtitle() {
       if (!activeSubtitle) return;
       if (activeSubtitle.tickHandle) clearInterval(activeSubtitle.tickHandle);
@@ -69,13 +95,20 @@
     function renderSubtitleRows(timeline, resetScroll) {
       if (!subBox) return;
       subBox.classList.remove('idx-hidden');
+      clearSubtitleDom();
       // 头像不进歌词区(占空间)。说话人通过左上角 cover 切换体现。
-      subBox.innerHTML = timeline.map(function (row, idx) {
+      var html = timeline.map(function (row, idx) {
         var text = String(row.text || "");
         return '<div class="idx-sub-row" data-idx="' + idx + '" data-start="' + row.start.toFixed(3) + '" data-role-name="' + escapeHtml(displayRoleName(row.role || "旁白")) + '" title="点击跳转到这一句">'
           + '<span class="idx-sub-text">' + escapeHtml(text) + '</span>'
           + '</div>';
       }).join("");
+      if (html) {
+        var holder = document.createElement("div");
+        holder.innerHTML = html;
+        while (holder.firstChild) subBox.appendChild(holder.firstChild);
+      }
+      keepSubtitleChrome();
       if (resetScroll) { try { subBox.scrollTop = 0; } catch (_) {} }
       $all(subBox, '.idx-sub-row').forEach(function (row) {
         on(row, 'click', function () {
@@ -115,22 +148,28 @@
       if (/\.webp(?:[?#]|$)/i.test(src) || /^data:image\/webp/i.test(src)) return "image/webp";
       return "";
     }
+    function mediaArtworkEntries(src) {
+      src = String(src || "");
+      if (!src) src = scriptAssetUrl("tavo-now-playing-cover.png");
+      var type = mediaArtworkType(src);
+      return ["512x512", "1024x1024", "256x256"].map(function (size) {
+        var item = { src: src, sizes: size };
+        if (type) item.type = type;
+        return item;
+      });
+    }
     function updateMediaSession(speakerRole, currentText) {
       if (!navigator.mediaSession || typeof MediaMetadata === "undefined") return;
       try {
         var ms = navigator.mediaSession;
         var charName = (context && context.characterName) ? context.characterName : (cfg.defaultVoice || "IndexTTS");
-        var artSrc = scriptAssetUrl("tavo-now-playing-cover.png");
-        var artType = "image/png";
+        var role = speakerRole || lastSpeakerRole || "";
+        var artSrc = avatarForRole(role) || avatarForRole("") || scriptAssetUrl("tavo-now-playing-cover.png");
         ms.metadata = new MediaMetadata({
           title: (currentText ? String(currentText).slice(0, 60) : charName),
-          artist: charName,
+          artist: displayRoleName(role) || charName,
           album: "IndexTTS",
-          artwork: [
-            { src: artSrc, sizes: "512x512", type: artType },
-            { src: artSrc, sizes: "1024x1024", type: artType },
-            { src: artSrc, sizes: "256x256", type: artType },
-          ],
+          artwork: mediaArtworkEntries(artSrc),
         });
         ms.setActionHandler('play',  function () { try { generate(false).catch(function(){}); } catch (_) {} });
         ms.setActionHandler('pause', function () { try { if (currentTrack() && currentTrack().webAudioPlaying) { var t = currentTrack(); if (t) t.pausedByUser = true; stopWebAudioPlayback("pause"); } else audio.pause(); } catch (_) {} });
@@ -247,6 +286,11 @@
         var t;
         try { t = getTimeSec(); } catch (_) { t = NaN; }
         if (!isFinite(t) || t < 0) return;
+        t = clampPlaybackTimeSec(trackEntry, t);
+        if (timeline.length && isFinite(Number(timeline[timeline.length - 1].end))) {
+          var end = Number(timeline[timeline.length - 1].end);
+          if (end > 0 && t >= end) t = Math.max(0, end - 0.001);
+        }
         var idx = -1;
         for (var i = 0; i < timeline.length; i++) {
           if (t >= timeline[i].start && t < timeline[i].end) { idx = i; break; }
