@@ -285,12 +285,25 @@
               if (j && j.cache_url) {
                 trackEntry.cacheUrl = new URL(j.cache_url, cleanBase(cfg.apiBase) + "/").href;
               }
-              if (j && Array.isArray(j.segments_meta) && j.segments_meta.length && (!trackEntry.segments || !trackEntry.segments.length)) {
-                trackEntry.segments = j.segments_meta.map(function (s) {
-                  return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
-                });
+              if (j && Array.isArray(j.segments_meta) && j.segments_meta.length) {
+                var nextSig = j.segments_meta.map(function (m) {
+                  return [m.role || "", m.text || "", Number(m.start_s || 0).toFixed(3), Number(m.start_offset_bytes || 0), Number(m.duration_s || 0).toFixed(3)].join(":");
+                }).join("|");
+                if (nextSig && nextSig !== trackEntry.segmentsSignature) {
+                  trackEntry.segmentsSignature = nextSig;
+                  trackEntry.segments = j.segments_meta.map(function (s) {
+                    return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
+                  });
+                }
               }
-              if (j && j.state === "done") {
+              var cacheHeadReady = false;
+              if (j && j.state !== "done" && j.state !== "failed" && j.state !== "cancelled" && !trackEntry.backgroundOnly && normalizePlaybackMode(trackEntry.playbackMode) !== "generate" && trackEntry.cacheUrl) {
+                try {
+                  var hs = await fetch(trackEntry.cacheUrl, { method: "HEAD", cache: "no-store" });
+                  cacheHeadReady = !!(hs && hs.ok);
+                } catch (_) { cacheHeadReady = false; }
+              }
+              if (j && (j.state === "done" || cacheHeadReady)) {
                 setTrackState(trackEntry, "saved");
                 var autoplaySaved = !!(trackEntry.playSavedWhenReady && currentTrack() === trackEntry);
                 if (trackEntry.backgroundOnly || normalizePlaybackMode(trackEntry.playbackMode) === "generate") autoplaySaved = false;
@@ -301,7 +314,7 @@
                 updateTrackButtons();
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 removePendingJobForTrack(trackEntry).catch(function(){});
-                debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
+                debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片" + (cacheHeadReady ? " (HEAD确认)" : ""), "#9f9");
                 if (autoplaySaved) setStatus("生成完成，正在播放保存音频");
                 else if (trackEntry.backgroundOnly || normalizePlaybackMode(trackEntry.playbackMode) === "generate") {
                   setStatus("后台生成完成");

@@ -88,6 +88,9 @@ Current lazy-loader assertions:
 - settings panel is aligned with the player card and its close button is at least 30px square;
 - opening the voice picker requests `/voices`, renders voice items, and has at least 540px height on desktop smoke;
 - settings exposes `普通模式` / `AI模式` and the player quick toggle defaults to `LIVE`;
+- simulated `data-live-active=1` keeps `[data-role="live-exit"]` visible despite `.idx-hidden`;
+- player card keeps a stable minimum height so pending/live/saved state changes do not resize the card;
+- settings section order is `文本模式` -> `合成质量` -> voice mapping -> `播放 / 离线`;
 - player header `0/0`, `LIVE/生成`, and settings controls share height and top alignment;
 - normal-mode voice rows use the same row layout as role mapping: 默认 is locked display-only, only 旁白/对话 open the picker;
 - subtitle height remains `136px`.
@@ -147,12 +150,12 @@ When a job fails:
 
 For a running live dialogue job:
 
-1. The card shows only play/pause and live exit as active controls.
+1. The card shows only play/pause and live exit as active controls. CSS must not hide `.idx-live-exit` under `data-live-active=1`.
 2. Previous, next, add, delete, rewind, forward, seek drag, subtitle click seek, and MediaSession seek do not act on the live track.
 3. Clicking play pauses or resumes the live wait/play state; it does not create a second job.
 4. Clicking live exit first checks status once; if status is `done`, the card becomes saved, otherwise the frontend calls `DELETE /tts_dialogue_stream_job/<cache_key>`.
 5. Exiting live removes only the transient live card and keeps existing saved history count unchanged.
-6. After status becomes `done`, the same card switches to a normal saved card with `/cache_audio/<cache_key>`.
+6. After status becomes `done`, the same card switches to a normal saved card with `/cache_audio/<cache_key>`. If foreground LIVE polling sees `/cache_audio/<cache_key>` is already readable via `HEAD`, it may switch to saved before the status endpoint catches up; this fallback must not run for failed/cancelled/background-generate jobs.
 
 For a background `生成` dialogue job:
 
@@ -235,6 +238,7 @@ For `Leon_api/环境检查/LEON启动器.ps1`:
 - The center first tab should be `首页日志`, receive launcher logs, and refresh backend logs from `/server_log/tail` when the API is available. The `首页 / 日志` sidebar button should return to this view after using other launcher functions.
 - The launcher may call `/warmup` only after a user-triggered service start reaches `/health`; it must not warm the model just because the launcher window opened.
 - Backend `/warmup` should run a tiny inference under `tts_stream_lock`, return warmup state through `GET /warmup`, and avoid rerunning unless `force=true`.
+- The launcher should expose the existing root Gradio WebUI through a `WebUI` page without auto-starting it. `启动 WebUI` should call `go-webui-VLLM-NoQwen.bat`, poll `http://127.0.0.1:7860`, and keep `浏览器打开` as the reliable path if embedded WebBrowser rendering fails.
 - The SVML check must prefer runtime evidence over global DLL presence. If `indextts2runtime\python.exe` can import `torch` and `vllm`, the `Intel SVML 兼容兜底` row should be OK even when `svml_dispmd.dll` is absent from `C:\Windows\System32` and global PATH.
 - One-click repair should copy bundled `svml_dispmd.dll` into the project runtime only when Torch/vLLM import output indicates SVML, LLVM, or DLL load failure. It should not blindly write `svml_dispmd.dll` to `C:\Windows\System32`.
 

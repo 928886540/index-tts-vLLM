@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "runtimeVersion": "20260605-ui-unify-v2",
+  "runtimeVersion": "20260605-live-status-v1",
   "mode": "ordered-fragments",
   "skin": {
     "default": "tavo.ui.skin.default.css"

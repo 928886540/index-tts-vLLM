@@ -586,6 +586,15 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
       const gear = document.querySelector('[data-role="gear"]');
       const playbackToggle = document.querySelector('[data-role="playback-mode-toggle"]');
       const headerCounter = document.querySelector('[data-role="counter"]');
+      const liveExit = document.querySelector('[data-role="live-exit"]');
+      let liveExitDisplay = "";
+      if (card && liveExit) {
+        card.setAttribute("data-live-active", "1");
+        liveExit.classList.add("idx-hidden");
+        liveExitDisplay = getComputedStyle(liveExit).display;
+        card.removeAttribute("data-live-active");
+      }
+      const settingTitles = Array.from(document.querySelectorAll('[data-role="panel"] .idx-section-title')).map((x) => (x.textContent || "").trim());
       const normalRows = Array.from(document.querySelectorAll('[data-role="normal-voices"] .idx-normal-voice-row')).map((row) => {
         const name = row.querySelector(".idx-role-name");
         const btn = row.querySelector(".idx-voice-btn");
@@ -636,6 +645,9 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
         cardRect: cardRect ? { left: cardRect.left, top: cardRect.top, width: cardRect.width, height: cardRect.height } : null,
         panelRect: panelRect ? { left: panelRect.left, top: panelRect.top, width: panelRect.width, height: panelRect.height } : null,
         closeRect: closeRect ? { width: closeRect.width, height: closeRect.height } : null,
+        cardMinHeight: card ? getComputedStyle(card).minHeight : "",
+        liveExitDisplay,
+        settingTitles,
         normalRows,
         roleMapping: []
       });
@@ -647,6 +659,8 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
     if (afterRuntime.voices !== 0) throw new Error("opening settings should not request /voices before the picker, count=" + afterRuntime.voices);
     if (afterRuntime.jobs !== 0) throw new Error("opening settings should not create TTS jobs, count=" + afterRuntime.jobs);
     if (afterRuntime.subtitleHeight !== "136px") throw new Error("subtitle height should stay fixed at 136px, got " + afterRuntime.subtitleHeight);
+    if (parseFloat(afterRuntime.cardMinHeight || "0") < 350) throw new Error("player card should keep a stable minimum height: " + JSON.stringify(afterRuntime));
+    if (afterRuntime.liveExitDisplay !== "flex") throw new Error("LIVE exit button must stay visible under live-active CSS: " + JSON.stringify(afterRuntime));
     if (!afterRuntime.cardRect || !afterRuntime.panelRect) throw new Error("missing panel/card rects: " + JSON.stringify(afterRuntime));
     if (Math.abs(afterRuntime.panelRect.left - afterRuntime.cardRect.left) > 24) {
       throw new Error("settings panel should follow the player card horizontally: " + JSON.stringify({ card: afterRuntime.cardRect, panel: afterRuntime.panelRect }));
@@ -671,6 +685,14 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
     }
     if (!afterRuntime.modeLabels.some((x) => /普通模式/.test(x)) || !afterRuntime.modeLabels.some((x) => /AI模式/.test(x))) {
       throw new Error("settings should expose 普通模式/AI模式 labels: " + JSON.stringify(afterRuntime.modeLabels));
+    }
+    const settingTitles = afterRuntime.settingTitles || [];
+    const qualityIdx = settingTitles.indexOf("合成质量");
+    const normalVoiceIdx = settingTitles.indexOf("普通模式音色");
+    const aiVoiceIdx = settingTitles.indexOf("角色音色映射");
+    const offlineIdx = settingTitles.indexOf("播放 / 离线");
+    if (qualityIdx < 0 || normalVoiceIdx < 0 || aiVoiceIdx < 0 || offlineIdx < 0 || normalVoiceIdx <= qualityIdx || aiVoiceIdx <= qualityIdx || offlineIdx <= normalVoiceIdx) {
+      throw new Error("voice mapping sections should be directly below quality and above playback/offline: " + JSON.stringify(settingTitles));
     }
     const normalRows = afterRuntime.normalRows || [];
     if (normalRows.length !== 3 || normalRows.map((r) => r.role).join("/") !== "默认/旁白/对话") {

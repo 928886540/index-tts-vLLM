@@ -355,3 +355,37 @@ Root cause: Launcher logs and backend logs were split across a small bottom area
 Fix: `LEON启动器.ps1` now uses the center first tab as `首页日志`, writes launcher logs there, pulls `/server_log/tail` when the API is available, and adds a sidebar `首页 / 日志` button. `indextts2_api.py` adds `GET/POST /warmup`; `POST /warmup` runs one very short inference under `tts_stream_lock` using a voice-library sample and fast settings. The launcher calls warmup only after the user clicks `启动 LEON 服务` and the API becomes ready; opening the launcher still does not start or warm the backend automatically.
 
 Guard: Opening the launcher should default to the center log view. Switching to environment, voice, or Tavo pages should not hide the ability to return via `首页 / 日志`. Startup should call `/warmup` only after the API reports ready from a user-triggered service start, and `/warmup` should be guarded by `tts_stream_lock` so it does not race real generation.
+
+## BUG-019: Launcher should expose the existing Gradio WebUI
+
+Status: fixed in launcher, needs real desktop/browser validation
+
+Reported: 2026-06-05
+
+Repro: User asked to combine the existing project WebUI into the launcher instead of making the launcher a disconnected shell.
+
+Evidence: The repository already has root `webui.py` and `go-webui-VLLM-NoQwen.bat`. `webui.py` is a Gradio UI with default `--port 7860`, and the existing BAT starts it with `indextts2runtime\python.exe webui.py --host 127.0.0.1 --fp16 --cuda_kernel --no_qwen_emo`.
+
+Root cause: The launcher only covered API startup, environment checks, logs, voice test, and Tavo notes. It did not expose the existing Gradio WebUI path, so users had to know about the separate BAT manually.
+
+Fix: `LEON启动器.ps1` now has a `WebUI` sidebar/page. It detects `http://127.0.0.1:7860`, can call `go-webui-VLLM-NoQwen.bat`, polls for readiness, offers a browser-open button, and attempts an embedded WinForms `WebBrowser` view. Because Gradio compatibility inside the legacy WebBrowser control can vary, browser-open remains the reliable path.
+
+Guard: Opening the launcher must not auto-start WebUI. Clicking `启动 WebUI` should use the existing BAT and poll port `7860`; `浏览器打开` should open `http://127.0.0.1:7860`; embedded view is optional and should fail gracefully.
+
+## BUG-019: Tavo live controls, stuck status, restore text, and settings layout regressions
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-05
+
+Repro: User ran Tavo in LIVE mode and reported that the live card did not show an exit button, first audio took too long, the second segment stayed stuck, switching back showed mismatched text/subtitles, settings/voice picker had an odd blue focus frame with non-rounded edges, and normal/AI voice mapping should appear directly under the quality tier because users care about it more. User later clarified that clicking play showed the audio had already landed on disk, so the backend/cache path was done while the frontend still looked stuck.
+
+Evidence: User provided four Tavo screenshots from QQ cache paths and described the runtime state as LIVE mode. Current regression already says live tracks should expose only play/pause plus live exit, and settings/picker focus/open styling should be compact and aligned. Playwright reproduced the CSS condition: `.idx-card[data-live-active="1"]` previously hid `.idx-live-exit` together with other secondary controls.
+
+Hypothesis: The latest header/UI cleanup hid the live exit control while the track was pending/live, and status polling could lag behind actual cache availability.
+
+Root cause: Three frontend regressions overlapped. First, the live-active CSS rule hid every control except the main play button with `!important`, and the live exit button matched that hidden selector too. Second, the live status poll only converted the card when `job_status.state` became `done`; if the cache file was already readable but status lagged, the UI stayed stuck until the user clicked play and forced another check. Third, segment metadata was only copied into the track when the new list was longer, so same-length corrected `segments_meta` could update visible subtitle polling but leave the track object stale for switch/re-enter paths.
+
+Fix: `static/tavo.ui.skin.default.css` now excludes `.idx-live-exit` from the live-active hidden-control selector and keeps a stable player/control minimum height. `static/tavo.runtime.parts/48_track_history.js` updates segment metadata by signature and, for foreground LIVE cards only, confirms `/cache_audio/{key}` with `HEAD` so a readable cache converts to saved even if status is lagging. The fallback skin in `05_style_config.js` and subtitle poll in `52_subtitle_media.js` were kept consistent. Settings order in `40_mount_shell.js` now puts normal/AI voice mapping directly under quality. Playwright smoke now asserts live exit visibility, card min height, and settings order.
+
+Guard: In LIVE mode, pending/live cards must always show an immediate exit/cancel button and no normal history controls. Status polling must update live segment metadata without mixing text from another message/track, and re-entering a message must bind pending jobs by stable message id plus cache key. Settings and picker focus outlines should use the same rounded radius as the component. The voice mapping section should render directly below quality tier settings. The player card height should remain stable while status/subtitle/control states change.

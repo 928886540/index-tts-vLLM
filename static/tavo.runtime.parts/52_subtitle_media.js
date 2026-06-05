@@ -269,12 +269,16 @@
             .then(function (j) {
               if (!j) return;
               if (Array.isArray(j.segments_meta) && j.segments_meta.length) {
-                if (!segs.length || j.segments_meta.length > segs.length) {
+                var metaSig = j.segments_meta.map(function (m) {
+                  return [m.role || "", m.text || "", Number(m.start_s || 0).toFixed(3), Number(m.start_offset_bytes || 0), Number(m.duration_s || 0).toFixed(3)].join(":");
+                }).join("|");
+                if (metaSig && metaSig !== trackEntry.segmentsSignature) {
+                  trackEntry.segmentsSignature = metaSig;
                   segs = j.segments_meta.map(function (s) {
                     return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
                   });
                   trackEntry.segments = segs;
-                  if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+                  if (messageId && isSavedTrack(trackEntry)) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 }
                 if (j.sample_rate) trackEntry.sampleRate = j.sample_rate;
                 if (j.duration_s) trackEntry.duration_s = j.duration_s;

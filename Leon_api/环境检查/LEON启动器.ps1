@@ -10,9 +10,12 @@ $Script:LauncherDir = if ($Script:LauncherScriptPath) { Split-Path -Parent $Scri
 $Script:RepoRoot = (Resolve-Path (Join-Path $Script:LauncherDir "..\..")).Path
 $Script:ApiPort = 9880
 $Script:ApiBase = "http://127.0.0.1:$Script:ApiPort"
+$Script:WebUiPort = 7860
+$Script:WebUiBase = "http://127.0.0.1:$Script:WebUiPort"
 $Script:LanHost = "192.168.8.100"
 $Script:PublicHost = "https://index-tts.928886540.xyz"
 $Script:StartupBat = Join-Path $Script:RepoRoot "go-API-VLLM-NoQwen.bat"
+$Script:WebUiStartupBat = Join-Path $Script:RepoRoot "go-webui-VLLM-NoQwen.bat"
 $Script:RuntimePython = Join-Path $Script:RepoRoot "indextts2runtime\python.exe"
 $Script:RuntimeScripts = Join-Path $Script:RepoRoot "indextts2runtime\Scripts"
 $Script:LogDir = Join-Path $Script:LauncherDir "logs"
@@ -37,6 +40,8 @@ $Script:StartButton = $null
 $Script:Tabs = $null
 $Script:BackendLogTimer = $null
 $Script:WarmupStarted = $false
+$Script:WebUiBrowser = $null
+$Script:WebUiStatusLabel = $null
 
 try {
     if (-not ([System.Management.Automation.PSTypeName]'LeonTaskbarIdentity').Type) {
@@ -322,6 +327,16 @@ function Test-ApiHealth {
     }
     catch {
         return $null
+    }
+}
+
+function Test-WebUiHealth {
+    try {
+        $resp = Invoke-WebRequest -Uri $Script:WebUiBase -UseBasicParsing -TimeoutSec 2
+        return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500)
+    }
+    catch {
+        return $false
     }
 }
 
@@ -932,6 +947,90 @@ function Open-ApiHome {
     Start-Process $Script:ApiBase | Out-Null
 }
 
+function Open-WebUiExternal {
+    Start-Process $Script:WebUiBase | Out-Null
+    Add-Log "已在浏览器打开 WebUI: $Script:WebUiBase"
+}
+
+function Refresh-WebUiPanel {
+    $running = Test-WebUiHealth
+    if ($Script:WebUiStatusLabel) {
+        if ($running) {
+            $Script:WebUiStatusLabel.Text = "WebUI 已运行：$Script:WebUiBase"
+            $Script:WebUiStatusLabel.ForeColor = [System.Drawing.Color]::LightGreen
+        }
+        else {
+            $Script:WebUiStatusLabel.Text = "WebUI 未运行。点击启动 WebUI 会调用 go-webui-VLLM-NoQwen.bat。"
+            $Script:WebUiStatusLabel.ForeColor = [System.Drawing.Color]::Khaki
+        }
+    }
+    return $running
+}
+
+function Start-WebUiService {
+    if (Test-WebUiHealth) {
+        Add-Log "WebUI 已经在运行: $Script:WebUiBase"
+        Refresh-WebUiPanel | Out-Null
+        return
+    }
+    if (-not (Test-Path $Script:WebUiStartupBat)) {
+        Add-Log "缺少 WebUI 启动 BAT: $Script:WebUiStartupBat" "ERROR"
+        return
+    }
+    Add-Log "调用 WebUI 启动入口: $Script:WebUiStartupBat"
+    try {
+        Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "`"$Script:WebUiStartupBat`"") -WorkingDirectory $Script:RepoRoot -WindowStyle Normal | Out-Null
+        if ($Script:WebUiStatusLabel) {
+            $Script:WebUiStatusLabel.Text = "WebUI 启动中，Gradio 首次加载可能需要几分钟..."
+            $Script:WebUiStatusLabel.ForeColor = [System.Drawing.Color]::Khaki
+        }
+        Wait-WebUiReadyAsync
+    }
+    catch {
+        Add-Log "WebUI 启动失败: $($_.Exception.Message)" "ERROR"
+    }
+}
+
+function Wait-WebUiReadyAsync {
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 3000
+    $start = Get-Date
+    $timer.Add_Tick({
+        if (Test-WebUiHealth) {
+            $timer.Stop()
+            $timer.Dispose()
+            Add-Log "WebUI ready: $Script:WebUiBase"
+            Refresh-WebUiPanel | Out-Null
+            Load-WebUiEmbedded
+            return
+        }
+        $elapsed = [int]((Get-Date) - $start).TotalSeconds
+        if ($Script:WebUiStatusLabel) {
+            $Script:WebUiStatusLabel.Text = "WebUI 启动中... ${elapsed}s"
+            $Script:WebUiStatusLabel.ForeColor = [System.Drawing.Color]::Khaki
+        }
+        if ($elapsed -gt 300) {
+            $timer.Stop()
+            $timer.Dispose()
+            Add-Log "WebUI 启动等待超时。" "WARN"
+            Refresh-WebUiPanel | Out-Null
+        }
+    })
+    $timer.Start()
+}
+
+function Load-WebUiEmbedded {
+    Refresh-WebUiPanel | Out-Null
+    if (-not $Script:WebUiBrowser) { return }
+    try {
+        $Script:WebUiBrowser.Navigate($Script:WebUiBase)
+        Add-Log "尝试在启动器内嵌 WebUI: $Script:WebUiBase"
+    }
+    catch {
+        Add-Log "内嵌 WebUI 失败，建议用浏览器打开: $($_.Exception.Message)" "WARN"
+    }
+}
+
 function Open-TavoTest {
     Start-Process "$Script:ApiBase/tavo_test" | Out-Null
 }
@@ -1068,7 +1167,8 @@ function Build-LauncherForm {
         @("一键修复", { $tabs.SelectedIndex = 1; Repair-Environment }),
         @("停止服务", { Stop-LeonService }),
         @("刷新音色", { $tabs.SelectedIndex = 2; Refresh-Voices }),
-        @("Tavo 说明", { $tabs.SelectedIndex = 3 }),
+        @("WebUI", { $tabs.SelectedIndex = 3; Refresh-WebUiPanel | Out-Null }),
+        @("Tavo 说明", { $tabs.SelectedIndex = 4 }),
         @("打开 API", { Open-ApiHome }),
         @("打开日志", { Open-LogsFolder })
     )
@@ -1285,6 +1385,70 @@ function Build-LauncherForm {
 我低声回答：“开始测试吧。”
 '@
     $tabVoice.Controls.Add($Script:TestTextBox)
+
+    $tabWebUi = New-Object System.Windows.Forms.TabPage
+    $tabWebUi.Text = "WebUI"
+    $tabWebUi.BackColor = [System.Drawing.Color]::FromArgb(15, 18, 22)
+    $tabs.TabPages.Add($tabWebUi)
+
+    $webUiTop = New-Object System.Windows.Forms.Panel
+    $webUiTop.Dock = "Top"
+    $webUiTop.Height = 74
+    $webUiTop.Padding = New-Object System.Windows.Forms.Padding(16, 10, 16, 8)
+    $webUiTop.BackColor = [System.Drawing.Color]::FromArgb(15, 18, 22)
+    $tabWebUi.Controls.Add($webUiTop)
+
+    $startWebUiBtn = New-Object System.Windows.Forms.Button
+    $startWebUiBtn.Text = "启动 WebUI"
+    $startWebUiBtn.Location = New-Object System.Drawing.Point(16, 10)
+    $startWebUiBtn.Size = New-Object System.Drawing.Size(116, 32)
+    $startWebUiBtn.FlatStyle = "Flat"
+    $startWebUiBtn.ForeColor = [System.Drawing.Color]::White
+    $startWebUiBtn.BackColor = [System.Drawing.Color]::FromArgb(25, 126, 89)
+    $startWebUiBtn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(110, 210, 160)
+    $startWebUiBtn.Add_Click({ Start-WebUiService })
+    $webUiTop.Controls.Add($startWebUiBtn)
+
+    $openWebUiBtn = New-Object System.Windows.Forms.Button
+    $openWebUiBtn.Text = "浏览器打开"
+    $openWebUiBtn.Location = New-Object System.Drawing.Point(144, 10)
+    $openWebUiBtn.Size = New-Object System.Drawing.Size(116, 32)
+    $openWebUiBtn.FlatStyle = "Flat"
+    $openWebUiBtn.ForeColor = [System.Drawing.Color]::White
+    $openWebUiBtn.BackColor = [System.Drawing.Color]::FromArgb(35, 45, 56)
+    $openWebUiBtn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(64, 78, 92)
+    $openWebUiBtn.Add_Click({ Open-WebUiExternal })
+    $webUiTop.Controls.Add($openWebUiBtn)
+
+    $embedWebUiBtn = New-Object System.Windows.Forms.Button
+    $embedWebUiBtn.Text = "内嵌刷新"
+    $embedWebUiBtn.Location = New-Object System.Drawing.Point(272, 10)
+    $embedWebUiBtn.Size = New-Object System.Drawing.Size(104, 32)
+    $embedWebUiBtn.FlatStyle = "Flat"
+    $embedWebUiBtn.ForeColor = [System.Drawing.Color]::White
+    $embedWebUiBtn.BackColor = [System.Drawing.Color]::FromArgb(35, 45, 56)
+    $embedWebUiBtn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(64, 78, 92)
+    $embedWebUiBtn.Add_Click({ Load-WebUiEmbedded })
+    $webUiTop.Controls.Add($embedWebUiBtn)
+
+    $Script:WebUiStatusLabel = New-Object System.Windows.Forms.Label
+    $Script:WebUiStatusLabel.Text = "WebUI 未运行。"
+    $Script:WebUiStatusLabel.ForeColor = [System.Drawing.Color]::Khaki
+    $Script:WebUiStatusLabel.Location = New-Object System.Drawing.Point(16, 48)
+    $Script:WebUiStatusLabel.Size = New-Object System.Drawing.Size(840, 22)
+    $webUiTop.Controls.Add($Script:WebUiStatusLabel)
+
+    $webUiShell = New-Object System.Windows.Forms.Panel
+    $webUiShell.Dock = "Fill"
+    $webUiShell.Padding = New-Object System.Windows.Forms.Padding(16, 8, 16, 16)
+    $webUiShell.BackColor = [System.Drawing.Color]::FromArgb(15, 18, 22)
+    $tabWebUi.Controls.Add($webUiShell)
+
+    $Script:WebUiBrowser = New-Object System.Windows.Forms.WebBrowser
+    $Script:WebUiBrowser.Dock = "Fill"
+    $Script:WebUiBrowser.ScriptErrorsSuppressed = $true
+    $webUiShell.Controls.Add($Script:WebUiBrowser)
+    Refresh-WebUiPanel | Out-Null
 
     $tabTavo = New-Object System.Windows.Forms.TabPage
     $tabTavo.Text = "Tavo 接入"

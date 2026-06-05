@@ -28,8 +28,6 @@
           + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option></select></label>'
           + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.00"></label>'
         + '</div>'
-        + '<div class="idx-section-title">播放 / 离线</div>'
-        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>已落盘音频存到本机，下次优先放本地。</span></span></label>'
         + '<div class="idx-normal-only"><div class="idx-section-title">普通模式音色</div><div class="idx-normal-voices" data-role="normal-voices">'
           + '<div class="idx-role-row idx-role-protected idx-normal-voice-row" data-normal-role="default">'
             + '<input class="idx-role-name" type="text" value="默认" readonly>'
@@ -58,6 +56,8 @@
           + '</div></details>'
           + '<label class="idx-check"><input type="checkbox" data-field="reuseLlmParse"><span><strong>复用 LLM 拆段</strong><span>同一消息、角色和 LLM 配置未变时，由后端复用拆段结果。</span></span></label>'
         + '</div>'
+        + '<div class="idx-section-title">播放 / 离线</div>'
+        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>已落盘音频存到本机，下次优先放本地。</span></span></label>'
         + '<div class="idx-actions"><button class="idx-btn" type="button" data-role="save">保存</button></div>'
         + '</dialog>'
         // 音色选择器:模态弹窗,走原生 dialog top-layer,跟设置面板同级

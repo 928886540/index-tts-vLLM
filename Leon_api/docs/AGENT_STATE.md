@@ -62,7 +62,7 @@ Screenshots saved for layout evidence:
 Tavo regex cache-busting URL should be updated to:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ui-unify-v2"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-live-status-v1"></script>
 ```
 
 ## Latest Packaging Snapshot: LEON Launcher
@@ -90,7 +90,7 @@ Important behavior:
 - Checks include administrator status, Chinese path, `indextts2runtime\python.exe`, NVIDIA driver, CUDA Toolkit / `nvcc`, MSVC `cl.exe`, runtime-aware SVML compatibility, Torch CUDA / vLLM / FastAPI / ninja imports, `patch_vllm` registration, required checkpoint files, voice library count, API port `9880`, and startup BAT presence.
 - One-click repair can copy the bundled `svml_dispmd.dll` into the project runtime only when import logs indicate SVML/LLVM/DLL load trouble, launch `winget` installs for Visual Studio Build Tools and NVIDIA CUDA Toolkit, and install `ninja` into the project runtime.
 - Voice testing uses `/voices`, `/tts_dialogue_stream_job`, `/tts_dialogue_job_status/{cache_key}`, and `/cache_audio/{cache_key}` with `parse_mode=normal`.
-- Tavo instructions use the current cache-busted script URL: `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ui-unify-v2`.
+- Tavo instructions use the current cache-busted script URL: `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-live-status-v1`.
 - No image API key or OpenAI-compatible key is written into launcher files or docs.
 - `LEON启动器.ps1` is UTF-8 with BOM so Windows PowerShell 5.1 can parse Chinese text directly.
 
@@ -205,3 +205,36 @@ curl.exe --noproxy "*" -I http://127.0.0.1:9880/static/tavo.js
 ```
 
 Real Tavo validation remains required for playback, storage, message identity, AR injection, and mobile audio behavior.
+
+## Latest Fix Snapshot: Tavo LIVE Status / Layout Follow-up
+
+Updated: 2026-06-05
+
+User reported that LIVE mode showed no exit button, appeared stuck on the second segment, could show mismatched text after switching back, and the card jumped in height. User later clarified that clicking play showed the audio had already landed on disk.
+
+Fixes now in code:
+
+- `.idx-live-exit` is no longer hidden by the live-active CSS selector that hides normal history controls.
+- Foreground LIVE polling updates `segments_meta` by content signature, not only when the list grows.
+- Foreground LIVE polling can confirm `/cache_audio/{cache_key}` with `HEAD` and switch to saved if the file is already readable but `job_status` lags. This fallback is disabled for failed/cancelled/background-generate jobs.
+- Player card/control height is stabilized to reduce pending/live/saved layout jumps.
+- Settings order is now: `文本模式`, `合成质量`, voice mapping, `播放 / 离线`.
+- Cache-busted Tavo URL is now `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-live-status-v1`.
+
+RTF evidence from recent real cache metadata:
+
+- `54e4954a5312c5f90d62c329ee198424be3aec4b`: 14/14 segments, audio `109.319s`, `rtf=5.418`.
+- `c69e43eb5bcd4544cfe22631822ddb1eaf91b17d`: 15/15 segments, audio `120.573s`, `rtf=6.051`.
+- `nvidia-smi` at 13:57 showed RTX 3060 memory `11867MiB / 12288MiB` with two project runtime Python processes: API PID `21012` and multiprocessing child PID `31712`. This points to real GPU memory pressure in addition to the frontend stuck-state bug.
+
+Verified after this follow-up:
+
+```powershell
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check Leon_api\dev_tools\test_tavo_widget_playwright.js
+git diff --check
+node Leon_api\dev_tools\test_tavo_widget_playwright.js
+```
+
+Playwright now asserts `liveExitDisplay="flex"`, `cardMinHeight="360px"`, settings order, no frontend `/parse_text`, normal generate cancellation, and voice picker behavior.
