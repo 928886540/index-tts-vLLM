@@ -1,0 +1,352 @@
+// IndexTTS Tavo runtime part: 20_generation_params.js // Role: style presets, LLM reuse helpers, single/dialogue job helpers, audio priming // This fragment is concatenated by static/tavo.runtime.js; it is not a standalone script.
+  var STYLE_PRESETS = [
+    { id: "neutral", label: "普通/平静", alpha: 0.20 },
+    { id: "breath_soft", label: "轻微气声", alpha: 0.34 },
+    { id: "breath_heavy", label: "明显喘息", alpha: 0.46 },
+    { id: "intimate_breath", label: "亲密气声", alpha: 0.44 },
+    { id: "moan_soft", label: "低声短吟", alpha: 0.48 },
+    { id: "low_murmur", label: "压低呢喃", alpha: 0.40 },
+    { id: "whisper_soft", label: "温柔耳语", alpha: 0.36 },
+    { id: "shy_whisper", label: "害羞低语", alpha: 0.36 },
+    { id: "tense_breath", label: "紧张呼吸", alpha: 0.38 },
+    { id: "sob_soft", label: "委屈哽咽", alpha: 0.42 },
+    { id: "cry_soft", label: "哭腔", alpha: 0.44 },
+    { id: "tease_soft", label: "轻声撒娇", alpha: 0.38 },
+    { id: "laugh_soft", label: "慵懒轻笑", alpha: 0.34 },
+    { id: "gasp_surprise", label: "惊讶轻叹", alpha: 0.38 },
+    { id: "scream_peak", label: "尖叫/高潮峰值", alpha: 0.50 },
+    { id: "stage_warmup", label: "亲密初段/轻气声", alpha: 0.36 },
+    { id: "stage_rising", label: "升温段/呼吸变重", alpha: 0.44 },
+    { id: "stage_peak", label: "高潮峰值/尖叫", alpha: 0.50 },
+    { id: "stage_afterglow", label: "余韵段/低声放松", alpha: 0.38 }
+  ];
+  var PERSON_STYLE_VARIANTS = [
+    { name: "轻喘", label: "轻喘", alpha: 0.34 },
+    { name: "喘息", label: "明显喘息", alpha: 0.46 },
+    { name: "耳语", label: "耳语", alpha: 0.36 },
+    { name: "低语", label: "低语", alpha: 0.36 },
+    { name: "低吟", label: "低声短吟", alpha: 0.48 },
+    { name: "惊喘", label: "惊喘", alpha: 0.38 },
+    { name: "哭腔", label: "哭腔", alpha: 0.44 },
+    { name: "哽咽", label: "哽咽", alpha: 0.42 },
+    { name: "挑逗", label: "挑逗", alpha: 0.38 },
+    { name: "轻笑", label: "轻笑", alpha: 0.34 },
+    { name: "尖叫", label: "尖叫/峰值", alpha: 0.50 },
+    { name: "余韵", label: "余韵低声", alpha: 0.38 }
+  ];
+  ["步非烟", "AD学姐", "JOK"].forEach(function (speaker) {
+    PERSON_STYLE_VARIANTS.forEach(function (item) {
+      STYLE_PRESETS.push({
+        id: item.name + "-" + speaker,
+        label: item.label + "/" + speaker,
+        alpha: item.alpha
+      });
+    });
+  });
+  function styleIdsText() { return STYLE_PRESETS.map(function (s) { return s.id + "=" + s.label + "(建议" + s.alpha + ")"; }).join(" / "); }
+  function normalizeStyleId(style) {
+    style = String(style || "neutral").trim();
+    var ok = STYLE_PRESETS.some(function (s) { return s.id === style; });
+    return ok ? style : "neutral";
+  }
+  function defaultStyleAlpha(style, cfg) {
+    style = normalizeStyleId(style);
+    var hit = STYLE_PRESETS.find(function (s) { return s.id === style; });
+    if (hit) return Math.min(hit.alpha, style === "neutral" ? 0.20 : 0.66);
+    return Math.min(Number(cfg.emoAlpha || 0.38), 0.66);
+  }
+  function stabilizeEmoVec(vec, role, style) {
+    if (role === "旁白") return [0,0,0,0,0,0,0,1];
+    var arr = Array.isArray(vec) ? vec.slice(0, 8).map(function (v) {
+      v = Number(v);
+      return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+    }) : [];
+    while (arr.length < 8) arr.push(0);
+    var activeCap = style === "neutral" ? 0.34 : 0.42;
+    var activeSum = 0;
+    for (var i = 0; i < 7; i++) {
+      arr[i] = Math.min(arr[i], activeCap);
+      activeSum += arr[i];
+    }
+    var maxActiveSum = style === "neutral" ? 0.55 : 0.76;
+    if (activeSum > maxActiveSum && activeSum > 0) {
+      var scale = maxActiveSum / activeSum;
+      for (var j = 0; j < 7; j++) arr[j] = arr[j] * scale;
+    }
+    arr[7] = Math.max(style === "neutral" ? 0.60 : 0.38, Math.min(1, arr[7] || 0));
+    return arr;
+  }
+  function llmMaxTokensForText(text) {
+    return Math.min(12000, Math.max(4000, Math.ceil(String(text || "").length * 5)));
+  }
+  function normalizeCoverageText(value) {
+    return String(value || "")
+      .replace(/[\s\u3000]/g, "")
+      .replace(/[「」『』“”"‘’'（）()《》〈〉【】\[\]{}]/g, "")
+      .replace(/[，。！？；：、,.!?;:…—\-~～·]/g, "");
+  }
+  function tailNarrationAfterQuote(value) {
+    var text = String(value || "").trim();
+    var lastClose = Math.max(
+      text.lastIndexOf("」"),
+      text.lastIndexOf("』"),
+      text.lastIndexOf("”"),
+      text.lastIndexOf("\"")
+    );
+    if (lastClose < 0 || lastClose >= text.length - 1) return "";
+    var tail = text.slice(lastClose + 1).trim();
+    if (!tail || !/[\u4e00-\u9fffA-Za-z0-9]/.test(tail)) return "";
+    return tail;
+  }
+  function assertLlmSegmentsCoverSource(sourceText, segments) {
+    var sourceNorm = normalizeCoverageText(sourceText);
+    var joinedNorm = normalizeCoverageText((segments || []).map(function (s) { return s.text || ""; }).join(""));
+    if (!sourceNorm || !joinedNorm) return;
+    if (sourceNorm !== joinedNorm) {
+      var tailLen = Math.min(32, sourceNorm.length);
+      var sourceTail = sourceNorm.slice(-tailLen);
+      var joinedTail = joinedNorm.slice(-tailLen);
+      var diff = Math.abs(sourceNorm.length - joinedNorm.length);
+      var tolerance = Math.max(12, Math.ceil(sourceNorm.length * 0.02));
+      if (sourceTail !== joinedTail || diff > tolerance) {
+        debugLog("⚠️ LLM 覆盖差异：原文约 " + sourceNorm.length + " 字，返回约 " + joinedNorm.length + " 字，差 " + diff + " 字。原文尾部=" + sourceTail + "；返回尾部=" + joinedTail, "#fc9");
+        return;
+      }
+      debugLog("⚠️ LLM 覆盖校验发现轻微差异但已放行：原文约 " + sourceNorm.length + " 字，返回约 " + joinedNorm.length + " 字，差 " + diff + " 字。", "#fc9");
+    }
+    var tail = tailNarrationAfterQuote(sourceText);
+    if (tail && segments && segments.length) {
+      var last = segments[segments.length - 1];
+      if ((last.role || "") !== "旁白") {
+        debugLog("⚠️ LLM 尾段可能应为旁白：当前 role=" + (last.role || "?") + "，尾部=" + tail.slice(0, 40), "#fc9");
+      }
+    }
+  }
+  function parseReuseHash(text) {
+    text = String(text || "");
+    var h = 2166136261;
+    for (var i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(16);
+  }
+  function cloneSegments(segments) {
+    try { return JSON.parse(JSON.stringify(segments || [])); }
+    catch (_) { return (segments || []).map(function (s) { return Object.assign({}, s); }); }
+  }
+  function parseReuseFingerprint(text, cfg, context) {
+    var roles = (cfg && Array.isArray(cfg.roleVoiceList) ? cfg.roleVoiceList : [])
+      .map(function (r) { return String((r && r.role) || "").trim(); })
+      .filter(Boolean);
+    return JSON.stringify({
+      v: 1,
+      text: String(text || ""),
+      userName: String((context && context.userName) || ""),
+      characterName: String((context && context.characterName) || cfg.currentCharacterName || ""),
+      roles: roles,
+      llmEndpoint: String((cfg && cfg.llmEndpoint) || ""),
+      llmModel: String((cfg && cfg.llmModel) || ""),
+      parseEndpoint: String((cfg && cfg.parseEndpoint) || "")
+    });
+  }
+  function parseReuseStorageKeys(fingerprint, context) {
+    var keys = [];
+    function add(key) { if (key && keys.indexOf(key) < 0) keys.push(key); }
+    add("indextts_llm_parse_v1_" + parseReuseHash(fingerprint));
+    if (context && context.messageId) add("indextts_llm_parse_msg_" + parseReuseHash(String(context.messageId)) + "_" + parseReuseHash(fingerprint));
+    return keys;
+  }
+  function parseReuseRecordMatches(record, fingerprint) {
+    return !!(record && record.fingerprint === fingerprint && Array.isArray(record.segments) && record.segments.length);
+  }
+  async function loadReusableSegments(text, cfg, context, setStatus) {
+    if (!cfg || cfg.reuseLlmParse === false) return null;
+    var fingerprint = parseReuseFingerprint(text, cfg, context);
+    var keys = parseReuseStorageKeys(fingerprint, context);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      var record = null;
+      try { record = JSON.parse(localStorage.getItem(key) || "null"); } catch (_) {}
+      if (!record) {
+        try { if (window.tavo && typeof tavo.get === "function") record = await tavo.get(key, "chat"); } catch (_) {}
+      }
+      if (parseReuseRecordMatches(record, fingerprint)) {
+        var segments = cloneSegments(record.segments);
+        debugLog("♻️ 复用 LLM 拆段 cacheKey=" + key + " segments=" + segments.length, "#9f9");
+        if (typeof setStatus === "function") setStatus("复用 LLM 拆段 " + segments.length + " 段");
+        return segments;
+      }
+    }
+    return null;
+  }
+  async function saveReusableSegments(text, cfg, context, segments) {
+    if (!cfg || cfg.reuseLlmParse === false || !Array.isArray(segments) || !segments.length) return;
+    var fingerprint = parseReuseFingerprint(text, cfg, context);
+    var keys = parseReuseStorageKeys(fingerprint, context);
+    var record = { fingerprint: fingerprint, segments: cloneSegments(segments), createdAt: Date.now() };
+    for (var i = 0; i < keys.length; i++) {
+      try { localStorage.setItem(keys[i], JSON.stringify(record)); } catch (_) {}
+      try { if (window.tavo && typeof tavo.set === "function") await tavo.set(keys[i], record, "chat"); } catch (_) {}
+    }
+    debugLog("💾 保存 LLM 拆段复用 cacheKey=" + keys[0] + " segments=" + segments.length, "#9ff");
+  }
+  async function parseWithOptionalReuse(text, cfg, setStatus, context) {
+    var cached = await loadReusableSegments(text, cfg, context, setStatus);
+    if (cached && cached.length) return cached;
+    var segments = await parseWithLlm(text, cfg, setStatus, context);
+    await saveReusableSegments(text, cfg, context, segments);
+    return segments;
+  }
+  function escapeRegExpText(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  function quoteDepthAt(sourceText, idx) {
+    var depth = 0;
+    var asciiQuoteOpen = false;
+    var text = String(sourceText || "");
+    for (var i = 0; i < Math.max(0, idx); i++) {
+      var ch = text.charAt(i);
+      if (ch === "「" || ch === "『" || ch === "“") depth += 1;
+      else if (ch === "」" || ch === "』" || ch === "”") depth = Math.max(0, depth - 1);
+      else if (ch === '"') asciiQuoteOpen = !asciiQuoteOpen;
+    }
+    return depth + (asciiQuoteOpen ? 1 : 0);
+  }
+  function findSegmentTextInSource(sourceText, segmentText, fromIdx) {
+    var text = String(segmentText || "").trim();
+    if (!text) return -1;
+    var src = String(sourceText || "");
+    var idx = src.indexOf(text, Math.max(0, fromIdx || 0));
+    if (idx >= 0) return idx;
+    return src.indexOf(text);
+  }
+  function looksLikeNarrationSegment(text, role) {
+    var s = String(text || "").trim();
+    if (!s || /[「」『』“”"]/.test(s)) return false;
+    var verbs = "(低下|抬起|低头|抬头|看着|望着|看见|听见|感觉|走|站|坐|躺|靠|伸|抱|搂|抓|攥|咬|闭|睁|转|笑|哭|喘|颤|缩|贴|凑|伏|跪|垂|松|捂|揉|摸|按|亲|吻|加快|放慢|停下|开始|尖叫|叫|张开|流|滴|仰|扭|摇|晃|动|沉浸|起伏)";
+    if (new RegExp("^我" + verbs).test(s)) return true;
+    if (new RegExp("^[他她它]" + verbs).test(s)) return true;
+    role = String(role || "").trim();
+    if (role && role !== "旁白" && role !== "用户") {
+      return new RegExp("^" + escapeRegExpText(role) + verbs).test(s);
+    }
+    return false;
+  }
+  function singleParams(cfg, text) {
+    var p = new URLSearchParams();
+    p.set("text", text);
+    p.set("ref_audio_path", cfg.defaultVoice);
+    p.set("emo_text", "");
+    p.set("emo_ref_audio_path", "");
+    p.set("emo_alpha", String(cfg.emoAlpha));
+    p.set("top_p", String(cfg.topP));
+    p.set("top_k", String(cfg.topK));
+    p.set("temperature", String(cfg.temperature));
+    p.set("repetition_penalty", String(cfg.repetitionPenalty));
+    applyGenerationParamsToSearchParams(p, cfg);
+    return p;
+  }
+  function singleStreamUrl(base, cfg, text, force) {
+    var p = singleParams(cfg, text);
+    if (force) {
+      p.set("bypass_cache", "1");
+      p.set("_t", String(Date.now()));
+    }
+    return cleanBase(base) + cfg.endpoint + "?" + p.toString();
+  }
+  function singleDeleteUrl(base, cfg, text) {
+    return cleanBase(base) + "/cache_tts_single?" + singleParams(cfg, text).toString();
+  }
+  function singleBody(cfg, text, force) {
+    return Object.assign({
+      text: text,
+      ref_audio_path: cfg.defaultVoice,
+      emo_text: "",
+      emo_ref_audio_path: "",
+      emo_vec: [],
+      normalize_emo_vec: false,
+      top_p: cfg.topP,
+      top_k: cfg.topK,
+      temperature: cfg.temperature,
+      repetition_penalty: cfg.repetitionPenalty,
+      emo_alpha: cfg.emoAlpha,
+      bypass_cache: !!force
+    }, generationQualityOverrides(cfg.qualityMode));
+  }
+  async function createSingleStreamJob(base, cfg, text, force) {
+    var res = await fetch(cleanBase(base) + "/tts_stream_job", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(singleBody(cfg, text, force))
+    });
+    if (!res.ok) throw new Error(await res.text());
+    var data = await res.json();
+    if (!data || !data.url) throw new Error("后端没有返回流式播放地址。");
+    return {
+      streamUrl: new URL(data.url, cleanBase(base) + "/").href,
+      cacheUrl: data.cache_url ? new URL(data.cache_url, cleanBase(base) + "/").href : "",
+      cacheKey: data.cache_key || "",
+      cached: !!data.cached,
+      live: false
+    };
+  }
+
+  async function createDialogueStreamJob(base, body) {
+    var res = await fetch(cleanBase(base) + "/tts_dialogue_stream_job", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(await res.text());
+    var data = await res.json();
+    if (!data || !data.url) throw new Error("后端没有返回流式播放地址。");
+    return {
+      streamUrl: new URL(data.url, cleanBase(base) + "/").href,
+      cacheUrl: data.cache_url ? new URL(data.cache_url, cleanBase(base) + "/").href : "",
+      cacheKey: data.cache_key || "",
+      cached: !!data.cached,
+      live: !!data.live,
+    };
+  }
+
+  function isMobileUA() {
+    try { return /Android|iPhone|iPad|iPod|Mobile|Phone|MicroMessenger/i.test(navigator.userAgent || ""); }
+    catch (_) { return false; }
+  }
+
+  // 在用户点击事件里同步创建并 resume AudioContext。iOS Safari 要求 audio
+  // 必须在 user gesture 里激活；后面经过 await saveConfig / await parseWithLlm
+  // 之后才创建的 ctx 会停在 suspended，永远不出声。
+  var PRIMED_CTX = null;
+  var PRIMED_UNLOCK_SOURCE = null;
+  function primeAudioContext() {
+    if (PRIMED_CTX) {
+      try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
+      return PRIMED_CTX;
+    }
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try {
+      var ctx = new AC();
+      // 立刻 resume + 播一段 1 帧静音解锁 iOS 音频通道
+      try { ctx.resume(); } catch (_) {}
+      try {
+        var unlockRate = ctx.sampleRate || 44100;
+        var b = ctx.createBuffer(1, Math.max(1, Math.floor(unlockRate * 0.03)), unlockRate);
+        var ch = b.getChannelData(0);
+        if (ch && ch.length) ch[0] = 0.0005;
+        var s = ctx.createBufferSource();
+        s.buffer = b; s.connect(ctx.destination); s.start(0);
+        PRIMED_UNLOCK_SOURCE = s;
+        s.onended = function () { if (PRIMED_UNLOCK_SOURCE === s) PRIMED_UNLOCK_SOURCE = null; };
+      } catch (_) {}
+      PRIMED_CTX = ctx;
+      return ctx;
+    } catch (_) { return null; }
+  }
+
+  // 真流式播放：用 Web Audio API 直接拉 chunked-WAV 的 ReadableStream，
+  // 解析 WAV 头后把 PCM 块逐段塞进 AudioContext。完全不走 <audio> 元素，
+  // 因此不受手机浏览器 "Content-Length 未知就报错" 的限制。
+  // hooks: { onStateChange(state), onError(err), debug(text), playbackRate }

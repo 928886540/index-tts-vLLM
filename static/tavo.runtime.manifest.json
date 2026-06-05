@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "runtimeVersion": "20260605-job-parse-v1",
+  "mode": "ordered-fragments",
+  "skin": {
+    "default": "tavo.ui.skin.default.css"
+  },
+  "modules": [
+    { "id": "base-context", "file": "tavo.runtime.parts/00_base_context.js", "phase": "bootstrap", "depends": [] },
+    { "id": "style-config", "file": "tavo.runtime.parts/05_style_config.js", "phase": "bootstrap", "depends": ["base-context"] },
+    { "id": "tracks-icons", "file": "tavo.runtime.parts/10_tracks_icons.js", "phase": "tracks", "depends": ["style-config"] },
+    { "id": "generation-params", "file": "tavo.runtime.parts/20_generation_params.js", "phase": "core", "depends": ["tracks-icons"] },
+    { "id": "web-audio-stream", "file": "tavo.runtime.parts/25_web_audio_stream.js", "phase": "audio", "depends": ["generation-params"] },
+    { "id": "llm-parse", "file": "tavo.runtime.parts/30_llm_parse.js", "phase": "core", "depends": ["web-audio-stream"] },
+    { "id": "mount-shell", "file": "tavo.runtime.parts/40_mount_shell.js", "phase": "ui", "depends": ["llm-parse"] },
+    { "id": "playback-header", "file": "tavo.runtime.parts/42_playback_header.js", "phase": "audio", "depends": ["mount-shell"] },
+    { "id": "element-audio", "file": "tavo.runtime.parts/44_element_audio.js", "phase": "audio", "depends": ["playback-header"] },
+    { "id": "track-state", "file": "tavo.runtime.parts/46_track_state.js", "phase": "tracks", "depends": ["element-audio"] },
+    { "id": "track-history", "file": "tavo.runtime.parts/48_track_history.js", "phase": "tracks", "depends": ["track-state"] },
+    { "id": "settings-fields", "file": "tavo.runtime.parts/50_settings_fields.js", "phase": "settings", "depends": ["track-history"] },
+    { "id": "subtitle-media", "file": "tavo.runtime.parts/52_subtitle_media.js", "phase": "media", "depends": ["settings-fields"] },
+    { "id": "voice-picker", "file": "tavo.runtime.parts/54_voice_picker.js", "phase": "ui", "depends": ["subtitle-media"] },
+    { "id": "generate-flow", "file": "tavo.runtime.parts/60_generate_flow.js", "phase": "generate", "depends": ["voice-picker"] },
+    { "id": "events-boot", "file": "tavo.runtime.parts/62_events_boot.js", "phase": "mount", "depends": ["generate-flow"] }
+  ]
+}

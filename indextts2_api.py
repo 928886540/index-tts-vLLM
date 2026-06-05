@@ -2,6 +2,8 @@ import os
 import sys
 import traceback
 import base64
+import hashlib
+import json
 import socket
 import secrets
 import time
@@ -224,11 +226,9 @@ class TTS_Request(BaseModel):
 
 
 # Phase 2 dialogue request models.
-# Caller is expected to pre-parse the source text into segments (typically by
-# calling a 3rd-party LLM client-side, e.g. from tavo.js). Each segment names
-# a role; each role maps to a voice in `voices`. Per-segment emotion can be
-# given as `emo_vec` (8-dim) or `emo_text` (natural language like "压低声音,
-# 带着喘息"). emo_vec wins when both present.
+# `segments` is still accepted for old callers that pre-parse text. The Tavo
+# intelligent path should send raw `text` plus LLM config and let the backend
+# job own parsing, reuse, status, and errors.
 class TTS_Segment(BaseModel):
     role: str
     text: str
@@ -244,9 +244,22 @@ class TTS_Segment(BaseModel):
 
 
 class TTS_Dialogue_Request(BaseModel):
-    segments: List[TTS_Segment]
+    segments: Optional[List[TTS_Segment]] = None
+    text: Optional[str] = None
     # role -> voice library name OR direct file path
     voices: Dict[str, str]
+    # Backend-owned LLM parsing config for text-only intelligent dialogue jobs.
+    llm_endpoint: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_api_key: Optional[str] = None
+    parse_temperature: float = 0.2
+    parse_timeout: int = 90
+    parse_max_tokens: Optional[int] = None
+    parse_system_prompt: Optional[str] = None
+    reuse_llm_parse: bool = True
+    user_name: Optional[str] = None
+    character_name: Optional[str] = None
+    roles_hint: Optional[List[str]] = None
     performance_mode: str = "expressive"
     interval_ms: int = 350
     top_p: float = 0.8
@@ -534,20 +547,284 @@ def _make_complete_wav_bytes(pcm: bytes, sample_rate: int, channels: int = 1, bi
     return header + pcm
 
 
-async def _prepare_dialogue_for_streaming(req: dict):
-    """Resolve voices, build cache_payload, compute cache_key.
+BACKEND_LLM_PARSE_PROMPT_VERSION = "20260605-backend-v1"
+LLM_PARSE_CACHE_MAX = 64
+LLM_PARSE_CACHE: Dict[str, dict] = {}
 
-    Returns (prepared_dict, None) on success or (None, JSONResponse) on input error.
-    """
-    segments = req.get("segments") or []
-    voices = req.get("voices") or {}
-    if not segments:
-        return None, JSONResponse(status_code=400, content={"message": "segments is required"})
-    if not voices:
-        return None, JSONResponse(status_code=400, content={"message": "voices is required"})
 
+def _secret_hash(value: str) -> str:
+    value = str(value or "")
+    if not value:
+        return ""
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()
+
+
+def _llm_max_tokens_for_text(text: str) -> int:
+    return min(12000, max(4000, int(len(str(text or "")) * 5 + 0.999)))
+
+
+def _normalize_dialogue_voices(voices: dict) -> Dict[str, str]:
     from indextts.llm_proxy import _normalize_role
-    voices = {(_normalize_role(k) if k != "default" else "default"): v for k, v in voices.items()}
+
+    normalized: Dict[str, str] = {}
+    for key, value in (voices or {}).items():
+        role = "default" if key == "default" else _normalize_role(key)
+        normalized[role] = str(value or "").strip()
+    return normalized
+
+
+def _configured_voice_payload(voices: dict) -> dict:
+    payload = {}
+    for role, voice in sorted((voices or {}).items()):
+        resolved = _resolve_voice(voice)
+        payload[role] = {
+            "voice": voice,
+            "path": resolved or "",
+            "meta": _audio_file_meta(resolved) if resolved else {},
+        }
+    return payload
+
+
+def _dialogue_common_settings(req: dict) -> dict:
+    interval_ms = int(req.get("interval_ms", 350))
+    default_emo_alpha = float(req.get("emo_alpha", 0.55))
+    performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
+    sampling_kwargs = {
+        "top_p": float(req.get("top_p", 0.8)),
+        "top_k": int(req.get("top_k", 30)),
+        "temperature": float(req.get("temperature", 0.7)),
+        "repetition_penalty": float(req.get("repetition_penalty", 1.2)),
+        **_stream_infer_kwargs(performance_mode=performance_mode),
+    }
+    sampling_kwargs = _apply_s2mel_test_overrides(req, sampling_kwargs)
+    return {
+        "interval_ms": interval_ms,
+        "default_emo_alpha": default_emo_alpha,
+        "sampling_kwargs": sampling_kwargs,
+    }
+
+
+def _style_catalog_for_prompt() -> str:
+    names = sorted(k for k in STYLE_VOICE_MAP.keys() if k not in ("none", "neutral"))
+    labels = ["neutral=普通/平静(建议0.15)"]
+    labels.extend(f"{name}=声腔参考(建议0.34-0.70)" for name in names)
+    return " / ".join(labels)
+
+
+def _known_roles_for_parse(req: dict, voices: dict) -> List[str]:
+    roles: List[str] = []
+
+    def add(role):
+        role = str(role or "").strip()
+        if role and role not in roles:
+            roles.append(role)
+
+    add("旁白")
+    add("用户")
+    for role in (req.get("roles_hint") or []):
+        role = str(role or "").strip()
+        if role and role not in ("角色", "character", "当前角色", "我"):
+            add(role)
+    for role in (voices or {}).keys():
+        if role != "default" and role not in ("角色", "character", "当前角色", "我"):
+            add(role)
+    character_name = str(req.get("character_name") or "").strip()
+    if character_name:
+        add(character_name)
+    return roles
+
+
+def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
+    custom_prompt = str(req.get("parse_system_prompt") or "").strip()
+    if custom_prompt:
+        return custom_prompt
+
+    text_user = str(req.get("user_name") or "").strip()
+    character_name = str(req.get("character_name") or "").strip()
+    known_roles = _known_roles_for_parse(req, voices)
+    roles_hint = "已知角色名单(LLM 输出 role 字段必须从这里选，或者用剧情里出现的新人物名):\n  " + " / ".join(known_roles)
+    user_alias_hint = "用户身份名: " + (text_user or "未读取到") + "。只有原文中的「你」以及这个用户身份名明确指向玩家/读者时，role 才写 \"用户\"。"
+    character_hint = "当前角色名: " + (character_name or "未读取到") + "。原文第一人称「我」通常指当前角色或正在自述的人物，不要因为出现「我」就改成用户。"
+    example_user = text_user or "你"
+    return "\n".join([
+        "你是中文小说→TTS 片段拆分器。只返回严格 JSON，不要任何解释，不要 ``` 代码块。",
+        "",
+        roles_hint,
+        user_alias_hint,
+        character_hint,
+        "输出格式:",
+        "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2,\"emo_vec\":[h,a,s,f,d,l,u,n]}]}",
+        "",
+        "拆段规则:",
+        "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
+        "   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。",
+        "   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。",
+        "   旁白 style 永远写 neutral，style_alpha 写 0.15，emo_vec 写 [0,0,0,0,0,0,0,1]。",
+        "   旁白连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。",
+        "2. 人物直接说出口的话 → role 用说话人的名字。",
+        "   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。",
+        "   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。",
+        "   - 其他人物优先从已知角色名单挑名字；名单外的新人物用原文里的名字。",
+        "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。",
+        "4. text 是要朗读的原文片段，保留标点和语气词。",
+        "5. style 是段级声腔/呼吸参考，只能从这个枚举里选: " + _style_catalog_for_prompt(),
+        "",
+        "完整性硬规则:",
+        "- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。",
+        "- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。",
+        "- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。",
+        "- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。",
+        "",
+        "emo_vec 是 8 维向量，必须严格按模型顺序:",
+        "[0]=happy 高兴 [1]=angry 愤怒 [2]=sad 悲伤 [3]=fear 恐惧 [4]=hate 反感 [5]=low 低落 [6]=surprise 惊讶 [7]=neutral 自然。",
+        "每段只激活 1-2 个最匹配维度，其他写 0；平静叙述/客观描写用 [0,0,0,0,0,0,0,0.8]。",
+        "每段可加 emo_alpha 字段：旁白 0.12-0.22，平静对白 0.20-0.30，正常带情绪对白 0.32-0.44，强烈台词 0.46-0.52。",
+        "style_alpha: neutral=0.12-0.20；轻微声腔=0.34-0.46；明显 breath/moan/呻吟/喘息=0.50-0.70。",
+        "",
+        "示例输入:",
+        "她低着头，眼角有泪。「对不起，我真的撑不住了。」",
+        f"{example_user}叹了口气，把手放在她肩上：「别哭。」",
+        "示例输出:",
+        "{\"segments\":[",
+        "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
+        "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.42,\"emo_vec\":[0,0,0.48,0.05,0,0.12,0,0.35]},",
+        f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]}},",
+        "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0.2,0,0.3,0,0,0.2,0,0.5]}",
+        "]}",
+    ])
+
+
+def _parse_cache_payload(req: dict, voices: dict) -> dict:
+    return {
+        "kind": "tts_dialogue_llm_parse_v1",
+        "prompt_version": BACKEND_LLM_PARSE_PROMPT_VERSION,
+        "text": str(req.get("text") or ""),
+        "llm_endpoint": str(req.get("llm_endpoint") or ""),
+        "llm_model": str(req.get("llm_model") or ""),
+        "llm_api_key_sha1": _secret_hash(req.get("llm_api_key") or ""),
+        "parse_temperature": float(req.get("parse_temperature", 0.2)),
+        "parse_timeout": int(req.get("parse_timeout", 90)),
+        "parse_max_tokens": int(req.get("parse_max_tokens")) if req.get("parse_max_tokens") is not None else None,
+        "parse_system_prompt": str(req.get("parse_system_prompt") or ""),
+        "user_name": str(req.get("user_name") or ""),
+        "character_name": str(req.get("character_name") or ""),
+        "roles_hint": _known_roles_for_parse(req, voices),
+    }
+
+
+def _get_parse_cache(key: str):
+    if not key or key not in LLM_PARSE_CACHE:
+        return None
+    item = LLM_PARSE_CACHE.get(key) or {}
+    item["last_hit"] = time.time()
+    try:
+        return json.loads(json.dumps(item.get("segments") or [], ensure_ascii=False))
+    except Exception:
+        return item.get("segments") or []
+
+
+def _put_parse_cache(key: str, segments: list):
+    if not key or not segments:
+        return
+    LLM_PARSE_CACHE[key] = {"segments": segments, "created_at": time.time(), "last_hit": time.time()}
+    if len(LLM_PARSE_CACHE) > LLM_PARSE_CACHE_MAX:
+        oldest = sorted(LLM_PARSE_CACHE.items(), key=lambda kv: kv[1].get("last_hit") or kv[1].get("created_at") or 0)
+        for old_key, _ in oldest[: max(1, len(LLM_PARSE_CACHE) - LLM_PARSE_CACHE_MAX)]:
+            LLM_PARSE_CACHE.pop(old_key, None)
+
+
+def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
+    from indextts import llm_proxy
+
+    normalized = llm_proxy.normalize_segments(parsed).get("segments") or []
+    user_name = str(req.get("user_name") or "").strip()
+    character_name = str(req.get("character_name") or "").strip()
+    out: List[dict] = []
+    for seg in normalized:
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            continue
+        role = str(seg.get("role") or "旁白").strip()
+        lowered = role.lower()
+        if role == user_name and user_name:
+            role = "用户"
+        elif role in ("角色", "当前角色") or lowered == "character":
+            role = character_name or role
+        style = str(seg.get("style") or seg.get("style_ref") or "neutral").strip() or "neutral"
+        if style not in STYLE_VOICE_MAP:
+            style = "neutral"
+        style_alpha = _clamp_float(seg.get("style_alpha"), 0.15 if style == "neutral" else 0.42, 0.12, 0.70)
+        if style == "neutral":
+            style_alpha = max(0.12, min(0.20, style_alpha))
+        else:
+            style_alpha = max(0.30, min(0.70, style_alpha))
+        if role == "旁白":
+            style = "neutral"
+            style_alpha = 0.15
+        emo_alpha_default = 0.18 if role == "旁白" else (0.28 if style == "neutral" else float(req.get("emo_alpha") or 0.38))
+        emo_alpha = _clamp_float(seg.get("emo_alpha"), emo_alpha_default, 0.12 if role == "旁白" else 0.18, 0.22 if role == "旁白" else 0.52)
+        emo_vec = _stabilize_dialogue_emo_vec(role, seg.get("emo_vec")) or ([0, 0, 0, 0, 0, 0, 0, 0.8] if role == "旁白" else [0, 0, 0, 0, 0, 0, 0, 0.35])
+        out.append({
+            "role": role or "旁白",
+            "text": text,
+            "style": style,
+            "style_alpha": style_alpha,
+            "emo_vec": emo_vec,
+            "emo_alpha": emo_alpha,
+        })
+    if not out:
+        raise RuntimeError("LLM 没有返回可用片段")
+    return out
+
+
+async def _parse_dialogue_text_in_backend(prepared: dict, job: "_LiveStreamingJob") -> List[dict]:
+    req = prepared["req"]
+    parse_cfg = prepared["parse"]
+    cache_key = parse_cfg.get("cache_key") or ""
+    if parse_cfg.get("reuse") and cache_key:
+        cached = _get_parse_cache(cache_key)
+        if cached:
+            job.metrics["llm_parse_cached"] = True
+            job.metrics["llm_segments"] = len(cached)
+            return cached
+
+    from indextts import llm_proxy
+
+    endpoint = str(req.get("llm_endpoint") or "").strip()
+    model = str(req.get("llm_model") or "").strip()
+    if not endpoint or not model:
+        raise RuntimeError("多音色智能模式缺少 LLM endpoint 或 model")
+
+    started = time.perf_counter()
+    prompt = _build_backend_parse_prompt(req, prepared.get("voices") or {})
+    max_tokens = req.get("parse_max_tokens")
+    if max_tokens is None:
+        max_tokens = _llm_max_tokens_for_text(req.get("text") or "")
+    job.metrics["state"] = "parsing"
+    job.metrics["phase"] = "llm_parse"
+    job.metrics["message"] = "后端正在调用 LLM 拆分文本"
+    result = await asyncio.to_thread(
+        llm_proxy.parse_text_openai_compatible,
+        text=req.get("text") or "",
+        endpoint=endpoint,
+        model=model,
+        api_key=req.get("llm_api_key") or "",
+        system_prompt=prompt,
+        temperature=float(req.get("parse_temperature", 0.2)),
+        timeout=int(req.get("parse_timeout", 90)),
+        max_tokens=max_tokens,
+    )
+    segments = _normalize_backend_parsed_segments(result, req)
+    job.metrics["llm_parse_s"] = round(time.perf_counter() - started, 3)
+    job.metrics["llm_parse_cached"] = False
+    job.metrics["llm_segments"] = len(segments)
+    if parse_cfg.get("reuse") and cache_key:
+        _put_parse_cache(cache_key, segments)
+    return segments
+
+
+def _resolve_dialogue_voices_for_segments(segments: list, voices: dict):
+    from indextts.llm_proxy import _normalize_role
 
     default_path = _resolve_voice(voices.get("default", ""))
     role_voice_paths: Dict[str, str] = {}
@@ -564,26 +841,14 @@ async def _prepare_dialogue_for_streaming(req: dict):
             unresolved_roles.append(role)
         else:
             role_voice_paths[role] = path
-    if unresolved_roles:
-        return None, JSONResponse(
-            status_code=400,
-            content={"message": "voices unresolved", "roles": unresolved_roles},
-        )
+    return default_path, role_voice_paths, unresolved_roles
 
-    interval_ms = int(req.get("interval_ms", 350))
-    default_emo_alpha = float(req.get("emo_alpha", 0.55))
-    performance_mode = str(req.get("performance_mode") or "expressive").strip().lower()
-    sampling_kwargs = {
-        "top_p": float(req.get("top_p", 0.8)),
-        "top_k": int(req.get("top_k", 30)),
-        "temperature": float(req.get("temperature", 0.7)),
-        "repetition_penalty": float(req.get("repetition_penalty", 1.2)),
-        **_stream_infer_kwargs(performance_mode=performance_mode),
-    }
-    sampling_kwargs = _apply_s2mel_test_overrides(req, sampling_kwargs)
+
+def _dialogue_segments_cache_payload(segments: list, role_voice_paths: dict, default_path: str, req: dict, common: dict, parse_info: dict = None) -> dict:
+    sampling_kwargs = common["sampling_kwargs"]
     role_payload = {
         role: {"path": path, "meta": _audio_file_meta(path)}
-        for role, path in sorted(role_voice_paths.items())
+        for role, path in sorted((role_voice_paths or {}).items())
     }
     cache_payload = {
         "kind": "tts_dialogue_stream_v1",
@@ -600,24 +865,107 @@ async def _prepare_dialogue_for_streaming(req: dict):
         ],
         "voices": role_payload,
         "default_voice": {"path": default_path, "meta": _audio_file_meta(default_path)} if default_path else None,
-        "interval_ms": interval_ms,
-        "emo_alpha": default_emo_alpha,
+        "interval_ms": common["interval_ms"],
+        "emo_alpha": common["default_emo_alpha"],
         **sampling_kwargs,
+    }
+    if parse_info:
+        cache_payload["backend_parse"] = parse_info
+    cache_nonce = str(req.get("cache_nonce") or "").strip()
+    if cache_nonce:
+        cache_payload["cache_nonce"] = cache_nonce
+    return cache_payload
+
+
+def _attach_dialogue_segments_to_prepared(prepared: dict, segments: list):
+    voices = prepared.get("voices") or {}
+    default_path, role_voice_paths, unresolved_roles = _resolve_dialogue_voices_for_segments(segments, voices)
+    if unresolved_roles:
+        raise RuntimeError("音色映射缺失: LLM 拆出了这些角色，但没有对应音色，也没有 default: " + "、".join(unresolved_roles))
+    prepared["segments"] = segments
+    prepared["role_voice_paths"] = role_voice_paths
+    prepared["default_path"] = default_path
+    return prepared
+
+
+async def _prepare_dialogue_for_streaming(req: dict):
+    """Resolve stable job inputs and compute cache_key.
+
+    Returns (prepared_dict, None) on success or (None, JSONResponse) on input error.
+    Text-only jobs intentionally defer LLM parsing to the background worker so
+    Tavo receives a job/cache id before LLM success or failure is known.
+    """
+    segments = req.get("segments") or []
+    text = str(req.get("text") or "").strip()
+    voices = _normalize_dialogue_voices(req.get("voices") or {})
+    if not voices:
+        return None, JSONResponse(status_code=400, content={"message": "voices is required"})
+    if not segments and not text:
+        return None, JSONResponse(status_code=400, content={"message": "segments or text is required"})
+
+    common = _dialogue_common_settings(req)
+    from indextts import snapshot_cache
+
+    if segments:
+        default_path, role_voice_paths, unresolved_roles = _resolve_dialogue_voices_for_segments(segments, voices)
+        if unresolved_roles:
+            return None, JSONResponse(
+                status_code=400,
+                content={"message": "voices unresolved", "roles": unresolved_roles},
+            )
+        cache_payload = _dialogue_segments_cache_payload(segments, role_voice_paths, default_path, req, common)
+        cache_key = snapshot_cache.make_cache_key(cache_payload)
+        return {
+            "req": req,
+            "needs_parse": False,
+            "segments": segments,
+            "voices": voices,
+            "role_voice_paths": role_voice_paths,
+            "default_path": default_path,
+            "sampling_kwargs": common["sampling_kwargs"],
+            "interval_ms": common["interval_ms"],
+            "default_emo_alpha": common["default_emo_alpha"],
+            "cache_payload": cache_payload,
+            "cache_key": cache_key,
+        }, None
+
+    if not str(req.get("llm_endpoint") or "").strip() or not str(req.get("llm_model") or "").strip():
+        return None, JSONResponse(status_code=400, content={"message": "text dialogue job requires llm_endpoint and llm_model"})
+
+    configured_payload = _configured_voice_payload(voices)
+    invalid_voices = [role for role, item in configured_payload.items() if item.get("voice") and not item.get("path")]
+    if invalid_voices:
+        return None, JSONResponse(status_code=400, content={"message": "voices unresolved", "roles": invalid_voices})
+    parse_payload = _parse_cache_payload(req, voices)
+    parse_cache_key = snapshot_cache.make_cache_key(parse_payload)
+    cache_payload = {
+        "kind": "tts_dialogue_stream_backend_parse_v1",
+        "text": text,
+        "backend_parse": parse_payload,
+        "voices": configured_payload,
+        "interval_ms": common["interval_ms"],
+        "emo_alpha": common["default_emo_alpha"],
+        **common["sampling_kwargs"],
     }
     cache_nonce = str(req.get("cache_nonce") or "").strip()
     if cache_nonce:
         cache_payload["cache_nonce"] = cache_nonce
-    from indextts import snapshot_cache
     cache_key = snapshot_cache.make_cache_key(cache_payload)
     return {
-        "segments": segments,
-        "role_voice_paths": role_voice_paths,
-        "default_path": default_path,
-        "sampling_kwargs": sampling_kwargs,
-        "interval_ms": interval_ms,
-        "default_emo_alpha": default_emo_alpha,
+        "req": req,
+        "needs_parse": True,
+        "segments": [],
+        "voices": voices,
+        "sampling_kwargs": common["sampling_kwargs"],
+        "interval_ms": common["interval_ms"],
+        "default_emo_alpha": common["default_emo_alpha"],
         "cache_payload": cache_payload,
         "cache_key": cache_key,
+        "parse": {
+            "cache_key": parse_cache_key,
+            "payload": parse_payload,
+            "reuse": bool(req.get("reuse_llm_parse", True)),
+        },
     }, None
 
 
@@ -674,14 +1022,35 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
     """Background worker: runs dialogue inference, writes PCM to job.pcm,
     saves the complete WAV to snapshot_cache on finish. Survives client
     disconnects — no GET in flight is required."""
-    lock_wait_started = time.perf_counter()
     job.metrics["state"] = "queued"
+    job.metrics["phase"] = "created"
+    job.metrics["message"] = "任务已创建，等待后端处理"
     try:
+        if prepared.get("needs_parse"):
+            job.metrics["state"] = "parsing"
+            job.metrics["phase"] = "llm_parse"
+            job.metrics["message"] = "后端正在分析文本"
+            segments = await _parse_dialogue_text_in_backend(prepared, job)
+            _attach_dialogue_segments_to_prepared(prepared, segments)
+            if job.cancelled:
+                job.metrics["state"] = "cancelled"
+                job.metrics["phase"] = "cancelled"
+                job.metrics["message"] = "任务已取消"
+                return
+
+        lock_wait_started = time.perf_counter()
+        job.metrics["state"] = "queued"
+        job.metrics["phase"] = "tts_queue"
+        job.metrics["message"] = "文本已拆分，等待 TTS 合成"
         async with tts_stream_lock:
             if job.cancelled:
                 job.metrics["state"] = "cancelled"
+                job.metrics["phase"] = "cancelled"
+                job.metrics["message"] = "任务已取消"
                 return
             job.metrics["state"] = "running"
+            job.metrics["phase"] = "tts"
+            job.metrics["message"] = "正在合成音频"
             job.metrics["lock_wait_s"] = round(time.perf_counter() - lock_wait_started, 3)
             from indextts.llm_proxy import _normalize_role
             segments = prepared["segments"]
@@ -710,6 +1079,8 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             for idx, seg in enumerate(segments):
                 if job.cancelled:
                     job.metrics["state"] = "cancelled"
+                    job.metrics["phase"] = "cancelled"
+                    job.metrics["message"] = "任务已取消"
                     return
                 role = _normalize_role(seg.get("role") or "")
                 text = (seg.get("text") or "").strip()
@@ -762,6 +1133,8 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                 infer_stats = dict(getattr(tts_pipeline, "last_infer_stats", {}) or {})
                 if job.cancelled:
                     job.metrics["state"] = "cancelled"
+                    job.metrics["phase"] = "cancelled"
+                    job.metrics["message"] = "任务已取消"
                     return
                 seg_wall = time.perf_counter() - seg_started
                 seg_byte_count = len(job.pcm) - seg_start_offset
@@ -819,6 +1192,8 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
         try:
             if job.cancelled:
                 job.metrics["state"] = "cancelled"
+                job.metrics["phase"] = "cancelled"
+                job.metrics["message"] = "任务已取消"
                 return
             from indextts import snapshot_cache
             cache_write_started = time.perf_counter()
@@ -831,6 +1206,8 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             job.metrics["rtf"] = round(total_segment_wall / audio_duration, 3) if audio_duration > 0 else None
             job.metrics["wall_rtf"] = round(float(job.metrics["total_wall_s"] or 0.0) / audio_duration, 3) if audio_duration > 0 else None
             job.metrics["state"] = "saving"
+            job.metrics["phase"] = "saving"
+            job.metrics["message"] = "音频合成完成，正在保存缓存"
             metadata = {
                 "kind": "tts_dialogue_stream_v1",
                 "segments_meta": job.segments_meta,
@@ -840,6 +1217,8 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             snapshot_cache.save_cached_audio(job.cache_key, wav_full, metadata)
             job.metrics["cache_write_s"] = round(time.perf_counter() - cache_write_started, 3)
             job.metrics["state"] = "done"
+            job.metrics["phase"] = "done"
+            job.metrics["message"] = "音频已保存"
             _, json_path = snapshot_cache.cache_paths(job.cache_key)
             saved_metadata = snapshot_cache._read_metadata(json_path)
             saved_metadata["metrics"] = job.metrics
@@ -850,6 +1229,12 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
     except Exception as e:
         job.error = str(e)
         job.metrics["state"] = "failed"
+        if job.metrics.get("phase") == "llm_parse" or job.metrics.get("state") == "parsing":
+            job.metrics["phase"] = "llm_parse_failed"
+            job.metrics["message"] = "后端 LLM 拆段失败"
+        else:
+            job.metrics["phase"] = "failed"
+            job.metrics["message"] = "后端生成失败"
         job.metrics["error"] = str(e)
         job.metrics["total_wall_s"] = round(time.perf_counter() - job._perf_created, 3)
         traceback.print_exc()

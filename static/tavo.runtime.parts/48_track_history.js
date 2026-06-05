@@ -1,0 +1,471 @@
+// IndexTTS Tavo runtime part: 48_track_history.js // Role: track selection, cache upgrade, history and delete flow // This fragment is concatenated by static/tavo.runtime.js; it is not a standalone script.
+    async function selectTrack(index, autoplay) {
+      if (index < 0 || index >= generatedTracks.length) return;
+      var track = generatedTracks[index];
+      currentTrackIndex = index;
+      currentCacheKey = track.cacheKey || "";
+      var state = trackState(track);
+      // 切卡前先清掉旧 audio 状态(防止旧的 currentTime/duration 串到新卡片)
+      try { audio.pause(); } catch (_) {}
+      stopWebAudioPlayback("switch");
+      stopSubtitle();
+      hideSubtitlePanel();
+      var srcUrl = "";
+      // 统一先重置进度条/时间显示
+      if (seek) { seek.value = "0"; }
+      if (cur) cur.textContent = "00:00";
+      if (total) total.textContent = "--:--";
+      if (state === "live" && track.cacheKey && !track.deleted) {
+        setStatus("检查历史音频…");
+        showTrackNotice(track, "检查历史音频…", cfg.offlineAudioEnabled ? "优先检查本机离线音频" : "如果已保存，会切到可拖动音频");
+        await refreshTrackFromStatus(track, "select snapshot");
+        state = trackState(track);
+      }
+      await hydrateOfflineAudio(track, "select");
+      srcUrl = trackPlayableUrl(track);
+      debugLog("🎯 selectTrack idx=" + index + " state=" + state + " urlSource=" + (srcUrl === track.offlineUrl ? "offline" : srcUrl === track.url ? "url" : srcUrl === track.cacheUrl ? "cacheUrl" : srcUrl === track.streamUrl ? "streamUrl" : "none") + " src=" + srcUrl, "#9ff");
+      if (isLiveTrack(track) && !track.allowStreamPlay && !autoplay) {
+        clearElementAudioSrc();
+        if (seek) { seek.disabled = true; seek.value = "0"; }
+        setTrackPlaybackState(track, "idle");
+        setPlayState("idle");
+        setStatus("流式生成中");
+        showTrackNotice(track, "流式生成中", track.cacheKey ? "点播放从断点继续合成播放" : "正在合成第一段，稍候");
+        updateTrackButtons();
+        return;
+      }
+      if (srcUrl) {
+        if (shouldUseWebAudioForLiveTrack(track)) {
+          clearElementAudioSrc();
+          if (seek) { seek.disabled = true; seek.value = "0"; }
+          if (cur) cur.textContent = "00:00";
+          if (total) total.textContent = "--:--";
+          if (autoplay) {
+            var liveResumeSec = trackResumeSec(track);
+            setStatus("等待首段音频…");
+            showTrackNotice(track, liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频");
+            track.allowStreamPlay = false;
+            playLiveTrack(track, liveStreamUrlForTrack(track) || srcUrl, { noticeTitle: liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", noticeDetail: liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频", waitDetail: "正在合成第一段", startOffsetSec: liveResumeSec });
+          } else {
+            setStatus(historyStatusText());
+            showTrackNotice(track, "流式生成中", "点播放继续等待");
+          }
+          updateTrackButtons();
+          return;
+        }
+        if (isLiveTrack(track) && !shouldUseElementForLiveTrack(track, autoplay ? trackResumeSec(track) : 0)) {
+          clearElementAudioSrc();
+          if (seek) { seek.disabled = true; seek.value = "0"; }
+          if (autoplay) {
+            waitForSavedLiveTrack(track, "select live cache fallback", {
+              resumeSec: trackResumeSec(track),
+              title: "等待保存音频…",
+              detail: "实时直播音频在当前 WebView 不稳定，生成完成后切到完整音频"
+            });
+          } else {
+            setTrackPlaybackState(track, "idle");
+            setPlayState("idle");
+            setStatus("流式生成中，等待保存音频");
+            showTrackNotice(track, "流式生成中", "完成后会切到可拖动的完整音频");
+            pollCacheUpgrade(track, "select live cache fallback");
+          }
+          updateTrackButtons();
+          return;
+        }
+        if (autoplay && isLiveTrack(track) && liveStreamUrlForTrack(track)) {
+          startElementAudioFrom(track, trackResumeSec(track));
+          updateTrackButtons();
+          return;
+        }
+        audio.src = srcUrl;
+        markElementAudioTrack(track, isSavedTrack(track) ? "saved" : (srcUrl === track.streamUrl ? "stream" : "audio"));
+        if (isLiveTrack(track)) track.allowStreamPlay = false;
+        setAudioPlaybackRate();
+        // 强制重新加载 metadata,避免浏览器复用上次缓存的 duration/seekable
+        try { audio.load(); } catch (_) {}
+        if (seek) { seek.disabled = false; }
+        if (autoplay) {
+          setStatus("正在加载音频…");
+          showTrackNotice(track, "正在加载音频…", shouldUseElementForSavedTrack(track) ? "已加载音频，支持拖动" : "马上开始播放");
+        } else {
+          setStatus(historyStatusText());
+          showTrackNotice(track, savedTrackLabel(track), shouldUseElementForSavedTrack(track) ? "点播放开始，可拖动进度条" : "点播放开始");
+        }
+        updateTrackButtons();
+        if (autoplay) audio.play().catch(function (err) { handleAudioPlayReject("element", err, "请点播放继续"); });
+        return;
+      }
+      // 都没有 URL —— 该 track 是占位
+      try { audio.removeAttribute('src'); audio.load(); } catch (_) {}
+      if (seek) { seek.disabled = true; }
+      if (state === "failed") {
+        showTrackNotice(track, "生成失败", track.error || "请重新生成一次");
+        setStatus("生成失败");
+      } else if (state === "live") {
+        showTrackNotice(track, "流式生成中", "等待音频保存或继续播放");
+        setStatus(historyStatusText());
+      } else {
+        showTrackNotice(track, track.noticeTitle || "音频尚未就绪", track.noticeDetail || "生成完成后会自动显示歌词");
+        setStatus(historyStatusText());
+      }
+      updateTrackButtons();
+    }
+    function attachCacheAudio(track, opts) {
+      opts = opts || {};
+      if (!track || !track.cacheUrl) return false;
+      track.url = track.cacheUrl;
+      setTrackState(track, "saved");
+      if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === track) {
+        updateTrackButtons();
+        if (track.webAudioPlaying && !opts.forceElement) return true;
+        if (opts.deferElement) {
+          setStatus("音频已保存，可重播");
+          showTrackNotice(track, "音频已保存", formatJobMetrics(track.metrics) || "点播放可重播");
+          return true;
+        }
+        if (isElementUsingTrackStream(track) && !opts.forceElement && !opts.autoplay) {
+          setStatus(isElementPlayingTrackStream(track) ? "音频已保存，继续流式播放" : "音频已保存，可重播");
+          showTrackNotice(track, "音频已保存", trackHasStreamIssue(track) ? "检测到流式卡顿，可选择切到已保存音频" : "当前流式播放不切换，结束后可重播");
+          return true;
+        }
+        try {
+          var currentSrc = audio.currentSrc || audio.src || "";
+          if (currentSrc !== track.cacheUrl) {
+            audio.src = track.cacheUrl;
+            markElementAudioTrack(track, "saved");
+            audio.load();
+            if (seek) seek.value = "0";
+            if (cur) cur.textContent = "00:00";
+          }
+          if (seek) seek.disabled = false;
+          if (opts.autoplay) {
+            setAudioPlaybackRate();
+            audio.play().catch(function (err) { handleAudioPlayReject("cache", err, "缓存已就绪，点播放继续"); });
+          }
+        } catch (e) {
+          debugLog("❌ 挂载 cache audio 失败: " + (e && e.message ? e.message : e), "#f99");
+        }
+      } else {
+        updateTrackButtons();
+      }
+      return true;
+    }
+    function pollCacheUpgrade(trackEntry, label) {
+      if (!trackEntry || !trackEntry.cacheKey || trackEntry.cachePollStarted || isSavedTrack(trackEntry)) return;
+      trackEntry.cachePollStarted = true;
+      setTrackCacheState(trackEntry, "pending");
+      label = label || "snapshot";
+      (async function () {
+        var done = false;
+        for (var i = 0; i < 240; i++) {
+          if (trackEntry.deleted) { done = true; break; }
+          try {
+            if (trackEntry.mode === "single") {
+              if (await refreshTrackFromStatus(trackEntry, label)) {
+                done = true;
+                break;
+              }
+              await new Promise(function(r){ setTimeout(r, 1000); });
+              continue;
+            }
+            var st = await fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(trackEntry.cacheKey), { cache: "no-store" });
+            if (st.ok) {
+              var j = await st.json();
+              if (j && j.metrics) {
+                trackEntry.metrics = j.metrics;
+                if (currentTrack() === trackEntry && !isSavedTrack(trackEntry)) {
+                  var phase = String(j.metrics.phase || "");
+                  var msg = String(j.metrics.message || "");
+                  if (phase === "llm_parse" || phase === "created" || phase === "tts_queue" || phase === "tts") {
+                    setStatus(msg || (phase === "llm_parse" ? "后端正在分析文本…" : "后端正在合成…"));
+                    showTrackNotice(trackEntry, msg || "后端处理中…", formatJobMetrics(j.metrics) || "状态由后端控制");
+                  }
+                }
+              }
+              if (j && j.sample_rate) trackEntry.sampleRate = j.sample_rate;
+              if (j && j.duration_s) trackEntry.duration_s = j.duration_s;
+              if (j && j.cache_url) {
+                trackEntry.cacheUrl = new URL(j.cache_url, cleanBase(cfg.apiBase) + "/").href;
+              }
+              if (j && Array.isArray(j.segments_meta) && j.segments_meta.length && (!trackEntry.segments || !trackEntry.segments.length)) {
+                trackEntry.segments = j.segments_meta.map(function (s) {
+                  return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
+                });
+              }
+              if (j && j.state === "done") {
+                setTrackState(trackEntry, "saved");
+                var autoplaySaved = !!(trackEntry.playSavedWhenReady && currentTrack() === trackEntry);
+                trackEntry.playSavedWhenReady = false;
+                attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: trackEntry.webAudioPlaying && !autoplaySaved, autoplay: autoplaySaved });
+                scheduleOfflineAudioSave(trackEntry, label + " offline", 0);
+                knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
+                updateTrackButtons();
+                if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+                debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
+                if (autoplaySaved) setStatus("生成完成，正在播放保存音频");
+                var metricsLine = formatJobMetrics(trackEntry.metrics);
+                if (metricsLine) debugLog("📊 " + label + " 指标: " + metricsLine, "#9ff");
+                if (currentTrack() === trackEntry && isElementUsingTrackStream(trackEntry)) {
+                  debugLog("✅ 未检测到 stalled/中断，保持当前流式播放，不切到落盘音频", "#9f9");
+                }
+                done = true;
+                break;
+              }
+              if (j && j.state === "failed") {
+                var failMsg = (j.metrics && j.metrics.message ? j.metrics.message + ": " : "") + (j.error || "服务端生成失败");
+                trackEntry.error = failMsg;
+                setTrackState(trackEntry, "failed");
+                setPlayState("idle");
+                setStatus("生成失败");
+                setError(failMsg);
+                showTrackNotice(trackEntry, "生成失败", failMsg);
+                debugLog("❌ 服务端任务失败: " + failMsg, "#f99");
+                break;
+              }
+            }
+          } catch (e) {
+            debugLog("⚠️ " + label + " 状态轮询失败: " + (e && e.message ? e.message : e), "#fc9");
+          }
+          await new Promise(function(r){ setTimeout(r, 1000); });
+        }
+        if (!done && !trackEntry.deleted && !isSavedTrack(trackEntry)) {
+          trackEntry.cachePollStarted = false;
+          debugLog("⚠️ " + label + " 等待落盘超时，cacheKey=" + trackEntry.cacheKey, "#fc9");
+        }
+      })();
+    }
+    var tracksLoaded = !messageId;
+    var tracksLoading = null;
+    var knownHistoryCount = 0;
+    function restoreTrackFromSaved(t, base) {
+      if (!persistedTrackLooksSaved(t)) return null;
+      var restoredMode = t.mode || "ai8";
+      var savedState = "saved";
+      var restored = {
+        url: null,
+        cacheKey: t.cacheKey,
+        cacheUrl: base + "/cache_audio/" + encodeURIComponent(t.cacheKey),
+        streamUrl: restoredMode === "single" ? "" : base + "/tts_dialogue_stream_job/" + encodeURIComponent(t.cacheKey),
+        createdAt: t.createdAt || Date.now(),
+        voice: t.voice || cfg.defaultVoice,
+        mode: restoredMode,
+        offlineKey: t.offlineKey || offlineAudioKey(t.cacheKey),
+        offlineReady: !!t.offlineReady,
+        offlineWanted: !!t.offlineWanted,
+        offlineSavedAt: t.offlineSavedAt || 0,
+        offlineSize: t.offlineSize || 0,
+        voicesMap: t.voicesMap || null,
+        metrics: t.metrics || null,
+        sampleRate: t.sampleRate || t.sample_rate || 0,
+        duration_s: t.duration_s || (t.metrics && t.metrics.audio_duration_s) || 0,
+        segments: Array.isArray(t.segments) ? t.segments : [],
+        fromHistory: savedState === "saved",
+        state: savedState,
+        playbackState: "idle",
+        serverState: "done",
+        cacheState: "ready",
+        remoteCacheState: "ready",
+        offlineState: t.offlineState || "",
+        streamHealth: t.streamHealth || "",
+        stalledCount: Number(t.stalledCount || 0) || 0
+      };
+      setTrackState(restored, savedState);
+      if (t.offlineState) setTrackOfflineState(restored, t.offlineState);
+      if (t.streamHealth) setTrackStreamHealth(restored, t.streamHealth);
+      ensureTrackStates(restored);
+      return restored;
+    }
+    async function ensureTracksLoaded() {
+      if (tracksLoaded) return generatedTracks;
+      if (tracksLoading) return tracksLoading;
+      tracksLoading = (async function () {
+        var saved = persistableHistoryTracks(await loadTracksForMessage(messageId));
+        knownHistoryCount = saved && saved.length ? saved.length : 0;
+        tracksLoaded = true;
+        if (!saved || !saved.length) {
+          updateTrackButtons();
+          setStatus(historyStatusText());
+          showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+          return generatedTracks;
+        }
+        var base = cleanBase(cfg.apiBase);
+        saved.forEach(function (t) {
+          var restored = restoreTrackFromSaved(t, base);
+          if (restored) generatedTracks.push(restored);
+        });
+        currentTrackIndex = generatedTracks.length - 1;
+        updateTrackButtons();
+        setStatus(historyStatusText());
+        showTrackNotice(currentTrack(), historyStatusText(), "点播放继续，或用左右按钮切换历史音频");
+        debugLog("📂 按需恢复历史 tracks: " + generatedTracks.length + " 段, 未预取离线音频/未轮询落盘", "#9ff");
+        return generatedTracks;
+      })().catch(function (e) {
+        tracksLoaded = false;
+        throw e;
+      }).finally(function () {
+        tracksLoading = null;
+      });
+      return tracksLoading;
+    }
+    async function initializeHistoryCount() {
+      if (!messageId || tracksLoaded) return;
+      knownHistoryCount = localHistoryCountForMessage(messageId);
+      updateTrackButtons();
+      setStatus(historyStatusText());
+      showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
+      // 兜底：若本版 tavo.get 是异步实现，上面的同步读会落空，这里异步从 tavo 持久层
+      // 再确认一次条数（只读变量，不请求 /voices、不生成）。
+      try {
+        var arr = await loadTracksForMessage(messageId);
+        if (tracksLoaded || generatedTracks.length) return;
+        var n = persistableHistoryTracks(arr).length;
+        if (n !== knownHistoryCount) {
+          knownHistoryCount = n;
+          updateTrackButtons();
+          setStatus(historyStatusText());
+          showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
+        }
+      } catch (_) {}
+    }
+    async function confirmDeleteTrack(track) {
+      if (!track) return false;
+      var label = generatedTracks.length ? ((currentTrackIndex + 1) + "/" + generatedTracks.length) : "当前音频";
+      try {
+        if (window.tavo && tavo.utils && typeof tavo.utils.select === "function") {
+          var choice = await tavo.utils.select([
+            { value: "cancel", label: "取消", description: "保留这条历史音频" },
+            { value: "delete", label: "确认删除", description: "删除当前卡片和关联缓存" }
+          ], "删除 " + label + "？", "cancel");
+          return choice === "delete";
+        }
+      } catch (e) {
+        debugLog("⚠️ 删除确认弹窗失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
+      return typeof window.confirm === "function" ? window.confirm("确认删除当前音频？这会删除历史记录和关联缓存。") : true;
+    }
+    async function deleteRemoteTrack(track) {
+      if (!track) return;
+      var base = cleanBase(cfg.apiBase);
+      try {
+        if (track.cacheKey) {
+          await fetch(base + "/tts_dialogue_stream_job/" + encodeURIComponent(track.cacheKey), { method: "DELETE" }).catch(function () {});
+          await fetch(base + "/cache/" + encodeURIComponent(track.cacheKey), { method: "DELETE" }).catch(function () {});
+        } else if (track.deleteUrl) {
+          await fetch(track.deleteUrl, { method: "DELETE" }).catch(function () {});
+        }
+      } catch (e) {
+        debugLog("⚠️ 删除服务端关联缓存失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
+    }
+    async function clearCurrentTrack() {
+      if (currentTrackIndex < 0) return;
+      var target = currentTrack();
+      if (isCancelableLiveTrack(target)) {
+        await exitCurrentLiveTrack("delete live guard");
+        return;
+      }
+      if (!await confirmDeleteTrack(target)) return;
+      var removed = generatedTracks.splice(currentTrackIndex, 1)[0];
+      if (removed) removed.deleted = true;
+      try { audio.pause(); } catch (_) {}
+      stopWebAudioPlayback("switch");
+      if (removed && removed.url && /^blob:/i.test(removed.url)) {
+        try { URL.revokeObjectURL(removed.url); } catch (_) {}
+      }
+      deleteOfflineAudioForTrack(removed).catch(function () {});
+      deleteRemoteTrack(removed).catch(function () {});
+      // 删除后同步把变更写回 tavo.set，下次进页面就不会再看到这张卡片
+      if (messageId) {
+        saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+        debugLog("🗑 删除卡片并同步 tavo.set（剩 " + generatedTracks.length + " 张）", "#fc9");
+      }
+      currentTrackIndex = Math.min(currentTrackIndex, generatedTracks.length - 1);
+      if (currentTrackIndex >= 0) {
+        await selectTrack(currentTrackIndex, false);
+      } else {
+        audio.removeAttribute("src");
+        audio.load();
+        currentCacheKey = "";
+        if (seek) { seek.disabled = true; seek.value = "0"; }
+        if (cur) cur.textContent = "00:00";
+        if (total) total.textContent = "--:--";
+        setPlayState("idle");
+        setStatus("历史音频 0 条");
+        showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+        updateTrackButtons();
+      }
+    }
+    async function cancelLiveTrack(track, reason) {
+      if (!isCancelableLiveTrack(track)) return false;
+      var idx = generatedTracks.indexOf(track);
+      track.deleted = true;
+      track.cancelled = true;
+      track.playSavedWhenReady = false;
+      track.allowStreamPlay = false;
+      track.cachePollStarted = false;
+      setTrackState(track, "cancelled");
+      try { stopServerLogPolling(); } catch (_) {}
+      try { audio.pause(); } catch (_) {}
+      stopWebAudioPlayback("cancel");
+      clearElementAudioSrc();
+      stopSubtitle();
+      hideSubtitlePanel();
+      if (track.url && /^blob:/i.test(String(track.url))) {
+        try { URL.revokeObjectURL(track.url); } catch (_) {}
+      }
+      deleteOfflineAudioForTrack(track).catch(function () {});
+      deleteRemoteTrack(track).catch(function () {});
+      if (idx >= 0) {
+        generatedTracks.splice(idx, 1);
+        currentTrackIndex = Math.min(idx, generatedTracks.length - 1);
+      }
+      knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
+      tracksLoaded = true;
+      if (messageId) {
+        try { await saveTracksForMessage(messageId, generatedTracks); }
+        catch (e) { debugLog("⚠️ live 退出后同步历史失败: " + (e && e.message ? e.message : e), "#fc9"); }
+      }
+      debugLog("🛑 live 流式已退出并删除: " + (reason || "live exit") + (track.cacheKey ? " cacheKey=" + track.cacheKey : ""), "#fc9");
+      return true;
+    }
+    function showEmptyAfterLiveCancel(reason) {
+      currentCacheKey = "";
+      if (seek) { seek.disabled = true; seek.value = "0"; }
+      if (cur) cur.textContent = "00:00";
+      if (total) total.textContent = "--:--";
+      setPlayState("idle");
+      setStatus(historyStatusText());
+      showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
+      updateTrackButtons();
+      if (reason) debugLog("🛑 live 流式已中止: " + reason, "#fc9");
+    }
+    async function exitCurrentLiveTrack(reason) {
+      var track = currentTrack();
+      if (isSavedTrack(track)) {
+        await selectTrack(currentTrackIndex, false);
+        return true;
+      }
+      if (!isCancelableLiveTrack(track)) return false;
+      if (track.cacheKey) {
+        if (await refreshTrackFromStatus(track, "live exit status check")) {
+          if (isSavedTrack(track)) {
+            await selectTrack(currentTrackIndex, false);
+            return true;
+          }
+          if (trackState(track) === "failed") {
+            updateTrackButtons();
+            return true;
+          }
+        }
+      }
+      setStatus("正在退出流式…");
+      showTrackNotice(track, "正在退出流式…", "本次未完成任务会被删除");
+      await cancelLiveTrack(track, reason || "live exit");
+      if (!generatedTracks.length) {
+        showEmptyAfterLiveCancel(reason || "live exit");
+        return true;
+      }
+      var nextIndex = Math.max(0, Math.min(currentTrackIndex, generatedTracks.length - 1));
+      await selectTrack(nextIndex, false);
+      return true;
+    }

@@ -5,17 +5,23 @@
 正式运行代码在仓库根目录：
 
 - `indextts2_api.py`：API 服务入口，默认端口 `9880`
-- `static/tavo.js`：TAVO 单脚本播放器
+- `static/tavo.js`：TAVO 单脚本轻入口；完整播放器 runtime 在 `static/tavo.runtime.js` 和 `static/tavo.runtime.parts/`
 - `indextts/`：音色库、缓存、SQLite profile、LLM 代理等模块
 - `prompts/library/`：默认音色库
 
-当前只需要看的文档：
+当前优先看的文档：
 
-- `handoff_docs/CURRENT_STATUS.md`：当前真实进度、测试入口、已知问题
-- `handoff_docs/QUICKSTART_TAVO.md`：TAVO 正则接入方式
-- `handoff_docs/architecture/README.md`：本机交付架构图与多消息排队策略
+- `AGENTS.md`：进入本协作区前必须遵守的规则
+- `docs/AGENT_STATE.md`：当前真实进度、运行状态、交接重点
+- `docs/ARCHITECTURE.md`：当前架构边界和 Tavo/缓存/资源模型
+- `docs/DECISIONS.md`：已经接受的产品/工程决策
+- `docs/BUGS.md`：bug 台账；用户报新 bug 后先记录再改代码
+- `docs/TODO.md`：优先级和下一步
+- `docs/REGRESSION.md`：修复后的回归清单
 
-## 2026-05-29 Codex 接手快照
+历史交接仍保留在 `handoff_docs/`，但新工作优先更新 `docs/`。
+
+## 2026-05-29 Codex 接手快照（历史）
 
 先看这里，避免下个 Codex 又从旧文档绕远路。
 
@@ -122,11 +128,14 @@ node Leon_api\dev_tools\test_tavo_widget_playwright.js
 脚本当前固定检查：
 
 - `/tavo_test` 能挂载真实 `/static/tavo.js`
+- 初始挂载只出现 `.idx-lazy-card`，不加载 runtime manifest/parts
 - 初始挂载不请求 `/voices`
 - 初始挂载不创建 TTS job
-- 歌词区高度固定为 `148px`
+- 点 lazy 卡片打开播放器，再点播放器设置后加载 1 个 manifest 和 16 个 runtime parts
+- 歌词区高度固定为 `136px`
 - 打开音色选择器后才请求 `/voices`
 - 音色网格能渲染
+- mock 智能生成：同一消息重挂载后生成两次，前端 `/parse_text` 请求数必须为 0，只提交 mocked dialogue job；job body 必须包含原文、音色映射、LLM 配置和 Tavo 用户/角色上下文
 - 页面没有 `pageerror` 和关键 `console error`
 
 如果要测别的地址，只改环境变量，不要复制一份脚本：
@@ -141,7 +150,7 @@ node Leon_api\dev_tools\test_tavo_widget_playwright.js
 正则里用最新版脚本：
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260530-quality-presets"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-job-parse-v1"></script>
 ```
 
 ## 访问地址
