@@ -33,17 +33,35 @@ Reported: 2026-06-05
 
 Repro: User noted that IndexTTS has high resource usage and RTF rises badly unless enough GPU/SM/shared-memory headroom is available.
 
-Evidence: Local machine is an RTX 3060 12 GB. ComfyUI on port `8188` had to be stopped before returning to IndexTTS work. `nvidia-smi` showed about 4.3 GB GPU memory in use after ComfyUI was killed, with other Python model services still present.
+Evidence: Local machine is an RTX 3060 12 GB. ComfyUI on port `8188` had to be stopped before returning to IndexTTS work. `nvidia-smi` showed about 4.3 GB GPU memory in use after ComfyUI was killed, with other Python model services still present. Latest cache evidence on 2026-06-05: `54e4954a5312c5f90d62c329ee198424be3aec4b` produced 14 segments / 109.319s audio with `rtf=5.418`, `wall_rtf=5.47`, `lock_wait_s=0`, `total_wall_s=597.947`, and `s2mel_s=504.206`; `c69e43eb5bcd4544cfe22631822ddb1eaf91b17d` produced 15 segments / 120.573s audio with `rtf=6.051`, `wall_rtf=7.548`, and `lock_wait_s=180.455`. `nvidia-smi` at 14:17 showed `11876MiB / 12288MiB` in use with API PID `21012` and multiprocessing child PID `31712`; port `8188` was empty. A later read-only snapshot at 16:15 showed GPU memory down to `1106MiB / 12288MiB`, no compute Python process, `8188` not listening, and `9880` not listening; that means the slow RTF evidence is from completed cache metadata, not from a currently running saturated GPU process.
 
 Hypothesis: RTF spikes when IndexTTS2 competes for dedicated VRAM, spills into shared GPU memory, or runs while other heavy GPU workloads are loaded.
 
-Root cause: resource contention / VRAM pressure, not a Tavo frontend bug.
+Root cause: resource contention / VRAM pressure, with latest evidence pointing at the S2Mel/diffusion stage as the main inference-time bottleneck. The frontend live-card bug could make this look worse, but the latest cache metrics show real backend RTF regression too.
 
 Fix: pending operational and code hardening. Keep ComfyUI disabled while tuning IndexTTS2; prefer FP16/CUDA kernel; keep TTS heavy concurrency at 1; expose RTF and GPU/resource notes in regression.
 
 Guard: Before serious TTS tests, verify `8188` is not listening and check `nvidia-smi`. During a test, record RTF, audio duration, total elapsed time, and whether other compute Python processes were active.
 
 Notes: This is the main tradeoff versus GPT-SoVITS: IndexTTS2 is more stable/quality-oriented but heavier.
+
+## BUG-020: Tavo home player controls and status layout are cramped
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-05
+
+Repro: User reported that the player home screen should not show 10-second rewind/forward buttons; the delete button should move out of the main control row to the old page-counter position; the page counter should float at the top-right of the lyric/subtitle area; the music/add button should sit in the main control row and match the play button size; the hint under the role name is too cramped; and the top-right settings button should be slightly wider.
+
+Evidence: `static/tavo.runtime.parts/40_mount_shell.js` rendered `rewind10` and `forward10` buttons in the home controls, kept delete as a same-row control, and placed `[data-role="counter"]` in the top header. CSS constrained `.idx-info` with large right padding and kept `.idx-status` single-line/marquee style.
+
+Root cause: The previous control layout kept every secondary action in one row and used the header as a dense status/control strip. That left the role hint/status line too narrow and made delete/page count compete with playback controls.
+
+Fix: `static/tavo.runtime.parts/40_mount_shell.js` removes the visible 10-second skip buttons from the home row, moves delete into the subtitle panel, moves the page counter into the subtitle panel top-right, and keeps add/music beside play. `static/tavo.ui.skin.default.css` and the fallback style in `05_style_config.js` make add/music the same size as play, float the counter with `pointer-events:none`, widen the settings button slightly, and keep the role status as a single-line ellipsis after the header space was freed. Cache busting is bumped to `20260605-ld-live-v1`.
+
+Guard: Playwright should assert there are no `[data-role="rewind10"]` / `[data-role="forward10"]` home buttons, add/music and play share dimensions, delete lives inside `.idx-subtitle`, the counter lives inside `.idx-subtitle` at the top-right without intercepting taps, the subtitle container does not mask/fade those floating controls, and `.idx-status` stays single-line ellipsis.
+
+Follow-up bug found during project audit: after moving delete/counter into `.idx-subtitle`, the old subtitle `mask-image` also faded the floating controls. Fixed in `static/tavo.ui.skin.default.css` and fallback `05_style_config.js` by disabling the subtitle mask for this layout, and added a Playwright guard for `maskImage === none`.
 
 ## BUG-002: ComfyUI auto-start can occupy port 8188 and GPU memory
 
@@ -256,7 +274,7 @@ Status: fixed in code, needs real Tavo validation
 
 Reported: 2026-06-05
 
-Repro: User reported that settings and voice picker close buttons should match, both dialogs should open centered instead of jumping to an awkward scroll position, LLM analysis must be immediately cancelable, disk cache should not wait for stream playback to finish, mode labels should be `普通模式` / `AI模式`, normal mode should support default/narrator/dialogue voices without LLM, and the player needs a `LIVE/生成` quick switch.
+Repro: User reported that settings and voice picker close buttons should match, both dialogs should open centered instead of jumping to an awkward scroll position, LLM analysis must be immediately cancelable, disk cache should not wait for stream playback to finish, mode labels should be `普通模式` / `AI模式`, normal mode should support default/narrator/dialogue voices without LLM, and the player needs an `L`/`D` quick switch.
 
 Evidence: Current Tavo runtime had separate settings/picker close markup, settings/picker positioning derived mostly from player top, frontend generation used `single` / `ai8` labels, normal mode used the single-voice endpoint only, and frontend had no AbortController around the dialogue job creation request. Backend dialogue jobs already saved cache after inference, independent from GET readers, but cancelled LLM parse could still report as failed after the blocking LLM call returned.
 
@@ -266,7 +284,7 @@ Root cause: The runtime still treated "simple" and "multi-role" generation as tw
 
 Fix: `static/tavo.runtime.parts/*` now normalizes modes to `normal` / `ai`, adds `playbackMode` (`live` / `generate`), and keeps the player entry light. Normal mode submits raw text, `parse_mode=normal`, and a `{default, 旁白, 对白}` voice map to the backend; AI mode submits `parse_mode=ai` and LLM config. `indextts2_api.py` now has backend deterministic normal segmentation, cancellable dialogue job states, and delayed GC that cannot remove a newer same-key job. Pending generate jobs are persisted per Tavo message and removed on done/failed/cancelled/delete.
 
-Guard: Settings and picker close buttons use the same compact style and open centered near the player without scroll jumps. Normal mode submits raw text plus default/narrator/dialogue voice map to `/tts_dialogue_stream_job` with `parse_mode=normal`, and does not require LLM config. AI mode still submits `parse_mode=ai` and never pre-calls `/parse_text`. Deleting a pending/live card aborts the frontend job request if still in flight, calls backend DELETE when a cache key exists, removes the card immediately, and backend status reports cancelled rather than failed. `LIVE/生成` quick switch changes job body behavior: live creates a streaming live card, generate creates a background job that waits for `/cache_audio` and remains recoverable from cache later. Playwright now asserts normal generate/cancel makes `0` `/parse_text` calls, `0` stream GETs, one status poll, one DELETE, and clears pending storage.
+Guard: Settings and picker close buttons use the same compact style and open centered near the player without scroll jumps. Normal mode submits raw text plus default/narrator/dialogue voice map to `/tts_dialogue_stream_job` with `parse_mode=normal`, and does not require LLM config. AI mode still submits `parse_mode=ai` and never pre-calls `/parse_text`. Deleting a pending/live card aborts the frontend job request if still in flight, calls backend DELETE when a cache key exists, removes the card immediately, and backend status reports cancelled rather than failed. `L`/`D` quick switch changes job body behavior: live creates a streaming live card, generate creates a background job that waits for `/cache_audio` and remains recoverable from cache later. Playwright now asserts normal generate/cancel makes `0` `/parse_text` calls, `0` stream GETs, one status poll, one DELETE, and clears pending storage.
 
 ## BUG-014: cache audio files need human-readable role folders and timestamp names
 
@@ -300,7 +318,7 @@ Hypothesis: The normal/generate feature added new controls with one-off styling 
 
 Root cause: The LIVE/generate quick switch and normal-mode voice controls were added with one-off UI surfaces. The header controls did not share one sizing/alignment rule, and normal mode used standalone picker buttons instead of the existing role-row layout. The first fix also made 默认/旁白/对话 all look equally selectable, but the intended model is that 默认音色 is the locked base voice and only 旁白/对话 are configurable overrides.
 
-Fix: `static/tavo.runtime.parts/40_mount_shell.js` now renders 普通模式音色 as three role-style rows. 默认 is a locked display-only row (`default-voice-label`), while 旁白 and 对话 are the only voice picker buttons. `50_settings_fields.js` updates those labels without reading normal rows into the AI role list. `54_voice_picker.js` ignores the read-only default row and scopes role-row events to `[data-role="roles-list"]`. Header styles in `static/tavo.ui.skin.default.css` and fallback CSS unify the counter, LIVE/生成 toggle, and settings icon height/top/background/icon scale. Cache busting is bumped to `20260605-ui-unify-v2`.
+Fix: `static/tavo.runtime.parts/40_mount_shell.js` now renders 普通模式音色 as three role-style rows. 默认 is a locked display-only row (`default-voice-label`), while 旁白 and 对话 are the only voice picker buttons. `50_settings_fields.js` updates those labels without reading normal rows into the AI role list. `54_voice_picker.js` ignores the read-only default row and scopes role-row events to `[data-role="roles-list"]`. Header styles in `static/tavo.ui.skin.default.css` and fallback CSS keep only the `L`/`D` playback toggle and settings button in the top row. Cache busting is bumped to `20260605-ld-live-v1`.
 
 Guard: Player header controls should share the same top, height, glass background, border weight, and icon scale. Normal-mode voice settings must use role-row layout with `默认/旁白/对话`; 默认 must be display-only and not expose `[data-role="default-voice-btn"]`, while 旁白 and 对话 expose picker buttons. Normal-mode rows must not be saved into AI role mappings.
 
@@ -389,3 +407,23 @@ Root cause: Three frontend regressions overlapped. First, the live-active CSS ru
 Fix: `static/tavo.ui.skin.default.css` now excludes `.idx-live-exit` from the live-active hidden-control selector and keeps a stable player/control minimum height. `static/tavo.runtime.parts/48_track_history.js` updates segment metadata by signature and, for foreground LIVE cards only, confirms `/cache_audio/{key}` with `HEAD` so a readable cache converts to saved even if status is lagging. The fallback skin in `05_style_config.js` and subtitle poll in `52_subtitle_media.js` were kept consistent. Settings order in `40_mount_shell.js` now puts normal/AI voice mapping directly under quality. Playwright smoke now asserts live exit visibility, card min height, and settings order.
 
 Guard: In LIVE mode, pending/live cards must always show an immediate exit/cancel button and no normal history controls. Status polling must update live segment metadata without mixing text from another message/track, and re-entering a message must bind pending jobs by stable message id plus cache key. Settings and picker focus outlines should use the same rounded radius as the component. The voice mapping section should render directly below quality tier settings. The player card height should remain stable while status/subtitle/control states change.
+
+## BUG-022: Tavo home header and LIVE play click regressions
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-05
+
+Repro: User screenshot shows the avatar/name/status dropped below the top-right LIVE/settings controls. User clarified that avatar, role name/status, and the two top buttons should share one row; the visible `LIVE` text pill should become a small single-letter control; `L` means LIVE and `D` means落盘/后台生成; the role hint can stay single-line when that space is freed; the live exit button should be a circular button with the same size as play; and clicking play during live streaming currently appears to do nothing.
+
+Evidence: Current CSS adds top padding to `.idx-top`, keeps `.idx-status` in two-line clamp mode, renders `.idx-playback-toggle` as a wide text pill, and styles `.idx-live-exit` as a wide rectangular button. In the live play path, click handling can fall through into a wait-for-saved-cache branch without an immediate clear state change, so the user can perceive the play button as unresponsive while the backend is still running or already saving.
+
+Hypothesis: The previous home layout fix over-allocated header space for delete/LIVE/settings and pushed identity text into a second row. LIVE-mode playback also needs an explicit foreground wait/resume state and visible feedback instead of silently reusing the saved-cache fallback.
+
+Root cause: The top row still carried too much width because playback mode was rendered as a text pill and delete competed with identity controls. The live play click also treated a waiting LIVE card with `play.dataset.state === "loading"` as a pause request, so the same click could set loading feedback and then immediately flip the card to `已暂停`.
+
+Fix: `40_mount_shell.js` renders the playback mode as a single-letter `L` / `D` button and keeps delete inside the subtitle panel next to the floating counter. `50_settings_fields.js`, `10_tracks_icons.js`, and `62_events_boot.js` sync the direct `L`/`D` toggle without a dropdown. `static/tavo.ui.skin.default.css` and fallback CSS keep avatar/name/status plus the two top buttons on one row, make status single-line ellipsis, and make live exit circular/play-sized. `62_events_boot.js` no longer pauses a live card just because the play button is already in `loading`; clicking a pending/live card now shows checking/waiting feedback and lets `generate(false)` check `/cache_audio` / `/tts_dialogue_job_status`.
+
+Guard: Playwright should assert the identity row and the two top buttons are aligned, the playback mode control is icon-sized and shows only `L` or `D`, no playback dropdown exists, the role status is single-line ellipsis, the live exit control is circular and play-sized, and clicking play on a pending/live card immediately enters a visible wait/check state without creating a second job or immediately showing `已暂停`.
+
+Audit note: the first Playwright guard for live-exit size accidentally removed `data-live-active` after forcing `.idx-hidden`, so it could measure the hidden live-exit button as `0x0` and fail even when production CSS was correct. The test now keeps `data-live-active=1` while measuring the forced visible button.

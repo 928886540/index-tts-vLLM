@@ -44,10 +44,6 @@
           }
           return;
         }
-        if ((isLiveTrack(existingTrack) || trackState(existingTrack) === "pending") && play && play.dataset.state === "loading") {
-          pauseLiveTrack(existingTrack);
-          return;
-        }
         if (shouldUseElementForSavedTrack(existingTrack)) {
           await prepareOfflineAudio(existingTrack, "play", { saveMissing: true });
           var existingUrl = trackPlayableUrl(existingTrack);
@@ -63,7 +59,7 @@
           return;
         }
         if (isLiveTrack(existingTrack) || trackState(existingTrack) === "pending") {
-          if (existingTrack.cacheKey && await refreshTrackFromStatus(existingTrack, "play snapshot")) {
+          if (existingTrack.cacheKey && (await promoteTrackIfCacheReady(existingTrack, "play cache check") || await refreshTrackFromStatus(existingTrack, "play snapshot"))) {
             if (shouldUseElementForSavedTrack(existingTrack)) {
               await prepareOfflineAudio(existingTrack, "play saved", { saveMissing: true });
               startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
@@ -87,12 +83,14 @@
           if (liveUrl) {
             var manualResumeSec = trackResumeSec(existingTrack);
             existingTrack.allowStreamPlay = false;
-            setStatus(manualResumeSec > 0 ? "从断点继续…" : "连接流式音频…");
-            showTrackNotice(existingTrack, manualResumeSec > 0 ? "从断点继续播放" : "连接流式音频", manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续，后台仍在合成") : "后台仍在合成，连接后从断点继续");
+            setTrackPlaybackState(existingTrack, "loading");
+            setPlayState("loading");
+            setStatus(manualResumeSec > 0 ? "检查断点音频…" : "检查音频状态…");
+            showTrackNotice(existingTrack, manualResumeSec > 0 ? "检查断点音频" : "检查音频状态", manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续检查，完成后播放完整音频") : "如果已落盘会直接播放，否则继续等待保存");
             await playLiveTrack(existingTrack, liveUrl, {
-              noticeTitle: manualResumeSec > 0 ? "从断点继续播放" : "连接流式音频",
-              noticeDetail: manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续，后台仍在合成") : "后台仍在合成，连接后从断点继续",
-              waitDetail: "等待后端继续输出 PCM",
+              noticeTitle: manualResumeSec > 0 ? "等待保存音频…" : "等待保存音频…",
+              noticeDetail: manualResumeSec > 0 ? ("从 " + formatTime(manualResumeSec) + " 继续；完整音频保存后自动播放") : "完整音频保存后自动播放",
+              waitDetail: "等待后端继续合成并落盘",
               startOffsetSec: manualResumeSec
             });
             return;

@@ -13,12 +13,11 @@
     root.innerHTML = [
       '<div class="idx-card">',
       '  <button class="idx-gear" type="button" data-role="gear" aria-label="设置">' + gearIcon() + '</button>',
-      '  <button class="idx-playback-toggle" type="button" data-role="playback-mode-toggle" aria-label="切换播放/生成模式">LIVE</button>',
-      '  <div class="idx-card-counter" data-role="counter">0/0</div>',
+      '  <button class="idx-playback-toggle" type="button" data-role="playback-mode-toggle" aria-label="播放模式" title="播放模式">L</button>',
       '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点播放</div></div></div>',
       '  <div class="idx-seek-wrap"><input class="idx-seek" data-role="seek" type="range" min="0" max="1000" value="0" disabled><div class="idx-time"><span data-role="current">00:00</span><span data-role="total">--:--</span></div></div>',
-      '  <div class="idx-subtitle" data-role="subtitle"><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点播放开始生成音频</span></div></div>',
-      '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-skip" type="button" data-role="rewind10" aria-label="后退 10 秒" title="后退 10 秒"><svg viewBox="0 0 24 24"><path d="M9 8H4V3"/><path d="M5 8a8 8 0 1 1-1 6"/><path d="M10 12v5"/><path d="M14 12v5"/><path d="M10 12h1.5"/><path d="M14 12h1.5"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式" title="退出流式"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/><path d="M7 21h10"/></svg></button><button class="idx-ctrl idx-ctrl-skip" type="button" data-role="forward10" aria-label="快进 10 秒" title="快进 10 秒"><svg viewBox="0 0 24 24"><path d="M15 8h5V3"/><path d="M19 8a8 8 0 1 0 1 6"/><path d="M8 12v5"/><path d="M12 12v5"/><path d="M8 12h1.5"/><path d="M12 12h1.5"/></svg></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button><button class="idx-ctrl idx-ctrl-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button></div>',
+      '  <div class="idx-subtitle" data-role="subtitle"><button class="idx-sub-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button><div class="idx-card-counter" data-role="counter">0/0</div><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点播放开始生成音频</span></div></div>',
+      '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式" title="退出流式"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/><path d="M7 21h10"/></svg></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
         + '<div class="idx-section-title">文本模式</div>'
@@ -163,45 +162,13 @@
     function setStatus(v) {
       if (!status) return;
       status.textContent = v == null ? "" : String(v);
-      // 文字溢出才滚动。停留长 + 步长大 → 不抖。
+      try { status.title = status.textContent || ""; } catch (_) {}
       try {
         if (status.__idxScrollTimer) { clearInterval(status.__idxScrollTimer); status.__idxScrollTimer = null; }
         status.scrollLeft = 0;
-        requestAnimationFrame(function () {
-          if (!status) return;
-          var excess = status.scrollWidth - status.clientWidth;
-          if (excess > 16) {  // 容差大一点,小溢出不滚省得抖
-            status.style.overflowX = "hidden";
-            status.style.whiteSpace = "nowrap";
-            status.style.textOverflow = "clip";
-            var direction = 1, holdEnd = 60, holdStart = 60;  // 60×80ms = 4.8s 停留
-            var maxScroll = excess;  // 锁死最大位移
-            status.__idxScrollTimer = setInterval(function () {
-              if (!status || !document.body.contains(status)) {
-                clearInterval(status.__idxScrollTimer); status.__idxScrollTimer = null; return;
-              }
-              if (direction === 1) {
-                if (status.scrollLeft >= maxScroll) {
-                  status.scrollLeft = maxScroll;  // 钳位防抖
-                  if (holdEnd-- > 0) return;
-                  direction = -1; holdEnd = 60;
-                } else {
-                  status.scrollLeft = Math.min(status.scrollLeft + 2, maxScroll);
-                }
-              } else {
-                if (status.scrollLeft <= 0) {
-                  status.scrollLeft = 0;
-                  if (holdStart-- > 0) return;
-                  direction = 1; holdStart = 60;
-                } else {
-                  status.scrollLeft = Math.max(status.scrollLeft - 2, 0);
-                }
-              }
-            }, 80);  // 80ms / 步,慢一些更顺
-          } else {
-            status.style.textOverflow = "ellipsis";
-          }
-        });
+        status.style.overflowX = "hidden";
+        status.style.whiteSpace = "nowrap";
+        status.style.textOverflow = "ellipsis";
       } catch (_) {}
     }
     function historyStatusText() {
@@ -218,7 +185,7 @@
     function updateTrackCounter() {
       var active = currentTrack();
       if (counter && isCancelableLiveTrack(active)) {
-        counter.textContent = (active.backgroundOnly || normalizePlaybackMode(active.playbackMode) === "generate") ? "生成" : "LIVE";
+        counter.textContent = playbackModeLetter(active.playbackMode);
         return;
       }
       var savedList = persistableHistoryTracks(generatedTracks);

@@ -104,7 +104,7 @@
       return "";
     }
     function modeName() { return normalizeModeName(cfg.mode) === "ai" ? "AI模式" : "普通模式"; }
-    function playbackModeName() { return normalizePlaybackMode(cfg.playbackMode) === "generate" ? "生成" : "LIVE"; }
+    function playbackModeName() { return normalizePlaybackMode(cfg.playbackMode) === "generate" ? "落盘" : "LIVE"; }
     function updateNormalVoiceButtons() {
       var def = String(cfg.defaultVoice || "").trim();
       var narrator = voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], def, cfg.currentCharacterName);
@@ -155,9 +155,10 @@
       if (voicePill) voicePill.textContent = "音色：" + shortName(cfg.defaultVoice);
       if (modePill) modePill.textContent = "模式：" + modeName();
       if (playbackToggle) {
-        playbackToggle.textContent = playbackModeName();
+        playbackToggle.textContent = playbackModeLetter(cfg.playbackMode);
         playbackToggle.dataset.mode = cfg.playbackMode;
-        playbackToggle.setAttribute("title", cfg.playbackMode === "generate" ? "生成模式：后台生成落盘后再播放" : "LIVE模式：边生成边播放");
+        playbackToggle.setAttribute("title", "播放模式：" + playbackModeName());
+        playbackToggle.setAttribute("aria-label", "播放模式：" + playbackModeName());
       }
       updateNormalVoiceButtons();
       if (title) title.textContent = (context && context.characterName ? context.characterName : shortName(cfg.defaultVoice));

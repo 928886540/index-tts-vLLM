@@ -448,7 +448,7 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
     await page.click('[data-role="playback-mode-toggle"]');
     await page.waitForFunction(() => {
       const b = document.querySelector('[data-role="playback-mode-toggle"]');
-      return b && /生成/.test(b.textContent || "") && b.dataset.mode === "generate";
+      return b && (b.textContent || "").trim() === "D" && b.dataset.mode === "generate";
     }, { timeout: 5000 });
     await page.evaluate(() => {
       const add = document.querySelector('[data-role="add"]');
@@ -514,8 +514,153 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
       throw new Error("normal mode should map default/旁白/对白 to the default voice: " + JSON.stringify(body));
     }
     if (result.pendingActive) throw new Error("pending job storage should be cleared after delete: " + JSON.stringify(result));
+    if (result.toggleText.trim() !== "D") throw new Error("generate/落盘 mode should display the single-letter D button: " + JSON.stringify(result));
     if (pageErrors.length) throw new Error("normal generate smoke page error: " + pageErrors.join(" | "));
     return { parseCount, jobCount, statusCount, streamGetCount, deleteCount, result, body };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runLivePlayClickSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端/i.test(text)) pageErrors.push(text);
+  });
+
+  const liveKey = "c".repeat(40);
+  let headCount = 0;
+  let statusCount = 0;
+  let streamGetCount = 0;
+
+  await page.route("**/cache_audio/**", async (route) => {
+    if (route.request().method().toUpperCase() === "HEAD") headCount += 1;
+    await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    statusCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "running",
+        cache_key: liveKey,
+        cache_url: "/cache_audio/" + liveKey,
+        metrics: {
+          state: "running",
+          phase: "tts",
+          message: "后端正在合成…",
+          segments_done: 1,
+          segments_total: 3
+        },
+        segments_meta: [
+          { idx: 0, role: "旁白", text: "第一段正在合成。", style: "neutral", start_s: 0, duration_s: 1.0 }
+        ]
+      })
+    });
+  });
+  await page.route("**/tts_dialogue_stream_job/**", async (route) => {
+    streamGetCount += 1;
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "live smoke should wait for saved cache, not open stream" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate((key) => {
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+        configVersion: 11,
+        mode: "normal",
+        playbackMode: "live",
+        llmEndpoint: "http://127.0.0.1:8317/v1",
+        llmModel: "live-play-smoke-model",
+        llmApiKey: "",
+        reuseLlmParse: true,
+        intervalMs: 50,
+        topP: 0.8,
+        topK: 30,
+        temperature: 0.7,
+        repetitionPenalty: 1.2,
+        emoAlpha: 0.38,
+        speedFactor: 1.0,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }));
+      localStorage.setItem("indextts_pending_jobs_test-message-1", JSON.stringify([{
+        cacheKey: key,
+        cacheUrl: "/cache_audio/" + key,
+        streamUrl: "/tts_dialogue_stream_job/" + key,
+        createdAt: Date.now(),
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        parseMode: "normal",
+        playbackMode: "live",
+        backgroundOnly: false,
+        state: "live",
+        status: "running",
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav", "对白": "女声/高圆圆.wav" },
+        segments: []
+      }]));
+    }, liveKey);
+
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.click('[data-role="play"]');
+    await page.waitForFunction(() => {
+      const play = document.querySelector('[data-role="play"]');
+      const fetches = window.__idxTest.getFetchLog();
+      return play && play.dataset.state === "loading"
+        && fetches.some((r) => /\/cache_audio\//.test(r.url) || /\/tts_dialogue_job_status\//.test(r.url));
+    }, { timeout: 10000 });
+
+    await page.evaluate(() => window.__idxTest.clearFetchLog());
+    await page.click('[data-role="play"]');
+    await page.waitForTimeout(250);
+
+    const result = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const play = document.querySelector('[data-role="play"]');
+      const status = (document.querySelector('[data-role="status"]') || {}).textContent || "";
+      const notice = (document.querySelector(".idx-subtitle") || {}).textContent || "";
+      return {
+        playState: play ? play.dataset.state : "",
+        status,
+        notice,
+        cacheChecks: fetches.filter((r) => /\/cache_audio\//.test(r.url)).length,
+        statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
+        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        liveExitVisible: getComputedStyle(document.querySelector('[data-role="live-exit"]')).display !== "none"
+      };
+    });
+
+    if (/已暂停/.test(result.status) || /已暂停/.test(result.notice) || result.playState !== "loading") {
+      throw new Error("clicking a waiting LIVE card should not immediately pause itself: " + JSON.stringify(result));
+    }
+    if (result.cacheChecks + result.statuses < 1) {
+      throw new Error("clicking LIVE play should visibly check cache/status instead of doing nothing: " + JSON.stringify(result));
+    }
+    if (streamGetCount !== 0 || result.streamGets !== 0) {
+      throw new Error("default LIVE card should wait for saved cache instead of opening native stream: " + JSON.stringify({ streamGetCount, result }));
+    }
+    if (!result.liveExitVisible) {
+      throw new Error("LIVE exit button should stay visible on a waiting live card: " + JSON.stringify(result));
+    }
+    if (pageErrors.length) throw new Error("LIVE play-click smoke page error: " + pageErrors.join(" | "));
+    return { headCount, statusCount, streamGetCount, result };
   } finally {
     await context.close();
   }
@@ -586,13 +731,17 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
       const gear = document.querySelector('[data-role="gear"]');
       const playbackToggle = document.querySelector('[data-role="playback-mode-toggle"]');
       const headerCounter = document.querySelector('[data-role="counter"]');
+      const subtitleDelete = document.querySelector('.idx-subtitle [data-role="delete"]');
+      const playBtn = document.querySelector('[data-role="play"]');
+      const addBtn = document.querySelector('[data-role="add"]');
+      const rewind10 = document.querySelector('[data-role="rewind10"]');
+      const forward10 = document.querySelector('[data-role="forward10"]');
       const liveExit = document.querySelector('[data-role="live-exit"]');
       let liveExitDisplay = "";
       if (card && liveExit) {
         card.setAttribute("data-live-active", "1");
         liveExit.classList.add("idx-hidden");
         liveExitDisplay = getComputedStyle(liveExit).display;
-        card.removeAttribute("data-live-active");
       }
       const settingTitles = Array.from(document.querySelectorAll('[data-role="panel"] .idx-section-title')).map((x) => (x.textContent || "").trim());
       const normalRows = Array.from(document.querySelectorAll('[data-role="normal-voices"] .idx-normal-voice-row')).map((row) => {
@@ -626,8 +775,9 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
         subtitleHeight: sub ? getComputedStyle(sub).height : null,
         status: status ? status.textContent : "",
         playbackToggleText: (playbackToggle || {}).textContent || "",
+        playbackMenuCount: document.querySelectorAll(".idx-playback-menu,.idx-playback-option").length,
         modeLabels: Array.from(document.querySelectorAll(".idx-mode")).map((b) => (b.textContent || "").trim()),
-        headerControls: [headerCounter, playbackToggle, gear].map((el) => {
+        headerControls: [playbackToggle, gear].map((el) => {
           if (!el) return null;
           const r = el.getBoundingClientRect();
           const s = getComputedStyle(el);
@@ -640,6 +790,43 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
             backgroundColor: s.backgroundColor
           };
         }),
+        homeControls: {
+          hasRewind10: !!rewind10,
+          hasForward10: !!forward10,
+          playRect: playBtn ? { width: playBtn.getBoundingClientRect().width, height: playBtn.getBoundingClientRect().height } : null,
+          addRect: addBtn ? { width: addBtn.getBoundingClientRect().width, height: addBtn.getBoundingClientRect().height } : null,
+          liveExitRect: liveExit ? { width: liveExit.getBoundingClientRect().width, height: liveExit.getBoundingClientRect().height } : null,
+          deleteRect: subtitleDelete ? {
+            left: subtitleDelete.getBoundingClientRect().left,
+            top: subtitleDelete.getBoundingClientRect().top,
+            right: subtitleDelete.getBoundingClientRect().right,
+            bottom: subtitleDelete.getBoundingClientRect().bottom,
+            width: subtitleDelete.getBoundingClientRect().width,
+            height: subtitleDelete.getBoundingClientRect().height
+          } : null,
+          deleteParentClass: subtitleDelete && subtitleDelete.parentElement ? subtitleDelete.parentElement.className : "",
+          counterRect: headerCounter ? {
+            left: headerCounter.getBoundingClientRect().left,
+            top: headerCounter.getBoundingClientRect().top,
+            right: headerCounter.getBoundingClientRect().right,
+            bottom: headerCounter.getBoundingClientRect().bottom,
+            width: headerCounter.getBoundingClientRect().width,
+            height: headerCounter.getBoundingClientRect().height
+          } : null,
+          subtitleRect: sub ? {
+            left: sub.getBoundingClientRect().left,
+            top: sub.getBoundingClientRect().top,
+            right: sub.getBoundingClientRect().right,
+            bottom: sub.getBoundingClientRect().bottom,
+            width: sub.getBoundingClientRect().width,
+            height: sub.getBoundingClientRect().height
+          } : null,
+          counterParentClass: headerCounter && headerCounter.parentElement ? headerCounter.parentElement.className : "",
+          counterPointerEvents: headerCounter ? getComputedStyle(headerCounter).pointerEvents : "",
+          subtitleMaskImage: sub ? (getComputedStyle(sub).maskImage || getComputedStyle(sub).webkitMaskImage || "") : "",
+          statusWhiteSpace: status ? getComputedStyle(status).whiteSpace : "",
+          statusLineClamp: status ? (getComputedStyle(status).webkitLineClamp || "") : ""
+        },
         card: !!document.querySelector(".idx-card"),
         panelOpen: !!document.querySelector('[data-role="panel"][open]'),
         cardRect: cardRect ? { left: cardRect.left, top: cardRect.top, width: cardRect.width, height: cardRect.height } : null,
@@ -671,17 +858,46 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
     if (!afterRuntime.closeRect || afterRuntime.closeRect.width < 30 || afterRuntime.closeRect.height < 30) {
       throw new Error("settings close button should be a compact icon button: " + JSON.stringify(afterRuntime.closeRect));
     }
-    if (afterRuntime.playbackToggleText.trim() !== "LIVE") throw new Error("playback toggle should default to LIVE: " + JSON.stringify(afterRuntime));
+    if (afterRuntime.playbackToggleText.trim() !== "L") throw new Error("playback toggle should default to single-letter L: " + JSON.stringify(afterRuntime));
+    if (afterRuntime.playbackMenuCount !== 0) throw new Error("playback mode should be a direct L/D toggle, not a dropdown menu: " + JSON.stringify(afterRuntime));
     if (!afterRuntime.headerControls || afterRuntime.headerControls.some((x) => !x)) {
-      throw new Error("header controls should all exist: " + JSON.stringify(afterRuntime.headerControls));
+      throw new Error("top controls should include only playback mode and settings: " + JSON.stringify(afterRuntime.headerControls));
     }
     const headerHeights = afterRuntime.headerControls.map((x) => x.height);
     const headerTops = afterRuntime.headerControls.map((x) => x.top);
     if (Math.max(...headerHeights) - Math.min(...headerHeights) > 2 || Math.max(...headerTops) - Math.min(...headerTops) > 2) {
-      throw new Error("header controls should share height and vertical alignment: " + JSON.stringify(afterRuntime.headerControls));
+      throw new Error("top controls should share height and vertical alignment: " + JSON.stringify(afterRuntime.headerControls));
     }
-    if (afterRuntime.headerControls[2].width - afterRuntime.headerControls[2].height > 2) {
-      throw new Error("settings button should stay a compact square icon button: " + JSON.stringify(afterRuntime.headerControls[2]));
+    if (afterRuntime.headerControls[1].width <= afterRuntime.headerControls[1].height || afterRuntime.headerControls[1].width - afterRuntime.headerControls[1].height > 10) {
+      throw new Error("settings button should be slightly wider than square without becoming bulky: " + JSON.stringify(afterRuntime.headerControls[1]));
+    }
+    const home = afterRuntime.homeControls || {};
+    if (home.hasRewind10 || home.hasForward10) {
+      throw new Error("home player should not expose 10-second skip buttons: " + JSON.stringify(home));
+    }
+    if (!home.playRect || !home.addRect || Math.abs(home.playRect.width - home.addRect.width) > 2 || Math.abs(home.playRect.height - home.addRect.height) > 2) {
+      throw new Error("music/add button should match the main play button size: " + JSON.stringify(home));
+    }
+    if (!home.liveExitRect || Math.abs(home.playRect.width - home.liveExitRect.width) > 2 || Math.abs(home.playRect.height - home.liveExitRect.height) > 2) {
+      throw new Error("live exit button should be circular and match the main play button size: " + JSON.stringify(home));
+    }
+    if (!home.deleteRect || !/idx-subtitle/.test(home.deleteParentClass)) {
+      throw new Error("delete button should live inside the subtitle area: " + JSON.stringify(home));
+    }
+    if (!home.counterRect || !home.subtitleRect || !/idx-subtitle/.test(home.counterParentClass)) {
+      throw new Error("history page counter should live inside the subtitle area: " + JSON.stringify(home));
+    }
+    if (home.counterRect.top < home.subtitleRect.top || home.counterRect.right > home.subtitleRect.right + 1 || home.counterRect.bottom > home.subtitleRect.top + 36) {
+      throw new Error("history page counter should float at the subtitle top-right without covering the lyric body: " + JSON.stringify(home));
+    }
+    if (home.counterPointerEvents !== "none") {
+      throw new Error("floating subtitle counter should not intercept subtitle/settings/picker taps: " + JSON.stringify(home));
+    }
+    if (home.subtitleMaskImage && home.subtitleMaskImage !== "none") {
+      throw new Error("subtitle mask should not fade floating delete/counter controls: " + JSON.stringify(home));
+    }
+    if (home.statusWhiteSpace !== "nowrap" || String(home.statusLineClamp) === "2") {
+      throw new Error("role hint/status should stay one-line ellipsis after freeing header space: " + JSON.stringify(home));
     }
     if (!afterRuntime.modeLabels.some((x) => /普通模式/.test(x)) || !afterRuntime.modeLabels.some((x) => /AI模式/.test(x))) {
       throw new Error("settings should expose 普通模式/AI模式 labels: " + JSON.stringify(afterRuntime.modeLabels));
@@ -763,6 +979,7 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
     const llmReuse = await runLlmReuseSmoke(browser, targetUrl);
     const llmErrorCopy = await runLlmErrorCopySmoke(browser, targetUrl);
     const normalGenerateCancel = await runNormalGenerateCancelSmoke(browser, targetUrl);
+    const livePlayClick = await runLivePlayClickSmoke(browser, targetUrl);
 
     console.log(JSON.stringify({
       ok: true,
@@ -774,6 +991,7 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
       llmReuse,
       llmErrorCopy,
       normalGenerateCancel,
+      livePlayClick,
       consoleCount: consoleLines.length
     }, null, 2));
   } finally {

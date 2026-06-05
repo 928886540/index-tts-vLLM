@@ -693,6 +693,26 @@
       debugLog("▶️ live track 使用 audio 元素流式 start_s=" + startOffsetSec.toFixed(3), "#ffd479");
       return Promise.resolve(startElementAudioFrom(track, startOffsetSec));
     }
+    async function promoteTrackIfCacheReady(track, label) {
+      if (!track || !track.cacheKey || track.deleted) return false;
+      try {
+        if (!track.cacheUrl) track.cacheUrl = cleanBase(cfg.apiBase) + "/cache_audio/" + encodeURIComponent(track.cacheKey);
+        var hs = await fetch(track.cacheUrl, { method: "HEAD", cache: "no-store" });
+        if (!hs || !hs.ok) return false;
+        setTrackState(track, "saved");
+        attachCacheAudio(track, { deferElement: true });
+        scheduleOfflineAudioSave(track, (label || "cache ready") + " offline", 0);
+        knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
+        updateTrackButtons();
+        if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+        removePendingJobForTrack(track).catch(function(){});
+        debugLog("✅ " + (label || "cache ready") + " HEAD确认已落盘，切换为历史音频", "#9f9");
+        return true;
+      } catch (e) {
+        debugLog("⚠️ 检查 cache_audio HEAD 失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
+      return false;
+    }
     async function refreshTrackFromStatus(track, label) {
       if (!track || !track.cacheKey || track.deleted) return false;
       try {

@@ -87,11 +87,20 @@ Current lazy-loader assertions:
 - opening settings still does not request `/voices` or create a TTS job;
 - settings panel is aligned with the player card and its close button is at least 30px square;
 - opening the voice picker requests `/voices`, renders voice items, and has at least 540px height on desktop smoke;
-- settings exposes `普通模式` / `AI模式` and the player quick toggle defaults to `LIVE`;
+- settings exposes `普通模式` / `AI模式` and the player quick toggle defaults to `L`;
 - simulated `data-live-active=1` keeps `[data-role="live-exit"]` visible despite `.idx-hidden`;
 - player card keeps a stable minimum height so pending/live/saved state changes do not resize the card;
 - settings section order is `文本模式` -> `合成质量` -> voice mapping -> `播放 / 离线`;
-- player header `0/0`, `LIVE/生成`, and settings controls share height and top alignment;
+- player header keeps only the `L`/`D` playback toggle and settings button aligned with avatar/name/status;
+- playback mode is a direct `L`/`D` toggle and does not render a dropdown menu;
+- delete lives inside the subtitle panel, not the header;
+- player home controls do not expose visible 10-second rewind/forward buttons;
+- music/add and play controls share the same size;
+- history page counter floats inside the subtitle panel top-right and does not intercept taps;
+- subtitle container must not use a mask/fade that also fades the floating delete/counter controls;
+- role hint/status under the title stays single-line ellipsis after header space is freed;
+- live exit is circular and play-sized;
+- clicking play on a waiting LIVE card checks cache/status and must not immediately show `已暂停`;
 - normal-mode voice rows use the same row layout as role mapping: 默认 is locked display-only, only 旁白/对话 open the picker;
 - subtitle height remains `136px`.
 
@@ -131,7 +140,7 @@ For any Tavo persistence or history change:
 
 Failed, live, pending, or missing tracks must not silently overwrite saved history with an empty array.
 
-Live/pending tracks are not history. A live card may show `LIVE`, and a background job may show `生成`, but the saved history count must only change after `/tts_dialogue_job_status/<cache_key>` reports `done` and the card switches to saved/cache audio.
+Live/pending tracks are not history. A live card may show `L`, and a background job may show `D`, but the saved history count must only change after `/tts_dialogue_job_status/<cache_key>` reports `done` and the card switches to saved/cache audio.
 
 For background `生成` mode, pending jobs should be stored under the current Tavo message, restored after re-entering, and removed after done/failed/cancelled/delete.
 
@@ -152,7 +161,7 @@ For a running live dialogue job:
 
 1. The card shows only play/pause and live exit as active controls. CSS must not hide `.idx-live-exit` under `data-live-active=1`.
 2. Previous, next, add, delete, rewind, forward, seek drag, subtitle click seek, and MediaSession seek do not act on the live track.
-3. Clicking play pauses or resumes the live wait/play state; it does not create a second job.
+3. Clicking play on a waiting/pending LIVE card immediately shows a checking/waiting state, checks `/cache_audio/<cache_key>` or `/tts_dialogue_job_status/<cache_key>`, and must not immediately flip to `已暂停`; actively playing WebAudio may still pause.
 4. Clicking live exit first checks status once; if status is `done`, the card becomes saved, otherwise the frontend calls `DELETE /tts_dialogue_stream_job/<cache_key>`.
 5. Exiting live removes only the transient live card and keeps existing saved history count unchanged.
 6. After status becomes `done`, the same card switches to a normal saved card with `/cache_audio/<cache_key>`. If foreground LIVE polling sees `/cache_audio/<cache_key>` is already readable via `HEAD`, it may switch to saved before the status endpoint catches up; this fallback must not run for failed/cancelled/background-generate jobs.

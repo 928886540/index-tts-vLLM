@@ -21,6 +21,44 @@ Repository root:
 
 The older `Leon_api/handoff_docs/` files are still useful context, but ongoing work should update `Leon_api/docs/` first.
 
+## Latest Investigation Snapshot: RTF and Home Player UI
+
+Updated: 2026-06-05
+
+RTF evidence from the latest real cache files:
+
+- `54e4954a5312c5f90d62c329ee198424be3aec4b`: 14 segments, audio `109.319s`, `rtf=5.418`, `wall_rtf=5.47`, `lock_wait_s=0`, `total_wall_s=597.947`, `s2mel_s=504.206`, `gpt_gen_s=76.226`, `bigvgan_s=8.191`, `first_pcm_s=34.266`.
+- `c69e43eb5bcd4544cfe22631822ddb1eaf91b17d`: 15 segments, audio `120.573s`, `rtf=6.051`, `wall_rtf=7.548`, `lock_wait_s=180.455`, `s2mel_s=634.267`.
+- `nvidia-smi` at 14:17 showed RTX 3060 memory `11876MiB / 12288MiB` with API PID `21012` and multiprocessing child PID `31712`; `8188` was empty.
+- Later read-only checks at 16:23 showed GPU memory down to about `1072MiB / 12288MiB`, no compute Python process, and no listener on `9880` or `8188`.
+
+Conclusion: the previous live-card status bug caused a visible "fake stuck" path, but the newest cache metrics also show real backend slowness. For the latest no-wait sample, S2Mel/diffusion dominates the wall time. The slow-run evidence comes from completed cache metadata and the earlier near-full-VRAM snapshot, not from the current idle/offline machine state.
+
+Home player UI changes now in code:
+
+- Removed visible 10-second rewind/forward buttons from the player home controls.
+- Kept avatar, role name/status, `L`/`D` playback mode, and settings on one header row.
+- Playback mode is a direct single-letter toggle: `L` means LIVE, `D` means落盘/后台生成.
+- Moved delete into the subtitle panel near the old page-counter position.
+- Moved the page counter into the subtitle panel top-right with `pointer-events:none`.
+- Made the music/add button the same size as the main play button.
+- Kept the role hint/status under the title as a single-line ellipsis after freeing header space.
+- Widened the settings button slightly.
+- Made the live exit button circular and play-sized.
+- Fixed the LIVE play-click path so a waiting/live card checks cache/status instead of immediately flipping to `已暂停`.
+
+Current cache-busted Tavo URL:
+
+```html
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1"></script>
+```
+
+Current validation for this `L`/`D` follow-up:
+
+- Static JS syntax checks and `git diff --check` should be run after any final doc edit.
+- Full Playwright/Tavo smoke was not run in this follow-up because `9880` was not listening.
+- Do not claim current GPU saturation unless a fresh `nvidia-smi` during generation shows it again.
+
 ## Latest Fix Snapshot: Normal/AI Modes, Live/Generate Jobs, Backend-Owned Parse
 
 Updated: 2026-06-05
@@ -33,7 +71,7 @@ Completed in code:
 - Added `static/tavo.ui.skin.default.css` and `static/tavo.assets/narrator.png` as borrowed UI/asset patterns only.
 - Added `reuseLlmParse` config and UI toggle; normal Tavo intelligent generation no longer calls `/parse_text` from the WebView. It submits original text, voice mapping, LLM config, and Tavo context to `/tts_dialogue_stream_job`; the backend job owns LLM parse, parse reuse, status, and errors.
 - Replaced user-facing `单音色/多音色` with `普通模式/AI模式`. 普通模式 sends raw text plus default/旁白/对白 voices to the backend deterministic splitter with `parse_mode=normal`; AI模式 sends `parse_mode=ai` and LLM config to backend-owned parsing.
-- Added the player `LIVE/生成` quick switch. LIVE keeps the transient streaming card; 生成 creates a background job, persists the pending cache key, polls `/tts_dialogue_job_status/{cache_key}`, and restores it after re-entering the message.
+- Added the player `L`/`D` quick switch. `L` keeps the transient LIVE card; `D` creates a background落盘 job, persists the pending cache key, polls `/tts_dialogue_job_status/{cache_key}`, and restores it after re-entering the message.
 - Deleting pending/live tracks now aborts frontend job creation/stream readers, calls backend DELETE when a cache key exists, removes pending Tavo storage, and the backend reports `cancelled` instead of turning cancellation into a failed LLM/TTS job.
 - Added a human-readable cache index. The stable API files remain `outputs/cache/{cache_key}.wav/json`; each saved cache also writes one primary-role entry under `outputs/cache/by_role/<主角色>/<timestamp>_<cache_key>.wav/json` for manual backtracking.
 - Kept IndexTTS2 business rules in the runtime parts: saved/cache audio still uses native `<audio>`, live/pending tracks stay transient, and LLM role ownership stays with the LLM output.
@@ -62,7 +100,7 @@ Screenshots saved for layout evidence:
 Tavo regex cache-busting URL should be updated to:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-live-status-v1"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1"></script>
 ```
 
 ## Latest Packaging Snapshot: LEON Launcher
@@ -90,7 +128,7 @@ Important behavior:
 - Checks include administrator status, Chinese path, `indextts2runtime\python.exe`, NVIDIA driver, CUDA Toolkit / `nvcc`, MSVC `cl.exe`, runtime-aware SVML compatibility, Torch CUDA / vLLM / FastAPI / ninja imports, `patch_vllm` registration, required checkpoint files, voice library count, API port `9880`, and startup BAT presence.
 - One-click repair can copy the bundled `svml_dispmd.dll` into the project runtime only when import logs indicate SVML/LLVM/DLL load trouble, launch `winget` installs for Visual Studio Build Tools and NVIDIA CUDA Toolkit, and install `ninja` into the project runtime.
 - Voice testing uses `/voices`, `/tts_dialogue_stream_job`, `/tts_dialogue_job_status/{cache_key}`, and `/cache_audio/{cache_key}` with `parse_mode=normal`.
-- Tavo instructions use the current cache-busted script URL: `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-live-status-v1`.
+- Tavo instructions use the current cache-busted script URL: `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1`.
 - No image API key or OpenAI-compatible key is written into launcher files or docs.
 - `LEON启动器.ps1` is UTF-8 with BOM so Windows PowerShell 5.1 can parse Chinese text directly.
 
@@ -219,7 +257,7 @@ Fixes now in code:
 - Foreground LIVE polling can confirm `/cache_audio/{cache_key}` with `HEAD` and switch to saved if the file is already readable but `job_status` lags. This fallback is disabled for failed/cancelled/background-generate jobs.
 - Player card/control height is stabilized to reduce pending/live/saved layout jumps.
 - Settings order is now: `文本模式`, `合成质量`, voice mapping, `播放 / 离线`.
-- Cache-busted Tavo URL is now `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-live-status-v1`.
+- Cache-busted Tavo URL is now `https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ld-live-v1`.
 
 RTF evidence from recent real cache metadata:
 
@@ -227,7 +265,7 @@ RTF evidence from recent real cache metadata:
 - `c69e43eb5bcd4544cfe22631822ddb1eaf91b17d`: 15/15 segments, audio `120.573s`, `rtf=6.051`.
 - `nvidia-smi` at 13:57 showed RTX 3060 memory `11867MiB / 12288MiB` with two project runtime Python processes: API PID `21012` and multiprocessing child PID `31712`. This points to real GPU memory pressure in addition to the frontend stuck-state bug.
 
-Verified after this follow-up:
+Verified after that earlier live-status follow-up, while the local API was available:
 
 ```powershell
 node --check static\tavo.js

@@ -268,25 +268,53 @@ function Wait-ApiReady {
     return $false
 }
 
-Initialize-ApiEnvironment
+$restartMutexName = "Local\LEON.IndexTTS2.ApiRestart.$Port"
+$restartMutex = New-Object System.Threading.Mutex($false, $restartMutexName)
+$restartMutexAcquired = $false
 
-for ($attempt = 1; $attempt -le $Retries; $attempt++) {
-    Write-Step "Restart attempt $attempt/$Retries"
-    Stop-OldProjectApi
-    $run = Start-ApiProcess -Attempt $attempt
-
-    if (Wait-ApiReady -Run $run) {
-        Write-Step "API ready: http://127.0.0.1:$Port/health"
-        Write-Step "LAN script URL example: http://192.168.8.100:$Port/static/tavo.js"
-        exit 0
+try {
+    $restartMutexAcquired = $restartMutex.WaitOne(0)
+    if (-not $restartMutexAcquired) {
+        Write-Step "Another API startup/restart is already running; waiting for /health instead of starting a second instance."
+        for ($elapsed = 0; $elapsed -le $MaxWaitSeconds; $elapsed += 2) {
+            if (Test-ApiHealth) {
+                Write-Step "API ready from existing startup: http://127.0.0.1:$Port/health"
+                exit 0
+            }
+            Start-Sleep -Seconds 2
+        }
+        Write-Error "Another API startup/restart is still running and /health did not become ready within ${MaxWaitSeconds}s."
+        exit 1
     }
 
-    Stop-ProcessTree -ProcessId $run.Process.Id
-    if ($attempt -lt $Retries) {
-        Write-Step "Retrying in 6 seconds..."
-        Start-Sleep -Seconds 6
+    Initialize-ApiEnvironment
+
+    for ($attempt = 1; $attempt -le $Retries; $attempt++) {
+        Write-Step "Restart attempt $attempt/$Retries"
+        Stop-OldProjectApi
+        $run = Start-ApiProcess -Attempt $attempt
+
+        if (Wait-ApiReady -Run $run) {
+            Write-Step "API ready: http://127.0.0.1:$Port/health"
+            Write-Step "LAN script URL example: http://192.168.8.100:$Port/static/tavo.js"
+            exit 0
+        }
+
+        Stop-ProcessTree -ProcessId $run.Process.Id
+        if ($attempt -lt $Retries) {
+            Write-Step "Retrying in 6 seconds..."
+            Start-Sleep -Seconds 6
+        }
+    }
+
+    Write-Error "API failed to start after $Retries attempts. Check latest api_restart_stable_*.err under $LogDir."
+    exit 1
+}
+finally {
+    if ($restartMutexAcquired) {
+        try { $restartMutex.ReleaseMutex() } catch {}
+    }
+    if ($restartMutex) {
+        $restartMutex.Dispose()
     }
 }
-
-Write-Error "API failed to start after $Retries attempts. Check latest api_restart_stable_*.err under $LogDir."
-exit 1

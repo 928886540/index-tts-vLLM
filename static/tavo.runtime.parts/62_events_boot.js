@@ -27,7 +27,7 @@
     function tryResumeOrPauseInGesture() {
       try {
         var t = currentTrack();
-        if (t && isCancelableLiveTrack(t) && (t.webAudioPlaying || (play && play.dataset && play.dataset.state === "loading"))) {
+        if (t && isCancelableLiveTrack(t) && t.webAudioPlaying) {
           pauseLiveTrack(t);
           return true;
         }
@@ -56,7 +56,18 @@
     on(add, 'touchstart', function () { primeAudioContext(); });
     on(rewind10, 'touchstart', function () { primeAudioContext(); });
     on(forward10, 'touchstart', function () { primeAudioContext(); });
-    on(play, 'click', function () { primeAudioContext(); if (tryResumeOrPauseInGesture()) return; generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(play, 'click', function () {
+      primeAudioContext();
+      if (tryResumeOrPauseInGesture()) return;
+      var live = currentTrack();
+      if (isCancelableLiveTrack(live)) {
+        setTrackPlaybackState(live, "loading");
+        setPlayState("loading");
+        setStatus("检查音频状态…");
+        showTrackNotice(live, "检查音频状态…", live.cacheKey ? "如果已落盘会直接播放，否则继续等待保存" : "正在等待后端创建音频任务");
+      }
+      generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
+    });
     on(add, 'click', function () {
       primeAudioContext();
       var t = currentTrack();
@@ -87,12 +98,13 @@
     });
     on(del, 'click', function () { clearCurrentTrack().catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(liveExit, 'click', function () { exitCurrentLiveTrack("live exit").catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
-    on(playbackToggle, 'click', async function () {
+    on(playbackToggle, 'click', async function (ev) {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
       readFields();
       cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode) === "generate" ? "live" : "generate";
       syncUI();
       await saveConfig(cfg, characterId);
-      setStatus(cfg.playbackMode === "generate" ? "生成模式：后台落盘" : "LIVE模式：边生成边播放");
+      setStatus(cfg.playbackMode === "generate" ? "D：后台落盘" : "L：边生成边播放");
     });
     on(first(panel, '[data-role="save"]'), 'click', async function () { readFields(); await saveConfig(cfg, characterId); syncUI(); closeDialog(panel); setStatus("设置已保存"); });
     try {
