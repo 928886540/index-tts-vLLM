@@ -86,22 +86,25 @@
     function updateTrackButtons() {
       var track = currentTrack();
       var live = isCancelableLiveTrack(track);
+      var background = live && (track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate");
+      var liveControlsOnly = live && !background;
       try {
         var card = first(root, ".idx-card") || root;
         if (card) {
-          if (live) card.setAttribute("data-live-active", "1");
+          if (liveControlsOnly) card.setAttribute("data-live-active", "1");
           else card.removeAttribute("data-live-active");
         }
       } catch (_) {}
-      [prev, next, rewind10, forward10, add, del].forEach(function (el) { setHidden(el, live); });
-      setHidden(liveExit, !live);
+      [prev, next, rewind10, forward10, add].forEach(function (el) { setHidden(el, live); });
+      setHidden(del, liveControlsOnly);
+      setHidden(liveExit, !liveControlsOnly);
       if (prev) prev.disabled = live || currentTrackIndex <= 0;
       if (next) next.disabled = live || currentTrackIndex < 0 || currentTrackIndex >= generatedTracks.length - 1;
       var canSeekTrack = !!(track && isSavedTrack(track) && (trackPlayableUrl(track) || track.webAudioPlaying));
       if (rewind10) rewind10.disabled = live || !canSeekTrack;
       if (forward10) forward10.disabled = live || !canSeekTrack;
-      if (del) del.disabled = live || currentTrackIndex < 0 || !track;
-      if (liveExit) liveExit.disabled = !live;
+      if (del) del.disabled = liveControlsOnly || currentTrackIndex < 0 || !track;
+      if (liveExit) liveExit.disabled = !liveControlsOnly;
       updateTrackCounter();
     }
     function clearWebAudioProgressTimer() {

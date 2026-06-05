@@ -249,3 +249,39 @@ Root cause: the loader split put LLM parse ownership in the Tavo WebView. `stati
 Fix: `TTS_Dialogue_Request` now accepts either legacy `segments` or raw `text` plus LLM config. For text-only requests, `/tts_dialogue_stream_job` creates the live job/cache id immediately, then `_run_dialogue_inference_to_job()` runs backend-owned LLM parsing before entering the TTS lock. Job metrics expose `phase/message` such as `llm_parse`, `tts_queue`, `tts`, `llm_parse_failed`, and `done`; LLM failures surface through `/tts_dialogue_job_status/{cache_key}`. `static/tavo.runtime.parts/60_generate_flow.js` no longer calls `parseWithOptionalReuse()` in normal ai8 mode. It submits original `text`, `voices`, `llm_endpoint`, `llm_model`, `llm_api_key`, `reuse_llm_parse`, Tavo `user_name`/`character_name`, `roles_hint`, and generation parameters in one job request. Frontend track `segments` start empty and are filled later from backend `segments_meta`.
 
 Guard: Playwright intelligent-mode smoke now aborts `/parse_text` as a forbidden frontend path and asserts frontend `/parse_text` request count is `0`, job creation count is `2`, and the job body contains `text`, `voices`, LLM config, context names, role hints, and generation parameters. A separate smoke simulates `metrics.phase=llm_parse_failed` from `GET /tts_dialogue_job_status/{cache_key}` and verifies the UI shows the backend LLM failure instead of a pre-job frontend network error.
+
+## BUG-013: Tavo dialogs, normal mode, and job lifecycle need tighter ownership
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-05
+
+Repro: User reported that settings and voice picker close buttons should match, both dialogs should open centered instead of jumping to an awkward scroll position, LLM analysis must be immediately cancelable, disk cache should not wait for stream playback to finish, mode labels should be `普通模式` / `AI模式`, normal mode should support default/narrator/dialogue voices without LLM, and the player needs a `LIVE/生成` quick switch.
+
+Evidence: Current Tavo runtime had separate settings/picker close markup, settings/picker positioning derived mostly from player top, frontend generation used `single` / `ai8` labels, normal mode used the single-voice endpoint only, and frontend had no AbortController around the dialogue job creation request. Backend dialogue jobs already saved cache after inference, independent from GET readers, but cancelled LLM parse could still report as failed after the blocking LLM call returned.
+
+Hypothesis: This was mostly product boundary cleanup. Normal mode should be backend-owned lightweight segmentation, not a complex Tavo-side parser. AI mode should remain backend LLM-owned. Deleting a live/pending card should mark the backend job cancelled and remove the UI immediately, including while LLM parsing has not produced audio yet.
+
+Root cause: The runtime still treated "simple" and "multi-role" generation as two older UI/business paths (`single` vs `ai8`). That kept text parsing, voice mapping, pending card controls, and cancellation ownership split between frontend and backend instead of making `/tts_dialogue_stream_job` the single job boundary.
+
+Fix: `static/tavo.runtime.parts/*` now normalizes modes to `normal` / `ai`, adds `playbackMode` (`live` / `generate`), and keeps the player entry light. Normal mode submits raw text, `parse_mode=normal`, and a `{default, 旁白, 对白}` voice map to the backend; AI mode submits `parse_mode=ai` and LLM config. `indextts2_api.py` now has backend deterministic normal segmentation, cancellable dialogue job states, and delayed GC that cannot remove a newer same-key job. Pending generate jobs are persisted per Tavo message and removed on done/failed/cancelled/delete.
+
+Guard: Settings and picker close buttons use the same compact style and open centered near the player without scroll jumps. Normal mode submits raw text plus default/narrator/dialogue voice map to `/tts_dialogue_stream_job` with `parse_mode=normal`, and does not require LLM config. AI mode still submits `parse_mode=ai` and never pre-calls `/parse_text`. Deleting a pending/live card aborts the frontend job request if still in flight, calls backend DELETE when a cache key exists, removes the card immediately, and backend status reports cancelled rather than failed. `LIVE/生成` quick switch changes job body behavior: live creates a streaming live card, generate creates a background job that waits for `/cache_audio` and remains recoverable from cache later. Playwright now asserts normal generate/cancel makes `0` `/parse_text` calls, `0` stream GETs, one status poll, one DELETE, and clears pending storage.
+
+## BUG-014: cache audio files need human-readable role folders and timestamp names
+
+Status: open, recorded
+
+Reported: 2026-06-05
+
+Repro: User wants generated audio cache files to be easier to inspect and backtrack outside the Tavo UI.
+
+Evidence: Current snapshot cache stores files as `outputs/cache/{sha1}.wav` and `{sha1}.json`, which is stable for API lookup but hard to browse manually.
+
+Hypothesis: Keep the original SHA1 cache key as the API identity, but add a human-readable storage/index layer grouped by role or character. File names should start with a timestamp, include the original key, and sort newest-first by timestamp so old generations are easy to review.
+
+Root cause: Current cache design optimizes deterministic lookup, not manual audit/history browsing.
+
+Fix: pending. Do this after the Tavo normal/AI/live/generate lifecycle change is stable. Do not break existing `/cache_audio/{key}` lookup or saved Tavo history keys.
+
+Guard: Different roles/characters should get separate folders. The original cache key must remain in the filename/metadata. Timestamp naming must make directory listing readable in reverse chronological order, while API lookup by original key still works.

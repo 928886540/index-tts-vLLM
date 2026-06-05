@@ -3,7 +3,9 @@ import sys
 import traceback
 import base64
 import hashlib
+import html
 import json
+import re
 import socket
 import secrets
 import time
@@ -246,6 +248,8 @@ class TTS_Segment(BaseModel):
 class TTS_Dialogue_Request(BaseModel):
     segments: Optional[List[TTS_Segment]] = None
     text: Optional[str] = None
+    # `ai` = backend LLM parse, `normal` = deterministic narrator/dialogue split.
+    parse_mode: str = "ai"
     # role -> voice library name OR direct file path
     voices: Dict[str, str]
     # Backend-owned LLM parsing config for text-only intelligent dialogue jobs.
@@ -493,9 +497,11 @@ class _LiveStreamingJob:
         }
 
 
-def _gc_live_job(cache_key: str, delay: float = LIVE_JOB_LINGER_SECONDS):
+def _gc_live_job(cache_key: str, delay: float = LIVE_JOB_LINGER_SECONDS, expected_job: Optional["_LiveStreamingJob"] = None):
     async def _go():
         await asyncio.sleep(delay)
+        if expected_job is not None and LIVE_JOBS.get(cache_key) is not expected_job:
+            return
         LIVE_JOBS.pop(cache_key, None)
     try: asyncio.create_task(_go())
     except Exception: pass
@@ -548,8 +554,19 @@ def _make_complete_wav_bytes(pcm: bytes, sample_rate: int, channels: int = 1, bi
 
 
 BACKEND_LLM_PARSE_PROMPT_VERSION = "20260605-backend-v1"
+BACKEND_NORMAL_PARSE_VERSION = "20260605-normal-v1"
 LLM_PARSE_CACHE_MAX = 64
 LLM_PARSE_CACHE: Dict[str, dict] = {}
+
+
+def _mark_job_cancelled(job: "_LiveStreamingJob", message: str = "任务已取消"):
+    if not job:
+        return
+    job.cancelled = True
+    job.error = None
+    job.metrics["state"] = "cancelled"
+    job.metrics["phase"] = "cancelled"
+    job.metrics["message"] = message
 
 
 def _secret_hash(value: str) -> str:
@@ -733,6 +750,156 @@ def _put_parse_cache(key: str, segments: list):
             LLM_PARSE_CACHE.pop(old_key, None)
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"
+    "\U0001F300-\U0001FAFF"
+    "\U00002700-\U000027BF"
+    "\U00002600-\U000026FF"
+    "]+",
+    re.UNICODE,
+)
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _clean_tavo_body_text(text: str) -> str:
+    text = html.unescape(str(text or ""))
+    for _ in range(6):
+        before = text
+        text = re.sub(r"<(script|style|template)\b[^>]*>[\s\S]*?</\1>", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\[[A-Za-z0-9_-]*TAVO[A-Za-z0-9_-]*\]", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\[IndexTTS_TAVO_SCRIPT\]", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"</(p|div|br|li|section|article|blockquote|h[1-6])\s*>", "\n", text, flags=re.IGNORECASE)
+        text = _HTML_TAG_RE.sub("", text)
+        if text == before:
+            break
+    text = _CONTROL_RE.sub("", text)
+    text = _EMOJI_RE.sub("", text)
+    text = re.sub(r"^[ \t>*#\-_=~`]+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"[ \t\u3000]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+_QUOTE_PAIRS = {
+    "「": "」",
+    "『": "』",
+    "“": "”",
+    "‘": "’",
+    "\"": "\"",
+}
+_QUOTE_OPENERS = set(_QUOTE_PAIRS.keys())
+_SENTENCE_SPLIT_RE = re.compile(r"([^。！？!?；;…\n]+[。！？!?；;…]*|\n+)")
+
+
+def _split_normal_text_units(text: str, max_chars: int = 86) -> List[str]:
+    text = str(text or "").strip()
+    if not text:
+        return []
+    units: List[str] = []
+    for match in _SENTENCE_SPLIT_RE.finditer(text):
+        part = (match.group(1) or "").strip()
+        if not part or part.isspace():
+            continue
+        units.append(part)
+    if not units:
+        units = [text]
+    out: List[str] = []
+    buf = ""
+    for part in units:
+        if len(part) > max_chars:
+            if buf:
+                out.append(buf.strip())
+                buf = ""
+            pieces = re.split(r"(?<=[，,、：:])", part)
+            chunk = ""
+            for piece in pieces:
+                piece = piece.strip()
+                if not piece:
+                    continue
+                if chunk and len(chunk) + len(piece) > max_chars:
+                    out.append(chunk.strip())
+                    chunk = piece
+                else:
+                    chunk += piece
+            if chunk:
+                while len(chunk) > max_chars:
+                    out.append(chunk[:max_chars].strip())
+                    chunk = chunk[max_chars:]
+                if chunk.strip():
+                    out.append(chunk.strip())
+            continue
+        if buf and len(buf) + len(part) > max_chars:
+            out.append(buf.strip())
+            buf = part
+        else:
+            buf += part
+    if buf.strip():
+        out.append(buf.strip())
+    return [x for x in out if re.search(r"[\u4e00-\u9fffA-Za-z0-9]", x)]
+
+
+def _normal_segment(role: str, text: str) -> dict:
+    return {
+        "role": role,
+        "text": text,
+        "style": "neutral",
+        "style_alpha": 0.15 if role == "旁白" else 0.20,
+        "emo_vec": [0, 0, 0, 0, 0, 0, 0, 0.85 if role == "旁白" else 0.65],
+        "emo_alpha": 0.16 if role == "旁白" else 0.24,
+    }
+
+
+def _parse_dialogue_text_normal(req: dict) -> List[dict]:
+    text = _clean_tavo_body_text(req.get("text") or "")
+    if not text:
+        raise RuntimeError("普通模式没有可朗读正文")
+    segments: List[dict] = []
+    narration: List[str] = []
+    i = 0
+
+    def flush_narration():
+        raw = "".join(narration).strip()
+        narration.clear()
+        for unit in _split_normal_text_units(raw):
+            segments.append(_normal_segment("旁白", unit))
+
+    while i < len(text):
+        ch = text[i]
+        if ch in _QUOTE_OPENERS:
+            closer = _QUOTE_PAIRS[ch]
+            j = i + 1
+            inner: List[str] = []
+            found = False
+            while j < len(text):
+                cur = text[j]
+                if cur == closer:
+                    found = True
+                    break
+                inner.append(cur)
+                j += 1
+            if found:
+                flush_narration()
+                for unit in _split_normal_text_units("".join(inner)):
+                    segments.append(_normal_segment("对白", unit))
+                i = j + 1
+                continue
+        narration.append(ch)
+        i += 1
+    flush_narration()
+
+    merged: List[dict] = []
+    for seg in segments:
+        if merged and merged[-1]["role"] == seg["role"] and len(merged[-1]["text"]) + len(seg["text"]) <= 52:
+            merged[-1]["text"] = (merged[-1]["text"] + seg["text"]).strip()
+        else:
+            merged.append(seg)
+    if not merged:
+        merged.append(_normal_segment("旁白", text))
+    return merged
+
+
 def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
     from indextts import llm_proxy
 
@@ -881,7 +1048,9 @@ def _attach_dialogue_segments_to_prepared(prepared: dict, segments: list):
     voices = prepared.get("voices") or {}
     default_path, role_voice_paths, unresolved_roles = _resolve_dialogue_voices_for_segments(segments, voices)
     if unresolved_roles:
-        raise RuntimeError("音色映射缺失: LLM 拆出了这些角色，但没有对应音色，也没有 default: " + "、".join(unresolved_roles))
+        mode = str((prepared.get("req") or {}).get("parse_mode") or "ai").strip().lower()
+        label = "普通模式拆分" if mode == "normal" else "LLM 拆段"
+        raise RuntimeError("音色映射缺失: " + label + "拆出了这些角色，但没有对应音色，也没有 default: " + "、".join(unresolved_roles))
     prepared["segments"] = segments
     prepared["role_voice_paths"] = role_voice_paths
     prepared["default_path"] = default_path
@@ -898,6 +1067,12 @@ async def _prepare_dialogue_for_streaming(req: dict):
     segments = req.get("segments") or []
     text = str(req.get("text") or "").strip()
     voices = _normalize_dialogue_voices(req.get("voices") or {})
+    parse_mode = str(req.get("parse_mode") or "ai").strip().lower()
+    if parse_mode in ("single", "normal", "plain", "basic"):
+        parse_mode = "normal"
+    else:
+        parse_mode = "ai"
+    req["parse_mode"] = parse_mode
     if not voices:
         return None, JSONResponse(status_code=400, content={"message": "voices is required"})
     if not segments and not text:
@@ -918,6 +1093,38 @@ async def _prepare_dialogue_for_streaming(req: dict):
         return {
             "req": req,
             "needs_parse": False,
+            "parse_mode": parse_mode,
+            "segments": segments,
+            "voices": voices,
+            "role_voice_paths": role_voice_paths,
+            "default_path": default_path,
+            "sampling_kwargs": common["sampling_kwargs"],
+            "interval_ms": common["interval_ms"],
+            "default_emo_alpha": common["default_emo_alpha"],
+            "cache_payload": cache_payload,
+            "cache_key": cache_key,
+        }, None
+
+    if parse_mode == "normal":
+        segments = _parse_dialogue_text_normal(req)
+        default_path, role_voice_paths, unresolved_roles = _resolve_dialogue_voices_for_segments(segments, voices)
+        if unresolved_roles:
+            return None, JSONResponse(
+                status_code=400,
+                content={"message": "voices unresolved", "roles": unresolved_roles},
+            )
+        parse_info = {
+            "mode": "normal",
+            "version": BACKEND_NORMAL_PARSE_VERSION,
+            "clean_text_sha1": hashlib.sha1(_clean_tavo_body_text(text).encode("utf-8")).hexdigest(),
+        }
+        cache_payload = _dialogue_segments_cache_payload(segments, role_voice_paths, default_path, req, common, parse_info=parse_info)
+        cache_payload["kind"] = "tts_dialogue_stream_normal_parse_v1"
+        cache_key = snapshot_cache.make_cache_key(cache_payload)
+        return {
+            "req": req,
+            "needs_parse": False,
+            "parse_mode": "normal",
             "segments": segments,
             "voices": voices,
             "role_voice_paths": role_voice_paths,
@@ -954,6 +1161,7 @@ async def _prepare_dialogue_for_streaming(req: dict):
     return {
         "req": req,
         "needs_parse": True,
+        "parse_mode": "ai",
         "segments": [],
         "voices": voices,
         "sampling_kwargs": common["sampling_kwargs"],
@@ -1025,6 +1233,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
     job.metrics["state"] = "queued"
     job.metrics["phase"] = "created"
     job.metrics["message"] = "任务已创建，等待后端处理"
+    job.metrics["parse_mode"] = prepared.get("parse_mode") or (prepared.get("req") or {}).get("parse_mode") or "ai"
     try:
         if prepared.get("needs_parse"):
             job.metrics["state"] = "parsing"
@@ -1033,9 +1242,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             segments = await _parse_dialogue_text_in_backend(prepared, job)
             _attach_dialogue_segments_to_prepared(prepared, segments)
             if job.cancelled:
-                job.metrics["state"] = "cancelled"
-                job.metrics["phase"] = "cancelled"
-                job.metrics["message"] = "任务已取消"
+                _mark_job_cancelled(job)
                 return
 
         lock_wait_started = time.perf_counter()
@@ -1044,9 +1251,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
         job.metrics["message"] = "文本已拆分，等待 TTS 合成"
         async with tts_stream_lock:
             if job.cancelled:
-                job.metrics["state"] = "cancelled"
-                job.metrics["phase"] = "cancelled"
-                job.metrics["message"] = "任务已取消"
+                _mark_job_cancelled(job)
                 return
             job.metrics["state"] = "running"
             job.metrics["phase"] = "tts"
@@ -1078,9 +1283,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
 
             for idx, seg in enumerate(segments):
                 if job.cancelled:
-                    job.metrics["state"] = "cancelled"
-                    job.metrics["phase"] = "cancelled"
-                    job.metrics["message"] = "任务已取消"
+                    _mark_job_cancelled(job)
                     return
                 role = _normalize_role(seg.get("role") or "")
                 text = (seg.get("text") or "").strip()
@@ -1132,9 +1335,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                 )
                 infer_stats = dict(getattr(tts_pipeline, "last_infer_stats", {}) or {})
                 if job.cancelled:
-                    job.metrics["state"] = "cancelled"
-                    job.metrics["phase"] = "cancelled"
-                    job.metrics["message"] = "任务已取消"
+                    _mark_job_cancelled(job)
                     return
                 seg_wall = time.perf_counter() - seg_started
                 seg_byte_count = len(job.pcm) - seg_start_offset
@@ -1191,9 +1392,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
         # 可直接给 FileResponse（含 Content-Length，移动端可 seek）。
         try:
             if job.cancelled:
-                job.metrics["state"] = "cancelled"
-                job.metrics["phase"] = "cancelled"
-                job.metrics["message"] = "任务已取消"
+                _mark_job_cancelled(job)
                 return
             from indextts import snapshot_cache
             cache_write_started = time.perf_counter()
@@ -1227,6 +1426,9 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
         except Exception:
             traceback.print_exc()
     except Exception as e:
+        if job.cancelled:
+            _mark_job_cancelled(job)
+            return
         job.error = str(e)
         job.metrics["state"] = "failed"
         if job.metrics.get("phase") == "llm_parse" or job.metrics.get("state") == "parsing":
@@ -1240,7 +1442,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
         traceback.print_exc()
     finally:
         job.finished.set()
-        _gc_live_job(job.cache_key)
+        _gc_live_job(job.cache_key, expected_job=job)
 
 
 def _prune_stream_jobs():
@@ -2730,15 +2932,18 @@ async def tts_dialogue_stream_job_endpoint(request: TTS_Dialogue_Request):
         })
 
     if cache_key in LIVE_JOBS:
-        return JSONResponse(content={
-            "job_id": cache_key,
-            "cache_key": cache_key,
-            "url": f"/tts_dialogue_stream_job/{cache_key}",
-            "cache_url": f"/cache_audio/{cache_key}",
-            "expires_in": LIVE_JOB_LINGER_SECONDS,
-            "cached": False,
-            "live": True,
-        })
+        if LIVE_JOBS[cache_key].cancelled or LIVE_JOBS[cache_key].metrics.get("state") == "cancelled":
+            LIVE_JOBS.pop(cache_key, None)
+        else:
+            return JSONResponse(content={
+                "job_id": cache_key,
+                "cache_key": cache_key,
+                "url": f"/tts_dialogue_stream_job/{cache_key}",
+                "cache_url": f"/cache_audio/{cache_key}",
+                "expires_in": LIVE_JOB_LINGER_SECONDS,
+                "cached": False,
+                "live": True,
+            })
 
     job = _LiveStreamingJob(cache_key)
     LIVE_JOBS[cache_key] = job
@@ -2784,11 +2989,11 @@ async def tts_dialogue_stream_job_delete_endpoint(job_id: str):
     try:
         from indextts import snapshot_cache
 
-        live_job = LIVE_JOBS.pop(cache_key, None)
+        live_job = LIVE_JOBS.get(cache_key)
         if live_job:
-            live_job.cancelled = True
-            live_job.metrics["state"] = "cancelled"
+            _mark_job_cancelled(live_job)
             live_job.finished.set()
+            _gc_live_job(cache_key, delay=30, expected_job=live_job)
         deleted = snapshot_cache.delete_cache(cache_key)
         return JSONResponse(content={
             "cancelled_live": bool(live_job),
@@ -2808,7 +3013,10 @@ async def tts_dialogue_job_status_endpoint(cache_key: str):
     """
     job = LIVE_JOBS.get(cache_key)
     if job:
-        state = "failed" if job.error else ("done" if job.finished.is_set() else "running")
+        if job.cancelled or job.metrics.get("state") == "cancelled":
+            state = "cancelled"
+        else:
+            state = "failed" if job.error else ("done" if job.finished.is_set() else "running")
         return JSONResponse(content={
             "state": state,
             "cache_key": cache_key,

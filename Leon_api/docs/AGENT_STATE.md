@@ -21,7 +21,7 @@ Repository root:
 
 The older `Leon_api/handoff_docs/` files are still useful context, but ongoing work should update `Leon_api/docs/` first.
 
-## Latest Fix Snapshot: Tavo Loader Split, Compact Settings, Backend-Owned LLM Parse
+## Latest Fix Snapshot: Normal/AI Modes, Live/Generate Jobs, Backend-Owned Parse
 
 Updated: 2026-06-05
 
@@ -32,6 +32,9 @@ Completed in code:
 - Preserved a single Tavo script URL while splitting the runtime into manifest-driven parts.
 - Added `static/tavo.ui.skin.default.css` and `static/tavo.assets/narrator.png` as borrowed UI/asset patterns only.
 - Added `reuseLlmParse` config and UI toggle; normal Tavo intelligent generation no longer calls `/parse_text` from the WebView. It submits original text, voice mapping, LLM config, and Tavo context to `/tts_dialogue_stream_job`; the backend job owns LLM parse, parse reuse, status, and errors.
+- Replaced user-facing `单音色/多音色` with `普通模式/AI模式`. 普通模式 sends raw text plus default/旁白/对白 voices to the backend deterministic splitter with `parse_mode=normal`; AI模式 sends `parse_mode=ai` and LLM config to backend-owned parsing.
+- Added the player `LIVE/生成` quick switch. LIVE keeps the transient streaming card; 生成 creates a background job, persists the pending cache key, polls `/tts_dialogue_job_status/{cache_key}`, and restores it after re-entering the message.
+- Deleting pending/live tracks now aborts frontend job creation/stream readers, calls backend DELETE when a cache key exists, removes pending Tavo storage, and the backend reports `cancelled` instead of turning cancellation into a failed LLM/TTS job.
 - Kept IndexTTS2 business rules in the runtime parts: saved/cache audio still uses native `<audio>`, live/pending tracks stay transient, and LLM role ownership stays with the LLM output.
 - Updated Playwright smoke to assert the lazy entry does not load runtime parts, request `/voices`, or create TTS jobs before user interaction.
 
@@ -41,10 +44,11 @@ Verified:
 node --check static\tavo.js
 node --check static\tavo.runtime.js
 node --check Leon_api\dev_tools\test_tavo_widget_playwright.js
+python -m py_compile indextts2_api.py indextts\infer_vllm_v2.py indextts\gpt\model_vllm_v2.py
 node Leon_api\dev_tools\test_tavo_widget_playwright.js
 ```
 
-Playwright result: initial lazy card had `/voices=0`, job requests `0`, runtime manifest/parts `0`; clicking settings loaded one manifest and 16 runtime parts; opening the voice picker then requested `/voices` once.
+Playwright result: initial lazy card had `/voices=0`, job requests `0`, runtime manifest/parts `0`; clicking settings loaded one manifest and 16 runtime parts; opening the voice picker then requested `/voices` once. The smoke also checks settings labels `普通模式/AI模式`, default `LIVE` toggle, compact close buttons, centered settings/picker layers, backend-owned AI parse errors, and normal-mode `生成` cancellation.
 
 The same Playwright script also runs a mocked intelligent-mode check. It aborts `/parse_text` as a forbidden path, intercepts `/tts_dialogue_stream_job`, `/tts_dialogue_job_status/*`, and `/cache_audio/*`, generates twice for the same message after a re-mount, and verifies `parseCount=0`, `jobCount=2`. It also asserts the job body contains `text`, `voices`, `llm_endpoint`, `llm_model`, `reuse_llm_parse`, `user_name`, `character_name`, and generation parameters.
 
@@ -56,7 +60,7 @@ Screenshots saved for layout evidence:
 Tavo regex cache-busting URL should be updated to:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-job-parse-v1"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-normal-generate-v1"></script>
 ```
 
 ## Known Runtime Situation

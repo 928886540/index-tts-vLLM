@@ -150,6 +150,104 @@
       }
       return true;
     }
+    var PENDING_JOBS_KEY_PREFIX = "indextts_pending_jobs_";
+    function pendingJobsStorageKey() {
+      return messageId ? (PENDING_JOBS_KEY_PREFIX + messageId) : "";
+    }
+    function pendingJobLooksActive(t) {
+      if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
+      var state = String(t.state || "").trim();
+      return state !== "saved" && state !== "failed" && state !== "cancelled" && state !== "done";
+    }
+    async function loadPendingJobsForMessage() {
+      var key = pendingJobsStorageKey();
+      if (!key) return [];
+      try {
+        var raw = localStorage.getItem(key);
+        if (raw) {
+          var arr = JSON.parse(raw);
+          if (Array.isArray(arr)) return arr.filter(pendingJobLooksActive);
+        }
+      } catch (_) {}
+      try {
+        if (window.tavo && typeof tavo.get === "function") {
+          var cv = await tavo.get(key, "chat");
+          if (Array.isArray(cv)) return cv.filter(pendingJobLooksActive);
+        }
+      } catch (_) {}
+      return [];
+    }
+    async function savePendingJobsForMessage(list) {
+      var key = pendingJobsStorageKey();
+      if (!key) return;
+      var lite = (list || []).filter(pendingJobLooksActive).map(function (t) {
+        return {
+          cacheKey: t.cacheKey || "",
+          cacheUrl: t.cacheUrl || "",
+          streamUrl: t.streamUrl || "",
+          createdAt: t.createdAt || Date.now(),
+          voice: t.voice || "",
+          mode: normalizeModeName(t.mode),
+          parseMode: normalizeModeName(t.parseMode || t.mode),
+          playbackMode: normalizePlaybackMode(t.playbackMode),
+          backgroundOnly: !!t.backgroundOnly,
+          state: trackState(t),
+          status: t.status || "",
+          voicesMap: t.voicesMap || null,
+          sampleRate: t.sampleRate || t.sample_rate || 0,
+          duration_s: t.duration_s || (t.metrics && t.metrics.audio_duration_s) || 0,
+          metrics: t.metrics || null,
+          segments: Array.isArray(t.segments) ? t.segments : []
+        };
+      });
+      try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); } catch (_) {}
+      try { localStorage.setItem(key, JSON.stringify(lite)); } catch (_) {}
+    }
+    async function savePendingJobForTrack(track) {
+      if (!messageId || !track || !track.cacheKey || isSavedTrack(track) || track.deleted || track.cancelled) return;
+      var jobs = await loadPendingJobsForMessage();
+      var idx = jobs.findIndex(function (j) { return j && j.cacheKey === track.cacheKey; });
+      if (idx >= 0) jobs[idx] = track; else jobs.push(track);
+      await savePendingJobsForMessage(jobs);
+    }
+    async function removePendingJobForTrack(trackOrKey) {
+      var cacheKey = typeof trackOrKey === "string" ? trackOrKey : (trackOrKey && trackOrKey.cacheKey);
+      if (!messageId || !cacheKey) return;
+      var jobs = await loadPendingJobsForMessage();
+      jobs = jobs.filter(function (j) { return !j || j.cacheKey !== cacheKey; });
+      await savePendingJobsForMessage(jobs);
+    }
+    function restoreTrackFromPending(t, base) {
+      if (!pendingJobLooksActive(t)) return null;
+      var mode = normalizeModeName(t.mode || t.parseMode || "ai");
+      var restored = {
+        url: null,
+        streamUrl: t.streamUrl || (base + "/tts_dialogue_stream_job/" + encodeURIComponent(t.cacheKey)),
+        cacheUrl: t.cacheUrl || (base + "/cache_audio/" + encodeURIComponent(t.cacheKey)),
+        cacheKey: t.cacheKey,
+        createdAt: t.createdAt || Date.now(),
+        voice: t.voice || cfg.defaultVoice,
+        mode: mode,
+        parseMode: mode,
+        playbackMode: normalizePlaybackMode(t.playbackMode || "generate"),
+        backgroundOnly: t.backgroundOnly !== false,
+        segments: Array.isArray(t.segments) ? t.segments : [],
+        voicesMap: t.voicesMap || null,
+        metrics: t.metrics || null,
+        sampleRate: t.sampleRate || t.sample_rate || 0,
+        duration_s: t.duration_s || (t.metrics && t.metrics.audio_duration_s) || 0,
+        state: "pending",
+        status: "pending",
+        pendingBlob: true,
+        streaming: false,
+        allowStreamPlay: false,
+        savePromptAsked: false,
+        streamHealth: "ok"
+      };
+      setTrackState(restored, "pending");
+      ensureTrackStates(restored);
+      return restored;
+    }
     function pollCacheUpgrade(trackEntry, label) {
       if (!trackEntry || !trackEntry.cacheKey || trackEntry.cachePollStarted || isSavedTrack(trackEntry)) return;
       trackEntry.cachePollStarted = true;
@@ -195,14 +293,20 @@
               if (j && j.state === "done") {
                 setTrackState(trackEntry, "saved");
                 var autoplaySaved = !!(trackEntry.playSavedWhenReady && currentTrack() === trackEntry);
+                if (trackEntry.backgroundOnly || normalizePlaybackMode(trackEntry.playbackMode) === "generate") autoplaySaved = false;
                 trackEntry.playSavedWhenReady = false;
                 attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: trackEntry.webAudioPlaying && !autoplaySaved, autoplay: autoplaySaved });
                 scheduleOfflineAudioSave(trackEntry, label + " offline", 0);
                 knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
                 updateTrackButtons();
                 if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+                removePendingJobForTrack(trackEntry).catch(function(){});
                 debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片", "#9f9");
                 if (autoplaySaved) setStatus("生成完成，正在播放保存音频");
+                else if (trackEntry.backgroundOnly || normalizePlaybackMode(trackEntry.playbackMode) === "generate") {
+                  setStatus("后台生成完成");
+                  if (currentTrack() === trackEntry) showTrackNotice(trackEntry, "后台生成完成", "点播放开始播放完整音频");
+                }
                 var metricsLine = formatJobMetrics(trackEntry.metrics);
                 if (metricsLine) debugLog("📊 " + label + " 指标: " + metricsLine, "#9ff");
                 if (currentTrack() === trackEntry && isElementUsingTrackStream(trackEntry)) {
@@ -215,11 +319,24 @@
                 var failMsg = (j.metrics && j.metrics.message ? j.metrics.message + ": " : "") + (j.error || "服务端生成失败");
                 trackEntry.error = failMsg;
                 setTrackState(trackEntry, "failed");
+                removePendingJobForTrack(trackEntry).catch(function(){});
                 setPlayState("idle");
                 setStatus("生成失败");
                 setError(failMsg);
                 showTrackNotice(trackEntry, "生成失败", failMsg);
                 debugLog("❌ 服务端任务失败: " + failMsg, "#f99");
+                done = true;
+                break;
+              }
+              if (j && j.state === "cancelled") {
+                trackEntry.cancelled = true;
+                setTrackState(trackEntry, "cancelled");
+                removePendingJobForTrack(trackEntry).catch(function(){});
+                setPlayState("idle");
+                setStatus("已取消");
+                showTrackNotice(trackEntry, "任务已取消", "后台任务已停止");
+                debugLog("🛑 服务端任务已取消: " + trackEntry.cacheKey, "#fc9");
+                done = true;
                 break;
               }
             }
@@ -239,7 +356,7 @@
     var knownHistoryCount = 0;
     function restoreTrackFromSaved(t, base) {
       if (!persistedTrackLooksSaved(t)) return null;
-      var restoredMode = t.mode || "ai8";
+      var restoredMode = t.mode === "single" ? "single" : normalizeModeName(t.mode || "ai");
       var savedState = "saved";
       var restored = {
         url: null,
@@ -249,6 +366,9 @@
         createdAt: t.createdAt || Date.now(),
         voice: t.voice || cfg.defaultVoice,
         mode: restoredMode,
+        parseMode: restoredMode === "single" ? "normal" : restoredMode,
+        playbackMode: normalizePlaybackMode(t.playbackMode || "live"),
+        backgroundOnly: false,
         offlineKey: t.offlineKey || offlineAudioKey(t.cacheKey),
         offlineReady: !!t.offlineReady,
         offlineWanted: !!t.offlineWanted,
@@ -280,24 +400,36 @@
       if (tracksLoading) return tracksLoading;
       tracksLoading = (async function () {
         var saved = persistableHistoryTracks(await loadTracksForMessage(messageId));
+        var pending = await loadPendingJobsForMessage();
         knownHistoryCount = saved && saved.length ? saved.length : 0;
         tracksLoaded = true;
-        if (!saved || !saved.length) {
+        var base = cleanBase(cfg.apiBase);
+        if (saved && saved.length) {
+          saved.forEach(function (t) {
+            var restored = restoreTrackFromSaved(t, base);
+            if (restored) generatedTracks.push(restored);
+          });
+        }
+        if (pending && pending.length) {
+          pending.forEach(function (t) {
+            var restored = restoreTrackFromPending(t, base);
+            if (restored) {
+              generatedTracks.push(restored);
+              pollCacheUpgrade(restored, "pending restore");
+            }
+          });
+        }
+        if (!generatedTracks.length) {
           updateTrackButtons();
           setStatus(historyStatusText());
           showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
           return generatedTracks;
         }
-        var base = cleanBase(cfg.apiBase);
-        saved.forEach(function (t) {
-          var restored = restoreTrackFromSaved(t, base);
-          if (restored) generatedTracks.push(restored);
-        });
         currentTrackIndex = generatedTracks.length - 1;
         updateTrackButtons();
         setStatus(historyStatusText());
-        showTrackNotice(currentTrack(), historyStatusText(), "点播放继续，或用左右按钮切换历史音频");
-        debugLog("📂 按需恢复历史 tracks: " + generatedTracks.length + " 段, 未预取离线音频/未轮询落盘", "#9ff");
+        showTrackNotice(currentTrack(), historyStatusText(), pending && pending.length ? "后台生成会继续检查落盘" : "点播放继续，或用左右按钮切换历史音频");
+        debugLog("📂 按需恢复 tracks: saved=" + (saved ? saved.length : 0) + " pending=" + (pending ? pending.length : 0), "#9ff");
         return generatedTracks;
       })().catch(function (e) {
         tracksLoaded = false;
@@ -361,7 +493,15 @@
       if (currentTrackIndex < 0) return;
       var target = currentTrack();
       if (isCancelableLiveTrack(target)) {
-        await exitCurrentLiveTrack("delete live guard");
+        setStatus("正在删除任务…");
+        showTrackNotice(target, "正在删除任务…", "正在停止后端任务并移除当前卡片");
+        await cancelLiveTrack(target, "delete current task");
+        if (!generatedTracks.length) {
+          showEmptyAfterLiveCancel("delete current task");
+          return;
+        }
+        var nextIndex = Math.max(0, Math.min(currentTrackIndex, generatedTracks.length - 1));
+        await selectTrack(nextIndex, false);
         return;
       }
       if (!await confirmDeleteTrack(target)) return;
@@ -374,6 +514,7 @@
       }
       deleteOfflineAudioForTrack(removed).catch(function () {});
       deleteRemoteTrack(removed).catch(function () {});
+      removePendingJobForTrack(removed).catch(function () {});
       // 删除后同步把变更写回 tavo.set，下次进页面就不会再看到这张卡片
       if (messageId) {
         saveTracksForMessage(messageId, generatedTracks).catch(function(){});
@@ -398,6 +539,16 @@
     async function cancelLiveTrack(track, reason) {
       if (!isCancelableLiveTrack(track)) return false;
       var idx = generatedTracks.indexOf(track);
+      try {
+        if (track.jobCreateAbortController && typeof track.jobCreateAbortController.abort === "function") {
+          track.jobCreateAbortController.abort();
+        }
+      } catch (_) {}
+      try {
+        if (track.abortController && typeof track.abortController.abort === "function") {
+          track.abortController.abort();
+        }
+      } catch (_) {}
       track.deleted = true;
       track.cancelled = true;
       track.playSavedWhenReady = false;
@@ -415,6 +566,7 @@
       }
       deleteOfflineAudioForTrack(track).catch(function () {});
       deleteRemoteTrack(track).catch(function () {});
+      removePendingJobForTrack(track).catch(function () {});
       if (idx >= 0) {
         generatedTracks.splice(idx, 1);
         currentTrackIndex = Math.min(idx, generatedTracks.length - 1);

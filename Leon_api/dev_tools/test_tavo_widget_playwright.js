@@ -111,8 +111,9 @@ async function runLlmReuseSmoke(browser, targetUrl) {
     await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
     await page.evaluate(() => {
       localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
-        configVersion: 10,
-        mode: "ai8",
+        configVersion: 11,
+        mode: "ai",
+        playbackMode: "live",
         llmEndpoint: "http://127.0.0.1:8317/v1",
         llmModel: "reuse-smoke-model",
         llmApiKey: "",
@@ -189,7 +190,8 @@ async function runLlmReuseSmoke(browser, targetUrl) {
     if (!result.reuseToggle) throw new Error("reuseLlmParse setting toggle is missing");
     for (const body of jobBodies) {
       if (!body || typeof body.text !== "string" || !body.text.includes("潘金莲")) throw new Error("dialogue job body should include original text: " + JSON.stringify(body));
-      if (Array.isArray(body.segments)) throw new Error("frontend should not submit pre-parsed segments in normal ai8 path: " + JSON.stringify(body));
+      if (body.parse_mode !== "ai") throw new Error("AI mode should submit parse_mode=ai: " + JSON.stringify(body));
+      if (Array.isArray(body.segments)) throw new Error("frontend should not submit pre-parsed segments in AI path: " + JSON.stringify(body));
       if (!body.voices || body.voices["旁白"] !== "女声/高圆圆.wav" || body.voices["用户"] !== "男声/旁白.mp3" || body.voices["潘金莲"] !== "女声/风韵少妇.wav") {
         throw new Error("dialogue job body should include role voice map: " + JSON.stringify(body));
       }
@@ -269,8 +271,9 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
     await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
     await page.evaluate(() => {
       localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
-        configVersion: 10,
-        mode: "ai8",
+        configVersion: 11,
+        mode: "ai",
+        playbackMode: "live",
         llmEndpoint: "http://127.0.0.1:8317/v1",
         llmModel: "error-copy-model",
         llmApiKey: "",
@@ -330,6 +333,189 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
     }
     if (pageErrors.length) throw new Error("LLM error copy smoke page error: " + pageErrors.join(" | "));
     return { parseCount, jobCount, statusCount, result };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runNormalGenerateCancelSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|任务已取消|生成被中断/i.test(text)) pageErrors.push(text);
+  });
+
+  const pendingKey = "b".repeat(40);
+  let parseCount = 0;
+  let jobCount = 0;
+  let statusCount = 0;
+  let streamGetCount = 0;
+  let deleteCount = 0;
+  const jobBodies = [];
+
+  await page.route("**/parse_text", async (route) => {
+    parseCount += 1;
+    await route.abort("failed");
+  });
+  await page.route("**/tts_dialogue_stream_job", async (route) => {
+    jobCount += 1;
+    try { jobBodies.push(JSON.parse(route.request().postData() || "{}")); } catch (_) { jobBodies.push({}); }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        url: "/tts_dialogue_stream_job/" + pendingKey,
+        cache_url: "/cache_audio/" + pendingKey,
+        cache_key: pendingKey,
+        cached: false,
+        live: true
+      })
+    });
+  });
+  await page.route("**/tts_dialogue_stream_job/**", async (route) => {
+    const method = route.request().method().toUpperCase();
+    if (method === "DELETE") {
+      deleteCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ cancelled_live: true, deleted: false, cache_key: pendingKey })
+      });
+      return;
+    }
+    streamGetCount += 1;
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "generate mode should not open stream" }) });
+  });
+  await page.route("**/cache/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: false }) });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    statusCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "running",
+        cache_key: pendingKey,
+        metrics: {
+          state: "running",
+          phase: "tts",
+          message: "后端正在合成…"
+        }
+      })
+    });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(() => {
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+        configVersion: 11,
+        mode: "normal",
+        playbackMode: "live",
+        llmEndpoint: "http://127.0.0.1:8317/v1",
+        llmModel: "normal-generate-smoke-model",
+        llmApiKey: "",
+        reuseLlmParse: true,
+        intervalMs: 50,
+        topP: 0.8,
+        topK: 30,
+        temperature: 0.7,
+        repetitionPenalty: 1.2,
+        emoAlpha: 0.38,
+        speedFactor: 1.0,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }));
+    });
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.waitForSelector('[data-role="playback-mode-toggle"]', { timeout: 5000 });
+    await page.click('[data-role="playback-mode-toggle"]');
+    await page.waitForFunction(() => {
+      const b = document.querySelector('[data-role="playback-mode-toggle"]');
+      return b && /生成/.test(b.textContent || "") && b.dataset.mode === "generate";
+    }, { timeout: 5000 });
+    await page.evaluate(() => {
+      const add = document.querySelector('[data-role="add"]');
+      if (!add) throw new Error("missing add button");
+      add.click();
+    });
+    await page.waitForFunction(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      return fetches.filter((r) => /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length >= 1
+        && fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length >= 1;
+    }, { timeout: 10000 });
+    await page.evaluate(() => {
+      const btn = document.querySelector('[data-role="delete"]');
+      if (!btn) throw new Error("missing delete button");
+      btn.click();
+    });
+    await page.waitForFunction(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      return fetches.some((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url));
+    }, { timeout: 10000 });
+    await page.waitForTimeout(200);
+
+    const result = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const status = (document.querySelector('[data-role="status"]') || {}).textContent || "";
+      const notice = (document.querySelector(".idx-subtitle") || {}).textContent || "";
+      const bucket = window.__idxTest.storageBucket();
+      return {
+        parseFetches: fetches.filter((r) => /\/parse_text(?:[?#]|$)/.test(r.url)).length,
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
+        deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        toggleText: (document.querySelector('[data-role="playback-mode-toggle"]') || {}).textContent || "",
+        status,
+        notice,
+        pendingActive: Object.entries(bucket)
+          .filter(([k]) => /indextts_pending_jobs_/.test(k))
+          .flatMap(([, v]) => Array.isArray(v) ? v : [])
+          .filter((x) => x && x.cacheKey).length
+      };
+    });
+
+    if (parseCount !== 0 || result.parseFetches !== 0) {
+      throw new Error("normal generate smoke must not hit /parse_text: " + JSON.stringify({ parseCount, result }));
+    }
+    if (jobCount !== 1 || result.jobs !== 1) {
+      throw new Error("normal generate smoke should create exactly one dialogue job: " + JSON.stringify({ jobCount, result }));
+    }
+    if (statusCount < 1 || result.statuses < 1) {
+      throw new Error("generate mode should poll job status: " + JSON.stringify({ statusCount, result }));
+    }
+    if (streamGetCount !== 0 || result.streamGets !== 0) {
+      throw new Error("generate mode should not open the live stream: " + JSON.stringify({ streamGetCount, result }));
+    }
+    if (deleteCount < 1 || result.deletes < 1) {
+      throw new Error("deleting pending generate job should call DELETE: " + JSON.stringify({ deleteCount, result }));
+    }
+    const body = jobBodies[0] || {};
+    if (body.parse_mode !== "normal") throw new Error("normal mode should submit parse_mode=normal: " + JSON.stringify(body));
+    if (body.llm_endpoint || body.llm_model || body.llm_api_key) throw new Error("normal mode should not submit LLM config: " + JSON.stringify(body));
+    if (!body.voices || body.voices.default !== "女声/高圆圆.wav" || body.voices["旁白"] !== "女声/高圆圆.wav" || body.voices["对白"] !== "女声/高圆圆.wav") {
+      throw new Error("normal mode should map default/旁白/对白 to the default voice: " + JSON.stringify(body));
+    }
+    if (result.pendingActive) throw new Error("pending job storage should be cleared after delete: " + JSON.stringify(result));
+    if (pageErrors.length) throw new Error("normal generate smoke page error: " + pageErrors.join(" | "));
+    return { parseCount, jobCount, statusCount, streamGetCount, deleteCount, result, body };
   } finally {
     await context.close();
   }
@@ -414,6 +600,8 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
         runtimeParts: fetches.filter((r) => /\/static\/tavo\.runtime\.parts\//.test(r.url)).length,
         subtitleHeight: sub ? getComputedStyle(sub).height : null,
         status: status ? status.textContent : "",
+        playbackToggleText: (document.querySelector('[data-role="playback-mode-toggle"]') || {}).textContent || "",
+        modeLabels: Array.from(document.querySelectorAll(".idx-mode")).map((b) => (b.textContent || "").trim()),
         card: !!document.querySelector(".idx-card"),
         panelOpen: !!document.querySelector('[data-role="panel"][open]'),
         cardRect: cardRect ? { left: cardRect.left, top: cardRect.top, width: cardRect.width, height: cardRect.height } : null,
@@ -438,6 +626,10 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
     }
     if (!afterRuntime.closeRect || afterRuntime.closeRect.width < 30 || afterRuntime.closeRect.height < 30) {
       throw new Error("settings close button should be a compact icon button: " + JSON.stringify(afterRuntime.closeRect));
+    }
+    if (afterRuntime.playbackToggleText.trim() !== "LIVE") throw new Error("playback toggle should default to LIVE: " + JSON.stringify(afterRuntime));
+    if (!afterRuntime.modeLabels.some((x) => /普通模式/.test(x)) || !afterRuntime.modeLabels.some((x) => /AI模式/.test(x))) {
+      throw new Error("settings should expose 普通模式/AI模式 labels: " + JSON.stringify(afterRuntime.modeLabels));
     }
 
     const roleMapping = afterRuntime.roleMapping;
@@ -491,6 +683,7 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
 
     const llmReuse = await runLlmReuseSmoke(browser, targetUrl);
     const llmErrorCopy = await runLlmErrorCopySmoke(browser, targetUrl);
+    const normalGenerateCancel = await runNormalGenerateCancelSmoke(browser, targetUrl);
 
     console.log(JSON.stringify({
       ok: true,
@@ -501,6 +694,7 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
       afterPicker,
       llmReuse,
       llmErrorCopy,
+      normalGenerateCancel,
       consoleCount: consoleLines.length
     }, null, 2));
   } finally {

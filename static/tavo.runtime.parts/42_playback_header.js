@@ -1,7 +1,9 @@
 // IndexTTS Tavo runtime part: 42_playback_header.js // Role: header, status, seek helpers // This fragment is concatenated by static/tavo.runtime.js; it is not a standalone script.
     function currentTrack() { return currentTrackIndex >= 0 ? generatedTracks[currentTrackIndex] : null; }
     function currentVoicesMap(track) {
-      return (track && track.voicesMap) || rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
+      if (track && track.voicesMap) return track.voicesMap;
+      if (normalizeModeName((track && track.mode) || cfg.mode) === "normal") return normalModeVoicesMap(cfg);
+      return rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
     }
     function voiceNameForRole(role, track) {
       var voices = currentVoicesMap(track);
@@ -14,15 +16,17 @@
       return role || "旁白";
     }
     function playbackLabelForRole(role, track) {
-      role = String(role || "").trim() || "多音色";
+      role = String(role || "").trim() || (normalizeModeName((track && track.mode) || cfg.mode) === "ai" ? "AI模式" : "普通模式");
       var voice = voiceNameForRole(role, track);
       return displayRoleName(role) + (voice ? " / " + shortName(voice) : "");
     }
     function trackPlaybackLabel(track) {
       if (!track) return shortName(cfg.defaultVoice);
-      if (track.mode === "ai8") {
+      var mode = normalizeModeName(track.mode);
+      if (mode === "ai" || mode === "normal") {
         var role = lastSpeakerRole || ((track.segments && track.segments[0] && track.segments[0].role) || "");
-        return role ? playbackLabelForRole(role, track) : "多音色";
+        if (role) return playbackLabelForRole(role, track);
+        return mode === "ai" ? "AI模式" : "普通模式";
       }
       return shortName((track && track.voice) || cfg.defaultVoice);
     }
@@ -105,8 +109,8 @@
       pos = Math.max(0, Number(pos) || 0);
       if (track && isCancelableLiveTrack(track)) {
         if (seek) seek.value = "0";
-        setStatus("流式播放中不能拖动");
-        showTrackNotice(track, "流式播放中", "只保留播放/暂停和退出；完成后会变成可拖动历史音频");
+        setStatus(busyGenerationStatus(track, "seek"));
+        showTrackNotice(track, track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate" ? "后台生成中" : "流式生成中", track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate" ? "完成后会变成可播放的历史音频" : "只保留播放/暂停和退出；完成后会变成可拖动历史音频");
         return false;
       }
       var dur = Number(audio && audio.duration);

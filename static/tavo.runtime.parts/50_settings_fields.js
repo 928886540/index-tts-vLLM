@@ -24,6 +24,8 @@
       cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.0), 1.0, 0.85, 1.25);
       cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "balanced") || "balanced").trim();
       if (["fast", "balanced", "expressive"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
+      cfg.mode = normalizeModeName(cfg.mode);
+      cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode);
       cfg.offlineAudioEnabled = getCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       try { audio.playbackRate = cfg.speedFactor; } catch (_) {}
       // cfg.roleVoiceList 由 renderRoleList 实时维护(addRoleRow/setRowVoice 等),
@@ -37,6 +39,14 @@
         if (role || voice) newList.push({ role: role, voice: voice });
       });
       if (newList.length) cfg.roleVoiceList = newList;
+      if (cfg.mode === "normal" && cfg.defaultVoice) {
+        if (!voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], "", cfg.currentCharacterName)) {
+          cfg.roleVoiceList = setVoiceForRoleInList(cfg.roleVoiceList, "旁白", cfg.defaultVoice, cfg.currentCharacterName);
+        }
+        if (!voiceForRoleInList(cfg.roleVoiceList, ["对白", "dialogue", "台词"], "", cfg.currentCharacterName)) {
+          cfg.roleVoiceList = setVoiceForRoleInList(cfg.roleVoiceList, "对白", cfg.defaultVoice, cfg.currentCharacterName);
+        }
+      }
       cfg.roleVoicesText = serializeRoleVoiceList(cfg.roleVoiceList);  // 同步序列化兜底
       cfg.llmModel = String(getField("llmModel", cfg.llmModel || "")).trim();
       cfg.llmEndpoint = String(getField("llmEndpoint", cfg.llmEndpoint || "")).trim();
@@ -76,8 +86,9 @@
       return "";
     }
     function validateVoiceMappingForGenerate() {
-      if (cfg.mode === "single") {
-        return cfg.defaultVoice ? "" : "请先在“音色选择”里选择单音色音色。";
+      cfg.mode = normalizeModeName(cfg.mode);
+      if (cfg.mode === "normal") {
+        return cfg.defaultVoice ? "" : "请先在“普通模式音色”里选择默认音色。";
       }
       var missing = [];
       var list = normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName);
@@ -92,8 +103,22 @@
       if (missing.length) return "请先在“角色音色映射”里给这些角色选择音色：" + missing.join("、") + "。";
       return "";
     }
-    function modeName() { return cfg.mode === "ai8" ? "多音色" : "单音色"; }
+    function modeName() { return normalizeModeName(cfg.mode) === "ai" ? "AI模式" : "普通模式"; }
+    function playbackModeName() { return normalizePlaybackMode(cfg.playbackMode) === "generate" ? "生成" : "LIVE"; }
+    function updateNormalVoiceButtons() {
+      var def = String(cfg.defaultVoice || "").trim();
+      var narrator = voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], def, cfg.currentCharacterName);
+      var dialogue = voiceForRoleInList(cfg.roleVoiceList, ["对白", "dialogue", "台词"], def, cfg.currentCharacterName);
+      var defBtn = first(panel, '[data-role="default-voice-btn"]');
+      var narratorBtn = first(panel, '[data-role="normal-narrator-voice-btn"]');
+      var dialogueBtn = first(panel, '[data-role="normal-dialogue-voice-btn"]');
+      if (defBtn) defBtn.textContent = def ? ("默认：" + def) : "默认音色…";
+      if (narratorBtn) narratorBtn.textContent = narrator ? ("旁白：" + narrator) : (def ? ("旁白：默认 " + def) : "旁白音色…");
+      if (dialogueBtn) dialogueBtn.textContent = dialogue ? ("对白：" + dialogue) : (def ? ("对白：默认 " + def) : "对白音色…");
+    }
     function syncUI() {
+      cfg.mode = normalizeModeName(cfg.mode);
+      cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode);
       setField("apiBase", cfg.apiBase || scriptOrigin());
       setField("intervalMs", Number(cfg.intervalMs || 50));
       setField("llmModel", cfg.llmModel || "");
@@ -105,11 +130,10 @@
       setCheckedField("reuseLlmParse", cfg.reuseLlmParse !== false);
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25); } catch (_) {}
       renderRoleList();
-      // AI 八情绪 设置只在该模式下显示；单音色配置反之
       try {
-        var ai8Show = (cfg.mode === "ai8");
-        $all(panel, '.idx-ai8-only').forEach(function (el) { el.style.display = ai8Show ? "" : "none"; });
-        $all(panel, '.idx-single-only').forEach(function (el) { el.style.display = ai8Show ? "none" : ""; });
+        var aiShow = (cfg.mode === "ai");
+        $all(panel, '.idx-ai-only').forEach(function (el) { el.style.display = aiShow ? "" : "none"; });
+        $all(panel, '.idx-normal-only').forEach(function (el) { el.style.display = aiShow ? "none" : ""; });
       } catch (_) {}
       // 当前 mode 按钮高亮
       try {
@@ -119,6 +143,12 @@
       } catch (_) {}
       if (voicePill) voicePill.textContent = "音色：" + shortName(cfg.defaultVoice);
       if (modePill) modePill.textContent = "模式：" + modeName();
+      if (playbackToggle) {
+        playbackToggle.textContent = playbackModeName();
+        playbackToggle.dataset.mode = cfg.playbackMode;
+        playbackToggle.setAttribute("title", cfg.playbackMode === "generate" ? "生成模式：后台生成落盘后再播放" : "LIVE模式：边生成边播放");
+      }
+      updateNormalVoiceButtons();
       if (title) title.textContent = (context && context.characterName ? context.characterName : shortName(cfg.defaultVoice));
       if (cover) {
         if (avatarUrl) {
@@ -163,8 +193,7 @@
       var voices = await listVoices(cfg.apiBase);
       availableVoices = sortVoices(voices);
       // 旧 voicesBox grid 已经被"默认音色按钮"替代,这里只更新按钮文本
-      var defBtn = first(panel, '[data-role="default-voice-btn"]');
-      if (defBtn) defBtn.textContent = cfg.defaultVoice ? cfg.defaultVoice : "选择默认音色…";
+      updateNormalVoiceButtons();
       syncUI();
       setStatus(historyStatusText());
       if (!generatedTracks.length) showTrackNotice(null, historyStatusText(), voices.length ? "点播放开始生成音频" : "没有找到可用音色");

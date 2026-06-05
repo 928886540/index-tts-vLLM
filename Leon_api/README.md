@@ -150,7 +150,7 @@ node Leon_api\dev_tools\test_tavo_widget_playwright.js
 正则里用最新版脚本：
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-job-parse-v1"></script>
+<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-normal-generate-v1"></script>
 ```
 
 ## 访问地址

@@ -13,6 +13,7 @@
     root.innerHTML = [
       '<div class="idx-card">',
       '  <button class="idx-gear" type="button" data-role="gear" aria-label="设置">' + gearIcon() + '</button>',
+      '  <button class="idx-playback-toggle" type="button" data-role="playback-mode-toggle" aria-label="切换播放/生成模式">LIVE</button>',
       '  <div class="idx-card-counter" data-role="counter">0/0</div>',
       '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点播放</div></div></div>',
       '  <div class="idx-seek-wrap"><input class="idx-seek" data-role="seek" type="range" min="0" max="1000" value="0" disabled><div class="idx-time"><span data-role="current">00:00</span><span data-role="total">--:--</span></div></div>',
@@ -20,8 +21,8 @@
       '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-skip" type="button" data-role="rewind10" aria-label="后退 10 秒" title="后退 10 秒"><svg viewBox="0 0 24 24"><path d="M9 8H4V3"/><path d="M5 8a8 8 0 1 1-1 6"/><path d="M10 12v5"/><path d="M14 12v5"/><path d="M10 12h1.5"/><path d="M14 12h1.5"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式" title="退出流式"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/><path d="M7 21h10"/></svg></button><button class="idx-ctrl idx-ctrl-skip" type="button" data-role="forward10" aria-label="快进 10 秒" title="快进 10 秒"><svg viewBox="0 0 24 24"><path d="M15 8h5V3"/><path d="M19 8a8 8 0 1 0 1 6"/><path d="M8 12v5"/><path d="M12 12v5"/><path d="M8 12h1.5"/><path d="M12 12h1.5"/></svg></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button><button class="idx-ctrl idx-ctrl-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
-        + '<div class="idx-section-title">播放模式</div>'
-        + '<div class="idx-modes"><button class="idx-mode" data-mode="single" type="button"><strong>单音色</strong><span>整段用当前音色</span></button><button class="idx-mode" data-mode="ai8" type="button"><strong>多音色</strong><span>AI 拆旁白/人物</span></button></div>'
+        + '<div class="idx-section-title">文本模式</div>'
+        + '<div class="idx-modes"><button class="idx-mode" data-mode="normal" type="button"><strong>普通模式</strong><span>后端规则拆旁白/对白</span></button><button class="idx-mode" data-mode="ai" type="button"><strong>AI模式</strong><span>后端 LLM 拆旁白/人物</span></button></div>'
         + '<div class="idx-section-title">合成质量</div>'
         + '<div class="idx-grid">'
           + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option></select></label>'
@@ -29,10 +30,12 @@
         + '</div>'
         + '<div class="idx-section-title">播放 / 离线</div>'
         + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>已落盘音频存到本机，下次优先放本地。</span></span></label>'
-        // 单音色模式专属 —— mode==="single" 时显示
-        + '<div class="idx-single-only"><div class="idx-section-title">音色选择</div><div class="idx-default-voice"><button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择音色…</button></div></div>'
-        // AI 八情绪专属 —— mode==="ai8" 时显示；切换不清空（输入值在 readFields 时已存入 cfg）
-        + '<div class="idx-ai8-only">'
+        + '<div class="idx-normal-only"><div class="idx-section-title">普通模式音色</div><div class="idx-normal-voices">'
+          + '<button class="idx-voice-btn" type="button" data-role="default-voice-btn">默认音色…</button>'
+          + '<button class="idx-voice-btn" type="button" data-role="normal-narrator-voice-btn">旁白音色…</button>'
+          + '<button class="idx-voice-btn" type="button" data-role="normal-dialogue-voice-btn">对白音色…</button>'
+        + '</div></div>'
+        + '<div class="idx-ai-only">'
           + '<div class="idx-section-title">角色音色映射</div>'
           + '<div class="idx-roles" data-role="roles-list"></div>'
           + '<button class="idx-add-role" type="button" data-role="add-role">+ 添加角色</button>'
@@ -71,6 +74,7 @@
     var title = first(root, '[data-role="title"]', '.idx-name');
     var cover = first(root, '[data-role="cover"]', '.idx-cover');
     var counter = first(root, '[data-role="counter"]', '.idx-card-counter');
+    var playbackToggle = first(root, '[data-role="playback-mode-toggle"]', '.idx-playback-toggle');
     var err = first(root, '[data-role="error"]', '.idx-error');
     var seek = first(root, '[data-role="seek"]', '.idx-seek');
     var cur = first(root, '[data-role="current"]', '.idx-time span:first-child');
@@ -109,12 +113,13 @@
       var maxWidth = Math.max(280, vw - margin * 2);
       var naturalWidth = mobile ? maxWidth : Math.max(320, Math.min(760, Number(anchor.width || 0) || 760));
       var width = Math.min(maxWidth, naturalWidth);
-      var left = mobile ? margin : Math.min(Math.max(margin, Number(anchor.left || margin)), Math.max(margin, vw - width - margin));
+      var left = mobile ? margin : Math.min(Math.max(margin, Number(anchor.left || margin) + (Number(anchor.width || width) - width) / 2), Math.max(margin, vw - width - margin));
       var preferredHeight = Number(opts.height || 560) || 560;
       if (mobile) preferredHeight = Number(opts.mobileHeight || preferredHeight) || preferredHeight;
       preferredHeight = Math.min(preferredHeight, vh - margin * 2);
+      var anchorCenterY = Number(anchor.top || margin) + Math.max(0, Number(anchor.height || 0)) / 2;
       var topLimitForHeight = Math.max(margin, vh - margin - preferredHeight);
-      var top = Math.min(Math.max(margin, Number(anchor.top || margin)), topLimitForHeight);
+      var top = Math.min(Math.max(margin, anchorCenterY - preferredHeight / 2), topLimitForHeight);
       var height = Math.min(preferredHeight, vh - top - margin);
       if (height < 360) {
         top = margin;
@@ -191,7 +196,7 @@
       var total = persistableHistoryTracks(generatedTracks).length;
       if (!total && !tracksLoaded && knownHistoryCount > 0) return "历史音频 " + knownHistoryCount + " 条";
       var active = currentTrack();
-      if (isCancelableLiveTrack(active)) return "流式生成中 · 历史音频 " + total + " 条";
+      if (isCancelableLiveTrack(active)) return (active.backgroundOnly || normalizePlaybackMode(active.playbackMode) === "generate" ? "后台生成中" : "流式生成中") + " · 历史音频 " + total + " 条";
       if (!total) return "历史音频 0 条";
       var savedList = persistableHistoryTracks(generatedTracks);
       var idx = active ? (savedList.indexOf(active) + 1) : total;
@@ -201,7 +206,7 @@
     function updateTrackCounter() {
       var active = currentTrack();
       if (counter && isCancelableLiveTrack(active)) {
-        counter.textContent = "LIVE";
+        counter.textContent = (active.backgroundOnly || normalizePlaybackMode(active.playbackMode) === "generate") ? "生成" : "LIVE";
         return;
       }
       var savedList = persistableHistoryTracks(generatedTracks);

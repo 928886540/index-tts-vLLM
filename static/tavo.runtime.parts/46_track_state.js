@@ -3,8 +3,8 @@
       if (!track) return null;
       var state = oneOf(track.state, ["pending", "live", "saved", "failed", "cancelled"], inferLegacyTrackState(track));
       track.state = state; // legacy coarse state, persisted for old cards.
-      track.serverState = oneOf(track.serverState, ["pending", "running", "done", "failed"],
-        state === "saved" ? "done" : ((state === "failed" || state === "cancelled") ? "failed" : (state === "live" ? "running" : "pending")));
+      track.serverState = oneOf(track.serverState, ["pending", "running", "done", "failed", "cancelled"],
+        state === "saved" ? "done" : (state === "cancelled" ? "cancelled" : (state === "failed" ? "failed" : (state === "live" ? "running" : "pending"))));
       var cacheState = track.cacheState || track.remoteCacheState;
       track.cacheState = oneOf(cacheState, ["none", "pending", "ready", "failed", "missing"],
         state === "saved" ? "ready" : (state === "failed" ? "failed" : (state === "cancelled" ? "none" : ((track.cacheKey || track.cacheUrl) ? "pending" : "none"))));
@@ -25,7 +25,7 @@
     function setTrackServerState(track, state) {
       if (!track) return "";
       ensureTrackStates(track);
-      track.serverState = oneOf(state, ["pending", "running", "done", "failed"], "pending");
+      track.serverState = oneOf(state, ["pending", "running", "done", "failed", "cancelled"], "pending");
       return track.serverState;
     }
     function setTrackCacheState(track, state) {
@@ -90,7 +90,7 @@
         track.cancelled = true;
         track.pendingBlob = false;
         track.streaming = false;
-        setTrackServerState(track, "failed");
+        setTrackServerState(track, "cancelled");
         setTrackCacheState(track, "none");
         setTrackPlaybackState(track, "cancelled");
       } else {
@@ -297,7 +297,7 @@
       return false;
     }
     function shouldUseWebAudioForLiveTrack(track) {
-      if (!(track && track.mode === "ai8" && isLiveTrack(track) && track.streamUrl)) return false;
+      if (!(track && track.mode !== "single" && isLiveTrack(track) && track.streamUrl)) return false;
       return scriptFlagEnabled("webAudioLive");
     }
     function shouldUseElementForLiveTrack(track, startOffsetSec) {
@@ -334,7 +334,10 @@
     }
     function waitingLabelForTrack(track) {
       if (shouldUseElementForSavedTrack(track)) return "缓冲中…";
-      if (track && track.mode === "single") return "正在生成单音色音频…";
+      if (track && track.backgroundOnly) return "后台生成中…";
+      if (track && track.mode === "single") return "正在生成普通模式音频…";
+      if (track && normalizeModeName(track.mode) === "ai") return "AI模式正在生成…";
+      if (track && normalizeModeName(track.mode) === "normal") return "普通模式正在生成…";
       return "正在等待音频…";
     }
     function qualityModeLabel(mode) {
@@ -725,12 +728,26 @@
           knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
           updateTrackButtons();
           if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          removePendingJobForTrack(track).catch(function(){});
           debugLog("✅ " + (label || "track") + " 已保存，切换为历史音频", "#9f9");
           return true;
         }
         if (j && j.state === "failed") {
           track.error = j.error || "服务端生成失败";
           setTrackState(track, "failed");
+          removePendingJobForTrack(track).catch(function(){});
+          updateTrackButtons();
+          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          debugLog("❌ " + (label || "track") + " 服务端生成失败: " + track.error, "#f99");
+          return true;
+        }
+        if (j && j.state === "cancelled") {
+          track.error = j.error || "任务已取消";
+          setTrackState(track, "cancelled");
+          removePendingJobForTrack(track).catch(function(){});
+          updateTrackButtons();
+          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          debugLog("🛑 " + (label || "track") + " 服务端任务已取消", "#fc9");
           return true;
         }
       } catch (e) {

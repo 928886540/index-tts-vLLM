@@ -1,5 +1,14 @@
 // IndexTTS Tavo runtime part: 62_events_boot.js // Role: dialog, audio event bindings, runtime bootstrap // This fragment is concatenated by static/tavo.runtime.js; it is not a standalone script.
-    function openDialog(d) { if (!d) return; try { if (typeof d.showModal === 'function') d.showModal(); else if (typeof d.show === 'function') d.show(); else d.setAttribute('open', ''); } catch (_) { try { d.setAttribute('open', ''); } catch (__) {} } }
+    function openDialog(d) {
+      if (!d) return;
+      try { d.setAttribute("tabindex", "-1"); } catch (_) {}
+      try { if (typeof d.showModal === 'function') d.showModal(); else if (typeof d.show === 'function') d.show(); else d.setAttribute('open', ''); } catch (_) { try { d.setAttribute('open', ''); } catch (__) {} }
+      try {
+        if (typeof d.focus === "function") d.focus({ preventScroll: true });
+      } catch (_) {
+        try { if (typeof d.focus === "function") d.focus(); } catch (__) {}
+      }
+    }
     function closeDialog(d) { if (!d) return; try { if (typeof d.close === 'function') d.close(); else d.removeAttribute('open'); } catch (_) { try { d.removeAttribute('open'); } catch (__) {} } }
     on(gear, 'click', async function (ev) {
       ev.preventDefault(); ev.stopPropagation();
@@ -34,6 +43,11 @@
         return true;
       } catch (_) { return false; }
     }
+    function busyGenerationStatus(track, action) {
+      var background = track && (track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate");
+      if (action === "seek") return background ? "后台生成中，完成后才能拖动" : "流式生成中不能拖动";
+      return background ? "后台生成中，先删除或等待落盘" : "流式生成中，先退出或等待保存";
+    }
     on(play, 'pointerdown', function () { primeAudioContext(); });
     on(add, 'pointerdown', function () { primeAudioContext(); });
     on(rewind10, 'pointerdown', function () { primeAudioContext(); });
@@ -45,29 +59,41 @@
     on(play, 'click', function () { primeAudioContext(); if (tryResumeOrPauseInGesture()) return; generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(add, 'click', function () {
       primeAudioContext();
-      if (isCancelableLiveTrack(currentTrack())) { setStatus("流式播放中，先退出或等待保存"); return; }
+      var t = currentTrack();
+      if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t)); return; }
       generate(true).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
     on(rewind10, 'click', function () {
       primeAudioContext();
-      if (isCancelableLiveTrack(currentTrack())) { setStatus("流式播放中不能拖动"); return; }
+      var t = currentTrack();
+      if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t, "seek")); return; }
       if (!seekBySeconds(-10)) setStatus("暂无可跳转音频");
     });
     on(forward10, 'click', function () {
       primeAudioContext();
-      if (isCancelableLiveTrack(currentTrack())) { setStatus("流式播放中不能拖动"); return; }
+      var t = currentTrack();
+      if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t, "seek")); return; }
       if (!seekBySeconds(10)) setStatus("暂无可跳转音频");
     });
     on(prev, 'click', function () {
-      if (isCancelableLiveTrack(currentTrack())) { setStatus("流式播放中，先退出或等待保存"); return; }
+      var t = currentTrack();
+      if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t)); return; }
       ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex - 1, true); }).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
     on(next, 'click', function () {
-      if (isCancelableLiveTrack(currentTrack())) { setStatus("流式播放中，先退出或等待保存"); return; }
+      var t = currentTrack();
+      if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t)); return; }
       ensureTracksLoaded().then(function () { return selectTrack(currentTrackIndex + 1, true); }).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
     on(del, 'click', function () { clearCurrentTrack().catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(liveExit, 'click', function () { exitCurrentLiveTrack("live exit").catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
+    on(playbackToggle, 'click', async function () {
+      readFields();
+      cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode) === "generate" ? "live" : "generate";
+      syncUI();
+      await saveConfig(cfg, characterId);
+      setStatus(cfg.playbackMode === "generate" ? "生成模式：后台落盘" : "LIVE模式：边生成边播放");
+    });
     on(first(panel, '[data-role="save"]'), 'click', async function () { readFields(); await saveConfig(cfg, characterId); syncUI(); closeDialog(panel); setStatus("设置已保存"); });
     try {
       window.addEventListener('resize', function () {
@@ -88,15 +114,15 @@
       voicesLoaded = false;
       ensureVoicesLoaded().catch(function (e) { setStatus("音色列表读取失败"); setError(e && e.message ? e.message : String(e)); });
     });
-    $all(panel, '.idx-mode').forEach(function (b) { b.addEventListener('click', async function () { readFields(); cfg.mode = b.dataset.mode; syncUI(); await saveConfig(cfg, characterId); }); });
+    $all(panel, '.idx-mode').forEach(function (b) { b.addEventListener('click', async function () { readFields(); cfg.mode = normalizeModeName(b.dataset.mode); syncUI(); await saveConfig(cfg, characterId); }); });
     on(audio, 'play', function () {
       var t = currentTrack();
       if (t) setTrackPlaybackState(t, "playing");
       setPlayState("playing"); setStatus("正在播放：" + trackPlaybackLabel(t));
       // 系统媒体面板基础信息(后台/锁屏可见,可控制播放/前后 10 秒)
       try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
-      // 桌面 / <audio> 路径的字幕：当前 track 是 ai8 且有 segments 时启动
-      if (t && t.mode === "ai8") {
+      // 桌面 / <audio> 路径的字幕：普通/AI dialogue track 有 segments 时启动。
+      if (t && t.mode !== "single" && (normalizeModeName(t.mode) === "ai" || normalizeModeName(t.mode) === "normal")) {
         if (t.segments && t.segments.length) {
           startSubtitle(t, function () { return elementPlaybackTimeSec(t); });
         } else if (t.cacheKey && !t.fetchingSegments) {
@@ -237,7 +263,7 @@
       var live = currentTrack();
       if (isCancelableLiveTrack(live)) {
         if (seek) seek.value = "0";
-        setStatus("流式播放中不能拖动");
+        setStatus(busyGenerationStatus(live, "seek"));
         return;
       }
       var dur = Number(audio && audio.duration);
@@ -253,7 +279,7 @@
       var live = currentTrack();
       if (isCancelableLiveTrack(live)) {
         if (seek) seek.value = "0";
-        setStatus("流式播放中不能拖动");
+        setStatus(busyGenerationStatus(live, "seek"));
         return;
       }
       var dur = Number(audio && audio.duration);

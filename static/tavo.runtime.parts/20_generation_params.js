@@ -292,11 +292,13 @@
     };
   }
 
-  async function createDialogueStreamJob(base, body) {
+  async function createDialogueStreamJob(base, body, opts) {
+    opts = opts || {};
     var res = await fetch(cleanBase(base) + "/tts_dialogue_stream_job", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: opts.signal
     });
     if (!res.ok) throw new Error(await res.text());
     var data = await res.json();

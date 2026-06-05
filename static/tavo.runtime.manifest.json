@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "runtimeVersion": "20260605-job-parse-v1",
+  "runtimeVersion": "20260605-normal-generate-v1",
   "mode": "ordered-fragments",
   "skin": {
     "default": "tavo.ui.skin.default.css"

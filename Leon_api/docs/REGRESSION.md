@@ -87,6 +87,7 @@ Current lazy-loader assertions:
 - opening settings still does not request `/voices` or create a TTS job;
 - settings panel is aligned with the player card and its close button is at least 30px square;
 - opening the voice picker requests `/voices`, renders voice items, and has at least 540px height on desktop smoke;
+- settings exposes `普通模式` / `AI模式` and the player quick toggle defaults to `LIVE`;
 - subtitle height remains `136px`.
 
 ## Cache / Snapshot Regression
@@ -120,7 +121,9 @@ For any Tavo persistence or history change:
 
 Failed, live, pending, or missing tracks must not silently overwrite saved history with an empty array.
 
-Live/pending tracks are not history. A live card may show `LIVE`, but the saved history count must only change after `/tts_dialogue_job_status/<cache_key>` reports `done` and the card switches to saved/cache audio.
+Live/pending tracks are not history. A live card may show `LIVE`, and a background job may show `生成`, but the saved history count must only change after `/tts_dialogue_job_status/<cache_key>` reports `done` and the card switches to saved/cache audio.
+
+For background `生成` mode, pending jobs should be stored under the current Tavo message, restored after re-entering, and removed after done/failed/cancelled/delete.
 
 ## Failed Track Guard
 
@@ -143,6 +146,13 @@ For a running live dialogue job:
 4. Clicking live exit first checks status once; if status is `done`, the card becomes saved, otherwise the frontend calls `DELETE /tts_dialogue_stream_job/<cache_key>`.
 5. Exiting live removes only the transient live card and keeps existing saved history count unchanged.
 6. After status becomes `done`, the same card switches to a normal saved card with `/cache_audio/<cache_key>`.
+
+For a background `生成` dialogue job:
+
+1. The player does not open `GET /tts_dialogue_stream_job/<cache_key>`.
+2. The frontend polls `/tts_dialogue_job_status/<cache_key>`.
+3. Deleting the pending card calls `DELETE /tts_dialogue_stream_job/<cache_key>` and clears pending storage.
+4. Returning to the message restores pending jobs and continues polling until saved/failed/cancelled.
 
 ## Saved Audio Background Guard
 
@@ -196,6 +206,15 @@ For intelligent mode:
 - Backend LLM failures surface through `/tts_dialogue_job_status/{cache_key}` with `state=failed`, `metrics.phase=llm_parse_failed`, and a concise `error` string.
 - The `reuseLlmParse` checkbox should be visible in multi-role settings and default to enabled.
 - `/parse_text` may remain as a compatibility/manual proxy endpoint, but it is not the normal Tavo generation path.
+
+## Normal Mode Guard
+
+For 普通模式:
+
+- Frontend submits `parse_mode=normal`.
+- Frontend submits `voices.default`, `voices.旁白`, and `voices.对白`; if only default is configured, 旁白/对白 should map to default.
+- Frontend does not submit LLM endpoint/model/key in normal mode.
+- Backend strips tags/script/style/template content, removes emoji/control noise, splits quoted dialogue into `对白`, and maps the rest to `旁白`.
 
 ## Secret Scan
 

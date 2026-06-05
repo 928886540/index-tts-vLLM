@@ -5,18 +5,28 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
   var script = (typeof window !== "undefined" && window.__indextts_tavo_runtime_script_override) || document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v5";
   var CONFIG_KEY = "indextts_tavo_config_v3";
-  var CONFIG_VERSION = 10;
+  var CONFIG_VERSION = 11;
   var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
   // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";
   var GLOBAL_CONFIG_FIELDS = [
     "configVersion",
-    "apiBase", "mode", "endpoint", "dialogueEndpoint", "parseEndpoint",
+    "apiBase", "mode", "playbackMode", "endpoint", "dialogueEndpoint", "parseEndpoint",
     "llmEndpoint", "llmModel", "llmApiKey", "reuseLlmParse",
     "intervalMs", "topP", "topK", "temperature", "repetitionPenalty", "emoAlpha", "speedFactor", "qualityMode",
     "offlineAudioEnabled"
   ];
   var RESERVED_ROLES = ["旁白", "用户"];  // 这两个常驻不可删；具体人物用原名或 defaultVoice
+  function normalizeModeName(mode) {
+    mode = String(mode || "").trim().toLowerCase();
+    if (mode === "ai" || mode === "ai8" || mode === "multi" || mode === "multivoice") return "ai";
+    return "normal";
+  }
+  function normalizePlaybackMode(mode) {
+    mode = String(mode || "").trim().toLowerCase();
+    if (mode === "generate" || mode === "background" || mode === "file") return "generate";
+    return "live";
+  }
   function normalizeCharacterRoleName(name) {
     return String(name || "").trim();
   }
@@ -187,7 +197,8 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
   var DEFAULT_CONFIG = {
     configVersion: CONFIG_VERSION,
     apiBase: scriptOrigin(),
-    mode: "single",
+    mode: "normal",
+    playbackMode: "live",
     endpoint: "/tts_cache_stream",
     dialogueEndpoint: "/tts_dialogue_cache_stream",
     parseEndpoint: "/parse_text",
