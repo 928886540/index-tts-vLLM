@@ -31,11 +31,11 @@ $Script:ApiBase = "http://127.0.0.1:$Script:ApiPort"
 $Script:WebUiPort = 7860
 $Script:WebUiBase = "http://127.0.0.1:$Script:WebUiPort"
 $Script:LanHost = if ($env:LEON_LAN_HOST) { $env:LEON_LAN_HOST } else { Get-PreferredLanHost }
-$Script:TavoCacheBust = "20260606-live-audio-v6"
+$Script:TavoCacheBust = "20260606-live-audio-v7"
 $Script:VersionKey = if ($env:LEON_LAUNCHER_VERSION) { $env:LEON_LAUNCHER_VERSION } else { "vllm" }
 $Script:EnableQwenEmotion = $false
 $Script:InvariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
-$Script:VllmGpuMemoryUtilization = 0.18
+$Script:VllmGpuMemoryUtilization = 0.15
 if (-not [string]::IsNullOrWhiteSpace($env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION)) {
     $configuredGpuUtil = 0.0
     if ([double]::TryParse($env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION, [System.Globalization.NumberStyles]::Float, $Script:InvariantCulture, [ref]$configuredGpuUtil) -and $configuredGpuUtil -gt 0) {
@@ -74,6 +74,37 @@ $Script:BackendLogTimer = $null
 $Script:WarmupStarted = $false
 $Script:WebUiBrowser = $null
 $Script:WebUiStatusLabel = $null
+$Script:HomePanel = $null
+$Script:EnvPanel = $null
+$Script:RepairPanel = $null
+$Script:LauncherLogBox = $null
+$Script:ApiLogBox = $null
+$Script:StartupOutLogBox = $null
+$Script:StartupErrLogBox = $null
+$Script:BackendLogBox = $null
+$Script:LogBox = $null
+$Script:LogViewport = $null
+$Script:LogContentLabel = $null
+$Script:LogScrollTrack = $null
+$Script:LogScrollThumb = $null
+$Script:LogScrollOffset = 0
+$Script:LogScrollDragging = $false
+$Script:LogScrollDragScreenY = 0
+$Script:LogScrollDragOffset = 0
+$Script:EnvCheckRows = @{}
+$Script:EnvCheckResults = @{}
+$Script:EnvCheckCompleted = $false
+$Script:EnvCheckLastRun = $null
+$Script:EnvCheckRecording = $false
+$Script:RepairStatusLabels = @{}
+$Script:RepairDetailLabels = @{}
+$Script:RepairSummaryLabel = $null
+$Script:VllmGpuShell = $null
+$Script:VllmGpuTooltip = $null
+$Script:NavButtons = @{}
+$Script:LogTabButtons = @{}
+$Script:LogTexts = @{}
+$Script:ActiveLogTab = "launcher"
 
 function Get-VllmGpuMemoryUtilizationText {
     return $Script:VllmGpuMemoryUtilization.ToString("0.###", $Script:InvariantCulture)
@@ -81,7 +112,7 @@ function Get-VllmGpuMemoryUtilizationText {
 
 function Get-VllmGpuMemoryLabel {
     $text = Get-VllmGpuMemoryUtilizationText
-    if ([Math]::Abs($Script:VllmGpuMemoryUtilization - 0.18) -lt 0.0001) { return "0.18 默认" }
+    if ([Math]::Abs($Script:VllmGpuMemoryUtilization - 0.15) -lt 0.0001) { return "0.15 默认" }
     if ([Math]::Abs($Script:VllmGpuMemoryUtilization - 0.11) -lt 0.0001) { return "0.11 保守" }
     return "$text 自定义"
 }
@@ -99,12 +130,42 @@ function Set-VllmGpuMemoryUtilization {
 
 function Sync-VllmGpuControls {
     if (-not $Script:VllmGpuCombo) { return }
-    $label = Get-VllmGpuMemoryLabel
-    if (-not $Script:VllmGpuCombo.Items.Contains($label)) {
-        [void]$Script:VllmGpuCombo.Items.Add($label)
+    $showRatio = ($Script:VersionKey -eq "vllm")
+    if ($Script:VllmGpuCombo -is [System.Windows.Forms.ComboBox]) {
+        $label = Get-VllmGpuMemoryLabel
+        if (-not $Script:VllmGpuCombo.Items.Contains($label)) {
+            [void]$Script:VllmGpuCombo.Items.Add($label)
+        }
+        $Script:VllmGpuCombo.Text = $label
     }
-    $Script:VllmGpuCombo.SelectedItem = $label
-    $Script:VllmGpuCombo.Enabled = ($Script:VersionKey -eq "vllm")
+    else {
+        $Script:VllmGpuCombo.Text = Get-VllmGpuMemoryUtilizationText
+    }
+    $Script:VllmGpuCombo.Enabled = $showRatio
+    $Script:VllmGpuCombo.Visible = $showRatio
+    if ($Script:VllmGpuShell) {
+        $Script:VllmGpuShell.Visible = $showRatio
+        $Script:VllmGpuShell.Enabled = $showRatio
+    }
+    if ($Script:VersionCombo -and $Script:VersionCombo.Tag -eq "segmented-version") {
+        foreach ($ctrl in $Script:VersionCombo.Controls) {
+            if (-not ($ctrl -is [System.Windows.Forms.Button])) { continue }
+            $isActive = ([string]$ctrl.Tag -eq $Script:VersionKey)
+            if ($isActive) {
+                $ctrl.BackColor = [System.Drawing.Color]::FromArgb(48, 68, 88)
+                $ctrl.ForeColor = [System.Drawing.Color]::White
+                $ctrl.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(110, 145, 175)
+            }
+            else {
+                $ctrl.BackColor = [System.Drawing.Color]::FromArgb(24, 31, 39)
+                $ctrl.ForeColor = [System.Drawing.Color]::FromArgb(202, 212, 222)
+                $ctrl.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(46, 56, 68)
+            }
+        }
+    }
+    elseif ($Script:VersionCombo -and $Script:VersionCombo.Tag -eq "compact-version") {
+        if ($showRatio) { $Script:VersionCombo.Width = 112 } else { $Script:VersionCombo.Width = 204 }
+    }
 }
 
 function Set-LeonVersion {
@@ -125,7 +186,7 @@ function Set-LeonVersion {
         $Script:StartupBat = Join-Path $Script:WorkspaceRoot "scripts\start-vllm-api.bat"
         $Script:WebUiStartupBat = Join-Path $Script:WorkspaceRoot "scripts\start-vllm-webui.bat"
     }
-    if ($Script:VersionCombo) {
+    if ($Script:VersionCombo -and $Script:VersionCombo -is [System.Windows.Forms.ComboBox]) {
         $Script:VersionCombo.SelectedItem = $key
     }
     if ($Script:QwenEmotionCheck) {
@@ -181,7 +242,7 @@ function Get-VoiceLibraryDir {
 }
 
 function Sync-LeonVersionControls {
-    if ($Script:VersionCombo) {
+    if ($Script:VersionCombo -and $Script:VersionCombo -is [System.Windows.Forms.ComboBox]) {
         $Script:VersionCombo.SelectedItem = $Script:VersionKey
     }
     if ($Script:QwenEmotionCheck) {
@@ -215,10 +276,11 @@ function New-Font {
 function Add-Log {
     param([string]$Message, [string]$Level = "INFO")
     $line = "[{0}] [{1}] {2}" -f (Get-Date -Format "HH:mm:ss"), $Level, $Message
-    if ($Script:LogBox) {
-        $Script:LogBox.AppendText($line + [Environment]::NewLine)
-        $Script:LogBox.SelectionStart = $Script:LogBox.TextLength
-        $Script:LogBox.ScrollToCaret()
+    if (-not $Script:LogTexts) { $Script:LogTexts = @{} }
+    $existing = if ($Script:LogTexts.ContainsKey("launcher")) { [string]$Script:LogTexts["launcher"] } else { "" }
+    $Script:LogTexts["launcher"] = ($existing + $line + [Environment]::NewLine)
+    if ($Script:ActiveLogTab -eq "launcher" -and $Script:LogBox -and -not (Test-LogTextSelected)) {
+        Set-LogTabActive "launcher"
     }
     New-Item -ItemType Directory -Force -Path $Script:LogDir | Out-Null
     $logFile = Join-Path $Script:LogDir ("launcher-" + (Get-Date -Format "yyyyMMdd") + ".log")
@@ -226,17 +288,240 @@ function Add-Log {
 }
 
 function Show-HomeLog {
+    if ($Script:HomePanel -and $Script:EnvPanel) {
+        Set-LauncherNavActive "home"
+        $Script:EnvPanel.Visible = $false
+        $Script:HomePanel.Visible = $true
+        $Script:HomePanel.BringToFront()
+        Refresh-BackendLogTail
+        return
+    }
     if ($Script:Tabs) {
         $Script:Tabs.SelectedIndex = 0
     }
     Refresh-BackendLogTail
 }
 
+function Show-EnvironmentPanel {
+    param([string]$NavKey = "env")
+    Set-LauncherNavActive $NavKey
+    if ($Script:HomePanel -and $Script:EnvPanel) {
+        $Script:HomePanel.Visible = $false
+        $Script:EnvPanel.Visible = $true
+        $Script:EnvPanel.BringToFront()
+    }
+}
+
+function Show-RepairPanel {
+    Show-EnvironmentPanel
+}
+
+function Test-LogTextSelected {
+    if (-not $Script:LogBox) { return $false }
+    try {
+        return ($Script:LogBox.PSObject.Properties.Name -contains "SelectionLength" -and $Script:LogBox.SelectionLength -gt 0)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Normalize-LauncherLogText {
+    param([string]$Text)
+    if ($null -eq $Text) { return "" }
+    $text = [string]$Text
+    $esc = [string][char]27
+    $text = [regex]::Replace($text, [regex]::Escape($esc) + "\[[0-?]*[ -/]*[@-~]", "")
+    $text = $text -replace "`0", ""
+    $text = [regex]::Replace($text, "`r(?!`n)", "`n")
+    $text = $text -replace "`r`n", "`n"
+    $text = [regex]::Replace($text, "(\d{1,3})%\|[^\n]*?\|\s*", '$1% ')
+    $text = $text -replace "[█▉▊▋▌▍▎▏▓▒░■□▇▆▅▄▃▂▁�]", ""
+    $text = [regex]::Replace($text, "\n{3,}", "`n`n")
+    return ($text -replace "`n", "`r`n").TrimEnd()
+}
+
+function Read-LauncherLogTail {
+    param([string]$Path, [int]$Tail = 160)
+    if (-not $Path -or -not (Test-Path $Path)) { return "" }
+    try {
+        $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+    }
+    catch {
+        try {
+            $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::Default)
+        }
+        catch {
+            $raw = ((Get-Content -LiteralPath $Path -Tail $Tail -ErrorAction SilentlyContinue) -join "`n")
+        }
+    }
+    $normalized = Normalize-LauncherLogText $raw
+    $lines = $normalized -split "`r?`n"
+    if ($lines.Count -gt $Tail) {
+        $lines = $lines | Select-Object -Last $Tail
+    }
+    return ($lines -join "`r`n").TrimEnd()
+}
+
 function Set-StatusText {
     param([string]$Message, [string]$ColorName = "White")
     if ($Script:StatusLabel) {
-        $Script:StatusLabel.Text = $Message
-        $Script:StatusLabel.ForeColor = [System.Drawing.Color]::$ColorName
+        if ($Script:StatusLabel.Tag -eq "hidden-header-status") {
+            $Script:StatusLabel.Text = ""
+            return
+        }
+        $displayMessage = $Message
+        if ($Script:StatusLabel.Tag -eq "muted-header") {
+            $displayMessage = $displayMessage -replace "API 已运行：http://127\.0\.0\.1:\d+", "服务已运行"
+            $displayMessage = $displayMessage -replace "API 已启动：http://127\.0\.0\.1:\d+", "服务已启动"
+            $displayMessage = $displayMessage -replace "默认 API：http://127\.0\.0\.1:\d+", "服务可用"
+            if ($displayMessage -match "^(vLLM|fast6g).*(质量版|6G|双加速)") {
+                $displayMessage = ""
+            }
+            if ($displayMessage.Length -gt 44) {
+                $displayMessage = $displayMessage.Substring(0, 44) + "..."
+            }
+        }
+        $Script:StatusLabel.Text = $displayMessage
+        if ($Script:StatusLabel.Tag -eq "muted-header" -and $ColorName -eq "LightGreen") {
+            $Script:StatusLabel.ForeColor = [System.Drawing.Color]::FromArgb(178, 188, 198)
+        }
+        else {
+            $Script:StatusLabel.ForeColor = [System.Drawing.Color]::$ColorName
+        }
+    }
+}
+
+function Set-LauncherNavActive {
+    param([string]$Key)
+    if (-not $Script:NavButtons) { return }
+    foreach ($navKey in $Script:NavButtons.Keys) {
+        $btn = $Script:NavButtons[$navKey]
+        if (-not $btn) { continue }
+        if ($navKey -eq $Key) {
+            $btn.BackColor = [System.Drawing.Color]::FromArgb(48, 68, 88)
+            $btn.ForeColor = [System.Drawing.Color]::White
+            $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(110, 145, 175)
+        }
+        else {
+            $btn.BackColor = [System.Drawing.Color]::FromArgb(30, 39, 49)
+            $btn.ForeColor = [System.Drawing.Color]::FromArgb(218, 226, 234)
+            $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(52, 64, 78)
+        }
+    }
+}
+
+function Set-RoundedControlRegion {
+    param(
+        [System.Windows.Forms.Control]$Control,
+        [int]$Radius = 6
+    )
+    if (-not $Control -or $Control.Width -le 0 -or $Control.Height -le 0) { return }
+    $diameter = [Math]::Max(2, $Radius * 2)
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $path.AddArc(0, 0, $diameter, $diameter, 180, 90)
+    $path.AddArc($Control.Width - $diameter - 1, 0, $diameter, $diameter, 270, 90)
+    $path.AddArc($Control.Width - $diameter - 1, $Control.Height - $diameter - 1, $diameter, $diameter, 0, 90)
+    $path.AddArc(0, $Control.Height - $diameter - 1, $diameter, $diameter, 90, 90)
+    $path.CloseFigure()
+    $oldRegion = $Control.Region
+    $Control.Region = New-Object System.Drawing.Region($path)
+    if ($oldRegion) { $oldRegion.Dispose() }
+    $path.Dispose()
+}
+
+function Get-LogViewerMaxOffset {
+    if (-not $Script:LogViewport -or -not $Script:LogContentLabel) { return 0 }
+    $visibleHeight = [Math]::Max(20, $Script:LogViewport.ClientSize.Height - 20)
+    return [Math]::Max(0, $Script:LogContentLabel.Height - $visibleHeight)
+}
+
+function Update-LogViewerLayout {
+    if (-not $Script:LogViewport -or -not $Script:LogContentLabel) { return }
+
+    $contentWidth = [Math]::Max(80, $Script:LogViewport.ClientSize.Width - 28)
+    $Script:LogContentLabel.MaximumSize = New-Object System.Drawing.Size($contentWidth, 0)
+    $Script:LogContentLabel.Width = $contentWidth
+
+    $maxOffset = Get-LogViewerMaxOffset
+    $Script:LogScrollOffset = [Math]::Max(0, [Math]::Min($Script:LogScrollOffset, $maxOffset))
+    $Script:LogContentLabel.Location = New-Object System.Drawing.Point(12, (10 - $Script:LogScrollOffset))
+
+    if ($Script:LogScrollTrack -and $Script:LogScrollThumb) {
+        $showScroll = ($maxOffset -gt 0)
+        $Script:LogScrollTrack.Visible = $showScroll
+        if ($showScroll) {
+            $trackHeight = [Math]::Max(20, $Script:LogViewport.ClientSize.Height - 16)
+            $Script:LogScrollTrack.Location = New-Object System.Drawing.Point(($Script:LogViewport.ClientSize.Width - 13), 8)
+            $Script:LogScrollTrack.Size = New-Object System.Drawing.Size(8, $trackHeight)
+            $thumbHeight = [Math]::Max(28, [int]($trackHeight * ([Math]::Max(1, $Script:LogViewport.ClientSize.Height) / [Math]::Max(1, $Script:LogContentLabel.Height))))
+            $thumbHeight = [Math]::Min($trackHeight, $thumbHeight)
+            $thumbRange = [Math]::Max(1, $trackHeight - $thumbHeight)
+            $thumbY = if ($maxOffset -gt 0) { [int]($Script:LogScrollOffset * $thumbRange / $maxOffset) } else { 0 }
+            $Script:LogScrollThumb.Location = New-Object System.Drawing.Point(0, $thumbY)
+            $Script:LogScrollThumb.Size = New-Object System.Drawing.Size(8, $thumbHeight)
+        }
+    }
+}
+
+function Set-LogViewerText {
+    param([string]$Text)
+    if (-not $Script:LogContentLabel) { return $false }
+    $Script:LogContentLabel.Text = $Text
+    $Script:LogScrollOffset = 0
+    Update-LogViewerLayout
+    return $true
+}
+
+function Scroll-LogViewer {
+    param([int]$Delta)
+    $maxOffset = Get-LogViewerMaxOffset
+    if ($maxOffset -le 0) { return }
+    $Script:LogScrollOffset = [Math]::Max(0, [Math]::Min(($Script:LogScrollOffset + $Delta), $maxOffset))
+    Update-LogViewerLayout
+}
+
+function Set-LogTabActive {
+    param([string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key)) { $Key = "launcher" }
+    $tabChanged = ($Script:ActiveLogTab -ne $Key)
+    $Script:ActiveLogTab = $Key
+    foreach ($tabKey in $Script:LogTabButtons.Keys) {
+        $btn = $Script:LogTabButtons[$tabKey]
+        if (-not $btn) { continue }
+        if ($tabKey -eq $Key) {
+            $btn.BackColor = [System.Drawing.Color]::FromArgb(48, 68, 88)
+            $btn.ForeColor = [System.Drawing.Color]::White
+            $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(110, 145, 175)
+        }
+        else {
+            $btn.BackColor = [System.Drawing.Color]::FromArgb(24, 31, 39)
+            $btn.ForeColor = [System.Drawing.Color]::FromArgb(205, 214, 224)
+            $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(46, 56, 68)
+        }
+    }
+    if ($Script:LogBox) {
+        $text = ""
+        if ($Script:LogTexts -and $Script:LogTexts.ContainsKey($Key)) {
+            $text = [string]$Script:LogTexts[$Key]
+        }
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            $text = "暂无日志。"
+        }
+        $hadSelection = ($Script:LogBox.PSObject.Properties.Name -contains "SelectionLength" -and $Script:LogBox.SelectionLength -gt 0)
+        if ($hadSelection -and -not $tabChanged) {
+            return
+        }
+        $sameText = ($Script:LogBox.Text -eq $text)
+        if (-not $sameText) {
+            $Script:LogBox.Text = $text
+        }
+        if ($Script:LogBox.PSObject.Properties.Name -contains "SelectionStart") {
+            if (-not $hadSelection) {
+                $Script:LogBox.SelectionStart = $Script:LogBox.TextLength
+                $Script:LogBox.ScrollToCaret()
+            }
+        }
     }
 }
 
@@ -255,13 +540,28 @@ function Update-StartButtonState {
     param([bool]$Running)
     if (-not $Script:StartButton) { return }
     if ($Running) {
-        $Script:StartButton.Text = "服务已运行"
-        $Script:StartButton.BackColor = [System.Drawing.Color]::FromArgb(52, 116, 78)
+        $Script:StartButton.Text = "停止 LEON 服务"
+        $Script:StartButton.BackColor = [System.Drawing.Color]::FromArgb(86, 47, 50)
+        $Script:StartButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(156, 84, 90)
     }
     else {
         $Script:StartButton.Text = "启动 LEON 服务"
-        $Script:StartButton.BackColor = [System.Drawing.Color]::FromArgb(25, 126, 89)
+        $Script:StartButton.BackColor = [System.Drawing.Color]::FromArgb(32, 94, 72)
+        $Script:StartButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(90, 168, 130)
     }
+}
+
+function Toggle-LeonService {
+    if (Test-ApiHealth) {
+        Stop-LeonService
+        Start-Sleep -Milliseconds 300
+        $health = Test-ApiHealth
+        Update-StartButtonState ($null -ne $health)
+        if ($health) { Set-StatusText "服务仍在运行，请稍后再试。" "Khaki" }
+        else { Set-StatusText "服务已停止。" "Khaki" }
+        return
+    }
+    Start-LeonService
 }
 
 function Test-IsAdmin {
@@ -457,13 +757,59 @@ function Add-CheckResult {
     param(
         [string]$Name,
         [string]$Status,
-        [string]$Detail
+        [string]$Detail,
+        [switch]$Record
     )
+    if ($Record -or $Script:EnvCheckRecording) {
+        if (-not $Script:EnvCheckResults) { $Script:EnvCheckResults = @{} }
+        $Script:EnvCheckResults[$Name] = [pscustomobject]@{
+            Name = $Name
+            Status = $Status
+            Detail = $Detail
+            Time = Get-Date
+        }
+    }
     $icon = switch ($Status) {
         "OK" { "通过" }
         "WARN" { "警告" }
         "FAIL" { "失败" }
+        "WAIT" { "待检测" }
         default { $Status }
+    }
+    $color = switch ($Status) {
+        "OK" { [System.Drawing.Color]::FromArgb(76, 220, 132) }
+        "WARN" { [System.Drawing.Color]::FromArgb(245, 190, 85) }
+        "FAIL" { [System.Drawing.Color]::FromArgb(255, 110, 110) }
+        "WAIT" { [System.Drawing.Color]::FromArgb(150, 162, 174) }
+        default { [System.Drawing.Color]::WhiteSmoke }
+    }
+    if ($Script:CheckList -is [System.Windows.Forms.DataGridView]) {
+        $row = $null
+        if ($Script:EnvCheckRows -and $Script:EnvCheckRows.ContainsKey($Name)) {
+            $row = $Script:EnvCheckRows[$Name]
+        }
+        if (-not $row) {
+            $idx = $Script:CheckList.Rows.Add($Name, $icon, $Detail)
+            $row = $Script:CheckList.Rows[$idx]
+            $Script:EnvCheckRows[$Name] = $row
+        }
+        $row.Cells["name"].Value = $Name
+        $row.Cells["status"].Value = $icon
+        $row.Cells["detail"].Value = $Detail
+        $row.DefaultCellStyle.ForeColor = [System.Drawing.Color]::FromArgb(224, 231, 238)
+        $row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(16, 21, 27)
+        $row.DefaultCellStyle.SelectionBackColor = [System.Drawing.Color]::FromArgb(30, 48, 62)
+        $row.DefaultCellStyle.SelectionForeColor = [System.Drawing.Color]::White
+        $row.Cells["status"].Style.ForeColor = $color
+        $row.Cells["status"].Style.SelectionForeColor = $color
+        return
+    }
+    if ($Script:EnvCheckRows -and $Script:EnvCheckRows.ContainsKey($Name)) {
+        $item = $Script:EnvCheckRows[$Name]
+        $item.SubItems[1].Text = $icon
+        $item.SubItems[2].Text = $Detail
+        $item.ForeColor = $color
+        return
     }
     $item = New-Object System.Windows.Forms.ListViewItem($Name)
     [void]$item.SubItems.Add($icon)
@@ -472,8 +818,81 @@ function Add-CheckResult {
         "OK" { $item.ForeColor = [System.Drawing.Color]::FromArgb(76, 220, 132) }
         "WARN" { $item.ForeColor = [System.Drawing.Color]::FromArgb(245, 190, 85) }
         "FAIL" { $item.ForeColor = [System.Drawing.Color]::FromArgb(255, 110, 110) }
+        "WAIT" { $item.ForeColor = [System.Drawing.Color]::FromArgb(150, 162, 174) }
     }
     [void]$Script:CheckList.Items.Add($item)
+    $Script:EnvCheckRows[$Name] = $item
+}
+
+function Initialize-EnvironmentCheckRows {
+    param([string]$Status = "WAIT", [switch]$ResetResults)
+    if (-not $Script:CheckList) { return }
+    if ($ResetResults) {
+        $Script:EnvCheckResults = @{}
+        $Script:EnvCheckCompleted = $false
+        $Script:EnvCheckLastRun = $null
+    }
+    $Script:EnvCheckRows = @{}
+    $names = @(
+        "管理员权限",
+        "项目路径中文检查",
+        "项目 Python Runtime",
+        "NVIDIA 显卡/驱动",
+        "CUDA Toolkit / nvcc",
+        "MSVC C++ Build Tools",
+        "Intel SVML 兼容兜底",
+        "Python 包 / Torch CUDA",
+        "vLLM 插件 / GPT2TTSModel 注册",
+        "IndexTTS2 模型文件",
+        "本地音色库",
+        "API 端口 $Script:ApiPort",
+        "启动入口 BAT"
+    )
+    if ($Script:CheckList -is [System.Windows.Forms.DataGridView]) {
+        $Script:CheckList.Rows.Clear()
+    }
+    else {
+        $Script:CheckList.Items.Clear()
+    }
+    foreach ($name in $names) {
+        Add-CheckResult $name $Status ""
+    }
+}
+
+function Set-RepairResult {
+    param([string]$Name, [string]$Status, [string]$Detail = "")
+    if (-not $Script:RepairStatusLabels -or -not $Script:RepairStatusLabels.ContainsKey($Name)) { return }
+    $statusLabel = $Script:RepairStatusLabels[$Name]
+    $detailLabel = $Script:RepairDetailLabels[$Name]
+    $statusText = switch ($Status) {
+        "OK" { "已处理" }
+        "SKIP" { "跳过" }
+        "RUN" { "执行中" }
+        "WARN" { "注意" }
+        "FAIL" { "失败" }
+        default { "待处理" }
+    }
+    $statusColor = switch ($Status) {
+        "OK" { [System.Drawing.Color]::FromArgb(90, 222, 145) }
+        "SKIP" { [System.Drawing.Color]::FromArgb(150, 162, 174) }
+        "RUN" { [System.Drawing.Color]::FromArgb(120, 175, 230) }
+        "WARN" { [System.Drawing.Color]::FromArgb(245, 190, 85) }
+        "FAIL" { [System.Drawing.Color]::FromArgb(255, 110, 110) }
+        default { [System.Drawing.Color]::FromArgb(150, 162, 174) }
+    }
+    $statusLabel.Text = $statusText
+    $statusLabel.ForeColor = $statusColor
+    $detailLabel.Text = $Detail
+}
+
+function Initialize-RepairRows {
+    if (-not $Script:RepairStatusLabels) { return }
+    foreach ($name in $Script:RepairStatusLabels.Keys) {
+        Set-RepairResult $name "WAIT" ""
+    }
+    if ($Script:RepairSummaryLabel) {
+        $Script:RepairSummaryLabel.Text = ""
+    }
 }
 
 function Test-ApiHealth {
@@ -551,17 +970,20 @@ function Get-CudaToolkitPath {
 function Run-EnvironmentCheck {
     param([switch]$Silent)
 
-    $Script:CheckList.Items.Clear()
-    Set-Progress 2 "正在检测环境..."
-    Add-Log "开始环境检测。项目目录: $Script:RepoRoot"
+    Show-EnvironmentPanel
+    Initialize-EnvironmentCheckRows -ResetResults
+    $Script:EnvCheckRecording = $true
+    try {
+        Set-Progress 2 "正在检测环境..."
+        Add-Log "开始环境检测。项目目录: $Script:RepoRoot"
 
-    $Script:EnvCheckFail = 0
-    $Script:EnvCheckWarn = 0
+        $Script:EnvCheckFail = 0
+        $Script:EnvCheckWarn = 0
 
-    function Count-Result([string]$Status) {
-        if ($Status -eq "FAIL") { $Script:EnvCheckFail++ }
-        elseif ($Status -eq "WARN") { $Script:EnvCheckWarn++ }
-    }
+        function Count-Result([string]$Status) {
+            if ($Status -eq "FAIL") { $Script:EnvCheckFail++ }
+            elseif ($Status -eq "WARN") { $Script:EnvCheckWarn++ }
+        }
 
     $status = if (Test-IsAdmin) { "OK" } else { "WARN" }
     Count-Result $status
@@ -741,7 +1163,13 @@ function Run-EnvironmentCheck {
     else {
         Set-StatusText "环境检测通过，点击左下角“启动 LEON 服务”。" "LightGreen"
     }
-    Add-Log "环境检测完成：FAIL=$Script:EnvCheckFail, WARN=$Script:EnvCheckWarn"
+        $Script:EnvCheckCompleted = $true
+        $Script:EnvCheckLastRun = Get-Date
+        Add-Log "环境检测完成：FAIL=$Script:EnvCheckFail, WARN=$Script:EnvCheckWarn"
+    }
+    finally {
+        $Script:EnvCheckRecording = $false
+    }
 }
 
 function Install-WithWinget {
@@ -749,7 +1177,7 @@ function Install-WithWinget {
     $winget = Get-CommandPath "winget.exe"
     if (-not $winget) {
         Add-Log "找不到 winget，无法自动安装 $Name。" "ERROR"
-        [System.Windows.Forms.MessageBox]::Show("找不到 winget。请先安装 App Installer，或手动安装 $Name。", "无法自动安装", "OK", "Warning") | Out-Null
+        Set-StatusText "找不到 winget，无法自动安装 $Name。" "LightCoral"
         return
     }
     Add-Log "开始通过 winget 安装/修复: $Name"
@@ -766,18 +1194,53 @@ function Install-WithWinget {
     }
 }
 
-function Repair-Environment {
-    Add-Log "用户触发一键修复。"
-    Set-Progress 5 "正在执行可自动修复项..."
+function Get-EnvCheckResult {
+    param([string]$Name)
+    if ($Script:EnvCheckResults -and $Script:EnvCheckResults.ContainsKey($Name)) {
+        return $Script:EnvCheckResults[$Name]
+    }
+    return $null
+}
 
-    if ((Test-Path $Script:SvmlSource) -and (Test-SvmlRepairNeeded)) {
+function Test-EnvCheckResultNeedsRepair {
+    param([string]$Name, [string]$Pattern = "", [string[]]$Statuses = @("WARN", "FAIL"))
+    $result = Get-EnvCheckResult $Name
+    if (-not $result) { return $false }
+    if ($result.Status -notin $Statuses) { return $false }
+    if ([string]::IsNullOrWhiteSpace($Pattern)) { return $true }
+    return ([string]$result.Detail -match $Pattern)
+}
+
+function Repair-Environment {
+    Show-EnvironmentPanel
+    Add-Log "用户触发一键修复。"
+
+    if (-not $Script:EnvCheckCompleted -or -not $Script:EnvCheckResults -or $Script:EnvCheckResults.Count -eq 0) {
+        Set-Progress 0
+        if ($Script:CheckList) {
+            Add-CheckResult "管理员权限" "WAIT" "先点开始检测，再点一键修复。"
+        }
+        Set-StatusText "先点开始检测，再点一键修复。" "Khaki"
+        Add-Log "一键修复已取消：尚未完成环境检测。"
+        return
+    }
+
+    Set-StatusText "正在执行可自动修复项..." "Khaki"
+    Set-Progress 5
+    $actions = 0
+
+    if ((Test-Path $Script:SvmlSource) -and (Test-EnvCheckResultNeedsRepair "Intel SVML 兼容兜底" "(?i)svml|llvm|dll|模块|module" @("FAIL"))) {
+        Add-CheckResult "Intel SVML 兼容兜底" "WAIT" "正在复制随包 DLL 到项目 runtime。"
         try {
             $svmlTarget = Get-SvmlRepairTarget
             if (-not $svmlTarget) { throw "找不到可写入的项目 runtime 目录" }
             Copy-Item -LiteralPath $Script:SvmlSource -Destination $svmlTarget -Force
+            $actions++
+            Add-CheckResult "Intel SVML 兼容兜底" "OK" "已复制: $svmlTarget" -Record
             Add-Log "已复制 svml_dispmd.dll 到项目 runtime: $svmlTarget"
         }
         catch {
+            Add-CheckResult "Intel SVML 兼容兜底" "FAIL" $_.Exception.Message -Record
             Add-Log "复制 svml_dispmd.dll 失败: $($_.Exception.Message)" "WARN"
         }
     }
@@ -786,56 +1249,88 @@ function Repair-Environment {
     }
     Set-Progress 25
 
-    if (-not (Get-VsInstallPath)) {
+    if (Test-EnvCheckResultNeedsRepair "MSVC C++ Build Tools" "未找到|缺少|cl\.exe") {
+        Add-CheckResult "MSVC C++ Build Tools" "WAIT" "正在调用 winget，可能需要系统弹窗确认。"
+        $actions++
         Install-WithWinget -Name "Visual Studio 2022 Build Tools" -Args @(
             "install", "-e", "--id", "Microsoft.VisualStudio.2022.BuildTools",
             "--override", "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended",
             "--accept-package-agreements", "--accept-source-agreements"
         )
+        Add-CheckResult "MSVC C++ Build Tools" "WARN" "安装命令已触发，完成后重新检测。" -Record
     }
     else {
         Add-Log "MSVC Build Tools 已存在，跳过安装。"
     }
     Set-Progress 45
 
-    if (-not (Get-CudaToolkitPath)) {
+    if (Test-EnvCheckResultNeedsRepair "CUDA Toolkit / nvcc" "未找到|nvcc 执行失败|CUDA Toolkit") {
+        Add-CheckResult "CUDA Toolkit / nvcc" "WAIT" "正在调用 winget，可能需要系统弹窗确认。"
+        $actions++
         Install-WithWinget -Name "NVIDIA CUDA Toolkit" -Args @("install", "-e", "--id", "Nvidia.CUDA", "--accept-package-agreements", "--accept-source-agreements")
+        Add-CheckResult "CUDA Toolkit / nvcc" "WARN" "安装命令已触发，完成后重新检测。" -Record
     }
     else {
         Add-Log "CUDA Toolkit 已存在，跳过安装。"
     }
     Set-Progress 65
 
-    if (Test-Path $Script:RuntimePython) {
-        $ninja = Invoke-PythonSnippet -Code "import ninja; print('ninja OK')" -TimeoutSeconds 30
-        if ($ninja.ExitCode -ne 0) {
-            Add-Log "runtime 内缺 ninja，尝试 pip 安装 ninja。"
+    if (Test-EnvCheckResultNeedsRepair "Python 包 / Torch CUDA" "(?i)ninja") {
+        if (Test-Path $Script:RuntimePython) {
+            Add-CheckResult "Python 包 / Torch CUDA" "WAIT" "检测结果显示 ninja 缺失，正在安装。"
+            Add-Log "根据最近一次检测结果安装 ninja。"
+            $actions++
             $pip = Invoke-Capture -FilePath $Script:RuntimePython -Arguments @("-m", "pip", "install", "ninja") -TimeoutSeconds 240 -Env @{ "PATH" = "$Script:RuntimeScripts;$env:PATH" }
             Add-Log ("pip install ninja exit=" + $pip.ExitCode)
-            if ($pip.ExitCode -ne 0) { Add-Log $pip.Stderr "WARN" }
+            if ($pip.ExitCode -ne 0) {
+                Add-CheckResult "Python 包 / Torch CUDA" "FAIL" $pip.Stderr -Record
+                Add-Log $pip.Stderr "WARN"
+            }
+            else {
+                Add-CheckResult "Python 包 / Torch CUDA" "OK" "ninja 已安装，完成后可重新检测确认。" -Record
+            }
         }
         else {
-            Add-Log "runtime 内 ninja 已可导入。"
+            Add-CheckResult "项目 Python Runtime" "FAIL" "缺少项目 runtime，无法安装 ninja。" -Record
         }
+    }
+    else {
+        Add-Log "Python 包检测结果未指向 ninja 缺失，跳过 pip 修复。"
     }
     Set-Progress 82
 
-    if (Test-PathHasChinese $Script:RepoRoot) {
+    $pathResult = Get-EnvCheckResult "项目路径中文检查"
+    if (Test-EnvCheckResultNeedsRepair "项目路径中文检查") {
+        $pathStatus = if ($pathResult) { [string]$pathResult.Status } else { "WARN" }
+        Add-CheckResult "项目路径中文检查" $pathStatus "路径包含中文，无法自动安全搬迁。" -Record
         Add-Log "项目路径包含中文，无法自动安全搬迁。请把整个项目移动到纯英文路径后再运行。" "ERROR"
     }
-    Set-Progress 100 "修复流程已执行，建议重新检测环境。"
-    [System.Windows.Forms.MessageBox]::Show("自动修复已执行。系统组件安装完成后，可能需要重启电脑或重新打开启动器。", "修复完成", "OK", "Information") | Out-Null
+
+    if ($actions -gt 0) {
+        Set-Progress 100
+        Set-StatusText "修复命令已触发，完成后点“开始检测”复查。" "Khaki"
+        Add-Log "一键修复已触发 $actions 个自动修复动作，完成后需要重新检测。"
+    }
+    else {
+        Set-Progress 100
+        Set-StatusText "最近一次检测里没有可自动修复项。" "Khaki"
+        Add-Log "一键修复完成：最近一次检测里没有可自动修复项。"
+    }
 }
 
 function Start-LeonService {
+    Show-HomeLog
+    if ($Script:VllmGpuCombo -and -not [string]::IsNullOrWhiteSpace($Script:VllmGpuCombo.Text)) {
+        Set-VllmGpuMemoryUtilization $Script:VllmGpuCombo.Text
+    }
     if (-not (Test-Path $Script:StartupBat)) {
         Add-Log "缺少启动 BAT: $Script:StartupBat" "ERROR"
         return
     }
     $health = Test-ApiHealth
     if ($health) {
-        Add-Log "API 已经在运行: $Script:ApiBase"
-        Set-StatusText "API 已运行：$Script:ApiBase" "LightGreen"
+        Add-Log "LEON 服务已经在运行: $Script:ApiBase"
+        Set-StatusText "LEON 服务已运行：$Script:ApiBase" "LightGreen"
         Update-StartButtonState $true
         return
     }
@@ -893,24 +1388,20 @@ function Wait-ApiReadyAsync {
         if ($health) {
             $timer.Stop()
             $timer.Dispose()
-            Set-StatusText "API 已启动：$Script:ApiBase" "LightGreen"
-            Add-Log "API ready: $Script:ApiBase"
+            Set-StatusText "LEON 服务已启动：$Script:ApiBase" "LightGreen"
+            Add-Log "LEON 服务 ready: $Script:ApiBase"
             Update-StartButtonState $true
-            Refresh-BackendLogTail
-            Refresh-Voices
             Start-WarmupAsync
             return
         }
         $elapsed = [int]((Get-Date) - $start).TotalSeconds
         Set-StatusText "服务启动中... ${elapsed}s" "Khaki"
-        Add-Log "等待 API /health... ${elapsed}s"
-        Refresh-BackendLogTail
+        Add-Log "等待 LEON 服务 /health... ${elapsed}s"
         if ($elapsed -gt 300) {
             $timer.Stop()
             $timer.Dispose()
-            Set-StatusText "API 启动超时，请查看日志。" "LightCoral"
-            Add-Log "API 启动等待超时。" "ERROR"
-            Refresh-BackendLogTail
+            Set-StatusText "LEON 服务启动超时，请查看日志。" "LightCoral"
+            Add-Log "LEON 服务启动等待超时。" "ERROR"
         }
     })
     $timer.Start()
@@ -919,8 +1410,8 @@ function Wait-ApiReadyAsync {
 function Start-WarmupAsync {
     if ($Script:WarmupStarted) { return }
     $Script:WarmupStarted = $true
-    Add-Log "开始请求后端模型预热..."
-    Set-StatusText "API 已启动，正在预热模型..." "Khaki"
+    Add-Log "开始请求 LEON 服务模型预热..."
+    Set-StatusText "LEON 服务已启动，正在预热模型..." "Khaki"
 
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 400
@@ -930,7 +1421,7 @@ function Start-WarmupAsync {
         try {
             $resp = Invoke-RestMethod -Uri "$Script:ApiBase/warmup" -Method Post -TimeoutSec 180
             if ($resp.status -eq "ok" -or $resp.status -eq "already_warmed") {
-                Set-StatusText "模型预热完成，默认 API：$Script:ApiBase" "LightGreen"
+                Set-StatusText "模型预热完成，服务地址：$Script:ApiBase" "LightGreen"
                 Add-Log "模型预热完成: status=$($resp.status), elapsed=$($resp.elapsed_s)s, voice=$($resp.voice)"
             }
             else {
@@ -940,7 +1431,7 @@ function Start-WarmupAsync {
         }
         catch {
             Set-StatusText "服务已启动，预热未完成，可稍后重试或直接使用。" "Khaki"
-            Add-Log "模型预热未完成: $($_.Exception.Message)。如果当前 API 是旧进程，/warmup 会在下次重启后生效。" "WARN"
+            Add-Log "模型预热未完成: $($_.Exception.Message)。如果当前服务是旧进程，/warmup 会在下次重启后生效。" "WARN"
         }
         Refresh-BackendLogTail
     })
@@ -948,6 +1439,7 @@ function Start-WarmupAsync {
 }
 
 function Stop-LeonService {
+    Show-HomeLog
     $pids = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
     if ($pids.Count -eq 0) {
         Add-Log "端口 $Script:ApiPort 没有监听进程。"
@@ -959,7 +1451,7 @@ function Stop-LeonService {
             $cmd = [string]($proc.CommandLine)
             if ($proc -and $cmd -and ($cmd -like "*$($Script:WorkspaceRoot)*" -or $cmd -like "*$($Script:RepoRoot)*")) {
                 Stop-Process -Id $pid -Force
-                Add-Log "已停止项目 API 进程 PID $pid"
+                Add-Log "已停止项目 LEON 服务进程 PID $pid"
                 Update-StartButtonState $false
             }
             else {
@@ -991,8 +1483,8 @@ function Refresh-Voices {
         Add-Log "音色列表已刷新。"
     }
     catch {
-        Add-Log "刷新音色失败，请先启动 API: $($_.Exception.Message)" "WARN"
-        Set-StatusText "刷新音色失败，请先启动 API。" "Khaki"
+        Add-Log "刷新音色失败，请先启动 LEON 服务: $($_.Exception.Message)" "WARN"
+        Set-StatusText "刷新音色失败，请先启动 LEON 服务。" "Khaki"
     }
 }
 
@@ -1015,7 +1507,7 @@ function Open-VoicePreview {
 function Start-MultiVoiceTest {
     $health = Test-ApiHealth
     if (-not $health) {
-        Add-Log "API 未运行，无法多音色测试。" "WARN"
+        Add-Log "LEON 服务未运行，无法多音色测试。" "WARN"
         return
     }
     $default = $Script:VoiceDefaultBox.Text
@@ -1122,7 +1614,7 @@ function Copy-LocalTavoScript {
 
 function Copy-ApiUrl {
     [System.Windows.Forms.Clipboard]::SetText($Script:ApiBase)
-    Add-Log "已复制 API 地址: $Script:ApiBase"
+    Add-Log "已复制 LEON 服务地址: $Script:ApiBase"
 }
 
 function Open-ApiHome {
@@ -1223,35 +1715,44 @@ function Open-LogsFolder {
 
 function Refresh-BackendLogTail {
     Refresh-StartupLogPaths
-    $text = ""
+    if (-not $Script:LogTexts) { $Script:LogTexts = @{} }
+    $launcherLog = Join-Path $Script:LogDir ("launcher-" + (Get-Date -Format "yyyyMMdd") + ".log")
+    if (Test-Path $launcherLog) {
+        $Script:LogTexts["launcher"] = Read-LauncherLogTail $launcherLog 160
+    }
+    $apiText = ""
     try {
         $apiTail = Invoke-RestMethod -Uri "$Script:ApiBase/server_log/tail?n=220" -TimeoutSec 2
         if ($apiTail -and $apiTail.lines) {
-            $text += "=== API RUNTIME /server_log/tail ===`r`n"
             foreach ($line in @($apiTail.lines)) {
                 $ts = ""
                 try { $ts = ([DateTimeOffset]::FromUnixTimeSeconds([int64]$line.ts).ToLocalTime().ToString("HH:mm:ss")) } catch { $ts = "--:--:--" }
-                $text += "[$ts] [$($line.stream)] $($line.line)`r`n"
+                $apiText += "[$ts] [$($line.stream)] $($line.line)`r`n"
             }
-            $text += "`r`n"
         }
     }
     catch {}
+    if ([string]::IsNullOrWhiteSpace($apiText)) {
+        $apiText = "服务日志暂不可用。服务未启动时这里会保持为空。"
+    }
+    $Script:LogTexts["api"] = Normalize-LauncherLogText $apiText
+
+    $stdoutText = ""
     if ($Script:LatestStartupLog -and (Test-Path $Script:LatestStartupLog.FullName)) {
-        $text += "=== STDOUT $($Script:LatestStartupLog.Name) ===`r`n"
-        $text += ((Get-Content -LiteralPath $Script:LatestStartupLog.FullName -Tail 120 -ErrorAction SilentlyContinue) -join "`r`n")
-        $text += "`r`n`r`n"
+        $stdoutText = Read-LauncherLogTail $Script:LatestStartupLog.FullName 160
     }
+    if ([string]::IsNullOrWhiteSpace($stdoutText)) { $stdoutText = "未发现当前服务启动日志。" }
+    $Script:LogTexts["stdout"] = $stdoutText
+
+    $stderrText = ""
     if ($Script:LatestStartupErr -and (Test-Path $Script:LatestStartupErr.FullName)) {
-        $text += "=== STDERR $($Script:LatestStartupErr.Name) ===`r`n"
-        $text += ((Get-Content -LiteralPath $Script:LatestStartupErr.FullName -Tail 120 -ErrorAction SilentlyContinue) -join "`r`n")
+        $stderrText = Read-LauncherLogTail $Script:LatestStartupErr.FullName 160
     }
-    if ([string]::IsNullOrWhiteSpace($text)) {
-        $text = '还没有发现后端启动日志。先点击左下角“启动 LEON 服务”。'
+    if ([string]::IsNullOrWhiteSpace($stderrText)) { $stderrText = "未发现当前诊断日志。" }
+    $Script:LogTexts["stderr"] = $stderrText
+    if (-not (Test-LogTextSelected)) {
+        Set-LogTabActive $Script:ActiveLogTab
     }
-    $Script:BackendLogBox.Text = $text
-    $Script:BackendLogBox.SelectionStart = $Script:BackendLogBox.TextLength
-    $Script:BackendLogBox.ScrollToCaret()
 }
 
 function Build-LauncherForm {
@@ -1283,7 +1784,7 @@ function Build-LauncherForm {
     $header.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 25)
     $form.Controls.Add($header)
 
-    if (Test-Path $Script:BannerPath) {
+    if ($false -and (Test-Path $Script:BannerPath)) {
         $banner = New-Object System.Windows.Forms.PictureBox
         $banner.Dock = "Fill"
         $banner.SizeMode = "Zoom"
@@ -1313,7 +1814,7 @@ function Build-LauncherForm {
     $sub.BringToFront()
 
     $Script:StatusLabel = New-Object System.Windows.Forms.Label
-    $Script:StatusLabel.Text = "首次启动会自动检测环境。"
+    $Script:StatusLabel.Text = "打开后不会自动检测。需要时点环境检测。"
     $Script:StatusLabel.Font = New-Font 9
     $Script:StatusLabel.ForeColor = [System.Drawing.Color]::Khaki
     $Script:StatusLabel.BackColor = [System.Drawing.Color]::Transparent
@@ -1322,12 +1823,7 @@ function Build-LauncherForm {
     $header.Controls.Add($Script:StatusLabel)
     $Script:StatusLabel.BringToFront()
 
-    $Script:ProgressBar = New-Object System.Windows.Forms.ProgressBar
-    $Script:ProgressBar.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
-    $Script:ProgressBar.Location = New-Object System.Drawing.Point(850, 104)
-    $Script:ProgressBar.Size = New-Object System.Drawing.Size(340, 12)
-    $header.Controls.Add($Script:ProgressBar)
-    $Script:ProgressBar.BringToFront()
+    $Script:ProgressBar = $null
 
     $main = New-Object System.Windows.Forms.SplitContainer
     $main.Dock = "Fill"
@@ -1350,19 +1846,15 @@ function Build-LauncherForm {
     $tabs.Dock = "Fill"
     $tabs.Font = New-Font 9
     $tabs.BackColor = [System.Drawing.Color]::FromArgb(15, 18, 22)
+    $tabs.Appearance = [System.Windows.Forms.TabAppearance]::FlatButtons
+    $tabs.SizeMode = [System.Windows.Forms.TabSizeMode]::Fixed
+    $tabs.ItemSize = New-Object System.Drawing.Size(0, 1)
     $main.Panel2.Controls.Add($tabs)
     $Script:Tabs = $tabs
 
     $buttons = @(
-        @("首页 / 日志", { Show-HomeLog }),
         @("环境检测", { $tabs.SelectedIndex = 1; Run-EnvironmentCheck }),
-        @("一键修复", { $tabs.SelectedIndex = 1; Repair-Environment }),
-        @("停止服务", { Stop-LeonService }),
-        @("刷新音色", { $tabs.SelectedIndex = 2; Refresh-Voices }),
-        @("WebUI", { $tabs.SelectedIndex = 3; Refresh-WebUiPanel | Out-Null }),
-        @("Tavo 说明", { $tabs.SelectedIndex = 4 }),
-        @("打开 API", { Open-ApiHome }),
-        @("打开日志", { Open-LogsFolder })
+        @("一键修复", { $tabs.SelectedIndex = 1; Repair-Environment })
     )
     $y = 20
     foreach ($b in $buttons) {
@@ -1381,7 +1873,7 @@ function Build-LauncherForm {
     }
 
     $info = New-Object System.Windows.Forms.Label
-    $info.Text = "默认 API: $Script:ApiBase`r`n打开后只检测环境，不会自动启动服务。"
+    $info.Text = "服务地址: $Script:ApiBase`r`n打开后只检测环境，不会自动启动服务。"
     $info.ForeColor = [System.Drawing.Color]::Silver
     $info.Location = New-Object System.Drawing.Point(18, 320)
     $info.Size = New-Object System.Drawing.Size(176, 80)
@@ -1534,7 +2026,7 @@ function Build-LauncherForm {
     $logTop.Controls.Add($warmupBtn)
 
     $logHint = New-Object System.Windows.Forms.Label
-    $logHint.Text = "启动器日志 + 后端运行日志"
+    $logHint.Text = "启动器日志 + LEON 服务日志"
     $logHint.ForeColor = [System.Drawing.Color]::Silver
     $logHint.Location = New-Object System.Drawing.Point(246, 9)
     $logHint.Size = New-Object System.Drawing.Size(360, 22)
@@ -1739,7 +2231,7 @@ function Build-LauncherForm {
     $tavoPanel.Controls.Add($copyLocal)
 
     $copyApi = New-Object System.Windows.Forms.Button
-    $copyApi.Text = "复制 API 地址"
+    $copyApi.Text = "复制服务地址"
     $copyApi.Location = New-Object System.Drawing.Point(286, 10)
     $copyApi.Size = New-Object System.Drawing.Size(120, 32)
     $copyApi.Add_Click({ Copy-ApiUrl })
@@ -1764,7 +2256,7 @@ function Build-LauncherForm {
 Tavo 接入步骤
 
 1. 先在这个启动器里点击“环境检测”，确认没有失败项。
-2. 点击左下角“启动 LEON 服务”，等待状态显示 API 已启动。
+2. 点击左下角“启动 LEON 服务”，等待状态显示服务已启动。
 3. Tavo 里打开高级前端渲染：
    左侧边栏 -> 更多 -> 设置 -> 高级前端渲染 -> 打开。
 4. 在 Tavo 正则里新增显示时注入规则。手机和电脑在同一个局域网时，把替换内容设为：
@@ -1781,13 +2273,13 @@ Tavo 接入步骤
 
 常用地址
 
-默认 API: $Script:ApiBase
+服务地址: $Script:ApiBase
 本地测试页: $Script:ApiBase/tavo_test
 脚本地址: $Script:ApiBase/static/tavo.js
 
 注意
 
-- Tavo 前端智能模式由后端创建任务并解析，不应该让 WebView 先调用 /parse_text。
+- Tavo 前端智能模式由 LEON 服务创建任务并解析，不应该让 WebView 先调用 /parse_text。
 - 如果修改 static/tavo.js，需要更新 v= 后面的缓存参数，否则 Tavo 可能继续用旧脚本。
 - 真实手机/Tavo App 验证比浏览器测试更重要，尤其是后台播放、锁屏播放和历史音频恢复。
 "@
@@ -1805,6 +2297,649 @@ Tavo 接入步骤
     })
     $form.Add_FormClosed({
         if ($banner -and $banner.Image) { $banner.Image.Dispose() }
+        if ($Script:LauncherIcon) {
+            $Script:LauncherIcon.Dispose()
+            $Script:LauncherIcon = $null
+        }
+    })
+    return $form
+}
+
+function Build-LauncherForm {
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "LEON 启动器 - IndexTTS2"
+    $form.StartPosition = "CenterScreen"
+    $form.Size = New-Object System.Drawing.Size(1040, 720)
+    $form.MinimumSize = New-Object System.Drawing.Size(920, 620)
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
+    $form.MaximizeBox = $true
+    $form.MinimizeBox = $true
+    $form.SizeGripStyle = [System.Windows.Forms.SizeGripStyle]::Show
+    $form.BackColor = [System.Drawing.Color]::FromArgb(14, 18, 23)
+    $form.Font = New-Font 9
+    if (Test-Path $Script:IconPath) {
+        try {
+            $Script:LauncherIcon = New-Object System.Drawing.Icon($Script:IconPath)
+            $form.Icon = $Script:LauncherIcon
+            $form.ShowIcon = $true
+        }
+        catch {
+            Add-Log "加载启动器图标失败: $($_.Exception.Message)" "WARN"
+        }
+    }
+
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"
+    $header.Height = 104
+    $header.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $form.Controls.Add($header)
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = "LEON 启动器"
+    $title.Font = New-Font 22 ([System.Drawing.FontStyle]::Bold)
+    $title.ForeColor = [System.Drawing.Color]::White
+    $title.Location = New-Object System.Drawing.Point(24, 18)
+    $title.Size = New-Object System.Drawing.Size(420, 40)
+    $header.Controls.Add($title)
+
+    $sub = New-Object System.Windows.Forms.Label
+    $sub.Text = "IndexTTS2 本地语音服务 · vLLM / fast6g"
+    $sub.Font = New-Font 10
+    $sub.ForeColor = [System.Drawing.Color]::Gainsboro
+    $sub.Location = New-Object System.Drawing.Point(27, 58)
+    $sub.Size = New-Object System.Drawing.Size(520, 22)
+    $header.Controls.Add($sub)
+
+    $Script:StatusLabel = New-Object System.Windows.Forms.Label
+    $Script:StatusLabel.Text = "就绪"
+    $Script:StatusLabel.Font = New-Font 9
+    $Script:StatusLabel.ForeColor = [System.Drawing.Color]::FromArgb(178, 188, 198)
+    $Script:StatusLabel.Tag = "muted-header"
+    $Script:StatusLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    $Script:StatusLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+    $Script:StatusLabel.Location = New-Object System.Drawing.Point(560, 36)
+    $Script:StatusLabel.Size = New-Object System.Drawing.Size(420, 24)
+    $header.Controls.Add($Script:StatusLabel)
+
+    $side = New-Object System.Windows.Forms.Panel
+    $side.Dock = "Left"
+    $side.Width = 244
+    $side.Padding = New-Object System.Windows.Forms.Padding(20, 18, 20, 18)
+    $side.BackColor = [System.Drawing.Color]::FromArgb(19, 24, 31)
+    $form.Controls.Add($side)
+
+    $content = New-Object System.Windows.Forms.Panel
+    $content.Dock = "Fill"
+    $content.Padding = New-Object System.Windows.Forms.Padding(20, 18, 20, 20)
+    $content.BackColor = [System.Drawing.Color]::FromArgb(14, 18, 23)
+    $form.Controls.Add($content)
+    $content.BringToFront()
+
+    function Add-SideLabel {
+        param([string]$Text, [int]$Y)
+        $label = New-Object System.Windows.Forms.Label
+        $label.Text = $Text
+        $label.ForeColor = [System.Drawing.Color]::Gainsboro
+        $label.Location = New-Object System.Drawing.Point(20, $Y)
+        $label.Size = New-Object System.Drawing.Size(204, 20)
+        $side.Controls.Add($label)
+        return $label
+    }
+    function Add-SideButton {
+        param([string]$Text, [int]$Y, [scriptblock]$Handler, [System.Drawing.Color]$BackColor)
+        $btn = New-Object System.Windows.Forms.Button
+        $btn.Text = $Text
+        $btn.Location = New-Object System.Drawing.Point(20, $Y)
+        $btn.Size = New-Object System.Drawing.Size(204, 38)
+        $btn.FlatStyle = "Flat"
+        $btn.ForeColor = [System.Drawing.Color]::White
+        $btn.BackColor = $BackColor
+        $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(58, 70, 84)
+        $btn.FlatAppearance.BorderSize = 1
+        $btn.Add_Click($Handler)
+        $side.Controls.Add($btn)
+        return $btn
+    }
+
+    Add-SideLabel "启动版本" 20 | Out-Null
+    $Script:VersionCombo = New-Object System.Windows.Forms.ComboBox
+    $Script:VersionCombo.DropDownStyle = "DropDownList"
+    [void]$Script:VersionCombo.Items.Add("vllm")
+    [void]$Script:VersionCombo.Items.Add("fast6g")
+    $Script:VersionCombo.SelectedItem = $Script:VersionKey
+    $Script:VersionCombo.Location = New-Object System.Drawing.Point(20, 42)
+    $Script:VersionCombo.Size = New-Object System.Drawing.Size(204, 28)
+    $Script:VersionCombo.Add_SelectedIndexChanged({
+        if ($Script:VersionCombo.SelectedItem) {
+            Set-LeonVersion ([string]$Script:VersionCombo.SelectedItem)
+            Set-StatusText "当前启动版本：$(Get-LeonVersionLabel)" "Khaki"
+        }
+    })
+    $side.Controls.Add($Script:VersionCombo)
+
+    Add-SideLabel "vLLM 显存比例" 88 | Out-Null
+    $Script:VllmGpuCombo = New-Object System.Windows.Forms.TextBox
+    $Script:VllmGpuCombo.Text = Get-VllmGpuMemoryUtilizationText
+    $Script:VllmGpuCombo.Location = New-Object System.Drawing.Point(20, 110)
+    $Script:VllmGpuCombo.Size = New-Object System.Drawing.Size(204, 28)
+    $Script:VllmGpuCombo.BackColor = [System.Drawing.Color]::FromArgb(245, 247, 250)
+    $Script:VllmGpuCombo.ForeColor = [System.Drawing.Color]::Black
+    $Script:VllmGpuCombo.Add_Leave({
+        Set-VllmGpuMemoryUtilization $Script:VllmGpuCombo.Text
+        $Script:VllmGpuCombo.Text = Get-VllmGpuMemoryUtilizationText
+    })
+    $Script:VllmGpuCombo.Add_KeyDown({
+        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+            Set-VllmGpuMemoryUtilization $Script:VllmGpuCombo.Text
+            $Script:VllmGpuCombo.Text = Get-VllmGpuMemoryUtilizationText
+            $_.SuppressKeyPress = $true
+        }
+    })
+    $side.Controls.Add($Script:VllmGpuCombo)
+
+    $hint = New-Object System.Windows.Forms.Label
+    $hint.Text = "默认 0.15；保守可填 0.11。仅 vLLM 生效。"
+    $hint.ForeColor = [System.Drawing.Color]::Silver
+    $hint.Location = New-Object System.Drawing.Point(20, 142)
+    $hint.Size = New-Object System.Drawing.Size(204, 42)
+    $side.Controls.Add($hint)
+
+    $Script:StartButton = Add-SideButton "启动 LEON 服务" 202 { Toggle-LeonService } ([System.Drawing.Color]::FromArgb(25, 126, 89))
+    $Script:StartButton.Font = New-Font 13 ([System.Drawing.FontStyle]::Bold)
+    $Script:StartButton.Size = New-Object System.Drawing.Size(204, 68)
+    $Script:StartButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(110, 210, 160)
+
+    Add-SideButton "环境检测" 292 { Run-EnvironmentCheck } ([System.Drawing.Color]::FromArgb(35, 45, 56)) | Out-Null
+    Add-SideButton "一键修复" 338 { Repair-Environment } ([System.Drawing.Color]::FromArgb(35, 45, 56)) | Out-Null
+
+    $apiLabel = New-Object System.Windows.Forms.Label
+    $apiLabel.Text = "服务地址: $Script:ApiBase"
+    $apiLabel.ForeColor = [System.Drawing.Color]::Silver
+    $apiLabel.Location = New-Object System.Drawing.Point(20, 408)
+    $apiLabel.Size = New-Object System.Drawing.Size(204, 40)
+    $side.Controls.Add($apiLabel)
+
+    $envTitle = New-Object System.Windows.Forms.Label
+    $envTitle.Text = "环境检测"
+    $envTitle.Font = New-Font 15 ([System.Drawing.FontStyle]::Bold)
+    $envTitle.ForeColor = [System.Drawing.Color]::White
+    $envTitle.Dock = "Top"
+    $envTitle.Height = 34
+    $content.Controls.Add($envTitle)
+
+    $Script:ProgressBar = New-Object System.Windows.Forms.ProgressBar
+    $Script:ProgressBar.Dock = "Top"
+    $Script:ProgressBar.Height = 10
+    $Script:ProgressBar.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
+    $content.Controls.Add($Script:ProgressBar)
+    $Script:ProgressBar.BringToFront()
+
+    $Script:CheckList = New-Object System.Windows.Forms.ListView
+    $Script:CheckList.Dock = "Fill"
+    $Script:CheckList.View = "Details"
+    $Script:CheckList.FullRowSelect = $true
+    $Script:CheckList.GridLines = $false
+    $Script:CheckList.BorderStyle = "None"
+    $Script:CheckList.BackColor = [System.Drawing.Color]::FromArgb(16, 21, 27)
+    $Script:CheckList.ForeColor = [System.Drawing.Color]::WhiteSmoke
+    $Script:CheckList.Font = New-Font 9
+    [void]$Script:CheckList.Columns.Add("检查项", 220)
+    [void]$Script:CheckList.Columns.Add("状态", 80)
+    [void]$Script:CheckList.Columns.Add("详情", 680)
+    $content.Controls.Add($Script:CheckList)
+    $Script:CheckList.BringToFront()
+
+    $form.Add_Shown({
+        $health = Test-ApiHealth
+        Update-StartButtonState $health
+        if ($health) {
+            Set-StatusText "LEON 服务已运行：$Script:ApiBase" "LightGreen"
+        }
+        else {
+            Set-StatusText "就绪。需要时点环境检测。" "Khaki"
+        }
+        Sync-VllmGpuControls
+    })
+    $form.Add_Resize({
+        if ($Script:StatusLabel) {
+            $Script:StatusLabel.Location = New-Object System.Drawing.Point([Math]::Max(460, $form.ClientSize.Width - 460), 36)
+            $Script:StatusLabel.Size = New-Object System.Drawing.Size(420, 24)
+        }
+    })
+    $form.Add_FormClosed({
+        if ($Script:LauncherIcon) {
+            $Script:LauncherIcon.Dispose()
+            $Script:LauncherIcon = $null
+        }
+    })
+    return $form
+}
+
+function New-DarkLogBox {
+    $box = New-Object System.Windows.Forms.RichTextBox
+    $box.Multiline = $true
+    $box.Dock = "Fill"
+    $box.ScrollBars = [System.Windows.Forms.RichTextBoxScrollBars]::Vertical
+    $box.WordWrap = $true
+    $box.ReadOnly = $true
+    $box.HideSelection = $false
+    $box.ShortcutsEnabled = $true
+    $box.BorderStyle = "None"
+    $box.DetectUrls = $false
+    $box.BackColor = [System.Drawing.Color]::FromArgb(10, 14, 19)
+    $box.ForeColor = [System.Drawing.Color]::FromArgb(214, 224, 232)
+    $box.Font = New-Object System.Drawing.Font("Consolas", 10)
+    $menu = New-Object System.Windows.Forms.ContextMenuStrip
+    $copyItem = New-Object System.Windows.Forms.ToolStripMenuItem("复制")
+    $copyItem.Add_Click({
+        if ($box.SelectionLength -gt 0) {
+            $box.Copy()
+        }
+    })
+    [void]$menu.Items.Add($copyItem)
+    $copyAllItem = New-Object System.Windows.Forms.ToolStripMenuItem("复制全部")
+    $copyAllItem.Add_Click({
+        if (-not [string]::IsNullOrEmpty($box.Text)) {
+            [System.Windows.Forms.Clipboard]::SetText($box.Text)
+        }
+    })
+    [void]$menu.Items.Add($copyAllItem)
+    $selectAllItem = New-Object System.Windows.Forms.ToolStripMenuItem("全选")
+    $selectAllItem.Add_Click({ $box.SelectAll() })
+    [void]$menu.Items.Add($selectAllItem)
+    $box.ContextMenuStrip = $menu
+    return $box
+}
+
+function Use-NativeLogViewer {
+    return $true
+}
+
+function New-LauncherSection {
+    param(
+        [string]$Title,
+        [int]$Height = 0
+    )
+    $panel = New-Object System.Windows.Forms.Panel
+    $panel.Dock = "Top"
+    if ($Height -gt 0) { $panel.Height = $Height }
+    $panel.Padding = New-Object System.Windows.Forms.Padding(14, 10, 14, 14)
+    $panel.BackColor = [System.Drawing.Color]::FromArgb(17, 22, 29)
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $Title
+    $label.Dock = "Top"
+    $label.Height = 24
+    $label.ForeColor = [System.Drawing.Color]::WhiteSmoke
+    $label.Font = New-Font 10 ([System.Drawing.FontStyle]::Bold)
+    $panel.Controls.Add($label)
+
+    return $panel
+}
+
+function Build-LauncherForm {
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "LEON 启动器 - IndexTTS2"
+    $form.StartPosition = "CenterScreen"
+    $form.Size = New-Object System.Drawing.Size(1120, 760)
+    $form.MinimumSize = New-Object System.Drawing.Size(980, 660)
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
+    $form.MaximizeBox = $true
+    $form.MinimizeBox = $true
+    $form.SizeGripStyle = [System.Windows.Forms.SizeGripStyle]::Show
+    $form.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $form.Font = New-Font 9
+    if (Test-Path $Script:IconPath) {
+        try {
+            $Script:LauncherIcon = New-Object System.Drawing.Icon($Script:IconPath)
+            $form.Icon = $Script:LauncherIcon
+            $form.ShowIcon = $true
+        }
+        catch {
+            Add-Log "加载启动器图标失败: $($_.Exception.Message)" "WARN"
+        }
+    }
+
+    $root = New-Object System.Windows.Forms.Panel
+    $root.Dock = "Fill"
+    $root.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $form.Controls.Add($root)
+
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = "Top"
+    $header.Height = 112
+    $header.Padding = New-Object System.Windows.Forms.Padding(28, 18, 28, 14)
+    $header.BackColor = [System.Drawing.Color]::FromArgb(10, 14, 19)
+    $root.Controls.Add($header)
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = "LEON 启动器"
+    $title.Font = New-Font 22 ([System.Drawing.FontStyle]::Bold)
+    $title.ForeColor = [System.Drawing.Color]::White
+    $title.Location = New-Object System.Drawing.Point(28, 20)
+    $title.Size = New-Object System.Drawing.Size(420, 38)
+    $header.Controls.Add($title)
+
+    $sub = New-Object System.Windows.Forms.Label
+    $sub.Text = "IndexTTS2 本地语音服务 · vLLM / fast6g"
+    $sub.Font = New-Font 10
+    $sub.ForeColor = [System.Drawing.Color]::FromArgb(190, 202, 214)
+    $sub.Location = New-Object System.Drawing.Point(31, 62)
+    $sub.Size = New-Object System.Drawing.Size(520, 22)
+    $header.Controls.Add($sub)
+
+    $Script:StatusLabel = New-Object System.Windows.Forms.Label
+    $Script:StatusLabel.Text = "就绪"
+    $Script:StatusLabel.Font = New-Font 9
+    $Script:StatusLabel.ForeColor = [System.Drawing.Color]::FromArgb(178, 188, 198)
+    $Script:StatusLabel.Tag = "hidden-header-status"
+    $Script:StatusLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    $Script:StatusLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+    $Script:StatusLabel.Location = New-Object System.Drawing.Point(610, 42)
+    $Script:StatusLabel.Size = New-Object System.Drawing.Size(460, 24)
+    $Script:StatusLabel.Visible = $false
+    $header.Controls.Add($Script:StatusLabel)
+
+    $body = New-Object System.Windows.Forms.Panel
+    $body.Dock = "Fill"
+    $body.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $root.Controls.Add($body)
+    $body.BringToFront()
+
+    $side = New-Object System.Windows.Forms.Panel
+    $side.Dock = "Left"
+    $side.Width = 244
+    $side.Padding = New-Object System.Windows.Forms.Padding(18, 18, 18, 18)
+    $side.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
+    $body.Controls.Add($side)
+
+    $content = New-Object System.Windows.Forms.Panel
+    $content.Dock = "Fill"
+    $content.Padding = New-Object System.Windows.Forms.Padding(20, 18, 20, 20)
+    $content.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $body.Controls.Add($content)
+    $content.BringToFront()
+
+    function Add-SideLabel {
+        param([string]$Text, [int]$Y)
+        $label = New-Object System.Windows.Forms.Label
+        $label.Text = $Text
+        $label.ForeColor = [System.Drawing.Color]::FromArgb(194, 204, 214)
+        $label.Location = New-Object System.Drawing.Point(20, $Y)
+        $label.Size = New-Object System.Drawing.Size(204, 20)
+        $side.Controls.Add($label)
+        return $label
+    }
+    function Add-SideButton {
+        param([string]$Text, [int]$Y, [scriptblock]$Handler, [System.Drawing.Color]$BackColor)
+        $btn = New-Object System.Windows.Forms.Button
+        $btn.Text = $Text
+        $btn.Location = New-Object System.Drawing.Point(20, $Y)
+        $btn.Size = New-Object System.Drawing.Size(204, 38)
+        $btn.FlatStyle = "Flat"
+        $btn.ForeColor = [System.Drawing.Color]::White
+        $btn.BackColor = $BackColor
+        $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(58, 70, 84)
+        $btn.FlatAppearance.BorderSize = 1
+        $btn.Add_Click($Handler)
+        $side.Controls.Add($btn)
+        return $btn
+    }
+
+    $Script:NavButtons = @{}
+
+    $homeNav = Add-SideButton "首页" 20 { Show-HomeLog } ([System.Drawing.Color]::FromArgb(30, 39, 49))
+    $Script:NavButtons["home"] = $homeNav
+    $envNav = Add-SideButton "环境检测" 66 { Show-EnvironmentPanel; if (-not $Script:EnvCheckRows -or $Script:EnvCheckRows.Count -eq 0) { Initialize-EnvironmentCheckRows }; Set-Progress 0 } ([System.Drawing.Color]::FromArgb(30, 39, 49))
+    $Script:NavButtons["env"] = $envNav
+
+    $bottomPanel = New-Object System.Windows.Forms.Panel
+    $bottomPanel.Dock = "Bottom"
+    $bottomPanel.Height = 132
+    $bottomPanel.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
+    $side.Controls.Add($bottomPanel)
+
+    $configRow = New-Object System.Windows.Forms.Panel
+    $configRow.Size = New-Object System.Drawing.Size(204, 32)
+    $configRow.Location = New-Object System.Drawing.Point(0, 0)
+    $configRow.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
+    $bottomPanel.Controls.Add($configRow)
+
+    $Script:VersionCombo = New-Object System.Windows.Forms.Panel
+    $Script:VersionCombo.Tag = "segmented-version"
+    $Script:VersionCombo.Location = New-Object System.Drawing.Point(0, 0)
+    $Script:VersionCombo.Size = New-Object System.Drawing.Size(126, 32)
+    $Script:VersionCombo.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
+    $configRow.Controls.Add($Script:VersionCombo)
+
+    function Add-VersionSegmentButton {
+        param([string]$Key, [string]$Text, [int]$X, [int]$Width)
+        $btn = New-Object System.Windows.Forms.Button
+        $btn.Text = $Text
+        $btn.Tag = $Key
+        $btn.Location = New-Object System.Drawing.Point($X, 0)
+        $btn.Size = New-Object System.Drawing.Size($Width, 32)
+        $btn.FlatStyle = "Flat"
+        $btn.Font = New-Font 9 ([System.Drawing.FontStyle]::Bold)
+        $btn.BackColor = [System.Drawing.Color]::FromArgb(24, 31, 39)
+        $btn.ForeColor = [System.Drawing.Color]::FromArgb(202, 212, 222)
+        $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(46, 56, 68)
+        $btn.FlatAppearance.BorderSize = 1
+        $btn.Add_Click({
+            Set-LeonVersion ([string]$this.Tag)
+            Initialize-EnvironmentCheckRows -ResetResults
+            Set-StatusText "$(Get-LeonVersionLabel)" "Khaki"
+        })
+        $Script:VersionCombo.Controls.Add($btn)
+    }
+    Add-VersionSegmentButton "vllm" "vLLM" 0 63
+    Add-VersionSegmentButton "fast6g" "6G" 63 63
+
+    $Script:VllmGpuShell = New-Object System.Windows.Forms.Panel
+    $Script:VllmGpuShell.Location = New-Object System.Drawing.Point(136, 0)
+    $Script:VllmGpuShell.Size = New-Object System.Drawing.Size(68, 32)
+    $Script:VllmGpuShell.BackColor = [System.Drawing.Color]::FromArgb(24, 31, 39)
+    $configRow.Controls.Add($Script:VllmGpuShell)
+
+    $Script:VllmGpuCombo = New-Object System.Windows.Forms.TextBox
+    $Script:VllmGpuCombo.Text = Get-VllmGpuMemoryUtilizationText
+    $Script:VllmGpuCombo.Location = New-Object System.Drawing.Point(1, 5)
+    $Script:VllmGpuCombo.Size = New-Object System.Drawing.Size(66, 22)
+    $Script:VllmGpuCombo.BackColor = [System.Drawing.Color]::FromArgb(24, 31, 39)
+    $Script:VllmGpuCombo.ForeColor = [System.Drawing.Color]::White
+    $Script:VllmGpuCombo.Font = New-Font 10 ([System.Drawing.FontStyle]::Bold)
+    $Script:VllmGpuCombo.TextAlign = "Center"
+    $Script:VllmGpuCombo.BorderStyle = "None"
+    $Script:VllmGpuCombo.Add_Leave({
+        Set-VllmGpuMemoryUtilization $Script:VllmGpuCombo.Text
+        $Script:VllmGpuCombo.Text = Get-VllmGpuMemoryUtilizationText
+    })
+    $Script:VllmGpuCombo.Add_KeyDown({
+        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+            Set-VllmGpuMemoryUtilization $Script:VllmGpuCombo.Text
+            $Script:VllmGpuCombo.Text = Get-VllmGpuMemoryUtilizationText
+            $_.SuppressKeyPress = $true
+        }
+    })
+    $Script:VllmGpuShell.Controls.Add($Script:VllmGpuCombo)
+    $Script:VllmGpuTooltip = New-Object System.Windows.Forms.ToolTip
+    $Script:VllmGpuTooltip.AutoPopDelay = 8000
+    $Script:VllmGpuTooltip.InitialDelay = 350
+    $Script:VllmGpuTooltip.ReshowDelay = 100
+    $Script:VllmGpuTooltip.SetToolTip($Script:VllmGpuCombo, "vLLM GPU 显存比例：控制 vLLM 预留 KV cache 的显存占比。0.15 是当前性能默认；显存紧张可填 0.11。")
+    $Script:VllmGpuTooltip.SetToolTip($Script:VllmGpuShell, "vLLM GPU 显存比例：控制 vLLM 预留 KV cache 的显存占比。0.15 是当前性能默认；显存紧张可填 0.11。")
+
+    $Script:StartButton = Add-SideButton "启动 LEON 服务" 0 { Toggle-LeonService } ([System.Drawing.Color]::FromArgb(25, 126, 89))
+    $side.Controls.Remove($Script:StartButton)
+    $bottomPanel.Controls.Add($Script:StartButton)
+    $Script:StartButton.Font = New-Font 13 ([System.Drawing.FontStyle]::Bold)
+    $Script:StartButton.Size = New-Object System.Drawing.Size(204, 68)
+    $Script:StartButton.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Bottom
+    $Script:StartButton.Location = New-Object System.Drawing.Point(0, 44)
+    $Script:StartButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(110, 210, 160)
+    Sync-VllmGpuControls
+
+    $Script:HomePanel = New-Object System.Windows.Forms.Panel
+    $Script:HomePanel.Dock = "Fill"
+    $Script:HomePanel.Padding = New-Object System.Windows.Forms.Padding(0)
+    $Script:HomePanel.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $content.Controls.Add($Script:HomePanel)
+
+    $logNav = New-Object System.Windows.Forms.FlowLayoutPanel
+    $logNav.Dock = "None"
+    $logNav.Location = New-Object System.Drawing.Point(0, 0)
+    $logNav.Size = New-Object System.Drawing.Size(820, 42)
+    $logNav.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $logNav.Padding = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
+    $logNav.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $logNav.WrapContents = $false
+    $Script:HomePanel.Controls.Add($logNav)
+
+    function Add-LogButton {
+        param([string]$Key, [string]$Text)
+        $btn = New-Object System.Windows.Forms.Button
+        $btn.Text = $Text
+        $btn.Size = New-Object System.Drawing.Size(106, 32)
+        $btn.Margin = New-Object System.Windows.Forms.Padding(0, 0, 8, 0)
+        $btn.FlatStyle = "Flat"
+        $btn.BackColor = [System.Drawing.Color]::FromArgb(24, 31, 39)
+        $btn.ForeColor = [System.Drawing.Color]::FromArgb(205, 214, 224)
+        $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(46, 56, 68)
+        $btn.FlatAppearance.BorderSize = 1
+        $btn.Tag = $Key
+        $btn.Add_Click({
+            param($sender, $eventArgs)
+            Set-LogTabActive ([string]$sender.Tag)
+        })
+        $btn.Add_MouseDown({
+            param($sender, $eventArgs)
+            Set-LogTabActive ([string]$sender.Tag)
+        })
+        $logNav.Controls.Add($btn)
+        $Script:LogTabButtons[$Key] = $btn
+    }
+
+    Add-LogButton "launcher" "启动器"
+    Add-LogButton "api" "服务日志"
+    Add-LogButton "stdout" "服务启动"
+    Add-LogButton "stderr" "诊断日志"
+
+    $Script:LogBox = New-DarkLogBox
+    $Script:LogBox.Dock = "None"
+    $Script:LogBox.Location = New-Object System.Drawing.Point(0, 42)
+    $Script:LogBox.Size = New-Object System.Drawing.Size(820, 520)
+    $Script:LogBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $Script:LogBox.BackColor = [System.Drawing.Color]::FromArgb(9, 13, 18)
+    $Script:HomePanel.Controls.Add($Script:LogBox)
+    $Script:LogBox.BringToFront()
+    $logNav.BringToFront()
+    $Script:LauncherLogBox = $Script:LogBox
+    Set-LogTabActive "launcher"
+    $Script:HomePanel.Add_Resize({
+        if ($logNav) {
+            $logNav.Size = New-Object System.Drawing.Size($Script:HomePanel.ClientSize.Width, 42)
+        }
+        if ($Script:LogBox) {
+            $height = [Math]::Max(80, $Script:HomePanel.ClientSize.Height - 42)
+            $Script:LogBox.Location = New-Object System.Drawing.Point(0, 42)
+            $Script:LogBox.Size = New-Object System.Drawing.Size($Script:HomePanel.ClientSize.Width, $height)
+        }
+    })
+
+    $Script:EnvPanel = New-Object System.Windows.Forms.Panel
+    $Script:EnvPanel.Dock = "Fill"
+    $Script:EnvPanel.Padding = New-Object System.Windows.Forms.Padding(0)
+    $Script:EnvPanel.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $Script:EnvPanel.Visible = $false
+    $content.Controls.Add($Script:EnvPanel)
+
+    $envActions = New-Object System.Windows.Forms.Panel
+    $envActions.Dock = "Top"
+    $envActions.Height = 46
+    $envActions.Padding = New-Object System.Windows.Forms.Padding(0, 0, 0, 10)
+    $envActions.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $Script:EnvPanel.Controls.Add($envActions)
+
+    $runCheckButton = New-Object System.Windows.Forms.Button
+    $runCheckButton.Text = "开始检测"
+    $runCheckButton.Location = New-Object System.Drawing.Point(0, 0)
+    $runCheckButton.Size = New-Object System.Drawing.Size(116, 34)
+    $runCheckButton.FlatStyle = "Flat"
+    $runCheckButton.ForeColor = [System.Drawing.Color]::White
+    $runCheckButton.BackColor = [System.Drawing.Color]::FromArgb(48, 68, 88)
+    $runCheckButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(110, 145, 175)
+    $runCheckButton.Add_Click({ Run-EnvironmentCheck })
+    $envActions.Controls.Add($runCheckButton)
+
+    $repairButton = New-Object System.Windows.Forms.Button
+    $repairButton.Text = "一键修复"
+    $repairButton.Location = New-Object System.Drawing.Point(128, 0)
+    $repairButton.Size = New-Object System.Drawing.Size(116, 34)
+    $repairButton.FlatStyle = "Flat"
+    $repairButton.ForeColor = [System.Drawing.Color]::White
+    $repairButton.BackColor = [System.Drawing.Color]::FromArgb(54, 58, 71)
+    $repairButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(102, 110, 132)
+    $repairButton.Add_Click({ Repair-Environment })
+    $envActions.Controls.Add($repairButton)
+
+    $Script:ProgressBar = New-Object System.Windows.Forms.ProgressBar
+    $Script:ProgressBar.Dock = "Top"
+    $Script:ProgressBar.Height = 8
+    $Script:EnvPanel.Controls.Add($Script:ProgressBar)
+    $Script:ProgressBar.BringToFront()
+
+    $Script:CheckList = New-Object System.Windows.Forms.DataGridView
+    $Script:CheckList.Dock = "Fill"
+    $Script:CheckList.AllowUserToAddRows = $false
+    $Script:CheckList.AllowUserToDeleteRows = $false
+    $Script:CheckList.AllowUserToResizeRows = $false
+    $Script:CheckList.ReadOnly = $true
+    $Script:CheckList.MultiSelect = $false
+    $Script:CheckList.RowHeadersVisible = $false
+    $Script:CheckList.BorderStyle = "None"
+    $Script:CheckList.BackgroundColor = [System.Drawing.Color]::FromArgb(16, 21, 27)
+    $Script:CheckList.GridColor = [System.Drawing.Color]::FromArgb(29, 37, 46)
+    $Script:CheckList.EnableHeadersVisualStyles = $false
+    $Script:CheckList.ColumnHeadersBorderStyle = [System.Windows.Forms.DataGridViewHeaderBorderStyle]::Single
+    $Script:CheckList.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(27, 35, 44)
+    $Script:CheckList.ColumnHeadersDefaultCellStyle.ForeColor = [System.Drawing.Color]::FromArgb(226, 232, 238)
+    $Script:CheckList.ColumnHeadersDefaultCellStyle.SelectionBackColor = [System.Drawing.Color]::FromArgb(27, 35, 44)
+    $Script:CheckList.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(16, 21, 27)
+    $Script:CheckList.DefaultCellStyle.ForeColor = [System.Drawing.Color]::WhiteSmoke
+    $Script:CheckList.DefaultCellStyle.SelectionBackColor = [System.Drawing.Color]::FromArgb(30, 48, 62)
+    $Script:CheckList.DefaultCellStyle.SelectionForeColor = [System.Drawing.Color]::White
+    $Script:CheckList.AlternatingRowsDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
+    $Script:CheckList.RowTemplate.Height = 26
+    $Script:CheckList.AutoSizeColumnsMode = [System.Windows.Forms.DataGridViewAutoSizeColumnsMode]::Fill
+    [void]$Script:CheckList.Columns.Add("name", "检查项")
+    [void]$Script:CheckList.Columns.Add("status", "状态")
+    [void]$Script:CheckList.Columns.Add("detail", "详情")
+    $Script:CheckList.Columns["name"].FillWeight = 28
+    $Script:CheckList.Columns["status"].FillWeight = 12
+    $Script:CheckList.Columns["detail"].FillWeight = 60
+    $Script:EnvPanel.Controls.Add($Script:CheckList)
+    $Script:CheckList.BringToFront()
+    Initialize-EnvironmentCheckRows
+
+    $form.Add_Shown({
+        $health = Test-ApiHealth
+        Update-StartButtonState ($null -ne $health)
+        if ($health) {
+            Set-StatusText "LEON 服务已运行：$Script:ApiBase" "LightGreen"
+        }
+        else {
+            Set-StatusText "就绪。需要时点环境检测。" "Khaki"
+        }
+        Sync-VllmGpuControls
+        Show-HomeLog
+    })
+    $form.Add_Resize({
+        if ($Script:StatusLabel) {
+            $Script:StatusLabel.Location = New-Object System.Drawing.Point([Math]::Max(520, $form.ClientSize.Width - 500), 42)
+            $Script:StatusLabel.Size = New-Object System.Drawing.Size(460, 24)
+        }
+    })
+    $form.Add_FormClosed({
         if ($Script:LauncherIcon) {
             $Script:LauncherIcon.Dispose()
             $Script:LauncherIcon = $null
