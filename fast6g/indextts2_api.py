@@ -2,7 +2,6 @@ import os
 import sys
 import traceback
 import base64
-import hashlib
 import html
 import json
 import re
@@ -28,6 +27,7 @@ import uvicorn
 from io import BytesIO
 
 from indextts.infer_v2 import IndexTTS2
+from indextts import snapshot_cache
 
 from pydantic import BaseModel
 
@@ -122,10 +122,45 @@ STATIC_DIR = _resolve_dir_from_env(
     os.path.join(WORKSPACE_ROOT, "static"),
     os.path.join(APP_ROOT, os.pardir, "static"),
 )
-VOICE_LIB_DIR = os.path.join("prompts", "library")
 VOICE_LIB_EXTS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+
+
+def _voice_dir_has_audio(path: str) -> bool:
+    try:
+        root = Path(path)
+        if not root.is_dir():
+            return False
+        return any(p.is_file() and p.suffix.lower() in VOICE_LIB_EXTS for p in root.rglob("*"))
+    except Exception:
+        return False
+
+
+def _resolve_voice_library_dir() -> str:
+    env_path = os.getenv("LEON_VOICE_LIB_DIR")
+    if env_path:
+        abs_env = os.path.abspath(env_path)
+        if os.path.isdir(abs_env):
+            return abs_env
+    candidates = [
+        os.path.join(APP_ROOT, "prompts", "library"),
+        os.path.join(WORKSPACE_ROOT, "prompts", "library"),
+        os.path.join(WORKSPACE_ROOT, "vllm", "prompts", "library"),
+    ]
+    existing = []
+    for candidate in candidates:
+        abs_path = os.path.abspath(candidate)
+        if not os.path.isdir(abs_path):
+            continue
+        existing.append(abs_path)
+        if _voice_dir_has_audio(abs_path):
+            return abs_path
+    return existing[0] if existing else os.path.join(APP_ROOT, "prompts", "library")
+
+
+VOICE_LIB_DIR = _resolve_voice_library_dir()
 CACHE_DIR = os.path.join("outputs", "cache")
-KEY_RE = re.compile(r"^[0-9a-f]{40}$")
+snapshot_cache.CACHE_DIR = CACHE_DIR
+snapshot_cache.READABLE_CACHE_DIR = os.path.join(CACHE_DIR, "by_role")
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 SENTENCE_SPLIT_RE = re.compile(r"([^。！？!?；;\n]+[。！？!?；;]*|\n+)")
 LIVE_JOB_LINGER_SECONDS = 300
@@ -209,19 +244,15 @@ def _ensure_cache_dir() -> None:
 
 
 def _make_cache_key(payload: dict) -> str:
-    stable = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha1(stable.encode("utf-8")).hexdigest()
+    return snapshot_cache.make_cache_key(payload)
 
 
 def _cache_paths(key: str) -> tuple[str, str]:
-    if not KEY_RE.fullmatch(str(key or "")):
-        raise ValueError("cache key must be a 40-character sha1 hex string")
-    return os.path.join(CACHE_DIR, f"{key}.wav"), os.path.join(CACHE_DIR, f"{key}.json")
+    return snapshot_cache.cache_paths(key)
 
 
 def _get_cached_audio(key: str) -> Optional[str]:
-    wav_path, _json_path = _cache_paths(key)
-    return wav_path if os.path.isfile(wav_path) else None
+    return snapshot_cache.get_cached_audio(key)
 
 
 def _write_json_atomic(path: str, data: dict) -> None:
@@ -234,17 +265,7 @@ def _write_json_atomic(path: str, data: dict) -> None:
 
 
 def _save_cached_audio(key: str, wav_bytes: bytes, metadata: dict) -> str:
-    _ensure_cache_dir()
-    wav_path, json_path = _cache_paths(key)
-    tmp = f"{wav_path}.tmp"
-    with open(tmp, "wb") as fp:
-        fp.write(wav_bytes)
-    os.replace(tmp, wav_path)
-    meta = dict(metadata or {})
-    meta["key"] = key
-    meta.setdefault("created_at", time.time())
-    _write_json_atomic(json_path, meta)
-    return wav_path
+    return snapshot_cache.save_cached_audio(key, wav_bytes, metadata)
 
 
 def _read_cache_metadata(key: str) -> dict:
@@ -258,16 +279,7 @@ def _read_cache_metadata(key: str) -> dict:
 
 
 def _delete_cache(key: str) -> bool:
-    deleted = False
-    for path in _cache_paths(key):
-        try:
-            os.remove(path)
-            deleted = True
-        except FileNotFoundError:
-            pass
-        except OSError:
-            pass
-    return deleted
+    return snapshot_cache.delete_cache(key)
 
 
 def _audio_file_meta(path: str) -> dict:
@@ -895,6 +907,9 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
         job.metrics["audio_duration_s"] = round(audio_duration, 3)
         job.metrics["total_wall_s"] = round(total_wall, 3)
         job.metrics["rtf"] = round(total_wall / audio_duration, 3) if audio_duration > 0 else None
+        job.metrics["state"] = "done"
+        job.metrics["phase"] = "done"
+        job.metrics["message"] = "音频已保存"
         metadata = {
             "kind": "fast6g_dialogue_stream_v1",
             "segments_meta": job.segments_meta,
@@ -904,10 +919,6 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
             "version": "fast6g",
         }
         _save_cached_audio(job.cache_key, wav_bytes, metadata)
-        job.metrics["state"] = "done"
-        job.metrics["phase"] = "done"
-        job.metrics["message"] = "音频已保存"
-        _write_json_atomic(_cache_paths(job.cache_key)[1], {**metadata, "metrics": job.metrics})
     except Exception as e:
         if job.cancelled:
             _mark_job_cancelled(job)

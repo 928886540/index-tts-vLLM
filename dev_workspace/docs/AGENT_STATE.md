@@ -24,6 +24,43 @@ If this session is restarted, ask Codex:
 继续 D:\apiWorkSpace\leon_api。先读 AGENTS.md 和 dev_workspace/docs/AGENT_STATE.md。检查上次 push 的状态，然后继续完成目录迁移后的路径/启动器/版本切换验证；不要恢复大音频/模型文件进 Git，不要写死公网域名或局域网 IP。
 ```
 
+## Latest Validation Snapshot: fast6g Startup
+
+Updated: 2026-06-06
+
+Verified on `master` after commit `8cd78fd`:
+
+- `fast6g` starts through `scripts/start-fast6g-api.bat` and serves `http://127.0.0.1:9880/health`.
+- `/health` reports `version=fast6g`, `engine=fast6g`, `normal_parse=true`, `llm_parse=false`, and `qwen_emo=false` by default.
+- `/voices` returns 1109 local voices on this machine. Because `fast6g/prompts/library` is local/empty, `fast6g` now falls back to `LEON_VOICE_LIB_DIR`, root `prompts/library`, then `vllm/prompts/library` when selecting the voice library.
+- Short normal-mode dialogue job completed:
+  - cache key `7515f69f5c42477ae4e7bb3be3825687ddb6a62d`
+  - 1 segment, audio duration `2.334s`
+  - total wall `~9.3s` / observed polling elapsed `10.285s`
+  - `/cache_audio/<key>` returned `HTTP 200`
+  - root cache WAV/JSON and readable `outputs/cache/by_role/旁白/..._<key>.wav/json` were written.
+- GPU memory after startup/generation was about `8.1 GB / 12 GB`.
+- The first public/private network confirmation can appear because the service binds `0.0.0.0:9880`; the user confirmed it.
+
+Fixes made during validation:
+
+- `fast6g/indextts2_api.py` now resolves the shared/local voice library instead of requiring duplicated audio under `fast6g/prompts/library`.
+- `fast6g` now uses the same `indextts/snapshot_cache.py` readable cache helper as `vllm`, so generated caches also create `outputs/cache/by_role/<主角色>/...` entries and delete them with root cache files.
+- `launcher/LEON-Launcher.ps1` environment checks use the same voice-library fallback logic, so selecting `fast6g` does not warn incorrectly when voices live under the shared/vLLM local library.
+
+Validation commands completed:
+
+```powershell
+python -m py_compile vllm\indextts2_api.py vllm\indextts\infer_vllm_v2.py vllm\indextts\gpt\model_vllm_v2.py fast6g\indextts2_api.py fast6g\indextts\infer_v2.py fast6g\indextts\snapshot_cache.py
+$env:PYTHONPATH='D:\apiWorkSpace\leon_api\vllm'; python dev_workspace\dev_tools\test_snapshot_cache_readable.py
+$env:PYTHONPATH='D:\apiWorkSpace\leon_api\fast6g'; python dev_workspace\dev_tools\test_snapshot_cache_readable.py
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+git diff --check
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; ... Invoke-Expression launcher\LEON-Launcher.ps1
+```
+
 This repository is now the likely mainline again because GPT-SoVITS proved unreliable for long Tavo dialogue: it can output long silence, miss text, or fail segments even when the HTTP request succeeds. IndexTTS2 has higher resource cost, but it is the better candidate for stable Tavo long dialogue.
 
 ## Current Project Shape

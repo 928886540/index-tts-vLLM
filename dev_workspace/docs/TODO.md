@@ -8,7 +8,8 @@
   - fixes update `docs/REGRESSION.md` with guards.
 
 - Return IndexTTS2 to the mainline Tavo engine:
-  - verify API startup on `9880`;
+  - verified `fast6g` API startup on `9880`, `/health`, `/voices`, and one short normal-mode generation on 2026-06-06;
+  - still verify `vllm` API startup after the fast6g fixes if switching back to the quality backend;
   - `static/tavo.js` now matches the desired live-card boundary in code: live is transient, saved is native `<audio>`;
   - `static/tavo.js` is now a light loader; runtime lives in `static/tavo.runtime.js` + `static/tavo.runtime.parts/`;
   - update Tavo regex/cache-busting URL with LAN URL or the user's own tunnel host outside repo config;
@@ -32,7 +33,8 @@
 
 - Human-readable cache index:
   - code now writes one primary-role readable entry under `outputs/cache/by_role/<主角色>/<timestamp>_<cache_key>.wav`;
-  - still run one real generation to confirm the generated role folder and matching JSON look right with actual Tavo metadata.
+  - `fast6g` short normal-mode generation confirmed matching `by_role/旁白/...wav/json` on 2026-06-06;
+  - still run one real Tavo generation to confirm role folders look right with actual Tavo metadata.
 
 ## P1
 

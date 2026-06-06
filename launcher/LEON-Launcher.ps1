@@ -142,6 +142,44 @@ function Get-LeonVersionLabel {
     return "vllm 质量版"
 }
 
+function Get-VoiceAudioFiles {
+    param([string]$Directory)
+    if ([string]::IsNullOrWhiteSpace($Directory) -or -not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        return @()
+    }
+    try {
+        return @(Get-ChildItem -LiteralPath $Directory -Recurse -File -Include *.wav,*.mp3,*.flac,*.ogg,*.m4a -ErrorAction SilentlyContinue)
+    }
+    catch {
+        return @()
+    }
+}
+
+function Get-VoiceLibraryDir {
+    $explicit = [string]$env:LEON_VOICE_LIB_DIR
+    if (-not [string]::IsNullOrWhiteSpace($explicit) -and (Test-Path -LiteralPath $explicit -PathType Container)) {
+        return (Resolve-Path -LiteralPath $explicit).Path
+    }
+    $candidates = @(
+        (Join-Path $Script:RepoRoot "prompts\library"),
+        (Join-Path $Script:WorkspaceRoot "prompts\library"),
+        (Join-Path $Script:WorkspaceRoot "vllm\prompts\library")
+    )
+    $existing = @()
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate) -or -not (Test-Path -LiteralPath $candidate -PathType Container)) {
+            continue
+        }
+        $resolved = (Resolve-Path -LiteralPath $candidate).Path
+        $existing += $resolved
+        if (@(Get-VoiceAudioFiles -Directory $resolved).Count -gt 0) {
+            return $resolved
+        }
+    }
+    if ($existing.Count -gt 0) { return [string]$existing[0] }
+    return (Join-Path $Script:RepoRoot "prompts\library")
+}
+
 function Sync-LeonVersionControls {
     if ($Script:VersionCombo) {
         $Script:VersionCombo.SelectedItem = $Script:VersionKey
@@ -664,15 +702,12 @@ function Run-EnvironmentCheck {
     Add-CheckResult "IndexTTS2 模型文件" $status ($(if ($missingModels.Count -eq 0) { "checkpoints 基础模型文件存在。" } else { "缺少: " + ($missingModels -join ", ") }))
     Set-Progress 78
 
-    $voiceCount = 0
-    try {
-        $voiceFiles = Get-ChildItem -LiteralPath (Join-Path $Script:RepoRoot "prompts\library") -Recurse -File -Include *.wav,*.mp3,*.flac,*.ogg,*.m4a -ErrorAction SilentlyContinue
-        $voiceCount = @($voiceFiles).Count
-    }
-    catch {}
+    $voiceDir = Get-VoiceLibraryDir
+    $voiceFiles = Get-VoiceAudioFiles -Directory $voiceDir
+    $voiceCount = @($voiceFiles).Count
     $status = if ($voiceCount -gt 0) { "OK" } else { "WARN" }
     Count-Result $status
-    Add-CheckResult "本地音色库" $status ($(if ($voiceCount -gt 0) { "发现 $voiceCount 个音频素材。" } else { "prompts/library 下没有发现音色音频。" }))
+    Add-CheckResult "本地音色库" $status ($(if ($voiceCount -gt 0) { "音色目录: $voiceDir；发现 $voiceCount 个音频素材。" } else { "音色目录: $voiceDir；没有发现音色音频。" }))
     Set-Progress 84
 
     $portPids = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
