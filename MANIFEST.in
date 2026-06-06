@@ -1,4 +1,0 @@
-global-exclude *~ *.py[cod]
-include *.cu *.cpp
-include *.h *.hpp
-prune Leon_api

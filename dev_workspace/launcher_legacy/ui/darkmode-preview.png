@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="ui-style-app" content="1" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UI Style Prompt - AI UI 设计风格提示词库</title>
+
+    <!-- CRITICAL CSS: Prevent FOUC for hidden SEO/a11y content before main CSS loads -->
+    <style>
+      .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}
+      .focus\:not-sr-only:focus{position:static;width:auto;height:auto;padding:0;margin:0;overflow:visible;clip:auto;white-space:normal}
+      .seo-content-fallback{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
+    </style>
+
+    <!-- Canonical URL (default, overridden by react-helmet per page) -->
+    <link rel="canonical" href="https://www.uiprompt.site/" />
+
+    <!-- hreflang for internationalization (default, overridden by react-helmet per page) -->
+    <link rel="alternate" hreflang="zh-CN" href="https://www.uiprompt.site/zh" />
+    <link rel="alternate" hreflang="en-US" href="https://www.uiprompt.site/en" />
+    <link rel="alternate" hreflang="x-default" href="https://www.uiprompt.site/" />
+
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#3b82f6" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="UI Prompt" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="color-scheme" content="light dark" />
+
+    <!-- Google Site Verification (replace YOUR_CODE with actual verification code) -->
+    <!-- <meta name="google-site-verification" content="YOUR_CODE" /> -->
+
+    <!-- SEO Meta Tags (defaults, overridden by react-helmet per page) -->
+    <meta name="description" content="探索 70+ 种现代 UI 设计风格，获取专业 AI 生成提示词。包含玻璃态、新拟物、扁平化、赛博朋克等流行设计系统，帮助您的 AI 生成独特 UI。" />
+    <meta name="keywords" content="UI设计,AI提示词,设计风格,玻璃态,新拟物,扁平化,CSS,前端设计,UI模板" />
+    <meta name="author" content="UI Style Prompt" />
+    <meta name="robots" content="index,follow" />
+
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="UI Style Prompt" />
+    <meta property="og:title" content="UI Style Prompt - AI UI 设计风格提示词库" />
+    <meta property="og:description" content="探索 70+ 种现代 UI 设计风格，获取专业 AI 生成提示词。" />
+    <meta property="og:url" content="https://www.uiprompt.site" />
+    <meta property="og:image" content="https://www.uiprompt.site/og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:alt" content="UI Style Prompt - AI UI Design Style Library" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="UI Style Prompt - AI UI 设计风格提示词库" />
+    <meta name="twitter:description" content="探索 70+ 种现代 UI 设计风格，获取专业 AI 生成提示词。" />
+    <meta name="twitter:image" content="https://www.uiprompt.site/og-image.jpg" />
+    <meta name="twitter:image:alt" content="UI Style Prompt - AI UI Design Style Library" />
+
+    <!-- Baidu Specific Meta Tags -->
+    <!-- <meta name="baidu-site-verification" content="YOUR_VERIFICATION_CODE" /> -->
+    <meta name="applicable-device" content="pc,mobile" />
+    <meta http-equiv="Cache-Control" content="no-siteapp" />
+    <meta http-equiv="Cache-Control" content="no-transform" />
+
+    <!-- OPTIMIZATION Phase 3: Resource Hints for Faster Loading -->
+    <!-- Preconnect to critical origins (saves DNS + TCP + TLS time) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.tailwindcss.com" />
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
+    <!-- OPTIMIZATION: Preconnect to Google Analytics domains -->
+    <link rel="preconnect" href="https://www.googletagmanager.com" />
+    <link rel="preconnect" href="https://www.google-analytics.com" />
+
+    <!-- OPTIMIZATION Phase 4: LCP Enhancement -->
+    <!-- Preload critical fonts for faster text rendering -->
+    <link rel="preload" href="https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiA.woff2" as="font" type="font/woff2" crossorigin />
+
+    <!-- OPTIMIZATION: Async Google Fonts loading (improves LCP by not blocking render) -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Permanent+Marker&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Permanent+Marker&display=swap" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Permanent+Marker&display=swap" /></noscript>
+
+    <!-- DNS Prefetch for secondary resources -->
+    <link rel="dns-prefetch" href="https://unpkg.com" />
+
+    <!-- Prefetch critical data for faster navigation -->
+    <link rel="prefetch" href="/data/preview-id-map.json" as="fetch" crossorigin />
+    <link rel="prefetch" href="/data/compiled-jsx-index.json" as="fetch" crossorigin />
+
+    <!-- OPTIMIZATION: Preload/Prefetch sharded index (critical first, then high priority) -->
+    <link rel="preload" href="/data/styles-index/layout.json" as="fetch" crossorigin />
+    <link rel="prefetch" href="/data/styles-index/interaction.json" as="fetch" crossorigin />
+    <link rel="prefetch" href="/data/styles-index/core.json" as="fetch" crossorigin />
+
+    <!-- Preload critical assets (high priority) -->
+    <link rel="modulepreload" href="data:text/jsx;base64,aW1wb3J0IHsgU3RyaWN0TW9kZSwgRnJhZ21lbnQgfSBmcm9tICdyZWFjdCcKaW1wb3J0IHsgY3JlYXRlUm9vdCB9IGZyb20gJ3JlYWN0LWRvbS9jbGllbnQnCmltcG9ydCAnLi9pbmRleC5jc3MnCmltcG9ydCBBcHAgZnJvbSAnLi9BcHAuanN4JwppbXBvcnQgeyBjbGVhckxvYWRlcnNDYWNoZSB9IGZyb20gJy4vZGF0YS9jb21wb25lbnRzL2xvYWRlcnMuanMnCgovLyBHb29nbGUgQW5hbHl0aWNzIDQgaW5pdGlhbGl6YXRpb24gKG11c3QgYmUgYmVmb3JlIFdlYiBWaXRhbHMpCmltcG9ydCB7IGluaXRHQTQgfSBmcm9tICcuL3V0aWxzL2FuYWx5dGljcy5qcycKCi8vIFdlYiBWaXRhbHMgbW9uaXRvcmluZyAtIHRyYWNrcyBDb3JlIFdlYiBWaXRhbHMgZm9yIFNFTwppbXBvcnQgeyBpbml0V2ViVml0YWxzIH0gZnJvbSAnLi91dGlscy93ZWJWaXRhbHMuanMnCgppZiAoaW1wb3J0Lm1ldGEuZW52LkRFViAmJiB0eXBlb2Ygd2luZG93ICE9PSAndW5kZWZpbmVkJykgewogIHdpbmRvdy5fX2NsZWFyTG9hZGVyc0NhY2hlID0gY2xlYXJMb2FkZXJzQ2FjaGUKfQoKLy8gT1BUSU1JWkFUSU9OOiBEZWZlciBHQTQgYW5kIFdlYiBWaXRhbHMgaW5pdGlhbGl6YXRpb24gdG8gbm90IGJsb2NrIGZpcnN0IHBhaW50Ci8vIFVzZXMgcmVxdWVzdElkbGVDYWxsYmFjayB0byBydW4gd2hlbiBicm93c2VyIGlzIGlkbGUsIGltcHJvdmluZyBMQ1AKY29uc3QgaW5pdEFuYWx5dGljc0RlZmVycmVkID0gKCkgPT4gewogIGluaXRHQTQoKQogIGluaXRXZWJWaXRhbHMoKQp9CgppZiAodHlwZW9mIHdpbmRvdyAhPT0gJ3VuZGVmaW5lZCcpIHsKICBpZiAoJ3JlcXVlc3RJZGxlQ2FsbGJhY2snIGluIHdpbmRvdykgewogICAgLy8gTW9kZXJuIGJyb3dzZXJzOiBydW4gd2hlbiBpZGxlCiAgICByZXF1ZXN0SWRsZUNhbGxiYWNrKGluaXRBbmFseXRpY3NEZWZlcnJlZCwgeyB0aW1lb3V0OiAyMDAwIH0pCiAgfSBlbHNlIHsKICAgIC8vIEZhbGxiYWNrOiBydW4gYWZ0ZXIgZmlyc3QgcGFpbnQgdmlhIHNldFRpbWVvdXQKICAgIHNldFRpbWVvdXQoaW5pdEFuYWx5dGljc0RlZmVycmVkLCAwKQogIH0KfQoKY29uc3Qgcm9vdEVsID0gZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ3Jvb3QnKTsKCi8vIE9QVElNSVpBVElPTjogT25seSB1c2UgU3RyaWN0TW9kZSBpbiBkZXZlbG9wbWVudAovLyBTdHJpY3RNb2RlIGNhdXNlcyBkb3VibGUtcmVuZGVyaW5nIHdoaWNoIGltcGFjdHMgcHJvZHVjdGlvbiBwZXJmb3JtYW5jZQpjb25zdCBXcmFwcGVyID0gaW1wb3J0Lm1ldGEuZW52LkRFViA/IFN0cmljdE1vZGUgOiBGcmFnbWVudDsKCmNyZWF0ZVJvb3Qocm9vdEVsKS5yZW5kZXIoCiAgPFdyYXBwZXI+CiAgICA8QXBwIC8+CiAgPC9XcmFwcGVyPgopOwo=" />
+    <script type="module" crossorigin src="/assets/index-COLtFW0k.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-react-WKyUJdZW.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-motion-MNZ5WDmH.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-syntax-BDF46-37.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-xfgqKiMF.css">
+  </head>
+  <body>
+    <div id="root"></div>
+
+	    <!-- OPTIMIZATION: Register Service Worker for offline caching -->
+	    <script>
+	      const isLoopbackHost = (host) => (
+	        host === 'localhost' ||
+	        host === '127.0.0.1' ||
+	        host === '[::1]' ||
+	        host === '::1'
+	      );
+
+	      const swOptOut =
+	        new URLSearchParams(location.search).has('no-sw') ||
+	        localStorage.getItem('disableSW') === '1';
+
+	      const isDevHost = isLoopbackHost(location.hostname);
+
+	      const clearUiStyleCaches = async () => {
+	        if (!('caches' in window)) return;
+	        try {
+	          const keys = await caches.keys();
+	          await Promise.all(
+	            keys
+	              .filter((k) => k.startsWith('ui-style-'))
+	              .map((k) => caches.delete(k))
+	          );
+	        } catch {
+	          // Ignore cache cleanup failures.
+	        }
+	      };
+
+	      const unregisterServiceWorkers = async () => {
+	        if (!('serviceWorker' in navigator)) return;
+	        try {
+	          const regs = await navigator.serviceWorker.getRegistrations();
+	          await Promise.all(regs.map((reg) => reg.unregister()));
+	        } catch {
+	          // Ignore unregistration failures.
+	        }
+	      };
+
+	      // In dev/loopback we want a clean environment (no stale SW/caches from older builds).
+	      if ('serviceWorker' in navigator && (isDevHost || swOptOut)) {
+	        const cleanupKey = '__ui_style_sw_cleanup_done__';
+	        const hasCleanupFlag = () => {
+	          try {
+	            return sessionStorage.getItem(cleanupKey) === '1';
+	          } catch {
+	            return false;
+	          }
+	        };
+	        const setCleanupFlag = () => {
+	          try {
+	            sessionStorage.setItem(cleanupKey, '1');
+	            return true;
+	          } catch {
+	            return false;
+	          }
+	        };
+
+	        Promise.all([unregisterServiceWorkers(), clearUiStyleCaches()]).finally(() => {
+	          // If a SW was controlling this page, reload once after cleanup to avoid first-load errors.
+	          if (isDevHost && navigator.serviceWorker.controller && !hasCleanupFlag() && setCleanupFlag()) {
+	            window.location.reload();
+	          }
+	        });
+	      }
+
+	      if ('serviceWorker' in navigator && !isDevHost && !swOptOut) {
+	        window.addEventListener('load', () => {
+	          navigator.serviceWorker.register('/sw.js').catch(() => {});
+	        });
+	      }
+	    </script>
+	  </body>
+</html>

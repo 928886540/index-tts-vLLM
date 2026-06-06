@@ -1,0 +1,13 @@
+Use case: stylized-concept
+Asset type: Windows launcher header banner for a local desktop AI voice service
+Primary request: Create a wide landscape banner for LEON / IndexTTS2 vLLM, a practical local voice synthesis launcher.
+Scene/backdrop: A dark but not black local voice studio interface, with subtle audio waveform lines, GPU compute lattice details, and restrained technical depth.
+Subject: Abstract voice synthesis and local GPU inference, no people and no face.
+Style/medium: polished cinematic desktop-tool banner, realistic-stylized, refined and practical rather than marketing-like.
+Composition/framing: 2048x1152 landscape. Keep safe negative space on the left for launcher title and status text. Put visual interest in the center-right and right side. The image must still read well when cropped into a shallow top header.
+Lighting/mood: low-key studio lighting with crisp edges, calm professional mood.
+Color palette: deep neutral charcoal base, subtle cyan/teal signal lines, small warm amber accents, avoid a one-note blue or purple palette.
+Materials/textures: glassy waveform traces, soft GPU-grid glow, clean matte desktop-tool surfaces.
+Text: no text.
+Constraints: no readable words, no logos, no watermark, no people, no faces, no mascot, no clutter, no dramatic fantasy scene. Must feel like a practical Windows launcher header, not a web landing-page hero.
+Avoid: stock-photo look, large decorative gradient blobs, blurry dark empty background, neon cyberpunk overload, readable UI text.

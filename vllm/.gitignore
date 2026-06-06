@@ -1,0 +1,56 @@
+# Development Tools.
+Git
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+.idea/
+.vscode/
+
+# Environments.
+.venv*/
+venv*/
+conda_env*/
+indextts2runtime
+
+# Python Bytecode.
+*.py[cod]
+
+# Distribution/Packaging.
+/build/
+/dist/
+*.egg-info/
+.pypirc
+*.whl
+
+# Operating System Junk.
+*.DS_Store
+Thumbs.db
+desktop.ini
+
+# IndexTTS.
+/cache/
+/checkpoints/*
+!/checkpoints/*.yaml
+!/checkpoints/*.yml
+!/checkpoints/*.json
+!/checkpoints/*.txt
+!/checkpoints/*.md
+!/checkpoints/*.model
+!/checkpoints/*.vocab
+!/checkpoints/.gitattributes
+!/checkpoints/feat1.pt
+!/checkpoints/feat2.pt
+!/checkpoints/wav2vec2bert_stats.pt
+/outputs/
+/prompts/audio_history.json
+/prompts/history/
+
+# Local dev_workspace runtime logs.
+/dev_workspace/dev_tools/*.log
+/dev_workspace/dev_tools/*.err
+/dev_workspace/dev_tools/tavo_debug/
+/dev_workspace/dev_tools/multivoice_500_stream_*
+/prompts/*.zip
+
+# Local torch extension build scratch.
+**/alias_free_activation/cuda/build/

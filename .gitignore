@@ -1,49 +1,88 @@
-*.bat
-# Development Tools.
-Git
+# Python / tools
+__pycache__/
+*.py[cod]
 .mypy_cache/
 .ruff_cache/
-__pycache__/
-.idea/
-.vscode/
-
-# Environments.
+.pytest_cache/
+.ipynb_checkpoints/
 .venv*/
 venv*/
 conda_env*/
-indextts2runtime
+node_modules/
 
-# Python Bytecode.
-*.py[cod]
-
-# Distribution/Packaging.
-/build/
-/dist/
-*.egg-info/
-.pypirc
-*.whl
-
-# Operating System Junk.
-*.DS_Store
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
 Thumbs.db
 desktop.ini
 
-# IndexTTS.
-/cache/
-/checkpoints/*
-!/checkpoints/*.yaml
-/outputs/
-/prompts/audio_history.json
-/prompts/history/
-/prompts/library/**
-!/prompts/library/
-!/prompts/library/**/*.txt
+# Local runtime environments
+vllm/indextts2runtime/
+fast6g/indextts2runtime/
+*/indextts2runtime/
 
-# Local Leon_api runtime logs.
-/Leon_api/dev_tools/*.log
-/Leon_api/dev_tools/*.err
-/Leon_api/dev_tools/tavo_debug/
-/Leon_api/dev_tools/multivoice_500_stream_*
-/Leon_api/环境检查/logs/
-/Leon_api/双加速默认版(6G可用)/
-/prompts/*.zip
+# Model weights and local model caches
+vllm/checkpoints/*
+fast6g/checkpoints/*
+!vllm/checkpoints/*.yaml
+!fast6g/checkpoints/*.yaml
+!vllm/checkpoints/*.yml
+!fast6g/checkpoints/*.yml
+!vllm/checkpoints/*.json
+!fast6g/checkpoints/*.json
+!vllm/checkpoints/*.txt
+!fast6g/checkpoints/*.txt
+!vllm/checkpoints/*.md
+!fast6g/checkpoints/*.md
+!vllm/checkpoints/*.model
+!fast6g/checkpoints/*.model
+!vllm/checkpoints/*.vocab
+!fast6g/checkpoints/*.vocab
+!vllm/checkpoints/.gitattributes
+!fast6g/checkpoints/.gitattributes
+!vllm/checkpoints/feat1.pt
+!fast6g/checkpoints/feat1.pt
+!vllm/checkpoints/feat2.pt
+!fast6g/checkpoints/feat2.pt
+!vllm/checkpoints/wav2vec2bert_stats.pt
+!fast6g/checkpoints/wav2vec2bert_stats.pt
+
+# Generated outputs / caches / logs
+logs/
+vllm/cache/
+fast6g/cache/
+vllm/outputs/
+fast6g/outputs/
+dev_workspace/dev_tools/*.log
+dev_workspace/dev_tools/*.err
+dev_workspace/dev_tools/tavo_debug/
+dev_workspace/dev_tools/multivoice_500_stream_*
+
+# Large local audio libraries and generated packages
+vllm/prompts/*.zip
+fast6g/prompts/*.zip
+packages/
+
+# Local tool bundles and backups
+vllm/Git/
+fast6g/Git/
+vllm/.claude/
+fast6g/.claude/
+vllm/.codex_dispatch_voice_library.log
+fast6g/.codex_dispatch_voice_library.log
+.codex_dispatch_voice_library.log
+
+# Binary package artifacts
+*.7z
+*.zip
+*.rar
+*.tar
+*.tar.gz
+*.whl
+
+# Torch extension build scratch
+vllm/**/build/lock
+fast6g/**/build/lock
+vllm/**/alias_free_activation/cuda/build/
+fast6g/**/alias_free_activation/cuda/build/
