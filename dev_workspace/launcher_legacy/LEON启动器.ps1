@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Continue"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -12,8 +12,7 @@ $Script:ApiPort = 9880
 $Script:ApiBase = "http://127.0.0.1:$Script:ApiPort"
 $Script:WebUiPort = 7860
 $Script:WebUiBase = "http://127.0.0.1:$Script:WebUiPort"
-$Script:LanHost = "192.168.8.100"
-$Script:PublicHost = "https://index-tts.928886540.xyz"
+$Script:LanHost = "<LAN-IP>"
 $Script:StartupBat = Join-Path $Script:RepoRoot "go-API-VLLM-NoQwen.bat"
 $Script:WebUiStartupBat = Join-Path $Script:RepoRoot "go-webui-VLLM-NoQwen.bat"
 $Script:RuntimePython = Join-Path $Script:RepoRoot "indextts2runtime\python.exe"
@@ -941,9 +940,7 @@ function Open-LastAudio {
 }
 
 function Copy-TavoScript {
-    $text = "<script src=`"$Script:PublicHost/static/tavo.js?v=20260605-ui-unify-v2`"></script>"
-    [System.Windows.Forms.Clipboard]::SetText($text)
-    Add-Log "已复制 Tavo 注入脚本。"
+    Copy-LocalTavoScript
 }
 
 function Copy-LocalTavoScript {
@@ -1481,7 +1478,7 @@ function Build-LauncherForm {
     $tabTavo.Controls.Add($tavoPanel)
 
     $copyPublic = New-Object System.Windows.Forms.Button
-    $copyPublic.Text = "复制域名脚本"
+    $copyPublic.Text = "复制脚本"
     $copyPublic.Location = New-Object System.Drawing.Point(16, 10)
     $copyPublic.Size = New-Object System.Drawing.Size(120, 32)
     $copyPublic.Add_Click({ Copy-TavoScript })
@@ -1525,10 +1522,6 @@ Tavo 接入步骤
    左侧边栏 -> 更多 -> 设置 -> 高级前端渲染 -> 打开。
 4. 在 Tavo 正则里新增显示时注入规则，把替换内容设为：
 
-   <script src="$Script:PublicHost/static/tavo.js?v=20260605-ui-unify-v2"></script>
-
-   如果手机和电脑在同一个局域网，也可以用：
-
    <script src="http://$Script:LanHost`:$Script:ApiPort/static/tavo.js?v=20260605-ui-unify-v2"></script>
 
 5. 正则建议：
@@ -1541,7 +1534,7 @@ Tavo 接入步骤
 默认 API: $Script:ApiBase
 本地测试页: $Script:ApiBase/tavo_test
 脚本地址: $Script:ApiBase/static/tavo.js
-域名脚本: $Script:PublicHost/static/tavo.js
+公网隧道: 只替换脚本 host，不写入启动器配置
 
 注意
 

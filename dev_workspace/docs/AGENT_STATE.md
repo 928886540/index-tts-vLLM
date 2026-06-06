@@ -6,6 +6,24 @@ Updated: 2026-06-06
 
 Finish the root workspace migration and keep IndexTTS2 as the Tavo mainline without copying GPT-SoVITS engine behavior into this project.
 
+## Restart Handoff: 2026-06-06 Push Point
+
+The repository has been moved to `D:\apiWorkSpace\leon_api` and is intended to be the Git root. The current push includes:
+
+- root layout with `vllm/`, `fast6g/`, shared `static/`, shared `launcher/`, shared `scripts/`, and `dev_workspace/`;
+- root launcher version selection for `vllm` / `fast6g`;
+- optional Qwen emotion startup flag;
+- vLLM GPU memory ratio startup option (`0.18` default / `0.11` conservative);
+- public tunnel/domain removed from program configuration and docs;
+- fixed LAN IP examples removed from tracked code/docs;
+- large model/audio/DLL/runtime assets removed from Git tracking and ignored locally.
+
+If this session is restarted, ask Codex:
+
+```text
+继续 D:\apiWorkSpace\leon_api。先读 AGENTS.md 和 dev_workspace/docs/AGENT_STATE.md。检查上次 push 的状态，然后继续完成目录迁移后的路径/启动器/版本切换验证；不要恢复大音频/模型文件进 Git，不要写死公网域名或局域网 IP。
+```
+
 This repository is now the likely mainline again because GPT-SoVITS proved unreliable for long Tavo dialogue: it can output long silence, miss text, or fail segments even when the HTTP request succeeds. IndexTTS2 has higher resource cost, but it is the better candidate for stable Tavo long dialogue.
 
 ## Current Project Shape
@@ -45,6 +63,14 @@ Current launcher direction:
 - Current launcher source is `launcher/LEON-Launcher.ps1`.
 - The launcher selects `vllm` or `fast6g`, then starts the selected version through `scripts/start-vllm-api.bat` or `scripts/start-fast6g-api.bat`.
 - `LEON_ENABLE_QWEN_EMO=1` is set only when the launcher checkbox is enabled.
+- vLLM startup exposes `gpu_memory_utilization` in the launcher. Current choices are `0.18` default and `0.11` conservative; the value is passed as `INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION`.
+- Public Tavo tunnel host must not be hardcoded in Git and must not be treated as launcher/backend configuration. The program should work with local/LAN URLs by default. If the user has a tunnel/reverse proxy, they replace only the script host in the Tavo regex; `static/tavo.js` then uses its own loaded origin as the API origin.
+
+Git/LFS direction:
+
+- Keep code, scripts, docs, tests, and small config under Git.
+- Keep model weights, prompt/reference audio, generated WAV/MP3/MP4, DLL fallbacks, runtime environments, and package archives local/untracked.
+- `.gitattributes` no longer routes audio/video/DLL files through LFS; these files are local assets unless explicitly reintroduced later.
 
 ## Latest Investigation Snapshot: RTF and Home Player UI
 
@@ -75,7 +101,7 @@ Home player UI changes now in code:
 Current cache-busted Tavo URL:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v6"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
 ```
 
 Current validation for this `L`/`D` follow-up:
@@ -125,7 +151,7 @@ Screenshots saved for layout evidence:
 Tavo regex cache-busting URL should be updated to:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v6"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
 ```
 
 ## Latest Packaging Snapshot: LEON Launcher
@@ -153,7 +179,7 @@ Important behavior:
 - Checks include administrator status, Chinese path, `indextts2runtime\python.exe`, NVIDIA driver, CUDA Toolkit / `nvcc`, MSVC `cl.exe`, runtime-aware SVML compatibility, Torch CUDA / vLLM / FastAPI / ninja imports, `patch_vllm` registration, required checkpoint files, voice library count, API port `9880`, and startup BAT presence.
 - One-click repair can copy the bundled `svml_dispmd.dll` into the project runtime only when import logs indicate SVML/LLVM/DLL load trouble, launch `winget` installs for Visual Studio Build Tools and NVIDIA CUDA Toolkit, and install `ninja` into the project runtime.
 - Voice testing uses `/voices`, `/tts_dialogue_stream_job`, `/tts_dialogue_job_status/{cache_key}`, and `/cache_audio/{cache_key}` with `parse_mode=normal`.
-- Tavo instructions use the current cache-busted script URL: `https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v6`.
+- Tavo instructions use the current cache-busted LAN script URL; public hosts are user-managed outside the program.
 - No image API key or OpenAI-compatible key is written into launcher files or docs.
 - `LEON启动器.ps1` is UTF-8 with BOM so Windows PowerShell 5.1 can parse Chinese text directly.
 
@@ -212,7 +238,7 @@ Still required:
 - Tavo regex cache-busting URL was:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260605-live-card"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260605-live-card"></script>
 ```
 
 ## Recently Imported Documentation Workflow
@@ -282,7 +308,7 @@ Fixes now in code:
 - Foreground LIVE polling can confirm `/cache_audio/{cache_key}` with `HEAD` and switch to saved if the file is already readable but `job_status` lags. This fallback is disabled for failed/cancelled/background-generate jobs.
 - Player card/control height is stabilized to reduce pending/live/saved layout jumps.
 - Settings order is now: `文本模式`, `合成质量`, voice mapping, `播放 / 离线`.
-- Cache-busted Tavo URL is now `https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v6`.
+- Cache-busted Tavo URL is now `http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6` for LAN examples; public hosts are user-managed outside the program.
 
 RTF evidence from recent real cache metadata:
 

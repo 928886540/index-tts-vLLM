@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Continue"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -26,8 +26,7 @@ $Script:ApiPort = 9880
 $Script:ApiBase = "http://127.0.0.1:$Script:ApiPort"
 $Script:WebUiPort = 7860
 $Script:WebUiBase = "http://127.0.0.1:$Script:WebUiPort"
-$Script:LanHost = "192.168.8.100"
-$Script:PublicHost = "https://index-tts.928886540.xyz"
+$Script:LanHost = "<LAN-IP>"
 $Script:StartupBat = Join-Path $Script:RepoRoot "go-API-VLLM-NoQwen.bat"
 $Script:WebUiStartupBat = Join-Path $Script:RepoRoot "go-webui-VLLM-NoQwen.bat"
 $Script:RuntimePython = Join-Path $Script:RepoRoot "indextts2runtime\python.exe"
@@ -1501,9 +1500,7 @@ function Open-LastAudio {
 }
 
 function Copy-TavoScript {
-    $text = "<script src=`"$Script:PublicHost/static/tavo.js?v=20260605-ld-live-v1`"></script>"
-    [System.Windows.Forms.Clipboard]::SetText($text)
-    Add-Log "已复制 Tavo 注入脚本。"
+    Copy-LocalTavoScript
 }
 
 function Copy-LocalTavoScript {

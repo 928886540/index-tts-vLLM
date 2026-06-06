@@ -258,6 +258,8 @@ For `launcher/LEON-Launcher.ps1`:
 - The launcher may call `/warmup` only after a user-triggered service start reaches `/health`; it must not warm the model just because the launcher window opened.
 - Backend `/warmup` should run a tiny inference under `tts_stream_lock`, return warmup state through `GET /warmup`, and avoid rerunning unless `force=true`.
 - The launcher should expose the selected version Gradio WebUI through a `WebUI` page without auto-starting it. `启动 WebUI` should call the current version WebUI script, poll `http://127.0.0.1:7860`, and keep `浏览器打开` as the reliable path if embedded WebBrowser rendering fails.
+- The launcher should select backend version (`vllm` / `fast6g`) before startup, pass `LEON_ENABLE_QWEN_EMO` from the Qwen checkbox, and pass `INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION` for vLLM only.
+- Public Tavo host must not be launcher/backend configuration. Real tunnel hostnames must not be committed to repo docs or source. Tavo may load `static/tavo.js` from any reachable host; the runtime should use the loaded script origin for API calls.
 - The SVML check must prefer runtime evidence over global DLL presence. If `indextts2runtime\python.exe` can import `torch` and `vllm`, the `Intel SVML 兼容兜底` row should be OK even when `svml_dispmd.dll` is absent from `C:\Windows\System32` and global PATH.
 - One-click repair should copy bundled `svml_dispmd.dll` into the project runtime only when Torch/vLLM import output indicates SVML, LLVM, or DLL load failure. It should not blindly write `svml_dispmd.dll` to `C:\Windows\System32`.
 

@@ -39,13 +39,13 @@ http://127.0.0.1:9880/health -> {"status":"ok"}
 Domain tunnel was restarted via scheduled task `CF Tunnel`, and the user later reported the JS URL became accessible:
 
 ```text
-https://index-tts.928886540.xyz/static/tavo.js
+<public-host>/static/tavo.js
 ```
 
 Use cache busting in TAVO regex while iterating:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260525xx"></script>
+<script src="<public-host>/static/tavo.js?v=20260525xx"></script>
 ```
 
 ## Current Code State
@@ -168,7 +168,7 @@ Find Regex:
 
 Replace With:
 $1
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=2026052502"></script>
+<script src="<public-host>/static/tavo.js?v=2026052502"></script>
 ```
 
 Scope: role/assistant messages only.
@@ -241,7 +241,7 @@ Find Regex:
 
 Replace With:
 $1
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=2026052502"></script>
+<script src="<public-host>/static/tavo.js?v=2026052502"></script>
 ```
 
 Settings:
@@ -261,7 +261,7 @@ Find Regex:
 \[IndexTTS_TAVO_SCRIPT\]
 
 Replace With:
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=2026052502"></script>
+<script src="<public-host>/static/tavo.js?v=2026052502"></script>
 ```
 
 But this only tests whether UI renders. It does not provide readable story text unless the same message contains story content.

@@ -46,7 +46,7 @@
   const STORAGE_KEY = 'indextts_tavo_config';
   const SECRET_STORAGE_KEY = 'indextts_tavo_secret';
   const DEFAULTS = {
-    apiBase: scriptOrigin(),      // e.g. http://192.168.1.100:9880
+    apiBase: scriptOrigin(),      // e.g. http://<LAN-IP>:9880
     chatSelector: '#chat',        // CSS selector for the chat container
     messageSelector: '.mes',      // CSS selector for each message
     textSelector: '.mes_text',    // CSS selector for the message text within a message

@@ -85,13 +85,13 @@ curl.exe http://127.0.0.1:9880/health
 
 ## TAVO 正则示例
 
-假设服务在 `192.168.1.100:9880`,音色文件在 `D:/voices/girl.wav`。
+假设服务在 `<LAN-IP>:9880`,音色文件在 `D:/voices/girl.wav`。
 
 ### 简单触发(`[TTS]文本[/TTS]` 转音频块)
 
 ```
 Find:    /\[TTS\](.+?)\[\/TTS\]/g
-Replace: <audio controls autoplay src="http://192.168.1.100:9880/tts_stream?text=$1&ref_audio_path=D:/voices/girl.wav"></audio>
+Replace: <audio controls autoplay src="http://<LAN-IP>:9880/tts_stream?text=$1&ref_audio_path=D:/voices/girl.wav"></audio>
 ```
 
 > 注意:`$1` 里如果有 `&`、`#`、空格等,TAVO 自己得做 URL 编码。否则会被截断。
@@ -100,10 +100,10 @@ Replace: <audio controls autoplay src="http://192.168.1.100:9880/tts_stream?text
 
 ```
 Find:    /\[A\](.+?)\[\/A\]/g
-Replace: <audio controls autoplay src="http://192.168.1.100:9880/tts_stream?text=$1&ref_audio_path=D:/voices/A.wav"></audio>
+Replace: <audio controls autoplay src="http://<LAN-IP>:9880/tts_stream?text=$1&ref_audio_path=D:/voices/A.wav"></audio>
 
 Find:    /\[B\](.+?)\[\/B\]/g
-Replace: <audio controls autoplay src="http://192.168.1.100:9880/tts_stream?text=$1&ref_audio_path=D:/voices/B.wav"></audio>
+Replace: <audio controls autoplay src="http://<LAN-IP>:9880/tts_stream?text=$1&ref_audio_path=D:/voices/B.wav"></audio>
 ```
 
 > 真正的"一段对话多音色"留到 Phase 2 在服务端做(`/tts_dialogue_stream`),
@@ -119,7 +119,7 @@ Replace: <audio controls autoplay src="http://192.168.1.100:9880/tts_stream?text
 <body>
   <h1>IndexTTS Stream Test</h1>
   <audio controls autoplay
-         src="http://192.168.1.100:9880/tts_stream?text=测试一下流式播放是否能用,这句话再长一点看看分段效果如何。&ref_audio_path=D:/voices/girl.wav">
+         src="http://<LAN-IP>:9880/tts_stream?text=测试一下流式播放是否能用,这句话再长一点看看分段效果如何。&ref_audio_path=D:/voices/girl.wav">
   </audio>
 </body>
 </html>

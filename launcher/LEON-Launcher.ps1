@@ -5,6 +5,24 @@ Add-Type -AssemblyName System.Drawing
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+function Get-PreferredLanHost {
+    try {
+        $addresses = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+            Where-Object { $_.OperationalStatus -eq [System.Net.NetworkInformation.OperationalStatus]::Up -and $_.NetworkInterfaceType -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Loopback } |
+            ForEach-Object { $_.GetIPProperties().UnicastAddresses } |
+            Where-Object { $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork } |
+            ForEach-Object { $_.Address.IPAddressToString } |
+            Where-Object { $_ -and $_ -notmatch '^169\.254\.' -and $_ -ne '127.0.0.1' }
+        $preferred = @($addresses | Where-Object { $_ -match '^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)' } | Select-Object -First 1)
+        if ($preferred.Count -gt 0) { return [string]$preferred[0] }
+        $fallback = @($addresses | Select-Object -First 1)
+        if ($fallback.Count -gt 0) { return [string]$fallback[0] }
+    }
+    catch {
+    }
+    return "127.0.0.1"
+}
+
 $Script:LauncherScriptPath = if ($env:LEON_LAUNCHER_SCRIPT) { $env:LEON_LAUNCHER_SCRIPT } else { $MyInvocation.MyCommand.Path }
 $Script:LauncherDir = if ($Script:LauncherScriptPath) { Split-Path -Parent $Script:LauncherScriptPath } else { (Get-Location).Path }
 $Script:WorkspaceRoot = (Resolve-Path (Join-Path $Script:LauncherDir "..")).Path
@@ -12,11 +30,18 @@ $Script:ApiPort = 9880
 $Script:ApiBase = "http://127.0.0.1:$Script:ApiPort"
 $Script:WebUiPort = 7860
 $Script:WebUiBase = "http://127.0.0.1:$Script:WebUiPort"
-$Script:LanHost = "192.168.8.100"
-$Script:PublicHost = "https://index-tts.928886540.xyz"
+$Script:LanHost = if ($env:LEON_LAN_HOST) { $env:LEON_LAN_HOST } else { Get-PreferredLanHost }
 $Script:TavoCacheBust = "20260606-live-audio-v6"
 $Script:VersionKey = if ($env:LEON_LAUNCHER_VERSION) { $env:LEON_LAUNCHER_VERSION } else { "vllm" }
 $Script:EnableQwenEmotion = ($env:LEON_ENABLE_QWEN_EMO -eq "1")
+$Script:InvariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
+$Script:VllmGpuMemoryUtilization = 0.18
+if (-not [string]::IsNullOrWhiteSpace($env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION)) {
+    $configuredGpuUtil = 0.0
+    if ([double]::TryParse($env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION, [System.Globalization.NumberStyles]::Float, $Script:InvariantCulture, [ref]$configuredGpuUtil) -and $configuredGpuUtil -gt 0) {
+        $Script:VllmGpuMemoryUtilization = $configuredGpuUtil
+    }
+}
 $Script:RepoRoot = $null
 $Script:StartupBat = $null
 $Script:WebUiStartupBat = $null
@@ -43,11 +68,44 @@ $Script:LauncherIcon = $null
 $Script:StartButton = $null
 $Script:VersionCombo = $null
 $Script:QwenEmotionCheck = $null
+$Script:VllmGpuCombo = $null
 $Script:Tabs = $null
 $Script:BackendLogTimer = $null
 $Script:WarmupStarted = $false
 $Script:WebUiBrowser = $null
 $Script:WebUiStatusLabel = $null
+
+function Get-VllmGpuMemoryUtilizationText {
+    return $Script:VllmGpuMemoryUtilization.ToString("0.###", $Script:InvariantCulture)
+}
+
+function Get-VllmGpuMemoryLabel {
+    $text = Get-VllmGpuMemoryUtilizationText
+    if ([Math]::Abs($Script:VllmGpuMemoryUtilization - 0.18) -lt 0.0001) { return "0.18 默认" }
+    if ([Math]::Abs($Script:VllmGpuMemoryUtilization - 0.11) -lt 0.0001) { return "0.11 保守" }
+    return "$text 自定义"
+}
+
+function Set-VllmGpuMemoryUtilization {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return }
+    if ($Value -match "([0-9]+(?:\.[0-9]+)?)") {
+        $parsed = 0.0
+        if ([double]::TryParse($Matches[1], [System.Globalization.NumberStyles]::Float, $Script:InvariantCulture, [ref]$parsed) -and $parsed -gt 0) {
+            $Script:VllmGpuMemoryUtilization = $parsed
+        }
+    }
+}
+
+function Sync-VllmGpuControls {
+    if (-not $Script:VllmGpuCombo) { return }
+    $label = Get-VllmGpuMemoryLabel
+    if (-not $Script:VllmGpuCombo.Items.Contains($label)) {
+        [void]$Script:VllmGpuCombo.Items.Add($label)
+    }
+    $Script:VllmGpuCombo.SelectedItem = $label
+    $Script:VllmGpuCombo.Enabled = ($Script:VersionKey -eq "vllm")
+}
 
 function Set-LeonVersion {
     param([string]$VersionKey)
@@ -73,6 +131,7 @@ function Set-LeonVersion {
     if ($Script:QwenEmotionCheck) {
         $Script:QwenEmotionCheck.Checked = [bool]$Script:EnableQwenEmotion
     }
+    Sync-VllmGpuControls
     $Script:RuntimeImportProbe = $null
 }
 
@@ -90,6 +149,7 @@ function Sync-LeonVersionControls {
     if ($Script:QwenEmotionCheck) {
         $Script:QwenEmotionCheck.Checked = [bool]$Script:EnableQwenEmotion
     }
+    Sync-VllmGpuControls
 }
 
 try {
@@ -745,13 +805,20 @@ function Start-LeonService {
         return
     }
     Add-Log "调用启动入口: $Script:StartupBat"
+    $qwenText = if ($Script:EnableQwenEmotion) { "on" } else { "off" }
+    $gpuText = if ($Script:VersionKey -eq "vllm") { ", vLLM gpu_memory_utilization=$(Get-VllmGpuMemoryUtilizationText)" } else { "" }
+    Add-Log "启动配置: $(Get-LeonVersionLabel), Qwen emotion=$qwenText$gpuText"
     try {
         $oldNoPause = $env:LEON_LAUNCHER_NO_PAUSE
         $oldVersion = $env:LEON_LAUNCHER_VERSION
         $oldQwen = $env:LEON_ENABLE_QWEN_EMO
+        $oldVllmGpu = $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION
         $env:LEON_LAUNCHER_NO_PAUSE = "1"
         $env:LEON_LAUNCHER_VERSION = $Script:VersionKey
         $env:LEON_ENABLE_QWEN_EMO = if ($Script:EnableQwenEmotion) { "1" } else { "0" }
+        if ($Script:VersionKey -eq "vllm") {
+            $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION = Get-VllmGpuMemoryUtilizationText
+        }
         try {
             Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "`"$Script:StartupBat`"") -WorkingDirectory $Script:RepoRoot -WindowStyle Hidden | Out-Null
         }
@@ -764,6 +831,7 @@ function Start-LeonService {
             }
             if ($null -eq $oldVersion) { Remove-Item Env:\LEON_LAUNCHER_VERSION -ErrorAction SilentlyContinue } else { $env:LEON_LAUNCHER_VERSION = $oldVersion }
             if ($null -eq $oldQwen) { Remove-Item Env:\LEON_ENABLE_QWEN_EMO -ErrorAction SilentlyContinue } else { $env:LEON_ENABLE_QWEN_EMO = $oldQwen }
+            if ($null -eq $oldVllmGpu) { Remove-Item Env:\INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION -ErrorAction SilentlyContinue } else { $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION = $oldVllmGpu }
         }
         Set-StatusText "$(Get-LeonVersionLabel) 启动中，首次加载模型可能需要几分钟..." "Khaki"
         Start-Sleep -Milliseconds 600
@@ -1010,12 +1078,6 @@ function Open-LastAudio {
         return
     }
     Start-Process "$Script:ApiBase/cache_audio/$Script:LastJobKey" | Out-Null
-}
-
-function Copy-TavoScript {
-    $text = "<script src=`"$Script:PublicHost/static/tavo.js?v=$Script:TavoCacheBust`"></script>"
-    [System.Windows.Forms.Clipboard]::SetText($text)
-    Add-Log "已复制 Tavo 注入脚本。"
 }
 
 function Copy-LocalTavoScript {
@@ -1315,12 +1377,34 @@ function Build-LauncherForm {
     })
     $main.Panel1.Controls.Add($Script:VersionCombo)
 
+    $vllmGpuLabel = New-Object System.Windows.Forms.Label
+    $vllmGpuLabel.Text = "vLLM 显存比例"
+    $vllmGpuLabel.ForeColor = [System.Drawing.Color]::Gainsboro
+    $vllmGpuLabel.Location = New-Object System.Drawing.Point(18, 444)
+    $vllmGpuLabel.Size = New-Object System.Drawing.Size(178, 18)
+    $main.Panel1.Controls.Add($vllmGpuLabel)
+
+    $Script:VllmGpuCombo = New-Object System.Windows.Forms.ComboBox
+    $Script:VllmGpuCombo.DropDownStyle = "DropDownList"
+    [void]$Script:VllmGpuCombo.Items.Add("0.18 默认")
+    [void]$Script:VllmGpuCombo.Items.Add("0.11 保守")
+    $Script:VllmGpuCombo.Location = New-Object System.Drawing.Point(18, 464)
+    $Script:VllmGpuCombo.Size = New-Object System.Drawing.Size(178, 28)
+    $Script:VllmGpuCombo.Add_SelectedIndexChanged({
+        if ($Script:VllmGpuCombo.SelectedItem) {
+            Set-VllmGpuMemoryUtilization ([string]$Script:VllmGpuCombo.SelectedItem)
+            Add-Log "vLLM gpu_memory_utilization 已设为 $(Get-VllmGpuMemoryUtilizationText)"
+        }
+    })
+    $main.Panel1.Controls.Add($Script:VllmGpuCombo)
+    Sync-VllmGpuControls
+
     $Script:QwenEmotionCheck = New-Object System.Windows.Forms.CheckBox
     $Script:QwenEmotionCheck.Text = "启用 Qwen emotion"
     $Script:QwenEmotionCheck.ForeColor = [System.Drawing.Color]::Silver
     $Script:QwenEmotionCheck.BackColor = [System.Drawing.Color]::FromArgb(21, 25, 31)
     $Script:QwenEmotionCheck.Checked = [bool]$Script:EnableQwenEmotion
-    $Script:QwenEmotionCheck.Location = New-Object System.Drawing.Point(18, 444)
+    $Script:QwenEmotionCheck.Location = New-Object System.Drawing.Point(18, 500)
     $Script:QwenEmotionCheck.Size = New-Object System.Drawing.Size(178, 24)
     $Script:QwenEmotionCheck.Add_CheckedChanged({
         $Script:EnableQwenEmotion = [bool]$Script:QwenEmotionCheck.Checked
@@ -1350,11 +1434,15 @@ function Build-LauncherForm {
         if ($startY -lt 492) { $startY = 492 }
         $Script:StartButton.Location = New-Object System.Drawing.Point(18, $startY)
         $Script:StartButton.Size = New-Object System.Drawing.Size([Math]::Max(160, $panelWidth - 36), $startHeight)
-        $versionLabel.Location = New-Object System.Drawing.Point(18, [Math]::Max($y + 8, $startY - 102))
+        $versionLabel.Location = New-Object System.Drawing.Point(18, [Math]::Max($y + 8, $startY - 142))
         $versionLabel.Size = New-Object System.Drawing.Size([Math]::Max(150, $panelWidth - 36), 20)
         $Script:VersionCombo.Location = New-Object System.Drawing.Point(18, ($versionLabel.Location.Y + 22))
         $Script:VersionCombo.Size = New-Object System.Drawing.Size([Math]::Max(150, $panelWidth - 36), 28)
-        $Script:QwenEmotionCheck.Location = New-Object System.Drawing.Point(18, ($Script:VersionCombo.Location.Y + 34))
+        $vllmGpuLabel.Location = New-Object System.Drawing.Point(18, ($Script:VersionCombo.Location.Y + 34))
+        $vllmGpuLabel.Size = New-Object System.Drawing.Size([Math]::Max(150, $panelWidth - 36), 18)
+        $Script:VllmGpuCombo.Location = New-Object System.Drawing.Point(18, ($vllmGpuLabel.Location.Y + 20))
+        $Script:VllmGpuCombo.Size = New-Object System.Drawing.Size([Math]::Max(150, $panelWidth - 36), 28)
+        $Script:QwenEmotionCheck.Location = New-Object System.Drawing.Point(18, ($Script:VllmGpuCombo.Location.Y + 34))
         $Script:QwenEmotionCheck.Size = New-Object System.Drawing.Size([Math]::Max(150, $panelWidth - 36), 24)
         $infoTop = $y + 8
         $infoSpace = $versionLabel.Location.Y - $infoTop - 8
@@ -1601,17 +1689,17 @@ function Build-LauncherForm {
     $tabTavo.Controls.Add($tavoPanel)
 
     $copyPublic = New-Object System.Windows.Forms.Button
-    $copyPublic.Text = "复制域名脚本"
+    $copyPublic.Text = "复制局域网脚本"
     $copyPublic.Location = New-Object System.Drawing.Point(16, 10)
     $copyPublic.Size = New-Object System.Drawing.Size(120, 32)
-    $copyPublic.Add_Click({ Copy-TavoScript })
+    $copyPublic.Add_Click({ Copy-LocalTavoScript })
     $tavoPanel.Controls.Add($copyPublic)
 
     $copyLocal = New-Object System.Windows.Forms.Button
-    $copyLocal.Text = "复制局域网脚本"
+    $copyLocal.Text = "打开脚本"
     $copyLocal.Location = New-Object System.Drawing.Point(146, 10)
     $copyLocal.Size = New-Object System.Drawing.Size(130, 32)
-    $copyLocal.Add_Click({ Copy-LocalTavoScript })
+    $copyLocal.Add_Click({ Start-Process "$Script:ApiBase/static/tavo.js?v=$Script:TavoCacheBust" | Out-Null })
     $tavoPanel.Controls.Add($copyLocal)
 
     $copyApi = New-Object System.Windows.Forms.Button
@@ -1643,13 +1731,12 @@ Tavo 接入步骤
 2. 点击左下角“启动 LEON 服务”，等待状态显示 API 已启动。
 3. Tavo 里打开高级前端渲染：
    左侧边栏 -> 更多 -> 设置 -> 高级前端渲染 -> 打开。
-4. 在 Tavo 正则里新增显示时注入规则，把替换内容设为：
-
-   <script src="$Script:PublicHost/static/tavo.js?v=$Script:TavoCacheBust"></script>
-
-   如果手机和电脑在同一个局域网，也可以用：
+4. 在 Tavo 正则里新增显示时注入规则。手机和电脑在同一个局域网时，把替换内容设为：
 
    <script src="http://$Script:LanHost`:$Script:ApiPort/static/tavo.js?v=$Script:TavoCacheBust"></script>
+
+   如果需要公网访问，公网域名由你自己的隧道/反代配置提供。
+   这个程序不检测、不保存、不依赖公网域名；只要公网地址能访问 /static/tavo.js，就可以把 script 的 host 换成你的公网 host。
 
 5. 正则建议：
    - 作用范围：角色消息 / 显示时。
@@ -1661,7 +1748,6 @@ Tavo 接入步骤
 默认 API: $Script:ApiBase
 本地测试页: $Script:ApiBase/tavo_test
 脚本地址: $Script:ApiBase/static/tavo.js
-域名脚本: $Script:PublicHost/static/tavo.js
 
 注意
 

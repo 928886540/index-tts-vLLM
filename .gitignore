@@ -35,18 +35,16 @@ fast6g/checkpoints/*
 !fast6g/checkpoints/*.txt
 !vllm/checkpoints/*.md
 !fast6g/checkpoints/*.md
-!vllm/checkpoints/*.model
-!fast6g/checkpoints/*.model
-!vllm/checkpoints/*.vocab
-!fast6g/checkpoints/*.vocab
 !vllm/checkpoints/.gitattributes
 !fast6g/checkpoints/.gitattributes
-!vllm/checkpoints/feat1.pt
-!fast6g/checkpoints/feat1.pt
-!vllm/checkpoints/feat2.pt
-!fast6g/checkpoints/feat2.pt
-!vllm/checkpoints/wav2vec2bert_stats.pt
-!fast6g/checkpoints/wav2vec2bert_stats.pt
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+*.onnx
+*.gguf
+*.model
+*.vocab
 
 # Generated outputs / caches / logs
 logs/
@@ -60,8 +58,20 @@ dev_workspace/dev_tools/tavo_debug/
 dev_workspace/dev_tools/multivoice_500_stream_*
 
 # Large local audio libraries and generated packages
+*.wav
+*.WAV
+*.mp3
+*.MP3
+*.flac
+*.ogg
+*.m4a
+*.mp4
+*.t7
+*.dll
 vllm/prompts/*.zip
 fast6g/prompts/*.zip
+vllm/prompts/library/
+fast6g/prompts/library/
 packages/
 
 # Local tool bundles and backups

@@ -202,7 +202,7 @@ Status: fixed in code, needs real Tavo validation
 
 Reported: 2026-06-05
 
-Repro: During a long IndexTTS2 dialogue job, Tavo logged `audio error code=4 src=https://index-tts.928886540.xyz/tts_dialogue_stream_job/<cache_key>?start_s=60.219`.
+Repro: During a long IndexTTS2 dialogue job, Tavo logged `audio error code=4 src=<public-host>/tts_dialogue_stream_job/<cache_key>?start_s=60.219`.
 
 Evidence: `static/tavo.js` can route live tracks through native `<audio>` via `startElementAudioFrom()`. When seeking/resuming a live dialogue track, it appends `start_s` to `/tts_dialogue_stream_job/{cache_key}` and assigns that URL to `audio.src`. The backend returns chunked WAV for live jobs and only returns a complete seekable WAV after `/cache_audio/{cache_key}` is ready.
 
@@ -294,7 +294,7 @@ Reported: 2026-06-05
 
 Repro: In Tavo AR intelligent mode, the injected frontend calls `POST /parse_text` first. If that browser-to-backend request fails, the user sees a frontend-side `/parse_text` transport error before any `POST /tts_dialogue_stream_job` job exists.
 
-Evidence: User reported a Tavo AR debug/error string saying `LLM 解析代理 /parse_text 请求没有到达后端` with request URL `https://index-tts.928886540.xyz/parse_text`, current page `about:srcdoc`, script source `static/tavo.js`, and LLM endpoint `http://127.0.0.1:8317/v1`. User clarified that LLM parse success/failure should be controlled by the backend after job creation, and the frontend should only submit source text, voice mapping, LLM config, and generation parameters once to get a job id/cache key.
+Evidence: User reported a Tavo AR debug/error string saying `LLM 解析代理 /parse_text 请求没有到达后端` with request URL `<public-host>/parse_text`, current page `about:srcdoc`, script source `static/tavo.js`, and LLM endpoint `http://127.0.0.1:8317/v1`. User clarified that LLM parse success/failure should be controlled by the backend after job creation, and the frontend should only submit source text, voice mapping, LLM config, and generation parameters once to get a job id/cache key.
 
 Hypothesis: The loader split added frontend LLM parse reuse as a product optimization, but it kept LLM parse ownership in the Tavo WebView. That is the wrong boundary for Tavo AR because the browser fetch to `/parse_text` can fail before the backend owns the job. It also duplicates backend validation and makes backend/LLM/Tavo transport failures harder to classify.
 

@@ -23,20 +23,18 @@ The launcher selects one backend version at startup. `static/`, `launcher/`, and
 
 ## Tavo Script
 
-Current cache-busted script URL:
+The app does not require a public domain. For same-LAN phone testing, use:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v6"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
 ```
 
-Local LAN variant:
-
-```html
-<script src="http://192.168.8.100:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
-```
+For a public tunnel, configure the tunnel/reverse proxy outside this repository and replace only the script host.
+The only runtime code that should depend on the script host is `static/tavo.js`, which uses its own loaded script origin as the API origin.
 
 ## Development Notes
 
 - Active collaboration state lives in `dev_workspace/docs/`.
 - Tavo frontend changes must follow the local `tavo` Codex skill.
 - Do not commit model weights, runtime folders, generated audio cache, logs, package archives, or local Git backups.
+- Startup options are selected in the launcher: backend version (`vllm` / `fast6g`), Qwen emotion, and vLLM GPU memory ratio (`0.18` default or `0.11` conservative).

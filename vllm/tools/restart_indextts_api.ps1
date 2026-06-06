@@ -389,7 +389,7 @@ try {
 
         if (Wait-ApiReady -Run $run) {
             Write-Step "API ready: http://127.0.0.1:$Port/health"
-            Write-Step "LAN script URL example: http://192.168.8.100:$Port/static/tavo.js"
+            Write-Step "LAN script URL example: http://<LAN-IP>:$Port/static/tavo.js"
             exit 0
         }
 

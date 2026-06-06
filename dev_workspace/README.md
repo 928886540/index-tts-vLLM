@@ -33,17 +33,13 @@ The launcher selects `vllm` or `fast6g`, then starts the selected backend throug
 
 ## Tavo Script
 
-Current cache-busted script URL:
+The app does not require a public domain. Same-LAN testing can use:
 
 ```html
-<script src="https://index-tts.928886540.xyz/static/tavo.js?v=20260606-live-audio-v6"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
 ```
 
-Local LAN variant:
-
-```html
-<script src="http://192.168.8.100:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
-```
+For public tunnel usage, configure the tunnel/reverse proxy outside this repository and replace only the script host. The program should not detect, store, or require a public domain.
 
 ## Fixed Tavo Test Path
 

@@ -256,7 +256,7 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     var host = "";
     try { host = new URL(url, location.href).hostname; } catch (_) {}
     if (/^(127\.0\.0\.1|localhost)$/i.test(host)) {
-      return "\n注意: 在手机/Tavo WebView 里 127.0.0.1/localhost 指手机自己,不是电脑。手机测试请把脚本/服务地址换成电脑局域网 IP,例如 http://192.168.8.100:9880。";
+      return "\n注意: 在手机/Tavo WebView 里 127.0.0.1/localhost 指手机自己,不是电脑。手机测试请把脚本/服务地址换成电脑局域网 IP,例如 http://<LAN-IP>:9880。";
     }
     return "";
   }

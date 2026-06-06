@@ -33,8 +33,8 @@ LEON启动器.exe
 
 - API：`http://127.0.0.1:9880`
 - 本地测试页：`http://127.0.0.1:9880/tavo_test`
-- 局域网脚本示例：`http://192.168.8.100:9880/static/tavo.js`
-- 域名脚本示例：`https://index-tts.928886540.xyz/static/tavo.js?v=20260605-ui-unify-v2`
+- 局域网脚本示例：`http://<LAN-IP>:9880/static/tavo.js`
+- 域名脚本示例：`<public-host>/static/tavo.js?v=20260605-ui-unify-v2`
 
 ## 发包注意
 

@@ -107,3 +107,13 @@ If the launcher enables Qwen emotion, the backend automatically applies Qwen emo
 
 `普通模式` and `AI模式` remain text splitting / role assignment modes. Qwen emotion is not the same as LLM voice-cavity analysis. When Qwen emotion is enabled, the LLM should not output or control `style`, `style_alpha`, `emo_vec`, or `emo_alpha`; it should only provide dialogue role/text when AI parsing is used.
 
+## DEC-013: Public tunnel host stays out of Git
+
+Status: accepted
+
+Do not hardcode the user's real public tunnel hostname in repository files. Also do not make the launcher/backend detect or depend on a public domain.
+
+The program serves `static/tavo.js` locally. Users can load it through LAN or through their own tunnel/reverse proxy. `static/tavo.js` uses the origin it was loaded from as the API origin, so a public host only belongs in the Tavo regex script URL, not in app configuration.
+
+Repository docs should show local/LAN examples and describe public host replacement generically.
+
