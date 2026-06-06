@@ -64,6 +64,7 @@ When validating `vllm` startup with CUDA kernel enabled:
 - Record API PID, vLLM worker PID, selected `gpu_memory_utilization`, and idle GPU memory after `/health`.
 - Run one short `/warmup` after a vLLM FP16 change to catch dtype incompatibility before using Tavo.
 - `gpu_memory_utilization=0.08` failed on this machine with no available KV cache memory; do not expose it as a normal launcher preset unless a later architecture change creates more headroom.
+- For the current 12 GB RTX 3060 setup, `0.11` and `0.15` are the useful ratio range. In the 2026-06-06 fixed long multi-role benchmark, `0.11` averaged `RTF 1.037` with `10451 MiB` peak VRAM, `0.15` averaged `RTF 1.033` with `10847 MiB` peak VRAM, `0.20` slowed to `RTF 1.111`, and `0.25` collapsed to `RTF 2.875` with S2Mel/BigVGAN timing spikes. Do not chase full VRAM/100% utilization; keep headroom for S2Mel, BigVGAN, and temporary CUDA allocations.
 
 ## Style Reference Guard
 

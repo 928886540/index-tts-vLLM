@@ -6,6 +6,39 @@ Updated: 2026-06-06
 
 Finish the root workspace migration and keep IndexTTS2 as the Tavo mainline without copying GPT-SoVITS engine behavior into this project.
 
+## Latest Validation Snapshot: vLLM GPU Ratio RTF Benchmark
+
+Updated: 2026-06-06
+
+The fixed long multi-role sample from the user's 甘婷婷 readable cache was benchmarked on `vllm` with `gpu_memory_utilization` values `0.11`, `0.15`, `0.20`, and `0.25`, three fresh uncached runs each.
+
+Input / params:
+
+- Source JSON: `vllm/outputs/cache/by_role/甘婷婷/20260606-013108-395_263429152dd8dcd2b2715e80672dbdd93ee9a406.json`.
+- Voice mapping used real `/voices` names: `旁白/default -> 400个火爆音色/短剧解说`, `甘婷婷 -> 声腔/低吟-步非烟`, `用户 -> 400个火爆音色/蔡徐坤`.
+- The exact requested names `短句解说` and `低吟_步非烟` were not present in `/voices`; the closest available entries above were used.
+- Generation tier matched the 16-step expressive setting: `diffusion_steps=16`, `prompt_audio_seconds=12`, `segment_tokens=72`, `first_tokens=24`, `s2mel_cfg_rate=0.7`, `top_p=0.8`, `top_k=30`, `temperature=0.7`, `repetition_penalty=1.2`, `emo_alpha=0.55`, `bypass_cache=true`.
+- The benchmark used role/text segments only from the source cache and did not reuse stale style references such as the removed/bad `moan_soft`.
+
+Results:
+
+| vLLM ratio | Runs | Avg RTF | Warm RTF runs 2-3 | Avg wall | Avg GPT gen | Avg S2Mel | Avg BigVGAN | Max peak VRAM |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `0.11` | 3 | `1.037` | `1.038` | `69.772s` | `40.575s` | `24.831s` | `1.323s` | `10451 MiB` |
+| `0.15` | 3 | `1.033` | `1.023` | `69.538s` | `40.372s` | `24.811s` | `1.288s` | `10847 MiB` |
+| `0.20` | 3 | `1.111` | `1.131` | `74.789s` | `45.372s` | `25.030s` | `1.491s` | `11660 MiB` |
+| `0.25` | 3 | `2.875` | `3.575` | `193.260s` | `43.926s` | `137.336s` | `6.526s` | `11992 MiB` |
+
+Conclusion:
+
+- The FP16/autocast fix made the long vLLM path viable near realtime: this sample now runs around `RTF 1.03` at `0.11` / `0.15`, compared with the earlier source cache around `RTF 3.519`.
+- `0.15` was slightly fastest, but only by a tiny margin and with about `396 MiB` more peak VRAM than `0.11`.
+- `0.11` is the safer long-session default. `0.15` is the speed sweet spot when ComfyUI/SD/other GPU workloads are off.
+- `0.20` already trends slower. `0.25` should be avoided: pushing VRAM close to full makes S2Mel jump from about `25s` to about `137s` average and BigVGAN from about `1.3s` to about `6.5s`.
+- Do not tune for "GPU/VRAM peak reaches 100%". vLLM ratio only sizes vLLM KV cache; IndexTTS2 still needs headroom for S2Mel, BigVGAN, temporary CUDA allocations, and per-segment orchestration gaps.
+
+The repeatable benchmark helper is `dev_workspace/dev_tools/benchmark_vllm_gpu_ratios.py`. Generated benchmark JSON/logs live under `dev_workspace/benchmarks/` and should stay uncommitted.
+
 ## Latest Validation Snapshot: vLLM 0.11 VRAM Pass
 
 Updated: 2026-06-06

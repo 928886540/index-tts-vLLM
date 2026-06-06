@@ -127,3 +127,18 @@ The critical finding from 2026-06-06 is that this main-process GPT wrapper was s
 
 Guard: future vLLM changes must keep the main-process GPT wrapper aligned with the startup precision flag. A short `/warmup` must pass after changing this path. Do not reintroduce a FP32 main GPT wrapper unless there is a measured quality or stability reason and the VRAM cost is recorded.
 
+## DEC-015: vLLM ratio should preserve TTS headroom, not chase full VRAM
+
+Status: accepted
+
+The measured `gpu_memory_utilization` sweet spot on the RTX 3060 12 GB machine is `0.11` to `0.15` for the current IndexTTS2/vLLM architecture and 16-step expressive tier.
+
+Evidence from the 2026-06-06 fixed long multi-role benchmark:
+
+- `0.11`: avg RTF `1.037`, max peak VRAM `10451 MiB`.
+- `0.15`: avg RTF `1.033`, max peak VRAM `10847 MiB`.
+- `0.20`: avg RTF `1.111`, max peak VRAM `11660 MiB`.
+- `0.25`: avg RTF `2.875`, max peak VRAM `11992 MiB`, with S2Mel/BigVGAN timing collapse.
+
+Decision: keep `0.11` as the safer long-session default and use `0.15` as the performance preset when other GPU workloads are off. Avoid `0.20+` unless a later architecture change reduces S2Mel/BigVGAN memory pressure. Do not treat 100% GPU/VRAM usage as a success metric for this pipeline.
+

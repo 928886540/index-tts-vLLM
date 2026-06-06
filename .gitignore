@@ -56,6 +56,7 @@ dev_workspace/dev_tools/*.log
 dev_workspace/dev_tools/*.err
 dev_workspace/dev_tools/tavo_debug/
 dev_workspace/dev_tools/multivoice_500_stream_*
+dev_workspace/benchmarks/
 
 # Large local audio libraries and generated packages
 *.wav

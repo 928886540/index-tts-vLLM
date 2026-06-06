@@ -30,7 +30,9 @@
   - `vllm 0.08` was tested and rejected for now: vLLM reported no available KV cache memory and failed startup;
   - two supported 13-segment style jobs completed with RTF `2.727-2.741`, audio `60.213-63.023s`, and GPU memory about `6318 MiB` before / `8171 MiB` after;
   - the previous `moan_soft` run is invalid as style/quality evidence because that style was removed after the local asset was confirmed bad/removed;
-  - next performance pass should rerun a fixed long-text RTF comparison on `vllm 0.11` after the FP16 fix and compare Tavo quality tiers only when the user wants more long runs.
+  - fixed long multi-role vLLM benchmark completed for ratios `0.11`, `0.15`, `0.20`, and `0.25`, three uncached runs each;
+  - current recommendation: `0.11` for safe long sessions, `0.15` for best measured speed when other GPU workloads are off, avoid `0.20+` for now because near-full VRAM hurts S2Mel/BigVGAN;
+  - next performance pass, only if needed, should compare quality tiers/steps at `0.11` and `0.15` rather than increasing vLLM ratio further.
 
 - Protect saved history:
   - code audit done for `static/tavo.js` persistence paths: only saved/cache-ready tracks are persisted and counted;
