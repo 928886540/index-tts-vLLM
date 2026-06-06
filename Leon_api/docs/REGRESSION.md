@@ -161,11 +161,13 @@ For a running live dialogue job:
 
 1. The card shows only play/pause and live exit as active controls. CSS must not hide `.idx-live-exit` under `data-live-active=1`.
 2. Previous, next, add, delete, rewind, forward, seek drag, subtitle click seek, and MediaSession seek do not act on the live track.
-3. Clicking play on a waiting/pending LIVE card immediately shows a realtime-audio connection state and uses WebAudio by default unless `noWebAudioLive=1`, `nativeLive=1`, or `elementLive=1` changes that path. It must not immediately fall back to saved/cache wording.
+3. Clicking play on a waiting/pending LIVE card immediately shows a compact waiting-audio state and uses WebAudio by default unless `noWebAudioLive=1`, `nativeLive=1`, or `elementLive=1` changes that path. It must not say `音频已排队`, because that is only a frontend WebAudio scheduling state, not backend queueing or duplicate job creation.
 4. Clicking play again while LIVE is loading, buffering, streaming, or playing should pause/stop the current live connection cleanly; it must not create a second job or flip through confusing saved-cache states.
 5. Clicking live exit first checks status once; if status is `done`, the card becomes saved, otherwise the frontend calls `DELETE /tts_dialogue_stream_job/<cache_key>`.
 6. Exiting live removes only the transient live card and keeps existing saved history count unchanged.
 7. After status becomes `done`, the same card switches to a normal saved card with `/cache_audio/<cache_key>`. If foreground LIVE polling sees `/cache_audio/<cache_key>` is already readable via `HEAD`, it may switch to saved before the status endpoint catches up; this fallback must not run for failed/cancelled/background-generate jobs.
+8. If live playback starts before `track.segments` is populated, subtitles must still keep polling `/tts_dialogue_job_status/<cache_key>` and render lyrics as soon as `segments_meta` arrives.
+9. Early repeated WebAudio underrun should stop fake progress and switch to waiting for complete cache audio instead of leaving the UI in a silent "playing" state.
 
 For a background `生成` dialogue job:
 

@@ -25,6 +25,24 @@ Notes:
 - When the bug is fixed, record the actual root cause, the code/files changed, and the regression guard.
 - If a fixed bug returns, update the same entry and add a stricter guard in `docs/REGRESSION.md`.
 
+## BUG-025: Tavo LIVE WebAudio clock can advance without audible audio or subtitles
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-06
+
+Repro: In Tavo mobile JavaScript console, generate an AI/LIVE dialogue. The card starts a live WebAudio path, the progress bar appears to move, but there is no audible sound and lyrics/subtitles do not render. The visible `等待首段音频` and `正在合成` notices overlap/cramp each other. Reconnect stays at waiting for backend audio.
+
+Evidence: User screenshot shows `selectTrack idx=0 state=pending urlSource=cacheUrl src=""`, then `新建占位卡片 mode=ai playback=live`, `提交 dialogue job: parse_mode=ai playback=live`, `cached=false live=true`, `live track 使用 Web Audio API 真流式`, `AudioContext state=running sr=48000`, `WAV header parsed: sr=22050 ch=1 bits=16`, `Web Audio 播放时钟已启动`, followed only by repeated `Web Audio buffering count=1/2`. No subtitle/lyrics lines appear after the WAV header parse. User also reported that manually reconnecting the live stream can show `音频已排队`; subtitles/progress appear to move, but there is still no audible playback.
+
+Hypothesis: The frontend starts the live playback clock and UI progress as soon as WebAudio schedules a buffer, but it only checks `AudioContext.state === running`, not whether the scheduled source actually became audible in the Tavo WebView. `音频已排队` is a frontend WebAudio scheduling message, not backend queueing or an extra job. If first PCM is delayed, too short, or immediately underruns, the track looks like it is playing while no sound exists. Subtitle rendering may depend on `segments_meta` or generated segment state that is not attached to the pending live track until job status polling progresses. The status/notice layer also allows two transient messages to occupy the same subtitle area.
+
+Root cause: Three frontend issues overlapped. First, `startSubtitle()` returned immediately when the live track had no `segments` at playback start, so it never started the later `/tts_dialogue_job_status/{cache_key}` polling that would have filled `segments_meta`. Second, the WebAudio live state used `音频已排队` as user-facing wording for `AudioBufferSource.start()` scheduling; that sounded like backend queueing or duplicate job creation even though it was only a frontend audio scheduling state. Third, early WebAudio underrun kept the fake playing/progress path alive too long before falling back to saved-cache playback.
+
+Fix: `static/tavo.runtime.parts/52_subtitle_media.js` now keeps a subtitle session alive and polls job status even when no segments exist at initial playback, then rebuilds lyrics when `segments_meta` arrives. `static/tavo.runtime.parts/46_track_state.js`, `48_track_history.js`, and `60_generate_flow.js` replace `等待首段音频` / `音频已排队` wording with compact `等待音频` / `收到音频` states, and early repeated WebAudio underrun now switches to waiting for complete cache sooner instead of continuing fake progress. `42_playback_header.js` also resumes slightly before the last stalled time for live retries.
+
+Guard: LIVE WebAudio must not start the visible playback clock or advance progress until at least one PCM buffer has been scheduled and the audio context has crossed that source start time. User-facing wording must not say `音频已排队`, because that sounds like backend queueing or duplicate task creation. While waiting for first playable PCM, the UI should show one compact waiting/synthesizing notice without overlapping lyrics/status controls. Subtitles should be populated from job status `segments_meta` as soon as available, even before the full cache audio is ready. Reconnect should either resume the live stream from a known offset or clearly fall back to waiting for saved cache, not stay in an indefinite backend-audio wait state.
+
 ## BUG-021: API restart can leave half-started vLLM Python processes and launcher window cannot maximize
 
 Status: open, investigating

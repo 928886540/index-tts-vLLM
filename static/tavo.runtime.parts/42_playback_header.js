@@ -77,6 +77,9 @@
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       var playable = trackPlayableUrl(track);
       if ((elementAudioBelongsToTrack(track) || (playable && src === playable)) && isFinite(Number(audio.currentTime))) return Math.max(0, elementPlaybackTimeSec(track));
+      if ((track.state === "live" || track.state === "pending") && (track.streamHealth === "stalled" || track.streamHealth === "interrupted" || track.streamStalled) && isFinite(Number(track.lastStalledSec))) {
+        return Math.max(0, (Number(track.lastStalledSec) || 0) - 0.5);
+      }
       if (isFinite(Number(track.lastWebAudioSec))) return Math.max(0, Number(track.lastWebAudioSec) || 0);
       if (isFinite(Number(track.lastElementSec))) return Math.max(0, Number(track.lastElementSec) || 0);
       if (isFinite(Number(track.lastStalledSec))) return Math.max(0, Number(track.lastStalledSec) || 0);

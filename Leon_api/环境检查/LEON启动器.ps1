@@ -680,7 +680,19 @@ function Start-LeonService {
     }
     Add-Log "调用启动入口: $Script:StartupBat"
     try {
-        Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "`"$Script:StartupBat`"") -WorkingDirectory $Script:RepoRoot -WindowStyle Normal | Out-Null
+        $oldNoPause = $env:LEON_LAUNCHER_NO_PAUSE
+        $env:LEON_LAUNCHER_NO_PAUSE = "1"
+        try {
+            Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "`"$Script:StartupBat`"") -WorkingDirectory $Script:RepoRoot -WindowStyle Hidden | Out-Null
+        }
+        finally {
+            if ($null -eq $oldNoPause) {
+                Remove-Item Env:\LEON_LAUNCHER_NO_PAUSE -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:LEON_LAUNCHER_NO_PAUSE = $oldNoPause
+            }
+        }
         Set-StatusText "服务启动中，首次加载模型可能需要几分钟..." "Khaki"
         Start-Sleep -Milliseconds 600
         Refresh-StartupLogPaths
@@ -719,11 +731,13 @@ function Wait-ApiReadyAsync {
         $elapsed = [int]((Get-Date) - $start).TotalSeconds
         Set-StatusText "服务启动中... ${elapsed}s" "Khaki"
         Add-Log "等待 API /health... ${elapsed}s"
+        Refresh-BackendLogTail
         if ($elapsed -gt 300) {
             $timer.Stop()
             $timer.Dispose()
             Set-StatusText "API 启动超时，请查看日志。" "LightCoral"
             Add-Log "API 启动等待超时。" "ERROR"
+            Refresh-BackendLogTail
         }
     })
     $timer.Start()
@@ -1078,6 +1092,10 @@ function Build-LauncherForm {
     $form.StartPosition = "CenterScreen"
     $form.Size = New-Object System.Drawing.Size(1240, 820)
     $form.MinimumSize = New-Object System.Drawing.Size(1120, 720)
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
+    $form.MaximizeBox = $true
+    $form.MinimizeBox = $true
+    $form.SizeGripStyle = [System.Windows.Forms.SizeGripStyle]::Show
     $form.BackColor = [System.Drawing.Color]::FromArgb(15, 18, 22)
     $form.Font = New-Font 9
     if (Test-Path $Script:IconPath) {
@@ -1147,7 +1165,9 @@ function Build-LauncherForm {
     $main.Dock = "Fill"
     $main.SplitterDistance = 220
     $main.FixedPanel = [System.Windows.Forms.FixedPanel]::Panel1
-    $main.IsSplitterFixed = $true
+    $main.IsSplitterFixed = $false
+    $main.Panel1MinSize = 180
+    $main.Panel2MinSize = 720
     $main.BackColor = [System.Drawing.Color]::FromArgb(15, 18, 22)
     $main.Panel1.BackColor = [System.Drawing.Color]::FromArgb(21, 25, 31)
     $main.Panel2.BackColor = [System.Drawing.Color]::FromArgb(15, 18, 22)

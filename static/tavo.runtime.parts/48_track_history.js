@@ -53,10 +53,10 @@
           if (total) total.textContent = "--:--";
           if (autoplay) {
             var liveResumeSec = trackResumeSec(track);
-            setStatus("等待首段音频…");
-            showTrackNotice(track, liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频");
+            setStatus("等待音频…");
+            showTrackNotice(track, liveResumeSec > 0 ? "从暂停位置续播" : "等待音频…", liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频");
             track.allowStreamPlay = false;
-            playLiveTrack(track, liveStreamUrlForTrack(track) || srcUrl, { noticeTitle: liveResumeSec > 0 ? "从暂停位置续播" : "等待首段音频…", noticeDetail: liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频", waitDetail: "正在合成第一段", startOffsetSec: liveResumeSec });
+            playLiveTrack(track, liveStreamUrlForTrack(track) || srcUrl, { noticeTitle: liveResumeSec > 0 ? "从暂停位置续播" : "等待音频…", noticeDetail: liveResumeSec > 0 ? ("从 " + formatTime(liveResumeSec) + " 继续") : "正在连接流式音频", waitDetail: "后端合成中", startOffsetSec: liveResumeSec });
           } else {
             setStatus(historyStatusText());
             showTrackNotice(track, "流式生成中", "点播放继续等待");

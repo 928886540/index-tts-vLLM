@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "runtimeVersion": "20260606-live-audio-v5",
+  "runtimeVersion": "20260606-live-audio-v6",
   "mode": "ordered-fragments",
   "skin": {
     "default": "tavo.ui.skin.default.css"

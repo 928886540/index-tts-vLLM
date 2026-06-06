@@ -531,8 +531,8 @@
           stopWaitTimer();
           return;
         }
-        setStatus("等待首段音频 " + sec + "s…");
-        showTrackNotice(track, "等待首段音频 " + sec + "s…", opts.waitDetail || "弱网或后端合成较慢");
+        setStatus("等待音频 " + sec + "s…");
+        showTrackNotice(track, "等待音频 " + sec + "s…", opts.waitDetail || "后端合成中");
       }, 1000);
       try {
         await streamWavViaWebAudio(url, {
@@ -551,17 +551,17 @@
               setStatus("正在连接音频…");
               showTrackNotice(track, "正在连接音频…", "弱网下可能需要多等几秒");
             } else if (state === "connected" || state === "waiting_pcm") {
-              setTrackPlaybackState(track, "streaming");
-              setStatus("等待首段音频…");
-              showTrackNotice(track, "等待首段音频…", opts.waitDetail || "后端正在合成第一段");
+              setTrackPlaybackState(track, "loading");
+              setStatus("等待音频…");
+              showTrackNotice(track, "等待音频…", opts.waitDetail || "后端合成中");
             } else if (state === "first_pcm") {
               setTrackPlaybackState(track, "buffering");
               setStatus("收到音频，正在缓冲…");
               showTrackNotice(track, "收到音频", "缓冲一小段后起播");
             } else if (state === "scheduled") {
               setTrackPlaybackState(track, "buffering");
-              setStatus("音频已排队，准备起播…");
-              showTrackNotice(track, "音频已排队", "即将开始出声");
+              setStatus("收到音频，准备播放…");
+              showTrackNotice(track, "收到音频", "准备播放");
             } else if (state === "audio_suspended") {
               track.pausedByUser = true;
               track.lastWebAudioSec = trackResumeSec(track);
@@ -576,7 +576,7 @@
               setPlayState("playing");
               setStatus(trackPlaybackLabel(track));
               setError("");
-              debugLog("▶️ Web Audio 播放时钟已启动", "#9f9");
+              debugLog("▶️ Web Audio 首块音频开始播放", "#9f9");
               startedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
               startWebAudioProgress(token, startedAt, playbackRate, track, startOffsetSec);
               startSubtitle(track, function () {
@@ -594,7 +594,8 @@
               setStatus("网络缓冲中…");
               showTrackNotice(track, "网络缓冲中…", "歌词会停在当前播放位置");
               debugLog("⚠️ Web Audio buffering count=" + track.stalledCount, "#fc9");
-              if (track.cacheKey && track.stalledCount >= 4 && !streamTooSlowFallback) {
+              var earlyStall = !!(startedAt && (((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt) < 5000) && track.stalledCount >= 2);
+              if (track.cacheKey && (track.stalledCount >= 4 || earlyStall) && !streamTooSlowFallback) {
                 streamTooSlowFallback = true;
                 track.playSavedWhenReady = true;
                 setStatus("实时生成跟不上，等待完整音频…");

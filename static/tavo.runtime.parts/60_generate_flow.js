@@ -324,20 +324,20 @@
           stopServerLogPolling();
           return;
         }
-        setStatus("等待首段音频…");
-        showTrackNotice(placeholder, "等待首段音频…", "正在合成，完整音频会自动进入历史");
+        setStatus("等待音频…");
+        showTrackNotice(placeholder, "等待音频…", "后端合成中，完整音频会自动进入历史");
         setPlayState("loading");
         placeholder.allowStreamPlay = false;
         if (shouldUseWebAudioForLiveTrack(placeholder)) {
           debugLog("▶️ live track 使用 Web Audio API 真流式", "#ffd479");
-          await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，完整音频会自动进入历史", waitDetail: "正在合成第一段" });
+          await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待音频…", noticeDetail: "后端合成中，完整音频会自动进入历史", waitDetail: "后端合成中" });
           if (isSavedTrack(placeholder)) attachCacheAudio(placeholder, { deferElement: true });
           stopServerLogPolling();
           return;
         }
         var totalSec = Math.floor((Date.now() - t0) / 1000);
         debugLog("▶️ 启动 live 播放路径, 截至此处用时 " + totalSec + "s", "#9f9");
-        await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待首段音频…", noticeDetail: "正在合成，完整音频会自动进入历史", waitDetail: "正在合成第一段" });
+        await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待音频…", noticeDetail: "后端合成中，完整音频会自动进入历史", waitDetail: "后端合成中" });
         try {
           audio.addEventListener("ended", stopServerLogPolling, { once: true });
           audio.addEventListener("error", stopServerLogPolling, { once: true });

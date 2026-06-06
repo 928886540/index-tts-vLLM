@@ -242,15 +242,27 @@
     function startSubtitle(trackEntry, getTimeSec) {
       stopSubtitle();
       var segs = (trackEntry && trackEntry.segments) || [];
-      if (!segs.length) { showSubtitleNotice("暂无歌词", "音频可播放，但没有拿到分段字幕"); return; }
       var gap = (Number(cfg.intervalMs || 350) / 1000);
       var timeline = [];
       var lastIdx = -1;
       var lastMetaSignature = "";
+      var state = { tickHandle: null, pollHandle: null, track: trackEntry };
+      activeSubtitle = state;
+      function showWaitingSubtitleNotice() {
+        if (trackEntry && trackEntry.cacheKey && !isSavedTrack(trackEntry)) {
+          showSubtitleNotice("等待歌词…", "后端返回分段后自动显示");
+        } else {
+          showSubtitleNotice("暂无歌词", "音频可播放，但没有拿到分段字幕");
+        }
+      }
       function rebuild(metaList, sampleRate) {
         var t = 0;
         timeline = [];
         var count = Math.max(segs.length, (metaList && metaList.length) || 0);
+        if (!count) {
+          showWaitingSubtitleNotice();
+          return false;
+        }
         for (var i = 0; i < count; i++) {
           var seg = (metaList && metaList[i]) || segs[i] || {};
           var segDur;
@@ -277,12 +289,15 @@
         }
         renderSubtitleRows(timeline, !metaList);
         if (metaList) lastIdx = -1;
+        return timeline.length > 0;
       }
-      rebuild();
-      var state = { tickHandle: null, pollHandle: null, track: trackEntry };
-      activeSubtitle = state;
+      if (!rebuild() && !(trackEntry && trackEntry.cacheKey)) {
+        activeSubtitle = null;
+        return;
+      }
       state.tickHandle = setInterval(function () {
         if (activeSubtitle !== state) return;
+        if (!timeline.length) return;
         var t;
         try { t = getTimeSec(); } catch (_) { t = NaN; }
         if (!isFinite(t) || t < 0) return;
@@ -306,7 +321,7 @@
       }, 150);
       // 后台轮询 job_status 拿真实 segments_meta 校准时间轴
       if (trackEntry.cacheKey) {
-        state.pollHandle = setInterval(function () {
+        function pollSubtitleMeta() {
           if (activeSubtitle !== state) return;
           fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(trackEntry.cacheKey))
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -340,7 +355,9 @@
               }
             })
             .catch(function () {});
-        }, 1500);
+        }
+        state.pollHandle = setInterval(pollSubtitleMeta, 1500);
+        pollSubtitleMeta();
       }
     }
 
