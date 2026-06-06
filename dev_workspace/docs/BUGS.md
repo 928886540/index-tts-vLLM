@@ -45,7 +45,7 @@ Guard: After fixing, verify on `fast6g` that changing settings, saving, closing/
 
 ## BUG-027: fast6g style reference paths from old cache can miss local 声腔 files
 
-Status: fixed in code, runtime-validated on fast6g
+Status: fixed in code, needs runtime re-validation after `moan_soft` removal
 
 Reported: 2026-06-06
 
@@ -55,11 +55,11 @@ Evidence: The old JSON records `uses_style_audio=true` for `moan_soft`, `scream_
 
 Hypothesis: confirmed.
 
-Root cause: Two issues overlapped. First, the style resolver trusted explicit stale refs from cache, so `prompts/library/声腔/moan_soft.wav` could resolve to the bad local `moan_soft.MP3` instead of the intended style mapping. Second, English style ids such as `scream_peak` and `laugh_soft` pointed at missing English filenames even though the available local style slices are Chinese names.
+Root cause: Two issues overlapped. First, the style resolver trusted explicit stale refs from cache, so `prompts/library/声腔/moan_soft.wav` could hit a bad local `moan_soft.MP3` or a missing renamed file. Second, English style ids such as `scream_peak` and `laugh_soft` pointed at missing English filenames even though the available local style slices are Chinese names.
 
-Fix: `fast6g/indextts2_api.py` and `vllm/indextts2_api.py` now map English style ids to available Chinese style slices, prefer known style mapping over stale explicit refs, and fall back to explicit refs only when no style mapping works. `vllm/indextts/voice_library.py` and the fast6g resolver also strip `prompts/library` / `library` prefixes and stale extensions when matching local voice references. `moan_soft` currently maps to `声腔/低吟-AD学姐`; `scream_peak` maps to `声腔/尖叫-AD学姐`; `laugh_soft` maps to `声腔/轻笑-AD学姐`.
+Fix: `fast6g/indextts2_api.py` and `vllm/indextts2_api.py` now map only available English style ids to local Chinese style slices. `moan_soft` was removed from `STYLE_VOICE_MAP`, so the AI style catalog no longer主动推荐它。`声腔/`素材仍可作为普通音色配置出现和手动选择。`scream_peak` maps to `声腔/尖叫-AD学姐`; `laugh_soft` maps to `声腔/轻笑-AD学姐`. `vllm/indextts/voice_library.py` and the fast6g resolver also strip `prompts/library` / `library` prefixes and stale extensions when matching local voice references.
 
-Guard: Re-run the user's 甘婷婷 sample through `fast6g` for `moan_soft`, `scream_peak`, and `laugh_soft`. Completed metadata should show `uses_style_audio=true` on the styled segments, and cache audio should be written under `fast6g/outputs/cache/by_role/甘婷婷/`. Validated jobs: `6d7fb65031e872669bc25d6662f47ba6b3d34aaa`, `c38c00c8e02f33a8d12d3d5f46149396d7096e80`, and `3d18366480d7d97fca22217cbf43d7b42c68107d`.
+Guard: Do not reintroduce `moan_soft` into `STYLE_VOICE_MAP` unless a real, decodable local asset is restored and validated. `/voices` may still list `声腔/`素材 because the user may use them as manual voice configuration. Re-run the user's 甘婷婷 sample through `fast6g` only for supported styles such as `scream_peak` and `laugh_soft`; completed metadata should show `uses_style_audio=true` on styled segments, and cache audio should be written under `fast6g/outputs/cache/by_role/甘婷婷/`. Previous `moan_soft`/substitute output must not be used as quality or multi-voice evidence.
 
 ## BUG-025: Tavo LIVE WebAudio clock can advance without audible audio or subtitles
 

@@ -97,24 +97,24 @@ User-provided source:
 Fix/validation notes:
 
 - `moan_soft.MP3` was a bad renamed file on this machine: `soundfile` reported `1.164s`, but `librosa` decoded only `0.017s` of silence and emitted MP3 header errors. That caused the emotion/style encoder `Calculated padded input size per channel: (0)` failure.
-- English style ids now map to valid local Chinese style slices: `moan_soft -> 声腔/低吟-AD学姐`, `scream_peak -> 声腔/尖叫-AD学姐`, `laugh_soft -> 声腔/轻笑-AD学姐`.
+- `moan_soft` is removed from the runtime style map because the local asset was bad/removed. Do not advertise or test it unless a real decodable asset is restored.
+- Supported English style ids still map to valid local Chinese style slices where assets exist, for example `scream_peak -> 声腔/尖叫-AD学姐` and `laugh_soft -> 声腔/轻笑-AD学姐`.
+- `声腔/`素材仍可作为普通音色配置手动选择；这不是 bug。只是不再把 `moan_soft` 放进 AI style 枚举里主动推荐。
 - The resolver now strips stale `prompts/library` / `library` prefixes and old extensions, and known style mapping wins over stale explicit cache refs.
 - `fast6g` was restarted through `scripts/start-fast6g-api.bat`; `/health` reported `version=fast6g`, `llm_parse=true`, `qwen_emo=false`.
 - GPU memory before long style tests was about `6318 MiB / 12288 MiB`; after the tests about `8171 MiB / 12288 MiB`.
 
-All three 13-segment long-text jobs completed with `uses_style_audio=true` and `/cache_audio/<key>` returning HTTP 200:
+The prior `moan_soft` run is invalid as `moan_soft` evidence because it used a substitute mapping, and it is also invalid as multi-voice evidence because the test used one source speaker. Keep only the supported-style RTF numbers as rough backend timing evidence:
 
-- `moan_soft` job `6d7fb65031e872669bc25d6662f47ba6b3d34aaa`: audio `66.227s`, wall `185.958s`, RTF `2.808`, `gpt_gen_s=149.151`, `s2mel_s=29.286`, `bigvgan_s=4.064`.
 - `scream_peak` job `c38c00c8e02f33a8d12d3d5f46149396d7096e80`: audio `60.213s`, wall `164.206s`, RTF `2.727`, `gpt_gen_s=130.083`, `s2mel_s=28.726`, `bigvgan_s=3.728`.
 - `laugh_soft` job `3d18366480d7d97fca22217cbf43d7b42c68107d`: audio `63.023s`, wall `172.745s`, RTF `2.741`, `gpt_gen_s=138.452`, `s2mel_s=28.739`, `bigvgan_s=3.885`.
 
 Readable WAVs for manual listening:
 
-- `fast6g/outputs/cache/by_role/甘婷婷/20260606-150022-646_6d7fb65031e872669bc25d6662f47ba6b3d34aaa.wav`
 - `fast6g/outputs/cache/by_role/甘婷婷/20260606-150325-092_c38c00c8e02f33a8d12d3d5f46149396d7096e80.wav`
 - `fast6g/outputs/cache/by_role/甘婷婷/20260606-150709-734_3d18366480d7d97fca22217cbf43d7b42c68107d.wav`
 
-RTF conclusion: this fast6g path improves over the source vLLM cache (`rtf=3.519`) but is still not near realtime. In these long style tests, GPT generation dominates (`130-149s`) while S2Mel is about `29s`.
+RTF conclusion: this fast6g path improves over the source vLLM cache (`rtf=3.519`) but is still not near realtime. In the supported long style tests, GPT generation dominates (`130-138s`) while S2Mel is about `29s`. Re-run multi-voice RTF with explicit role voices before using any output as quality evidence.
 
 ## Current Project Shape
 

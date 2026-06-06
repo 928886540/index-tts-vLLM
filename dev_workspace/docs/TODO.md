@@ -25,7 +25,8 @@
 
 - Resource and RTF baseline:
   - checked `fast6g` long dialogue style RTF on 2026-06-06 with the user's 甘婷婷 cache sample;
-  - three 13-segment style jobs completed with RTF `2.727-2.808`, audio `60.213-66.227s`, and GPU memory about `6318 MiB` before / `8171 MiB` after;
+  - two supported 13-segment style jobs completed with RTF `2.727-2.741`, audio `60.213-63.023s`, and GPU memory about `6318 MiB` before / `8171 MiB` after;
+  - the previous `moan_soft` run is invalid as style/quality evidence because that style was removed after the local asset was confirmed bad/removed;
   - next performance pass should isolate why GPT generation dominates (`130-149s`) and compare Tavo quality tiers with the same long text only when the user wants more long runs.
 
 - Protect saved history:

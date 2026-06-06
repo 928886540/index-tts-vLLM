@@ -57,11 +57,12 @@ Record:
 
 For AI/custom segments that use `style`, `style_alpha`, or `emo_ref_audio_path`:
 
-- Old cache refs like `prompts/library/声腔/moan_soft.wav` must not force a stale or broken local file when a known style id has a valid mapping.
+- Old cache refs like `prompts/library/声腔/moan_soft.wav` must not be treated as a supported built-in style unless the style is explicitly restored and validated.
+- `/voices` may list `声腔/`素材 because the user may manually choose them as voice configuration; this is not a bug by itself.
 - Voice/style lookup should accept references with `prompts/library/` or `library/` prefixes and should retry without stale file extensions.
-- English style ids used by the LLM (`moan_soft`, `scream_peak`, `laugh_soft`, etc.) should map to available local `声腔` files, currently the Chinese style slices under `vllm/prompts/library/声腔`.
+- English style ids used by the LLM should map only to available local `声腔` files. `moan_soft` is currently removed from the advertised style map because the local asset was bad/removed.
 - A bad or too-short style file should fail clearly or be avoided through explicit mapping; it must not silently turn `uses_style_audio=false` for a segment that requested a known style.
-- Regression sample: use the user's 甘婷婷 cache JSON/WAV and run `moan_soft`, `scream_peak`, and `laugh_soft` on `fast6g`; all completed metadata should show `uses_style_audio=true` and `/cache_audio/<key>` should return `HTTP 200`.
+- Regression sample: use the user's 甘婷婷 cache JSON/WAV and run supported styles such as `scream_peak` and `laugh_soft` on `fast6g`; completed metadata should show `uses_style_audio=true` and `/cache_audio/<key>` should return `HTTP 200`. Do not use `moan_soft` until a real valid asset is restored.
 
 ## Tavo Script Regression
 

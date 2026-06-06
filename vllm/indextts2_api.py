@@ -1753,7 +1753,6 @@ STYLE_VOICE_MAP = {
     "breath_soft": "声腔/轻喘-AD学姐",
     "breath_heavy": "声腔/喘息-AD学姐",
     "intimate_breath": "声腔/喘息-AD学姐",
-    "moan_soft": "声腔/低吟-AD学姐",
     "low_murmur": "声腔/低吟-AD学姐",
     "whisper_soft": "声腔/耳语-AD学姐",
     "shy_whisper": "声腔/低语-AD学姐",
