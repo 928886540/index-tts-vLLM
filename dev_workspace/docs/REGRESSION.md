@@ -58,13 +58,28 @@ Record:
 When validating `vllm` startup with CUDA kernel enabled:
 
 - `/health` should return `version=vllm` and the selected Qwen/LLM flags.
+- `/health` alone is not enough after a restart. Confirm the listening API PID changed from the previous instance and that exactly one expected worker child belongs to the new API PID.
 - Startup logs should show only the active `indextts/s2mel/modules/bigvgan/alias_free_activation/cuda` extension path for BigVGAN CUDA preload.
 - Startup logs should not compile or load the legacy `indextts/BigVGAN/alias_free_activation/cuda` extension tree.
+- Fresh startup stderr logs must not contain fatal worker errors such as `No available memory for the cache blocks`, `Error in memory profiling`, `EngineCore failed to start`, or `EngineCore encountered an issue`.
 - With `--fp16`, the main-process GPT wrapper should run half precision/autocast, matching the non-vLLM backend pattern.
 - Record API PID, vLLM worker PID, selected `gpu_memory_utilization`, and idle GPU memory after `/health`.
 - Run one short `/warmup` after a vLLM FP16 change to catch dtype incompatibility before using Tavo.
 - `gpu_memory_utilization=0.08` failed on this machine with no available KV cache memory; do not expose it as a normal launcher preset unless a later architecture change creates more headroom.
 - For the current 12 GB RTX 3060 setup, `0.11` and `0.15` are the useful ratio range. In the 2026-06-06 fixed long multi-role benchmark, `0.11` averaged `RTF 1.037` with `10451 MiB` peak VRAM, `0.15` averaged `RTF 1.033` with `10847 MiB` peak VRAM, `0.20` slowed to `RTF 1.111`, and `0.25` collapsed to `RTF 2.875` with S2Mel/BigVGAN timing spikes. Do not chase full VRAM/100% utilization; keep headroom for S2Mel, BigVGAN, and temporary CUDA allocations.
+
+## Benchmark Fail-Fast Guard
+
+For long RTF benchmarks:
+
+- Use a helper with fail-fast guards, currently `dev_workspace/dev_tools/benchmark_vllm_gpu_ratios.py`.
+- Preflight must record baseline GPU memory and active project Python PIDs.
+- Restart must prove a new API PID and worker PID, not just a healthy `/health` response.
+- Run `/warmup` once before measuring, then check warmup GPU memory before submitting a long job.
+- If warmup GPU memory is near full, stop. Do not run the long sample.
+- If a job's running GPU memory crosses the guard threshold, cancel the job and stop the benchmark.
+- If the first completed run has abnormal RTF, stop remaining runs and report the abnormal result.
+- User-facing progress updates must include current run index, segment progress, elapsed time, GPU memory, and current RTF when available, so the user does not have to infer status from Task Manager.
 
 ## Style Reference Guard
 

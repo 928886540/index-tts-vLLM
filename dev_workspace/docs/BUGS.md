@@ -25,6 +25,24 @@ Notes:
 - When the bug is fixed, record the actual root cause, the code/files changed, and the regression guard.
 - If a fixed bug returns, update the same entry and add a stricter guard in `docs/REGRESSION.md`.
 
+## BUG-028: vLLM benchmark reused old healthy API after failed restart and did not fail fast
+
+Status: fixed in benchmark helper, needs one guarded re-run before trusting new numbers
+
+Reported: 2026-06-06
+
+Repro: Run `dev_workspace/dev_tools/benchmark_vllm_gpu_ratios.py --ratios 0.15 --runs 3` while an old vLLM API is still healthy on `9880`. The restart attempt can fail to initialize a new vLLM worker because the old API/worker still holds GPU memory, but `/health` returns OK from the old process. The benchmark then continues with the stale instance.
+
+Evidence: During the bad 0.15 re-test, the new worker log `logs/vllm/api_restart_stable_20260606_173701_try1.err` contained `ValueError: No available memory for the cache blocks`. At the same time `/health` still returned `version=vllm` from old PID `14140`, so the benchmark treated startup as successful. Warmup pushed GPU memory to `11725 MiB`; run 1 reached `RTF 2.17`; run 2 reached `RTF 7.398` with `s2mel_s=382.939` and `bigvgan_s=61.188`; run 3 was cancelled after 3 segments. After manually stopping old API PID `14140` and worker PID `2428`, GPU memory dropped to about `648 MiB`. A clean restart then started PID `23284` / worker `13584` at about `8048 MiB` idle.
+
+Hypothesis: confirmed.
+
+Root cause: The benchmark helper trusted `/health` alone after restart. That is not sufficient when an old healthy API is still listening while a new worker fails during startup. The helper also lacked fail-fast guards for abnormal warmup memory, abnormal first-run RTF, and near-full VRAM during polling.
+
+Fix: `dev_workspace/dev_tools/benchmark_vllm_gpu_ratios.py` now validates that the listening API PID changes across restart, scans fresh vLLM startup stderr logs for fatal KV-cache / memory-profiling / EngineCore errors, and fails before running long jobs when idle or warmup VRAM exceeds guard thresholds. During a job it cancels and stops the benchmark when running VRAM crosses the guard threshold; after a completed job it stops remaining runs when RTF exceeds the guard threshold.
+
+Guard: Performance benchmarks must not rely on `/health` alone. Record old/new API PID, worker PID, idle VRAM, warmup VRAM, and fatal startup log scan before long synthesis. If warmup VRAM is near full or a first run exceeds the RTF guard, cancel the active job and stop the whole benchmark instead of continuing remaining runs.
+
 ## BUG-026: Tavo settings reports saved but reopening shows old config on fast6g
 
 Status: open, user-reported, not investigated yet
