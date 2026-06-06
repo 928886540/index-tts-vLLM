@@ -117,3 +117,13 @@ The program serves `static/tavo.js` locally. Users can load it through LAN or th
 
 Repository docs should show local/LAN examples and describe public host replacement generically.
 
+## DEC-014: vLLM main-process GPT must honor FP16
+
+Status: accepted
+
+The vLLM backend still needs a main-process GPT wrapper after vLLM generates semantic codes, because that wrapper computes the latent passed into S2Mel. It cannot be deleted as a simple duplicate.
+
+The critical finding from 2026-06-06 is that this main-process GPT wrapper was staying FP32 even when the service was launched with `--fp16`. On the RTX 3060 12 GB test machine, fixing this by applying `.half()` plus local autocast dropped vLLM `0.11` idle GPU memory from about `9653 MiB` to about `8008 MiB`.
+
+Guard: future vLLM changes must keep the main-process GPT wrapper aligned with the startup precision flag. A short `/warmup` must pass after changing this path. Do not reintroduce a FP32 main GPT wrapper unless there is a measured quality or stability reason and the VRAM cost is recorded.
+

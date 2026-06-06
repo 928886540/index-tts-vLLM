@@ -81,7 +81,7 @@ Guard: LIVE WebAudio must not start the visible playback clock or advance progre
 
 ## BUG-021: API restart can leave half-started vLLM Python processes and launcher window cannot maximize
 
-Status: open, investigating
+Status: open, investigating; low-risk vLLM VRAM fixes runtime-validated
 
 Reported: 2026-06-05
 
@@ -89,13 +89,15 @@ Repro: User killed Python processes and retried startup, but port `9880` still d
 
 Evidence: `nvidia-smi` showed two compute processes from `...\indextts2runtime\python.exe` still holding GPU memory while `9880` had no LISTEN socket. Recent startup logs stop around vLLM engine initialization and do not reach `>> GPT weights restored` or `IndexTTS API listening`. `LEON启动器.ps1` sets a fixed splitter (`$main.IsSplitterFixed = $true`), and the form setup did not explicitly enable resizing/maximize behavior.
 
-Hypothesis: The restart mutex path can wait behind a stale launcher/restart chain instead of clearing half-started project processes. vLLM Windows spawn/IPC can leave child processes alive without a healthy API listener. The launcher UI also needs explicit resizable form settings and an unfixed splitter.
+2026-06-06 vLLM 0.11 evidence: after cleanly stopping `fast6g`, GPU memory dropped to about `1085 MiB`. Starting `vllm` with `--vllm_gpu_memory_utilization 0.11` created API PID `19704` and vLLM worker PID `17584`, `/health` returned `version=vllm`, `qwen_emo=false`, `llm_parse=true`, but idle GPU memory was still about `9647 MiB / 12288 MiB`. Startup logs showed the main API process loads GPT and moves the GPT wrapper to `cuda:0`, then vLLM starts and loads its own engine. The same log also compiled/loaded two BigVGAN CUDA extension trees: the old unused `vllm/indextts/BigVGAN/...` preload path, then the actual `vllm/indextts/s2mel/modules/bigvgan/...` vocoder path. After the BigVGAN preload fix, the next vLLM 0.11 restart created API PID `28008` and worker PID `26736`, `/health` and `/voices` passed, and startup logs only compiled/loaded `vllm/indextts/s2mel/modules/bigvgan/...`; the legacy `vllm/indextts/BigVGAN/...` path was absent, but idle GPU memory still stayed around `9653 MiB / 12288 MiB`. After the main GPT FP16/autocast fix, the final vLLM 0.11 restart created API PID `29272` and worker PID `28772`; idle GPU memory dropped to about `8008 MiB / 12288 MiB`, `/health` and `/voices` passed, and a short `/warmup` synthesis succeeded in `3.295s` with `RTF=3.6375`. A `gpu_memory_utilization=0.08` startup test failed with `Available KV cache memory: -0.05 GiB` and `No available memory for the cache blocks`, so `0.08` is too low on this machine with the current architecture.
+
+Hypothesis: The restart mutex path can wait behind a stale launcher/restart chain instead of clearing half-started project processes. vLLM Windows spawn/IPC can leave child processes alive without a healthy API listener. The launcher UI also needs explicit resizable form settings and an unfixed splitter. For high vLLM idle memory, the main API GPT wrapper and vLLM worker both need GPT-related weights, but the main-process GPT cannot be removed outright because it computes the latent passed into S2Mel after vLLM generates codes. The confirmed low-risk waste was that the vLLM main-process GPT stayed FP32 despite `--fp16`.
 
 Root cause: pending.
 
-Fix: pending.
+Fix: `vllm/indextts/infer_vllm_v2.py` no longer imports the unused old `indextts.BigVGAN.models.BigVGAN` class and now preloads the same `indextts.s2mel.modules.bigvgan.alias_free_activation.cuda.activation1d` extension used by the actual vocoder. Runtime validation confirmed the next vLLM startup log no longer mentions `vllm\indextts\BigVGAN\alias_free_activation\cuda\build`. The same file now also converts the main GPT wrapper to half precision when `--fp16` is active and wraps local GPT latent/conditioning calls in autocast, matching the non-vLLM backend pattern.
 
-Guard: Restarting should kill stale same-repo API/control-chain processes before launching a new instance. After startup, `9880` must pass `/health`, and no stale project Python should remain if startup fails. The launcher window should be sizable and maximizable, with the main splitter draggable.
+Guard: Restarting should kill stale same-repo API/control-chain processes before launching a new instance. After startup, `9880` must pass `/health`, and no stale project Python should remain if startup fails. vLLM startup with CUDA kernel enabled should compile/load only the active `s2mel/modules/bigvgan` CUDA extension path, not the legacy `indextts/BigVGAN` extension tree. With `--fp16`, the main GPT wrapper should not remain FP32, and a short `/warmup` should pass before using the service. The launcher window should be sizable and maximizable, with the main splitter draggable.
 
 ## BUG-001: IndexTTS2 resource pressure can make RTF spike
 

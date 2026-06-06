@@ -28,7 +28,6 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-from indextts.BigVGAN.models import BigVGAN as Generator
 from indextts.gpt.model_vllm_v2 import UnifiedVoice
 from indextts.utils.checkpoint import load_checkpoint
 from indextts.utils.feature_extractors import MelSpectrogramFeatures
@@ -101,7 +100,10 @@ class IndexTTS2:
         load_checkpoint(self.gpt, self.gpt_path)
         print(">> moving GPT wrapper to device:", self.device, flush=True)
         self.gpt = self.gpt.to(self.device)
-        self.gpt.eval()
+        if self.is_fp16:
+            self.gpt.eval().half()
+        else:
+            self.gpt.eval()
         print(">> GPT wrapper ready on device", flush=True)
 
         from vllm.engine.arg_utils import AsyncEngineArgs
@@ -139,10 +141,9 @@ class IndexTTS2:
         if self.use_cuda_kernel:
             # preload the CUDA kernel for BigVGAN
             try:
-                from indextts.BigVGAN.alias_free_activation.cuda import load
+                from indextts.s2mel.modules.bigvgan.alias_free_activation.cuda import activation1d
 
-                anti_alias_activation_cuda = load.load()
-                print(">> Preload custom CUDA kernel for BigVGAN", anti_alias_activation_cuda)
+                print(">> Preload custom CUDA kernel for BigVGAN", activation1d.anti_alias_activation_cuda)
             except Exception as ex:
                 traceback.print_exc()
                 print(">> Failed to load custom CUDA kernel for BigVGAN. Falling back to torch.")
@@ -594,30 +595,31 @@ class IndexTTS2:
 
             m_start_time = time.perf_counter()
             with torch.no_grad():
-                emovec = self.gpt.merge_emovec(
-                    spk_cond_emb,
-                    emo_cond_emb,
-                    torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
-                    torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
-                    alpha=emo_alpha
-                )
+                with torch.amp.autocast(text_tokens.device.type, enabled=self.dtype is not None, dtype=self.dtype):
+                    emovec = self.gpt.merge_emovec(
+                        spk_cond_emb,
+                        emo_cond_emb,
+                        torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
+                        torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
+                        alpha=emo_alpha
+                    )
 
-                if emo_vector is not None:
-                    emovec = emovec_mat + (1 - torch.sum(weight_vector)) * emovec
-                    # emovec = emovec_mat
+                    if emo_vector is not None:
+                        emovec = emovec_mat + (1 - torch.sum(weight_vector)) * emovec
+                        # emovec = emovec_mat
 
-                codes, speech_conditioning_latent = await self.gpt.inference_speech(
-                    spk_cond_emb,
-                    text_tokens,
-                    emo_cond_emb,
-                    cond_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
-                    emo_cond_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
-                    emo_vec=emovec,
-                    top_p=top_p,
-                    top_k=top_k,
-                    temperature=temperature,
-                    repetition_penalty=repetition_penalty,
-                )
+                    codes, speech_conditioning_latent = await self.gpt.inference_speech(
+                        spk_cond_emb,
+                        text_tokens,
+                        emo_cond_emb,
+                        cond_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
+                        emo_cond_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
+                        emo_vec=emovec,
+                        top_p=top_p,
+                        top_k=top_k,
+                        temperature=temperature,
+                        repetition_penalty=repetition_penalty,
+                    )
                 if should_stop_generation():
                     stopped = True
                     print(">> generation stopped by user request")
@@ -664,19 +666,20 @@ class IndexTTS2:
                 #                 code_lens*self.gpt.mel_length_compression,
                 #                 cond_mel_lengths=torch.tensor([speech_conditioning_latent.shape[-1]], device=text_tokens.device),
                 #                 return_latent=True, clip_inputs=False)
-                latent = self.gpt(
-                    speech_conditioning_latent,
-                    text_tokens,
-                    torch.tensor([text_tokens.shape[-1]], device=text_tokens.device),
-                    codes,
-                    torch.tensor([codes.shape[-1]], device=text_tokens.device),
-                    emo_cond_emb,
-                    cond_mel_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
-                    emo_cond_mel_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
-                    emo_vec=emovec,
-                    use_speed=use_speed,
-                )
-                gpt_forward_time += time.perf_counter() - m_start_time
+                with torch.amp.autocast(text_tokens.device.type, enabled=self.dtype is not None, dtype=self.dtype):
+                    latent = self.gpt(
+                        speech_conditioning_latent,
+                        text_tokens,
+                        torch.tensor([text_tokens.shape[-1]], device=text_tokens.device),
+                        codes,
+                        torch.tensor([codes.shape[-1]], device=text_tokens.device),
+                        emo_cond_emb,
+                        cond_mel_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
+                        emo_cond_mel_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
+                        emo_vec=emovec,
+                        use_speed=use_speed,
+                    )
+                    gpt_forward_time += time.perf_counter() - m_start_time
                 if should_stop_generation():
                     stopped = True
                     print(">> generation stopped by user request")

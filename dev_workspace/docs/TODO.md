@@ -17,7 +17,7 @@
   - after the Qwen/AI-mode code change, restart and verify `fast6g` `/health` reports `llm_parse=true`;
   - run one `fast6g` AI-mode job against a mock or real OpenAI-compatible LLM endpoint;
   - verify Qwen-enabled startup for both `vllm` and `fast6g` ignores style/emo_vec during synthesis while using per-segment `emo_text`;
-  - still verify `vllm` API startup after the fast6g fixes if switching back to the quality backend;
+  - `vllm` API startup was re-verified on 2026-06-06 at `gpu_memory_utilization=0.11`; `/health`, `/voices`, and a short `/warmup` passed;
   - `static/tavo.js` now matches the desired live-card boundary in code: live is transient, saved is native `<audio>`;
   - `static/tavo.js` is now a light loader; runtime lives in `static/tavo.runtime.js` + `static/tavo.runtime.parts/`;
   - update Tavo regex/cache-busting URL with LAN URL or the user's own tunnel host outside repo config;
@@ -25,9 +25,12 @@
 
 - Resource and RTF baseline:
   - checked `fast6g` long dialogue style RTF on 2026-06-06 with the user's 甘婷婷 cache sample;
+  - checked low-risk `vllm` startup optimizations on 2026-06-06: duplicate BigVGAN CUDA extension preload was removed, and the main-process GPT wrapper now uses FP16/autocast under `--fp16`;
+  - final `vllm 0.11` idle GPU memory dropped from about `9653 MiB` to about `8008 MiB`; after short warmup it was about `8490 MiB`;
+  - `vllm 0.08` was tested and rejected for now: vLLM reported no available KV cache memory and failed startup;
   - two supported 13-segment style jobs completed with RTF `2.727-2.741`, audio `60.213-63.023s`, and GPU memory about `6318 MiB` before / `8171 MiB` after;
   - the previous `moan_soft` run is invalid as style/quality evidence because that style was removed after the local asset was confirmed bad/removed;
-  - next performance pass should isolate why GPT generation dominates (`130-149s`) and compare Tavo quality tiers with the same long text only when the user wants more long runs.
+  - next performance pass should rerun a fixed long-text RTF comparison on `vllm 0.11` after the FP16 fix and compare Tavo quality tiers only when the user wants more long runs.
 
 - Protect saved history:
   - code audit done for `static/tavo.js` persistence paths: only saved/cache-ready tracks are persisted and counted;

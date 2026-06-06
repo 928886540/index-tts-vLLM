@@ -6,6 +6,25 @@ Updated: 2026-06-06
 
 Finish the root workspace migration and keep IndexTTS2 as the Tavo mainline without copying GPT-SoVITS engine behavior into this project.
 
+## Latest Validation Snapshot: vLLM 0.11 VRAM Pass
+
+Updated: 2026-06-06
+
+Low-risk vLLM startup/VRAM fixes were applied and runtime-validated:
+
+- `vllm/indextts/infer_vllm_v2.py` no longer preloads the legacy `indextts/BigVGAN/alias_free_activation/cuda` extension tree.
+- It now preloads the same `indextts/s2mel/modules/bigvgan/alias_free_activation/cuda` extension path that `BigVGAN.from_pretrained()` actually uses.
+- The vLLM main-process GPT wrapper now follows the normal backend behavior under `--fp16`: after loading the checkpoint and moving to CUDA, it calls `.half()` and GPT calls run under `torch.amp.autocast(...)`.
+- vLLM was restarted on `9880` with `--vllm_gpu_memory_utilization 0.11`, `--cuda_kernel`, `--fp16`, and `--no_qwen_emo`.
+- `/health` passed with `version=vllm`, `qwen_emo=false`, and `llm_parse=true`; `/voices` returned `HTTP 200`.
+- Final running vLLM processes after restoring `0.11`: API PID `29272`, worker PID `28772`.
+- Latest startup logs only show the `s2mel/modules/bigvgan` CUDA extension path; the old `indextts/BigVGAN` path is absent.
+- Idle GPU memory after the final `0.11` restart was about `8008 MiB / 12288 MiB`, down from the earlier `~9653 MiB` baseline.
+- Short warmup succeeded after the FP16/autocast change: text `你好。`, elapsed `3.295s`, `gpt_gen_time=1.27s`, `gpt_forward_time=0.02s`, `s2mel_time=0.43s`, `bigvgan_time=0.11s`, `RTF=3.6375`. GPU memory after warmup was about `8490 MiB / 12288 MiB`.
+- A test restart with `gpu_memory_utilization=0.08` failed. vLLM reported `Available KV cache memory: -0.05 GiB` and `No available memory for the cache blocks`; the half-started process was stopped and `0.11` was restored.
+
+Next performance direction: run a real fixed-text RTF comparison on `vllm 0.11` after the FP16 fix. The main-process GPT cannot simply be removed because it computes the latent passed into S2Mel after vLLM generates semantic codes; deeper savings would require using vLLM hidden states or another latent path and should be treated as higher risk.
+
 ## Restart Handoff: 2026-06-06 Push Point
 
 The repository has been moved to `D:\apiWorkSpace\leon_api` and is intended to be the Git root. The current push includes:

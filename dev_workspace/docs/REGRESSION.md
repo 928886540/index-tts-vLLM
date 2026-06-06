@@ -53,6 +53,18 @@ Record:
 - RTF.
 - Whether FP16/CUDA kernel/DeepSpeed/vLLM options were enabled.
 
+## vLLM Startup Guard
+
+When validating `vllm` startup with CUDA kernel enabled:
+
+- `/health` should return `version=vllm` and the selected Qwen/LLM flags.
+- Startup logs should show only the active `indextts/s2mel/modules/bigvgan/alias_free_activation/cuda` extension path for BigVGAN CUDA preload.
+- Startup logs should not compile or load the legacy `indextts/BigVGAN/alias_free_activation/cuda` extension tree.
+- With `--fp16`, the main-process GPT wrapper should run half precision/autocast, matching the non-vLLM backend pattern.
+- Record API PID, vLLM worker PID, selected `gpu_memory_utilization`, and idle GPU memory after `/health`.
+- Run one short `/warmup` after a vLLM FP16 change to catch dtype incompatibility before using Tavo.
+- `gpu_memory_utilization=0.08` failed on this machine with no available KV cache memory; do not expose it as a normal launcher preset unless a later architecture change creates more headroom.
+
 ## Style Reference Guard
 
 For AI/custom segments that use `style`, `style_alpha`, or `emo_ref_audio_path`:
