@@ -27,6 +27,37 @@ def safe_voice_name(name: str) -> str:
     return joined[:160]
 
 
+def _voice_lookup_candidates(name: str) -> list[str]:
+    raw = (name or "").strip().strip("\"'")
+    if not raw:
+        return []
+    normalized = raw.replace("\\", "/").strip("/")
+    values = [normalized]
+    lower = normalized.lower()
+    for marker in ("prompts/library/", "library/"):
+        idx = lower.rfind(marker)
+        if idx >= 0:
+            values.append(normalized[idx + len(marker):])
+    expanded = []
+    for value in values:
+        value = value.strip("/")
+        if not value:
+            continue
+        expanded.append(value)
+        for ext in VOICE_LIB_EXTS:
+            if value.lower().endswith(ext):
+                expanded.append(value[:-len(ext)])
+                break
+    out = []
+    seen = set()
+    for value in expanded:
+        key = value.lower()
+        if value and key not in seen:
+            seen.add(key)
+            out.append(value)
+    return out
+
+
 def list_voices() -> list[dict]:
     """List saved voices recursively, walking sub-directories.
 
@@ -73,17 +104,17 @@ def get_voice_path(name: str) -> Optional[str]:
     支持三种写法:
       "高圆圆"          → library/高圆圆.{wav,mp3,...} 任一存在的即取
       "男声/陈宇"      → library/男声/陈宇.{ext}
-      "library/.../x"  → 直接当相对路径解释
+      "prompts/library/.../x.wav" → 去掉库前缀和旧扩展名后匹配
     无前缀写法找不到时,会递归扫所有子目录找 stem 同名的文件。
     """
-    safe = safe_voice_name(name)
-    if not safe:
-        return None
-
-    path = _find_voice_path(safe)
-    if path is None:
-        return None
-    return _format_voice_path(path)
+    for candidate in _voice_lookup_candidates(name):
+        safe = safe_voice_name(candidate)
+        if not safe:
+            continue
+        path = _find_voice_path(safe)
+        if path is not None:
+            return _format_voice_path(path)
+    return None
 
 
 def save_voice(audio_bytes: bytes, name: str, ext: str = ".wav") -> str:

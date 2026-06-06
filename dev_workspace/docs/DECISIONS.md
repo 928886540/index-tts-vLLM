@@ -97,15 +97,15 @@ For intelligent/multi-role mode, the LLM decides `segment.role`. The frontend ma
 
 The frontend must not override a non-`旁白` LLM role just because the segment text is not inside quotation marks. Quote/narration policy belongs in the LLM prompt and regression samples, not in frontend post-processing.
 
-## DEC-012: Qwen emotion is a launcher/backend mode
+## DEC-012: Qwen emotion is deprecated for the launcher path
 
-Status: accepted
+Status: deprecated
 
-Qwen emotion is selected at launcher startup, not from the Tavo mobile UI.
+Qwen emotion should not be the recommended Tavo/launcher path.
 
-If the launcher enables Qwen emotion, the backend automatically applies Qwen emotion text for Tavo dialogue segments. The Tavo frontend should not expose a separate Qwen emotion toggle; loading that model means it should be used automatically.
+Runtime testing confirmed that IndexTTS2's `use_emo_text=True` path calls local QwenEmotion to convert text into an 8-dimensional emotion vector, then disables `emo_audio_prompt`. That can automate coarse emotion weights, but it does not reliably produce breath, whisper, sob, vocal-cavity, or style-reference texture.
 
-`普通模式` and `AI模式` remain text splitting / role assignment modes. Qwen emotion is not the same as LLM voice-cavity analysis. When Qwen emotion is enabled, the LLM should not output or control `style`, `style_alpha`, `emo_vec`, or `emo_alpha`; it should only provide dialogue role/text when AI parsing is used.
+The launcher now forces Qwen emotion off. Backend/script `--qwen_emo` compatibility may remain for manual comparison, but the product direction is: AI mode should let the LLM output per-segment `role`, `text`, `style`, `style_alpha`, `emo_vec`, and `emo_alpha`; the backend then uses style reference audio and emotion parameters directly.
 
 ## DEC-013: Public tunnel host stays out of Git
 

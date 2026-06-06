@@ -53,6 +53,16 @@ Record:
 - RTF.
 - Whether FP16/CUDA kernel/DeepSpeed/vLLM options were enabled.
 
+## Style Reference Guard
+
+For AI/custom segments that use `style`, `style_alpha`, or `emo_ref_audio_path`:
+
+- Old cache refs like `prompts/library/声腔/moan_soft.wav` must not force a stale or broken local file when a known style id has a valid mapping.
+- Voice/style lookup should accept references with `prompts/library/` or `library/` prefixes and should retry without stale file extensions.
+- English style ids used by the LLM (`moan_soft`, `scream_peak`, `laugh_soft`, etc.) should map to available local `声腔` files, currently the Chinese style slices under `vllm/prompts/library/声腔`.
+- A bad or too-short style file should fail clearly or be avoided through explicit mapping; it must not silently turn `uses_style_audio=false` for a segment that requested a known style.
+- Regression sample: use the user's 甘婷婷 cache JSON/WAV and run `moan_soft`, `scream_peak`, and `laugh_soft` on `fast6g`; all completed metadata should show `uses_style_audio=true` and `/cache_audio/<key>` should return `HTTP 200`.
+
 ## Tavo Script Regression
 
 After changing `static/tavo.js`:
@@ -235,6 +245,8 @@ For intelligent mode:
 - Backend LLM failures surface through `/tts_dialogue_job_status/{cache_key}` with `state=failed`, `metrics.phase=llm_parse_failed`, and a concise `error` string.
 - The `reuseLlmParse` checkbox should be visible in multi-role settings and default to enabled.
 - `/parse_text` may remain as a compatibility/manual proxy endpoint, but it is not the normal Tavo generation path.
+- Both `vllm` and `fast6g` should accept `parse_mode=ai` through `/tts_dialogue_stream_job`; `fast6g` uses the same OpenAI-compatible backend parse helper but its TTS inference path remains the 6G backend.
+- When Qwen emotion is enabled at backend startup, LLM/custom segments may contain `style`, `style_alpha`, `emo_ref_audio_path`, `emo_vec`, or `emo_alpha`, but synthesis/cache identity must ignore those fields and use Qwen text-emotion instead. AI parsing should return per-segment `emo_text`; synthesis must pass that `emo_text` to IndexTTS2/QwenEmotion and only fall back to the segment text when `emo_text` is missing.
 
 ## Normal Mode Guard
 
@@ -259,6 +271,7 @@ For `launcher/LEON-Launcher.ps1`:
 - Backend `/warmup` should run a tiny inference under `tts_stream_lock`, return warmup state through `GET /warmup`, and avoid rerunning unless `force=true`.
 - The launcher should expose the selected version Gradio WebUI through a `WebUI` page without auto-starting it. `启动 WebUI` should call the current version WebUI script, poll `http://127.0.0.1:7860`, and keep `浏览器打开` as the reliable path if embedded WebBrowser rendering fails.
 - The launcher should select backend version (`vllm` / `fast6g`) before startup, pass `LEON_ENABLE_QWEN_EMO` from the Qwen checkbox, and pass `INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION` for vLLM only.
+- The Qwen emotion checkbox applies to both `vllm` and `fast6g`; the vLLM GPU memory ratio control is vLLM-only and should be disabled or clearly marked when `fast6g` is selected.
 - Public Tavo host must not be launcher/backend configuration. Real tunnel hostnames must not be committed to repo docs or source. Tavo may load `static/tavo.js` from any reachable host; the runtime should use the loaded script origin for API calls.
 - The SVML check must prefer runtime evidence over global DLL presence. If `indextts2runtime\python.exe` can import `torch` and `vllm`, the `Intel SVML 兼容兜底` row should be OK even when `svml_dispmd.dll` is absent from `C:\Windows\System32` and global PATH.
 - One-click repair should copy bundled `svml_dispmd.dll` into the project runtime only when Torch/vLLM import output indicates SVML, LLVM, or DLL load failure. It should not blindly write `svml_dispmd.dll` to `C:\Windows\System32`.

@@ -270,14 +270,8 @@ function Start-ApiProcess {
         "--cuda_kernel",
         "--fp16"
     )
-    if ($env:LEON_ENABLE_QWEN_EMO -eq "1") {
-        $args += "--qwen_emo"
-        Write-Step "Qwen emotion auto mode enabled."
-    }
-    else {
-        $args += "--no_qwen_emo"
-        Write-Step "Qwen emotion disabled."
-    }
+    $args += "--no_qwen_emo"
+    Write-Step "Qwen emotion disabled (deprecated for LEON voice-cavity mode)."
 
     $proc = Start-Process -FilePath $python `
         -ArgumentList $args `

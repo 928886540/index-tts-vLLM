@@ -25,6 +25,42 @@ Notes:
 - When the bug is fixed, record the actual root cause, the code/files changed, and the regression guard.
 - If a fixed bug returns, update the same entry and add a stricter guard in `docs/REGRESSION.md`.
 
+## BUG-026: Tavo settings reports saved but reopening shows old config on fast6g
+
+Status: open, user-reported, not investigated yet
+
+Reported: 2026-06-06
+
+Repro: User is using the 6G/`fast6g` version in Tavo. Change settings and save. The UI reports save success, but reopening settings shows the previous/original configuration.
+
+Evidence: User report only so far. No local reproduction or logs captured yet.
+
+Hypothesis: Pending. Likely candidates are Tavo storage scope/key mismatch, settings save writing to one message/chat scope while settings load reads another, capability detection for `fast6g` overwriting saved AI/normal/Qwen-related config on remount, or a stale lazy/runtime config snapshot after save.
+
+Root cause: pending.
+
+Fix: pending. User explicitly asked to record this and fix later.
+
+Guard: After fixing, verify on `fast6g` that changing settings, saving, closing/reopening the panel, remounting the message, and re-entering the chat all show the same saved values. The success toast must only appear after `tavo.set` completes and the in-memory config is updated.
+
+## BUG-027: fast6g style reference paths from old cache can miss local 声腔 files
+
+Status: fixed in code, runtime-validated on fast6g
+
+Reported: 2026-06-06
+
+Repro: Reuse segments from `vllm/outputs/cache/by_role/甘婷婷/20260606-013108-395_263429152dd8dcd2b2715e80672dbdd93ee9a406.json` in `fast6g`, with style refs such as `prompts/library/声腔/moan_soft.wav`, `scream_peak`, and `laugh_soft`.
+
+Evidence: The old JSON records `uses_style_audio=true` for `moan_soft`, `scream_peak`, and `laugh_soft`, but local search found `moan_soft.MP3` and Chinese style-slice files such as `尖叫-AD学姐.MP3` / `轻笑-AD学姐.MP3`. A fresh `fast6g` run could report `uses_style_audio=false` for `scream_peak`, and the earlier `moan_soft` test failed with `Calculated padded input size per channel: (0)`. Local decode showed `moan_soft.MP3` reports `1.164s` through `soundfile`, but `librosa` only decoded `0.017s` of silence with MP3 header errors.
+
+Hypothesis: confirmed.
+
+Root cause: Two issues overlapped. First, the style resolver trusted explicit stale refs from cache, so `prompts/library/声腔/moan_soft.wav` could resolve to the bad local `moan_soft.MP3` instead of the intended style mapping. Second, English style ids such as `scream_peak` and `laugh_soft` pointed at missing English filenames even though the available local style slices are Chinese names.
+
+Fix: `fast6g/indextts2_api.py` and `vllm/indextts2_api.py` now map English style ids to available Chinese style slices, prefer known style mapping over stale explicit refs, and fall back to explicit refs only when no style mapping works. `vllm/indextts/voice_library.py` and the fast6g resolver also strip `prompts/library` / `library` prefixes and stale extensions when matching local voice references. `moan_soft` currently maps to `声腔/低吟-AD学姐`; `scream_peak` maps to `声腔/尖叫-AD学姐`; `laugh_soft` maps to `声腔/轻笑-AD学姐`.
+
+Guard: Re-run the user's 甘婷婷 sample through `fast6g` for `moan_soft`, `scream_peak`, and `laugh_soft`. Completed metadata should show `uses_style_audio=true` on the styled segments, and cache audio should be written under `fast6g/outputs/cache/by_role/甘婷婷/`. Validated jobs: `6d7fb65031e872669bc25d6662f47ba6b3d34aaa`, `c38c00c8e02f33a8d12d3d5f46149396d7096e80`, and `3d18366480d7d97fca22217cbf43d7b42c68107d`.
+
 ## BUG-025: Tavo LIVE WebAudio clock can advance without audible audio or subtitles
 
 Status: fixed in code, needs real Tavo validation

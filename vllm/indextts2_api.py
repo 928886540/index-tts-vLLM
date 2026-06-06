@@ -93,12 +93,15 @@ parser.add_argument("--no_fp16", dest="fp16", action="store_false", help="Force 
 parser.add_argument("--use_deepspeed", action="store_true", default=False, help="Use Deepspeed to accelerate if available")
 parser.add_argument("--cuda_kernel", action="store_true", default=True, help="Use BigVGAN fused-activation CUDA kernel (default: on)")
 parser.add_argument("--no_cuda_kernel", dest="cuda_kernel", action="store_false", help="Disable BigVGAN CUDA kernel")
-parser.add_argument("--qwen_emo", action="store_true", default=False, help="Enable Qwen text-emotion model (loads ~2GB to GPU). Off by default; TAVO front-end uses emotion vectors and never calls this.")
-parser.add_argument("--no_qwen_emo", dest="qwen_emo", action="store_false", help="(legacy) Qwen is already off by default; this flag is a no-op kept for backward compatibility.")
+parser.add_argument("--qwen_emo", action="store_true", default=False, help="Deprecated no-op. Qwen emotion is not used by the launcher path.")
+parser.add_argument("--no_qwen_emo", dest="qwen_emo", action="store_false", help="Disable deprecated Qwen emotion model.")
 parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=float(os.getenv("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION", "0.18")), help="vLLM GPU memory reservation ratio. Lower is safer on 12GB GPUs.")
 parser.add_argument("--vllm_enforce_eager", action="store_true", default=os.getenv("INDEXTTS_VLLM_ENFORCE_EAGER", "1") != "0", help="Disable vLLM CUDA graph capture for lower memory pressure (default: on).")
 parser.add_argument("--no_vllm_enforce_eager", dest="vllm_enforce_eager", action="store_false", help="Allow vLLM CUDA graph capture for potentially faster GPT generation.")
 args = parser.parse_args()
+if args.qwen_emo:
+    print(">> Qwen emotion is deprecated for LEON voice-cavity mode; forcing --no_qwen_emo.")
+args.qwen_emo = False
 
 # device = args.device
 port = args.port
@@ -736,7 +739,7 @@ def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
             user_alias_hint,
             character_hint,
             "输出格式:",
-            "{\"segments\":[{\"role\":\"...\",\"text\":\"...\"}]}",
+            "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"emo_text\":\"...\"}]}",
             "",
             "拆段规则:",
             "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
@@ -750,7 +753,7 @@ def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
             "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。",
             "4. text 是要朗读的原文片段，保留标点和语气词。",
             "",
-            "重要: 当前后端已启用 Qwen emotion。你不要输出 style/style_alpha/emo_vec/emo_alpha，不要分析声腔或情绪向量；情绪补充由 IndexTTS2 的 QwenEmotion 在合成阶段自动完成。",
+            "重要: 当前后端已启用 Qwen emotion。你不要输出 style/style_alpha/emo_vec/emo_alpha，也不要输出声腔参考；但必须给每段输出 emo_text，写成简短自然语言情绪提示，例如「低声、克制、带一点哽咽」「轻松笑意、语速自然」。后端会把 emo_text 交给 IndexTTS2 的 QwenEmotion 生成情绪向量。",
             "",
             "完整性硬规则:",
             "- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。",
@@ -763,10 +766,10 @@ def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
             f"{example_user}叹了口气，把手放在她肩上：「别哭。」",
             "示例输出:",
             "{\"segments\":[",
-            "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\"},",
-            "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\"},",
-            f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\"}},",
-            "  {\"role\":\"用户\",\"text\":\"别哭。\"}",
+            "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"emo_text\":\"低声叙述，情绪压抑，带一点心疼\"},",
+            "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"emo_text\":\"哽咽、低落、快哭出来，但声音不要尖\"},",
+            f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\",\"emo_text\":\"平静叙述，动作温柔\"}},",
+            "  {\"role\":\"用户\",\"text\":\"别哭。\",\"emo_text\":\"压低声音、温柔安慰、语速慢\"}",
             "]}",
         ])
 
@@ -1025,6 +1028,14 @@ def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
             role = "用户"
         elif role in ("角色", "当前角色") or lowered == "character":
             role = character_name or role
+        if args.qwen_emo:
+            emo_text = str(seg.get("emo_text") or "").strip() or text
+            out.append({
+                "role": role or "旁白",
+                "text": text,
+                "emo_text": emo_text,
+            })
+            continue
         style = str(seg.get("style") or seg.get("style_ref") or "neutral").strip() or "neutral"
         if style not in STYLE_VOICE_MAP:
             style = "neutral"
@@ -1134,9 +1145,9 @@ def _dialogue_segments_cache_payload(segments: list, role_voice_paths: dict, def
                 "role": (seg.get("role") or "").strip(),
                 "text": (seg.get("text") or "").strip(),
                 **_style_cache_fragment(seg),
-                "emo_vec": seg.get("emo_vec") or None,
-                "emo_text": seg.get("emo_text") or None,
-                "emo_alpha": seg.get("emo_alpha"),
+                "emo_vec": None if args.qwen_emo else (seg.get("emo_vec") or None),
+                "emo_text": (seg.get("emo_text") or None) if args.qwen_emo else (seg.get("emo_text") or None),
+                "emo_alpha": None if args.qwen_emo else seg.get("emo_alpha"),
             }
             for seg in segments
         ],
@@ -1419,7 +1430,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                 if use_qwen_emo_seg:
                     style_audio = None
                     emo_vec = None
-                    emo_text_seg = text
+                    emo_text_seg = str(seg.get("emo_text") or "").strip() or text
                     seg_alpha = 1.0
                 elif role == "旁白":
                     emo_text_seg = None
@@ -1739,24 +1750,24 @@ async def _run_model_warmup(voice: Optional[str] = None, text: Optional[str] = N
 STYLE_VOICE_MAP = {
     "neutral": "",
     "none": "",
-    "breath_soft": "声腔/breath_soft",
-    "breath_heavy": "声腔/breath_heavy",
-    "intimate_breath": "声腔/intimate_breath",
-    "moan_soft": "声腔/moan_soft",
-    "low_murmur": "声腔/low_murmur",
-    "whisper_soft": "声腔/whisper_soft",
-    "shy_whisper": "声腔/shy_whisper",
-    "tense_breath": "声腔/tense_breath",
-    "sob_soft": "声腔/sob_soft",
-    "cry_soft": "声腔/cry_soft",
-    "tease_soft": "声腔/tease_soft",
-    "laugh_soft": "声腔/laugh_soft",
-    "gasp_surprise": "声腔/gasp_surprise",
-    "scream_peak": "声腔/scream_peak",
-    "stage_warmup": "声腔/breath_soft",
-    "stage_rising": "声腔/intimate_breath",
-    "stage_peak": "声腔/scream_peak",
-    "stage_afterglow": "声腔/low_murmur",
+    "breath_soft": "声腔/轻喘-AD学姐",
+    "breath_heavy": "声腔/喘息-AD学姐",
+    "intimate_breath": "声腔/喘息-AD学姐",
+    "moan_soft": "声腔/低吟-AD学姐",
+    "low_murmur": "声腔/低吟-AD学姐",
+    "whisper_soft": "声腔/耳语-AD学姐",
+    "shy_whisper": "声腔/低语-AD学姐",
+    "tense_breath": "声腔/惊喘-AD学姐",
+    "sob_soft": "声腔/哽咽-AD学姐",
+    "cry_soft": "声腔/哭腔-AD学姐",
+    "tease_soft": "声腔/挑逗-AD学姐",
+    "laugh_soft": "声腔/轻笑-AD学姐",
+    "gasp_surprise": "声腔/惊喘-AD学姐",
+    "scream_peak": "声腔/尖叫-AD学姐",
+    "stage_warmup": "声腔/轻喘-AD学姐",
+    "stage_rising": "声腔/喘息-AD学姐",
+    "stage_peak": "声腔/尖叫-AD学姐",
+    "stage_afterglow": "声腔/余韵-AD学姐",
 }
 
 _PERSON_STYLE_NAMES = (
@@ -1784,20 +1795,47 @@ def _segment_style_name(seg: dict) -> str:
     return str(seg.get("style") or seg.get("style_ref") or "").strip()
 
 
+def _style_name_from_ref(ref: str) -> str:
+    normalized = str(ref or "").strip().replace("\\", "/")
+    leaf = normalized.rsplit("/", 1)[-1]
+    for ext in (".wav", ".mp3", ".flac", ".ogg", ".m4a"):
+        if leaf.lower().endswith(ext):
+            return leaf[:-len(ext)]
+    return leaf
+
+
+def _style_voice_ref(style: str) -> str:
+    key = str(style or "").strip()
+    return STYLE_VOICE_MAP.get(key) or STYLE_VOICE_MAP.get(key.lower()) or key
+
+
 def _resolve_segment_style_audio(seg: dict) -> Optional[str]:
     ref = str(seg.get("emo_ref_audio_path") or "").strip()
-    if ref:
-        return _resolve_voice(ref)
-    style = _segment_style_name(seg)
+    style = _segment_style_name(seg) or _style_name_from_ref(ref)
     if not style or style in ("neutral", "none"):
-        return None
-    mapped = STYLE_VOICE_MAP.get(style, style)
+        return _resolve_voice(ref) if ref else None
+    mapped = _style_voice_ref(style)
     if not mapped:
-        return None
-    return _resolve_voice(mapped)
+        return _resolve_voice(ref) if ref else None
+    resolved = _resolve_voice(mapped)
+    if resolved:
+        return resolved
+    if mapped != style:
+        resolved = _resolve_voice(style)
+        if resolved:
+            return resolved
+    return _resolve_voice(ref) if ref else None
 
 
 def _style_cache_fragment(seg: dict) -> dict:
+    if args.qwen_emo:
+        return {
+            "style": None,
+            "style_alpha": None,
+            "emo_ref_audio_path": None,
+            "style_audio": None,
+            "style_meta": {},
+        }
     style = _segment_style_name(seg)
     explicit = str(seg.get("emo_ref_audio_path") or "").strip()
     style_audio = _resolve_segment_style_audio(seg)
@@ -1866,10 +1904,10 @@ async def tts_handle(req: dict):
         return resolve_res
     try:
         emo_text = req["emo_text"]
-        use_emo_text = bool(req["emo_text"])
+        use_emo_text = bool(args.qwen_emo and req["emo_text"])
         if emo_text == 'auto':
             emo_text = None
-            use_emo_text = True
+            use_emo_text = bool(args.qwen_emo)
         emo_vec = req["emo_vec"]
         if len(emo_vec) == 0:
             emo_vec = None
@@ -1927,10 +1965,10 @@ async def tts_stream_handle(req: dict):
         try:
             async with tts_stream_lock:
                 emo_text = req.get("emo_text")
-                use_emo_text = bool(emo_text)
+                use_emo_text = bool(args.qwen_emo and emo_text)
                 if emo_text == "auto":
                     emo_text = None
-                    use_emo_text = True
+                    use_emo_text = bool(args.qwen_emo)
                 emo_vec = req.get("emo_vec") or []
                 if not emo_vec:
                     emo_vec = None
@@ -2031,10 +2069,10 @@ async def tts_cache_stream_handle(req: dict):
         try:
             async with tts_stream_lock:
                 emo_text = req.get("emo_text")
-                use_emo_text = bool(emo_text)
+                use_emo_text = bool(args.qwen_emo and emo_text)
                 if emo_text == "auto":
                     emo_text = None
-                    use_emo_text = True
+                    use_emo_text = bool(args.qwen_emo)
                 emo_vec = req.get("emo_vec") or []
                 if not emo_vec:
                     emo_vec = None
@@ -2204,19 +2242,28 @@ async def tts_dialogue_stream_handle(req: dict):
                         seg_alpha = float(style_alpha)
                     seg_alpha = _clamp_dialogue_alpha(role, seg_alpha, style_audio=bool(style_audio))
                     emo_vec = _stabilize_dialogue_emo_vec(role, emo_vec)
-                    if role == "旁白":
-                        emo_text_seg = None
-                    # emo_vec wins when both are present; matches the V26
-                    # convention and the LLM-output schema we recommend.
-                    if style_audio:
+                    use_qwen_emo_seg = bool(args.qwen_emo)
+                    if use_qwen_emo_seg:
+                        style_audio = None
                         emo_vec = None
-                        emo_text_seg = None
-                        use_emo_text_seg = False
-                    elif emo_vec:
+                        emo_text_seg = str(seg.get("emo_text") or "").strip() or text
+                        seg_alpha = 1.0
+                        use_emo_text_seg = True
+                    elif role == "旁白":
                         emo_text_seg = None
                         use_emo_text_seg = False
                     else:
-                        use_emo_text_seg = bool(emo_text_seg)
+                        # emo_vec wins when both are present; matches the V26
+                        # convention and the LLM-output schema we recommend.
+                        if style_audio:
+                            emo_vec = None
+                            emo_text_seg = None
+                            use_emo_text_seg = False
+                        elif emo_vec:
+                            emo_text_seg = None
+                            use_emo_text_seg = False
+                        else:
+                            use_emo_text_seg = bool(emo_text_seg)
 
                     # Inter-segment silence. Sample rate is known after the
                     # first chunk arrived, so only insert from idx>=1 onward.
@@ -2386,17 +2433,26 @@ async def tts_dialogue_cache_stream_handle(req: dict):
                         seg_alpha = float(style_alpha)
                     seg_alpha = _clamp_dialogue_alpha(role, seg_alpha, style_audio=bool(style_audio))
                     emo_vec = _stabilize_dialogue_emo_vec(role, emo_vec)
-                    if role == "旁白":
-                        emo_text_seg = None
-                    if style_audio:
+                    use_qwen_emo_seg = bool(args.qwen_emo)
+                    if use_qwen_emo_seg:
+                        style_audio = None
                         emo_vec = None
-                        emo_text_seg = None
-                        use_emo_text_seg = False
-                    elif emo_vec:
+                        emo_text_seg = str(seg.get("emo_text") or "").strip() or text
+                        seg_alpha = 1.0
+                        use_emo_text_seg = True
+                    elif role == "旁白":
                         emo_text_seg = None
                         use_emo_text_seg = False
                     else:
-                        use_emo_text_seg = bool(emo_text_seg)
+                        if style_audio:
+                            emo_vec = None
+                            emo_text_seg = None
+                            use_emo_text_seg = False
+                        elif emo_vec:
+                            emo_text_seg = None
+                            use_emo_text_seg = False
+                        else:
+                            use_emo_text_seg = bool(emo_text_seg)
 
                     if idx > 0 and sample_rate_holder["sr"]:
                         silence = _silence_pcm_bytes(sample_rate_holder["sr"], interval_ms)

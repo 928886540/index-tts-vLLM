@@ -33,7 +33,7 @@ $Script:WebUiBase = "http://127.0.0.1:$Script:WebUiPort"
 $Script:LanHost = if ($env:LEON_LAN_HOST) { $env:LEON_LAN_HOST } else { Get-PreferredLanHost }
 $Script:TavoCacheBust = "20260606-live-audio-v6"
 $Script:VersionKey = if ($env:LEON_LAUNCHER_VERSION) { $env:LEON_LAUNCHER_VERSION } else { "vllm" }
-$Script:EnableQwenEmotion = ($env:LEON_ENABLE_QWEN_EMO -eq "1")
+$Script:EnableQwenEmotion = $false
 $Script:InvariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
 $Script:VllmGpuMemoryUtilization = 0.18
 if (-not [string]::IsNullOrWhiteSpace($env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION)) {
@@ -840,9 +840,8 @@ function Start-LeonService {
         return
     }
     Add-Log "调用启动入口: $Script:StartupBat"
-    $qwenText = if ($Script:EnableQwenEmotion) { "on" } else { "off" }
     $gpuText = if ($Script:VersionKey -eq "vllm") { ", vLLM gpu_memory_utilization=$(Get-VllmGpuMemoryUtilizationText)" } else { "" }
-    Add-Log "启动配置: $(Get-LeonVersionLabel), Qwen emotion=$qwenText$gpuText"
+    Add-Log "启动配置: $(Get-LeonVersionLabel)$gpuText"
     try {
         $oldNoPause = $env:LEON_LAUNCHER_NO_PAUSE
         $oldVersion = $env:LEON_LAUNCHER_VERSION
@@ -850,7 +849,7 @@ function Start-LeonService {
         $oldVllmGpu = $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION
         $env:LEON_LAUNCHER_NO_PAUSE = "1"
         $env:LEON_LAUNCHER_VERSION = $Script:VersionKey
-        $env:LEON_ENABLE_QWEN_EMO = if ($Script:EnableQwenEmotion) { "1" } else { "0" }
+        $env:LEON_ENABLE_QWEN_EMO = "0"
         if ($Script:VersionKey -eq "vllm") {
             $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION = Get-VllmGpuMemoryUtilizationText
         }
@@ -1413,7 +1412,7 @@ function Build-LauncherForm {
     $main.Panel1.Controls.Add($Script:VersionCombo)
 
     $vllmGpuLabel = New-Object System.Windows.Forms.Label
-    $vllmGpuLabel.Text = "vLLM 显存比例"
+    $vllmGpuLabel.Text = "vLLM 显存比例（仅 vLLM）"
     $vllmGpuLabel.ForeColor = [System.Drawing.Color]::Gainsboro
     $vllmGpuLabel.Location = New-Object System.Drawing.Point(18, 444)
     $vllmGpuLabel.Size = New-Object System.Drawing.Size(178, 18)
@@ -1435,15 +1434,17 @@ function Build-LauncherForm {
     Sync-VllmGpuControls
 
     $Script:QwenEmotionCheck = New-Object System.Windows.Forms.CheckBox
-    $Script:QwenEmotionCheck.Text = "启用 Qwen emotion"
+    $Script:QwenEmotionCheck.Text = "Qwen emotion 已弃用"
     $Script:QwenEmotionCheck.ForeColor = [System.Drawing.Color]::Silver
     $Script:QwenEmotionCheck.BackColor = [System.Drawing.Color]::FromArgb(21, 25, 31)
-    $Script:QwenEmotionCheck.Checked = [bool]$Script:EnableQwenEmotion
+    $Script:QwenEmotionCheck.Checked = $false
+    $Script:QwenEmotionCheck.Enabled = $false
+    $Script:QwenEmotionCheck.Visible = $false
     $Script:QwenEmotionCheck.Location = New-Object System.Drawing.Point(18, 500)
     $Script:QwenEmotionCheck.Size = New-Object System.Drawing.Size(178, 24)
     $Script:QwenEmotionCheck.Add_CheckedChanged({
-        $Script:EnableQwenEmotion = [bool]$Script:QwenEmotionCheck.Checked
-        Add-Log ("Qwen emotion " + ($(if ($Script:EnableQwenEmotion) { "已启用，启动后自动用于情绪补充。" } else { "已关闭。" })))
+        $Script:EnableQwenEmotion = $false
+        $Script:QwenEmotionCheck.Checked = $false
     })
     $main.Panel1.Controls.Add($Script:QwenEmotionCheck)
 

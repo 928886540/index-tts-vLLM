@@ -2,6 +2,11 @@
 
 ## P0
 
+- Investigate `BUG-026`:
+  - on `fast6g`, settings save reports success but reopening shows old config;
+  - capture Tavo console/storage evidence before changing code;
+  - verify save/reopen/remount/re-enter chat after the fix.
+
 - Make this docs workflow the active handoff path:
   - future work starts by reading root `AGENTS.md`, then `dev_workspace/AGENTS.md` and `dev_workspace/docs/*`;
   - new bugs are recorded in `docs/BUGS.md` before code changes;
@@ -9,6 +14,9 @@
 
 - Return IndexTTS2 to the mainline Tavo engine:
   - verified `fast6g` API startup on `9880`, `/health`, `/voices`, and one short normal-mode generation on 2026-06-06;
+  - after the Qwen/AI-mode code change, restart and verify `fast6g` `/health` reports `llm_parse=true`;
+  - run one `fast6g` AI-mode job against a mock or real OpenAI-compatible LLM endpoint;
+  - verify Qwen-enabled startup for both `vllm` and `fast6g` ignores style/emo_vec during synthesis while using per-segment `emo_text`;
   - still verify `vllm` API startup after the fast6g fixes if switching back to the quality backend;
   - `static/tavo.js` now matches the desired live-card boundary in code: live is transient, saved is native `<audio>`;
   - `static/tavo.js` is now a light loader; runtime lives in `static/tavo.runtime.js` + `static/tavo.runtime.parts/`;
@@ -16,10 +24,9 @@
   - run a short end-to-end generation without ComfyUI occupying GPU.
 
 - Resource and RTF baseline:
-  - check `8188` remains stopped;
-  - record `nvidia-smi` before test;
-  - run one fixed short sample and one long dialogue sample;
-  - record RTF, audio duration, total elapsed time, and GPU memory.
+  - checked `fast6g` long dialogue style RTF on 2026-06-06 with the user's 甘婷婷 cache sample;
+  - three 13-segment style jobs completed with RTF `2.727-2.808`, audio `60.213-66.227s`, and GPU memory about `6318 MiB` before / `8171 MiB` after;
+  - next performance pass should isolate why GPT generation dominates (`130-149s`) and compare Tavo quality tiers with the same long text only when the user wants more long runs.
 
 - Protect saved history:
   - code audit done for `static/tavo.js` persistence paths: only saved/cache-ready tracks are persisted and counted;

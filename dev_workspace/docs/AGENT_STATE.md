@@ -12,7 +12,7 @@ The repository has been moved to `D:\apiWorkSpace\leon_api` and is intended to b
 
 - root layout with `vllm/`, `fast6g/`, shared `static/`, shared `launcher/`, shared `scripts/`, and `dev_workspace/`;
 - root launcher version selection for `vllm` / `fast6g`;
-- optional Qwen emotion startup flag;
+- Qwen emotion is deprecated on the launcher path and should stay off by default;
 - vLLM GPU memory ratio startup option (`0.18` default / `0.11` conservative);
 - public tunnel/domain removed from program configuration and docs;
 - fixed LAN IP examples removed from tracked code/docs;
@@ -61,7 +61,60 @@ git diff --check
 $env:LEON_LAUNCHER_SMOKE_TEST='1'; ... Invoke-Expression launcher\LEON-Launcher.ps1
 ```
 
+## Latest Code Snapshot: fast6g AI Mode / Qwen Deprecation
+
+Updated: 2026-06-06
+
+Implemented and runtime-validated on `fast6g`:
+
+- Launcher Qwen emotion is deprecated and hidden/forced off. Backend/script `--qwen_emo` compatibility remains only for manual comparison.
+- Launcher vLLM GPU memory ratio remains vLLM-only and is only passed through `INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION` when the selected version is `vllm`.
+- `fast6g` now has the same OpenAI-compatible backend LLM parse helper as `vllm` and reports `llm_parse=true`.
+- `fast6g` `parse_mode=ai` accepts raw text, LLM endpoint/model/key, parse reuse settings, Tavo user/character context, and voice mappings through `/tts_dialogue_stream_job`.
+- Product direction after testing: for breath/whisper/sob/vocal texture, use AI-parsed `style`, `style_alpha`, `emo_vec`, and `emo_alpha`. Qwen text emotion only produces 8-dimensional emotion weights and disables style reference audio in the current IndexTTS2 inference path, so it is not useful for the target voice-cavity behavior.
+- `BUG-026` was recorded separately: Tavo settings can report saved but reopen with old config on `fast6g`; user asked to record it and fix later.
+
+Runtime validation:
+
+- `fast6g` qwen-off `/health`: `llm_parse=true`, `qwen_emo=false`.
+- Normal job `d325f10c57d805e4ccefaaa09e3aa11494cf0909`: 1 segment, `audio_duration_s=1.95`, `total_wall_s=7.931`, `rtf=4.066`, `/cache_audio` 200.
+- AI mock LLM job `e20fdce22df1152e86adba749fa129719cde2ade`: 2 segments, roles `旁白/用户`, `llm_segments=2`, `audio_duration_s=3.858`, `total_wall_s=11.77`, `rtf=3.05`, `/cache_audio` 200.
+- Medium normal job `e78ab135206e3aa3f838c1cb912f4bd566ae2a04`: 5 segments, `audio_duration_s=22.918`, `total_wall_s=70.314`, `rtf=3.068`, `first_pcm_s=20.816`.
+- Qwen comparison startup `/health`: `qwen_emo=true`, `llm_parse=true`.
+- Qwen comparison job `a75285bcf8ff5688954a81c99f6efef0a517dd76`: submitted `style=whisper_soft`, `emo_vec`, and `emo_text`; status showed `emotion_mode=qwen_emo`, `uses_style_audio=false`, `uses_emo_vector=false`, `style=neutral`, `rtf=4.437`. This is the evidence for deprecating Qwen on the launcher path.
+
 This repository is now the likely mainline again because GPT-SoVITS proved unreliable for long Tavo dialogue: it can output long silence, miss text, or fail segments even when the HTTP request succeeds. IndexTTS2 has higher resource cost, but it is the better candidate for stable Tavo long dialogue.
+
+## Latest Validation Snapshot: fast6g 甘婷婷 Style RTF
+
+Updated: 2026-06-06
+
+User-provided source:
+
+- JSON: `vllm/outputs/cache/by_role/甘婷婷/20260606-013108-395_263429152dd8dcd2b2715e80672dbdd93ee9a406.json`
+- speaker WAV: `vllm/outputs/cache/by_role/甘婷婷/20260606-013108-395_263429152dd8dcd2b2715e80672dbdd93ee9a406.wav`
+
+Fix/validation notes:
+
+- `moan_soft.MP3` was a bad renamed file on this machine: `soundfile` reported `1.164s`, but `librosa` decoded only `0.017s` of silence and emitted MP3 header errors. That caused the emotion/style encoder `Calculated padded input size per channel: (0)` failure.
+- English style ids now map to valid local Chinese style slices: `moan_soft -> 声腔/低吟-AD学姐`, `scream_peak -> 声腔/尖叫-AD学姐`, `laugh_soft -> 声腔/轻笑-AD学姐`.
+- The resolver now strips stale `prompts/library` / `library` prefixes and old extensions, and known style mapping wins over stale explicit cache refs.
+- `fast6g` was restarted through `scripts/start-fast6g-api.bat`; `/health` reported `version=fast6g`, `llm_parse=true`, `qwen_emo=false`.
+- GPU memory before long style tests was about `6318 MiB / 12288 MiB`; after the tests about `8171 MiB / 12288 MiB`.
+
+All three 13-segment long-text jobs completed with `uses_style_audio=true` and `/cache_audio/<key>` returning HTTP 200:
+
+- `moan_soft` job `6d7fb65031e872669bc25d6662f47ba6b3d34aaa`: audio `66.227s`, wall `185.958s`, RTF `2.808`, `gpt_gen_s=149.151`, `s2mel_s=29.286`, `bigvgan_s=4.064`.
+- `scream_peak` job `c38c00c8e02f33a8d12d3d5f46149396d7096e80`: audio `60.213s`, wall `164.206s`, RTF `2.727`, `gpt_gen_s=130.083`, `s2mel_s=28.726`, `bigvgan_s=3.728`.
+- `laugh_soft` job `3d18366480d7d97fca22217cbf43d7b42c68107d`: audio `63.023s`, wall `172.745s`, RTF `2.741`, `gpt_gen_s=138.452`, `s2mel_s=28.739`, `bigvgan_s=3.885`.
+
+Readable WAVs for manual listening:
+
+- `fast6g/outputs/cache/by_role/甘婷婷/20260606-150022-646_6d7fb65031e872669bc25d6662f47ba6b3d34aaa.wav`
+- `fast6g/outputs/cache/by_role/甘婷婷/20260606-150325-092_c38c00c8e02f33a8d12d3d5f46149396d7096e80.wav`
+- `fast6g/outputs/cache/by_role/甘婷婷/20260606-150709-734_3d18366480d7d97fca22217cbf43d7b42c68107d.wav`
+
+RTF conclusion: this fast6g path improves over the source vLLM cache (`rtf=3.519`) but is still not near realtime. In these long style tests, GPT generation dominates (`130-149s`) while S2Mel is about `29s`.
 
 ## Current Project Shape
 

@@ -187,9 +187,12 @@ class IndexTTS2:
         self.cache_s2mel_style = None
         self.cache_s2mel_prompt = None
         self.cache_spk_audio_prompt = None
+        self.cache_spk_audio_prompt_seconds = None
         self.cache_emo_cond = None
         self.cache_emo_audio_prompt = None
+        self.cache_emo_audio_prompt_seconds = None
         self.cache_mel = None
+        self.last_infer_stats = {}
 
         # 进度引用显示（可选）
         self.gr_progress = None
@@ -304,6 +307,32 @@ class IndexTTS2:
                   f"emo_vector:{emo_vector}, use_emo_text:{use_emo_text}, "
                   f"emo_text:{emo_text}")
         start_time = time.perf_counter()
+        diffusion_steps = int(generation_kwargs.pop("diffusion_steps", 14))
+        inference_cfg_rate = float(generation_kwargs.pop("s2mel_cfg_rate", 0.7))
+        max_prompt_audio_seconds = generation_kwargs.pop("max_prompt_audio_seconds", None)
+        max_emo_audio_seconds = generation_kwargs.pop("max_emo_audio_seconds", max_prompt_audio_seconds)
+        if max_prompt_audio_seconds is not None:
+            max_prompt_audio_seconds = float(max_prompt_audio_seconds)
+        if max_emo_audio_seconds is not None:
+            max_emo_audio_seconds = float(max_emo_audio_seconds)
+        self.last_infer_stats = {
+            "diffusion_steps": diffusion_steps,
+            "s2mel_cfg_rate": inference_cfg_rate,
+            "max_prompt_audio_seconds": max_prompt_audio_seconds,
+            "max_emo_audio_seconds": max_emo_audio_seconds,
+            "max_text_tokens_per_segment": max_text_tokens_per_segment,
+            "spk_cache_hit": False,
+            "emo_cache_hit": False,
+        }
+
+        def trim_audio_for_prompt(audio_data, sample_rate, max_seconds):
+            if max_seconds is None or max_seconds <= 0:
+                return audio_data
+            max_samples = int(sample_rate * max_seconds)
+            if max_samples <= 0 or len(audio_data) <= max_samples:
+                return audio_data
+            print(f">> trim reference audio from {len(audio_data) / sample_rate:.2f}s to {max_seconds:.2f}s")
+            return audio_data[:max_samples]
 
         if use_emo_text:
             emo_audio_prompt = None
@@ -331,8 +360,13 @@ class IndexTTS2:
             # assert emo_alpha == 1.0
 
         # 如果参考音频改变了，才需要重新生成, 提升速度
-        if self.cache_spk_cond is None or self.cache_spk_audio_prompt != spk_audio_prompt:
+        if (
+            self.cache_spk_cond is None
+            or self.cache_spk_audio_prompt != spk_audio_prompt
+            or self.cache_spk_audio_prompt_seconds != max_prompt_audio_seconds
+        ):
             audio, sr = librosa.load(spk_audio_prompt)
+            audio = trim_audio_for_prompt(audio, sr, max_prompt_audio_seconds)
             audio = torch.tensor(audio).unsqueeze(0)
             audio_22k = torchaudio.transforms.Resample(sr, 22050)(audio)
             audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio)
@@ -363,12 +397,14 @@ class IndexTTS2:
             self.cache_s2mel_style = style
             self.cache_s2mel_prompt = prompt_condition
             self.cache_spk_audio_prompt = spk_audio_prompt
+            self.cache_spk_audio_prompt_seconds = max_prompt_audio_seconds
             self.cache_mel = ref_mel
         else:
             style = self.cache_s2mel_style
             prompt_condition = self.cache_s2mel_prompt
             spk_cond_emb = self.cache_spk_cond
             ref_mel = self.cache_mel
+            self.last_infer_stats["spk_cache_hit"] = True
 
         if emo_vector is not None:
             weight_vector = torch.tensor(emo_vector).to(self.device)
@@ -383,8 +419,13 @@ class IndexTTS2:
             emovec_mat = torch.sum(emovec_mat, 0)
             emovec_mat = emovec_mat.unsqueeze(0)
 
-        if self.cache_emo_cond is None or self.cache_emo_audio_prompt != emo_audio_prompt:
+        if (
+            self.cache_emo_cond is None
+            or self.cache_emo_audio_prompt != emo_audio_prompt
+            or self.cache_emo_audio_prompt_seconds != max_emo_audio_seconds
+        ):
             emo_audio, _ = librosa.load(emo_audio_prompt, sr=16000)
+            emo_audio = trim_audio_for_prompt(emo_audio, 16000, max_emo_audio_seconds)
             emo_inputs = self.extract_features(emo_audio, sampling_rate=16000, return_tensors="pt")
             emo_input_features = emo_inputs["input_features"]
             emo_attention_mask = emo_inputs["attention_mask"]
@@ -394,8 +435,10 @@ class IndexTTS2:
 
             self.cache_emo_cond = emo_cond_emb
             self.cache_emo_audio_prompt = emo_audio_prompt
+            self.cache_emo_audio_prompt_seconds = max_emo_audio_seconds
         else:
             emo_cond_emb = self.cache_emo_cond
+            self.last_infer_stats["emo_cache_hit"] = True
 
         self._set_gr_progress(0.1, "text processing...")
         text_tokens_list = self.tokenizer.tokenize(text)
@@ -520,8 +563,6 @@ class IndexTTS2:
                 dtype = None
                 with torch.amp.autocast(text_tokens.device.type, enabled=dtype is not None, dtype=dtype):
                     m_start_time = time.perf_counter()
-                    diffusion_steps = 25
-                    inference_cfg_rate = 0.7
                     latent = self.s2mel.models['gpt_layer'](latent)
                     S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
                     S_infer = S_infer.transpose(1, 2)
@@ -564,6 +605,15 @@ class IndexTTS2:
         print(f">> Total inference time: {end_time - start_time:.2f} seconds")
         print(f">> Generated audio length: {wav_length:.2f} seconds")
         print(f">> RTF: {(end_time - start_time) / wav_length:.4f}")
+        self.last_infer_stats.update({
+            "gpt_gen_s": round(gpt_gen_time, 3),
+            "gpt_forward_s": round(gpt_forward_time, 3),
+            "s2mel_s": round(s2mel_time, 3),
+            "bigvgan_s": round(bigvgan_time, 3),
+            "total_infer_s": round(end_time - start_time, 3),
+            "audio_length_s": round(wav_length, 3),
+            "rtf": round((end_time - start_time) / wav_length, 4) if wav_length > 0 else None,
+        })
 
         # save audio
         wav = wav.cpu()  # to cpu
