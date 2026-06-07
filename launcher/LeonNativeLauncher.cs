@@ -335,7 +335,7 @@ internal sealed class LauncherForm : Form
         CachedImagePanel homeImage = new CachedImagePanel();
         homeImage.Dock = DockStyle.Fill;
         homeImage.BackColor = homePanel.BackColor;
-        homeImage.ScaleMode = ImageScaleMode.FitWidth;
+        homeImage.ScaleMode = ImageScaleMode.Cover;
         homeImage.HorizontalAlign = ImageHorizontalAlign.Center;
         homeImage.VerticalAlign = ImageVerticalAlign.Center;
         homeImage.SetImagePath(Path.Combine(launcherDir, "home.png"));
