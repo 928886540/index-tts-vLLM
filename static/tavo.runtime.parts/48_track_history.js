@@ -434,6 +434,10 @@
                 var preSavePlaybackState = String(trackEntry.playbackState || "");
                 var cacheFallbackNeeded = !!trackEntry.playSavedWhenReady;
                 var liveWebAudioOwnsTrack = !!(typeof webAudioBelongsToTrack === "function" && webAudioBelongsToTrack(trackEntry));
+                var liveWebAudioAudibleNow = !!(liveWebAudioOwnsTrack && trackEntry.webAudioPlaying);
+                var liveElementAudibleNow = !!(typeof isElementPlayingTrackStream === "function" && isElementPlayingTrackStream(trackEntry));
+                var liveStreamAudibleNow = liveWebAudioAudibleNow || liveElementAudibleNow;
+                var hardStreamIssue = !!(trackEntry.streamInterrupted || trackEntry.streamHealth === "interrupted");
                 var liveCurrentNeedsSoundHandoff = !!(
                   isCurrent
                   && !wasBackground
@@ -441,11 +445,13 @@
                   && !trackEntry.pausedByUser
                   && (
                     cacheFallbackNeeded
-                    || trackHasStreamIssue(trackEntry)
-                    || preSavePlaybackState === "loading"
-                    || preSavePlaybackState === "buffering"
-                    || (liveWebAudioOwnsTrack && trackEntry.webAudioPlaying && !trackEntry.webAudioBufferStable)
-                    || (!liveWebAudioOwnsTrack && preSavePlaybackState !== "playing")
+                    || hardStreamIssue
+                    || (!liveStreamAudibleNow && (
+                      trackHasStreamIssue(trackEntry)
+                      || preSavePlaybackState === "loading"
+                      || preSavePlaybackState === "buffering"
+                      || (!liveWebAudioOwnsTrack && preSavePlaybackState !== "playing")
+                    ))
                   )
                 );
                 var liveCacheHandoffNeeded = liveCurrentNeedsSoundHandoff;
@@ -477,6 +483,9 @@
                 }
                 var metricsLine = formatJobMetrics(trackEntry.metrics);
                 if (metricsLine) debugLog("📊 " + label + " 指标: " + metricsLine, "#9ff");
+                if (isCurrent && liveStreamAudibleNow && !autoplaySaved) {
+                  debugLog("✅ 完整音频已就绪，保持当前 LIVE 播放，不抢切 audio", "#9f9");
+                }
                 if (currentTrack() === trackEntry && isElementUsingTrackStream(trackEntry)) {
                   debugLog("✅ 未检测到 stalled/中断，保持当前流式播放，不切到落盘音频", "#9f9");
                 }

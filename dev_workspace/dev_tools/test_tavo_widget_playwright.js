@@ -228,6 +228,26 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
   await context.addInitScript(() => {
     try { localStorage.clear(); } catch (_) {}
     try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__cachePlayCalls = [];
+    try {
+      const originalPlay = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        try {
+          window.__cachePlayCalls.push({
+            src: this.currentSrc || this.src || "",
+            kind: this.dataset ? (this.dataset.idxSourceKind || "") : ""
+          });
+        } catch (_) {}
+        try {
+          this.dispatchEvent(new Event("play"));
+          this.dispatchEvent(new Event("playing"));
+        } catch (_) {}
+        if (originalPlay && this.dataset && this.dataset.idxSourceKind !== "saved") {
+          try { return originalPlay.apply(this, arguments); } catch (_) {}
+        }
+        return Promise.resolve();
+      };
+    } catch (_) {}
   });
 
   const page = await context.newPage();
@@ -729,34 +749,50 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
   const liveKey = "c".repeat(40);
   let jobCount = 0;
   let headCount = 0;
+  let cacheGetCount = 0;
   let statusCount = 0;
   let streamGetCount = 0;
   const streamUrls = [];
   const jobBodies = [];
   const pcm = pcmBufferSeconds(2.4);
+  const cachedWav = wavBufferSeconds(2.4);
 
   await page.route("**/cache_audio/**", async (route) => {
-    if (route.request().method().toUpperCase() === "HEAD") headCount += 1;
+    const method = route.request().method().toUpperCase();
+    if (method === "HEAD") headCount += 1;
+    else cacheGetCount += 1;
+    const ready = statusCount >= 4 && streamGetCount >= 2;
+    if (ready) {
+      await route.fulfill({ status: 200, contentType: method === "HEAD" ? "text/plain" : "audio/wav", body: method === "HEAD" ? "" : cachedWav });
+      return;
+    }
     await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
   });
   await page.route("**/tts_dialogue_job_status/**", async (route) => {
     statusCount += 1;
+    const done = statusCount >= 4 && streamGetCount >= 2;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        state: "running",
+        state: done ? "done" : "running",
         cache_key: liveKey,
         cache_url: "/cache_audio/" + liveKey,
+        sample_rate: 8000,
+        duration_s: 2.4,
         metrics: {
-          state: "running",
-          phase: "tts",
-          message: "后端正在合成…",
-          segments_done: 1,
+          state: done ? "done" : "running",
+          phase: done ? "done" : "tts",
+          message: done ? "音频已保存" : "后端正在合成…",
+          segments_done: done ? 3 : 1,
           segments_total: 3
         },
         segments_meta: [
-          { idx: 0, role: "旁白", text: "第一段正在合成。", style: "neutral", start_s: 0, duration_s: 0.4 }
+          { idx: 0, role: "旁白", text: "第一段正在合成。", style: "neutral", start_s: 0, duration_s: 0.4 },
+          ...(done ? [
+            { idx: 1, role: "对白", text: "第二段计划歌词。", style: "neutral", start_s: 0.4, duration_s: 0.6 },
+            { idx: 2, role: "旁白", text: "第三段计划歌词。", style: "neutral", start_s: 1.0, duration_s: 0.6 }
+          ] : [])
         ],
         segments_plan: [
           { idx: 0, role: "旁白", text: "第一段正在合成。", style: "neutral" },
@@ -896,6 +932,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       const curText = (document.querySelector('[data-role="current"]') || {}).textContent || "";
       const totalText = (document.querySelector('[data-role="total"]') || {}).textContent || "";
       const seek = document.querySelector('[data-role="seek"]');
+      const audio = document.querySelector('[data-role="audio"]');
       const progressStyle = progress ? getComputedStyle(progress) : null;
       return {
         playState: play ? play.dataset.state : "",
@@ -914,12 +951,17 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         totalText,
         seekValue: seek ? seek.value : "",
         counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioCacheKey: audio && audio.dataset ? audio.dataset.idxCacheKey || "" : "",
         jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         cacheChecks: fetches.filter((r) => /\/cache_audio\//.test(r.url)).length,
+        cacheGets: fetches.filter((r) => r.method !== "HEAD" && /\/cache_audio\//.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
         liveExitVisible: getComputedStyle(document.querySelector('[data-role="live-exit"]')).display !== "none",
-        progressSnapshots: Array.isArray(window.__idxProgressSnapshots) ? window.__idxProgressSnapshots.slice() : []
+        progressSnapshots: Array.isArray(window.__idxProgressSnapshots) ? window.__idxProgressSnapshots.slice() : [],
+        cachePlays: (window.__cachePlayCalls || []).filter((x) => x && x.kind === "saved").length,
+        allPlays: window.__cachePlayCalls || []
       };
     });
     await page.evaluate(() => {
@@ -939,8 +981,8 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (streamUrls.some((u) => !u.includes(liveKey))) {
       throw new Error("LIVE recovery must reuse the same cache key: " + JSON.stringify({ liveKey, streamUrls }));
     }
-    if (!result.liveExitVisible) {
-      throw new Error("LIVE exit button should stay visible on a waiting live card: " + JSON.stringify(result));
+    if (result.cachePlays || result.audioKind === "saved") {
+      throw new Error("cache landing must not steal a currently audible LIVE stream into saved audio: " + JSON.stringify({ result, cacheGetCount }));
     }
     const transientProgressPattern = /等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频|合成第\s*\d+\/\d+\s*段/;
     const progressBgTransparent = !result.progressBackgroundColor || /rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)|transparent/i.test(result.progressBackgroundColor);

@@ -26,12 +26,12 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v22"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v23"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v22`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v23`.
 - Tavo settings/config read `tavo.get` first; `localStorage` is fallback only.
 - `tavo.set` failures surface as "设置保存失败".
 - Saved tracks and pending jobs prefer `tavo.get`; deletion writes through `tavo.set`.
@@ -42,7 +42,7 @@ Current code state:
 - Avatar-side status is only the configured/current voice label; LLM/TTS/LIVE progress uses a transparent one-line hint at the bottom of the player. Delete and page counter stay in the lyric panel toolbar.
 - Restored LIVE pending tracks keep resume seconds and reconnect the same key with `start_s`, without a new POST.
 - LIVE uses same-key live PCM polling before cache落盘. Frontend PCM output now prefers an AudioWorklet queue, then ScriptProcessor, then BufferSource scheduling; user gesture also primes native audio. If WebAudio device startup fails, the same LIVE key can switch to native live `<audio>` before cache落盘 instead of waiting for saved audio.
-- If LIVE WebAudio is unstable when the cache file lands, the frontend can stop WebAudio and force native saved `<audio>` playback as a final fallback, not the primary LIVE path.
+- If LIVE is already audible when the cache file lands, the frontend keeps the current LIVE output and does not steal playback into saved `<audio>`; native saved `<audio>` handoff is reserved for explicit saved fallback or interrupted/not-yet-audible streams.
 - Loading spinner has fixed SVG transform origin to reduce wobble.
 
 ## Latest Validation
@@ -78,6 +78,7 @@ Still needs real Tavo/mobile validation:
 - restored pending LIVE resume after app re-entry;
 - saved/cache native `<audio>` background and lock-screen behavior.
 - avatar-side status only shows the voice label during AI LIVE generation.
+- LIVE cache落盘 while audio is already playing should not show a loading handoff or restart through saved `<audio>`.
 
 ## Active Bugs
 
