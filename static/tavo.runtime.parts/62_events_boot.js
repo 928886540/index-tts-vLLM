@@ -289,8 +289,8 @@
       if (total) total.textContent = progressDur > 0 ? formatTime(progressDur) : "--:--";
       debugLog("📐 audio metadata loaded: duration=" + (isFinite(dur) ? dur.toFixed(2) : String(audio.duration)) + "s seekable=" + (audio.seekable.length > 0 ? audio.seekable.end(0).toFixed(2) : "0"), "#9ff");
     });
-    on(audio, 'seeking', function () { debugLog("⏩ seeking → " + audio.currentTime.toFixed(2), "#9ff"); });
-    on(audio, 'seeked',  function () { debugLog("✅ seeked  → " + audio.currentTime.toFixed(2), "#9ff"); });
+    on(audio, 'seeking', function () { if (scriptFlagEnabled("debugSeek")) debugLog("⏩ seeking → " + audio.currentTime.toFixed(2), "#9ff"); });
+    on(audio, 'seeked',  function () { if (scriptFlagEnabled("debugSeek")) debugLog("✅ seeked  → " + audio.currentTime.toFixed(2), "#9ff"); });
     on(audio, 'stalled', function () {
       var t = currentTrack();
       if (t) {

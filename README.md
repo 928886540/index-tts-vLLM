@@ -33,7 +33,7 @@ The launcher selects one backend version at startup. `static/`, `launcher/`, and
 The app does not require a public domain. For same-LAN phone testing, use:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v23"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v25"></script>
 ```
 
 For a public tunnel, configure the tunnel/reverse proxy outside this repository and replace only the script host.

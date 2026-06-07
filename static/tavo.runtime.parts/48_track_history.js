@@ -350,6 +350,60 @@
       trackEntry.cachePollStarted = true;
       setTrackCacheState(trackEntry, "pending");
       label = label || "snapshot";
+      function playbackSegmentStatusText(trackEntry, payload, totalSegments) {
+        if (typeof playbackSegmentStatusTextForTrack === "function") {
+          return playbackSegmentStatusTextForTrack(trackEntry, payload, totalSegments);
+        }
+        if (!trackEntry || currentTrack() !== trackEntry) return "";
+        if (normalizePlaybackMode(trackEntry.playbackMode) !== "live") return "";
+        var isPlaying = !!(
+          trackEntry.webAudioPlaying
+          || String(trackEntry.playbackState || "") === "playing"
+          || (typeof isElementPlayingTrackStream === "function" && isElementPlayingTrackStream(trackEntry))
+        );
+        if (!isPlaying) return "";
+        var sec = 0;
+        try { sec = trackResumeSec(trackEntry); } catch (_) { sec = 0; }
+        if (!isFinite(Number(sec)) || Number(sec) < 0) return "";
+        var raw = [];
+        if (payload && Array.isArray(payload.segments_meta) && payload.segments_meta.length) raw = payload.segments_meta;
+        else if (Array.isArray(trackEntry.segments) && trackEntry.segments.length) raw = trackEntry.segments;
+        if (!raw.length) return "";
+        var sampleRate = Number((payload && payload.sample_rate) || trackEntry.sampleRate || trackEntry.sample_rate || 0);
+        var rows = raw.map(function (seg, i) {
+          var start = segmentStartSec(seg, sampleRate);
+          var idx = isFinite(Number(seg && seg.idx)) ? Number(seg.idx) : i;
+          return { idx: idx, start: start, duration: Number((seg && seg.duration_s) || 0) };
+        }).filter(function (row) {
+          return isFinite(row.start) && row.start >= 0;
+        }).sort(function (a, b) {
+          return a.start - b.start;
+        });
+        if (!rows.length) return "";
+        var currentIdx = -1;
+        for (var i = 0; i < rows.length; i += 1) {
+          var row = rows[i];
+          var next = rows[i + 1];
+          var end = row.duration > 0 ? row.start + row.duration : (next ? next.start : Infinity);
+          if (sec + 0.05 >= row.start && sec < end + 0.15) {
+            currentIdx = row.idx;
+            break;
+          }
+          if (sec >= row.start) currentIdx = row.idx;
+        }
+        if (currentIdx < 0 && sec <= rows[0].start + 0.15) currentIdx = rows[0].idx;
+        if (currentIdx < 0) return "";
+        var displayIdx = Math.max(1, Math.floor(Number(currentIdx) || 0) + 1);
+        var total = Math.max(
+          Number(totalSegments || 0) || 0,
+          payload && payload.metrics ? Number(payload.metrics.segments_total || 0) || 0 : 0,
+          payload && Array.isArray(payload.segments_plan) ? payload.segments_plan.length : 0,
+          trackEntry.segmentPlan && Array.isArray(trackEntry.segmentPlan) ? trackEntry.segmentPlan.length : 0,
+          raw.length,
+          displayIdx
+        );
+        return "当前在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
+      }
       function jobStatusMessage(metrics, trackEntry, payload) {
         var phase = String((metrics && metrics.phase) || "");
         var msg = String((metrics && metrics.message) || "");
@@ -361,6 +415,10 @@
         if (!total && metrics && Array.isArray(metrics.segments_plan)) total = metrics.segments_plan.length;
         var doneSegs = payload && Array.isArray(payload.segments_meta) ? payload.segments_meta.length : 0;
         var nextSeg = total ? Math.max(1, Math.min(total, doneSegs + 1)) : 0;
+        var playingSeg = playbackSegmentStatusText(trackEntry, payload, total);
+        function withPlayingSegment(text) {
+          return playingSeg ? (text + " · " + playingSeg) : text;
+        }
         if (phase === "created") return flow + " 任务已创建，等待后端接手";
         if (phase === "llm_parse_cache") return flow + " 已复用上次 AI 分段，等待" + (live ? "首段音频" : "合成");
         if (phase === "llm_parse") {
@@ -369,13 +427,13 @@
         }
         if (phase === "tts_queue") return flow + " 分段完成，等待" + (live ? "首段音频" : "TTS 合成");
         if (phase === "tts") {
-          if (total) return flow + " 合成第 " + nextSeg + "/" + total + " 段中";
-          return flow + " 音频合成中";
+          if (total) return withPlayingSegment(flow + " 合成第 " + nextSeg + "/" + total + " 段中");
+          return withPlayingSegment(flow + " 音频合成中");
         }
-        if (phase === "saving") return flow + " 音频已合成，正在保存完整音频";
+        if (phase === "saving") return withPlayingSegment(flow + " 音频已合成，正在保存完整音频");
         if (phase === "done") return flow + " 音频已保存";
-        if (/文本已拆分|等待 TTS 合成|拆分文本|拆段/.test(msg)) return flow + " 分段完成，等待" + (live ? "首段音频" : "TTS 合成");
-        return msg || (flow + " 正在处理");
+        if (/文本已拆分|等待 TTS 合成|拆分文本|拆段/.test(msg)) return withPlayingSegment(flow + " 分段完成，等待" + (live ? "首段音频" : "TTS 合成"));
+        return withPlayingSegment(msg || (flow + " 正在处理"));
       }
       (async function () {
         var done = false;
@@ -399,6 +457,7 @@
                   var phase = String(j.metrics.phase || "");
                   if (phase === "llm_parse" || phase === "llm_parse_cache" || phase === "created" || phase === "tts_queue" || phase === "tts" || phase === "saving") {
                     var uiMsg = jobStatusMessage(j.metrics, trackEntry, j);
+                    trackEntry.latestSynthesisStatusText = String(uiMsg || "").replace(/\s*·\s*当前在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/g, "");
                     setStatus(uiMsg);
                     if (!isTransientProgressNotice(uiMsg)) showTrackNotice(trackEntry, uiMsg || "正在生成…", formatJobMetrics(j.metrics) || "请稍等");
                   }

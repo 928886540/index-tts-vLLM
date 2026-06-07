@@ -167,6 +167,10 @@
     var webAudioActiveTrack = null;
     var webAudioPlayToken = 0;
     var webAudioProgressTimer = null;
+    var progressStatusLastText = "";
+    var progressStatusLastAt = 0;
+    var progressStatusPendingText = "";
+    var progressStatusPendingTimer = null;
 
     if (!panel) throw new Error("TAVO player missing settings panel");
     removeLegacyGlobalGear();
@@ -177,7 +181,7 @@
       try {
         if (typeof isTransientProgressNotice === "function" && isTransientProgressNotice(text)) return true;
       } catch (_) {}
-      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(text);
+      return /等待音频|正在连接音频|连接实时音频|连接断点音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|合成第\s*\d+\s*\/\s*\d+\s*段|当前在播第\s*\d+|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中|音频已合成|正在保存/.test(text);
     }
     function configuredVoiceLabelText() {
       try {
@@ -199,16 +203,81 @@
       } catch (_) {}
       return configuredVoiceLabelText();
     }
+    function normalizeProgressStatusText(text) {
+      text = String(text || "");
+      if (!text) return "";
+      if (/^流式生成中\s*·\s*当前\s*\d+\s*\/\s*\d+/.test(text)) return "";
+      if (/收到音频/.test(text)) return "";
+      try {
+        var t = currentTrack();
+        if (t && (t.webAudioPlaying || String(t.playbackState || "") === "playing")) {
+          if (/正在连接音频|等待音频|网络缓冲|缓冲中|实时音频重连/.test(text) && !/合成第|当前在播/.test(text)) return "";
+        }
+      } catch (_) {}
+      return isHeaderProgressStatus(text) ? text : "";
+    }
+    function progressStatusPriority(text) {
+      text = String(text || "");
+      if (!text) return 0;
+      if (/合成第\s*\d+\s*\/\s*\d+\s*段|当前在播第\s*\d+|音频合成中|音频已合成|正在保存/.test(text)) return 3;
+      if (/LLM|分段|拆段|TTS|提交|后端正在|后端处理中|生成中|正在生成|正在合成/.test(text)) return 2;
+      if (/等待音频|正在连接音频|连接实时音频|连接断点音频|网络缓冲|缓冲中|实时音频重连|正在加载音频/.test(text)) return 1;
+      return 1;
+    }
+    function shouldKeepProgressOnClear() {
+      if (!progressLine) return false;
+      var current = String(progressLine.textContent || "");
+      if (!current || !isHeaderProgressStatus(current)) return false;
+      if (progressStatusPriority(current) < 3) return false;
+      try {
+        var t = currentTrack();
+        if (t && !isSavedTrack(t) && typeof isLiveProgressTrack === "function" && isLiveProgressTrack(t)) return true;
+      } catch (_) {}
+      return false;
+    }
+    function applyProgressStatusText(text) {
+      if (!progressLine) return;
+      if (progressStatusPendingTimer) { clearTimeout(progressStatusPendingTimer); progressStatusPendingTimer = null; }
+      progressStatusPendingText = "";
+      progressStatusLastText = text || "";
+      progressStatusLastAt = Date.now();
+      progressLine.textContent = text;
+      progressLine.classList.toggle("idx-progress-empty", !text);
+      try { progressLine.title = text || ""; } catch (_) {}
+      try { setupOneLineScroll(progressLine, !!text); } catch (_) {}
+    }
     function setProgressStatus(v) {
       if (!progressLine) return;
       var text = v == null ? "" : String(v);
       var stable = "";
       try { stable = stableHeaderStatusText(); } catch (_) {}
       if (stable && text === stable) text = "";
-      progressLine.textContent = text;
-      progressLine.classList.toggle("idx-progress-empty", !text);
-      try { progressLine.title = text || ""; } catch (_) {}
-      try { setupOneLineScroll(progressLine, !!text); } catch (_) {}
+      text = normalizeProgressStatusText(text);
+      if (!text && shouldKeepProgressOnClear()) return;
+      var current = String(progressLine.textContent || "");
+      if (text && current && text !== current) {
+        var nextPriority = progressStatusPriority(text);
+        var currentPriority = progressStatusPriority(current);
+        if (nextPriority < currentPriority) return;
+        if (nextPriority > currentPriority) {
+          applyProgressStatusText(text);
+          return;
+        }
+        var now = Date.now();
+        var wait = Math.max(0, 1400 - (now - progressStatusLastAt));
+        if (wait > 0) {
+          progressStatusPendingText = text;
+          if (!progressStatusPendingTimer) {
+            progressStatusPendingTimer = setTimeout(function () {
+              var next = progressStatusPendingText;
+              applyProgressStatusText(next);
+            }, wait);
+          }
+          return;
+        }
+      }
+      if (text === progressStatusLastText && text === current) return;
+      applyProgressStatusText(text);
     }
     function setupOneLineScroll(el, autoScroll) {
       if (!el) return;

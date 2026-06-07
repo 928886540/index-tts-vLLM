@@ -602,6 +602,18 @@
           }
         } catch (_) {}
         if (track) track.lastWebAudioSec = sec;
+        try {
+          if (track && track.latestSynthesisStatusText && Date.now() - Number(track.lastPlaybackSegmentStatusAt || 0) > 1000) {
+            var base = String(track.latestSynthesisStatusText || "");
+            if (/合成第\s*\d+\s*\/\s*\d+\s*段|音频合成中|音频已合成|正在保存/.test(base)) {
+              var segText = typeof playbackSegmentStatusTextForTrack === "function" ? playbackSegmentStatusTextForTrack(track, null, 0, sec) : "";
+              if (segText) {
+                track.lastPlaybackSegmentStatusAt = Date.now();
+                setStatus(base + " · " + segText);
+              }
+            }
+          }
+        } catch (_) {}
       }, 250);
     }
     async function playTrackViaWebAudio(track, url, opts) {
@@ -796,6 +808,15 @@
                 if (webAudioController && typeof webAudioController.getTimeSec === "function") return webAudioController.getTimeSec();
                 return startOffsetSec + ((((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt) / 1000) * playbackRate);
               });
+              try {
+                if (track.latestSynthesisStatusText) {
+                  var playingSegText = typeof playbackSegmentStatusTextForTrack === "function" ? playbackSegmentStatusTextForTrack(track, null, 0, startOffsetSec) : "";
+                  if (playingSegText) {
+                    track.lastPlaybackSegmentStatusAt = Date.now();
+                    setStatus(String(track.latestSynthesisStatusText || "") + " · " + playingSegText);
+                  }
+                }
+              } catch (_) {}
             } else if (state === "stable_playing") {
               track.webAudioStable = true;
               track.webAudioBufferStable = true;

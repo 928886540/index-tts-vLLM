@@ -118,6 +118,59 @@
       }
       return NaN;
     }
+    function playbackSegmentStatusTextForTrack(track, payload, totalSegments, positionSec) {
+      if (!track) return "";
+      if (normalizePlaybackMode(track.playbackMode) !== "live") return "";
+      var isPlaying = !!(
+        track.webAudioPlaying
+        || String(track.playbackState || "") === "playing"
+        || (typeof isElementPlayingTrackStream === "function" && isElementPlayingTrackStream(track))
+      );
+      if (!isPlaying) return "";
+      var sec = Number(positionSec);
+      if (!isFinite(sec)) {
+        try { sec = trackResumeSec(track); } catch (_) { sec = 0; }
+      }
+      if (!isFinite(sec) || sec < 0) return "";
+      var raw = [];
+      if (payload && Array.isArray(payload.segments_meta) && payload.segments_meta.length) raw = payload.segments_meta;
+      else if (Array.isArray(track.segments) && track.segments.length) raw = track.segments;
+      if (!raw.length) return "";
+      var sampleRate = Number((payload && payload.sample_rate) || track.sampleRate || track.sample_rate || 0);
+      var rows = raw.map(function (seg, i) {
+        var start = segmentStartSec(seg, sampleRate);
+        var idx = isFinite(Number(seg && seg.idx)) ? Number(seg.idx) : i;
+        return { idx: idx, start: start, duration: Number((seg && seg.duration_s) || 0) };
+      }).filter(function (row) {
+        return isFinite(row.start) && row.start >= 0;
+      }).sort(function (a, b) {
+        return a.start - b.start;
+      });
+      if (!rows.length) return "";
+      var currentIdx = -1;
+      for (var i = 0; i < rows.length; i += 1) {
+        var row = rows[i];
+        var next = rows[i + 1];
+        var end = row.duration > 0 ? row.start + row.duration : (next ? next.start : Infinity);
+        if (sec + 0.05 >= row.start && sec < end + 0.15) {
+          currentIdx = row.idx;
+          break;
+        }
+        if (sec >= row.start) currentIdx = row.idx;
+      }
+      if (currentIdx < 0 && sec <= rows[0].start + 0.15) currentIdx = rows[0].idx;
+      if (currentIdx < 0) return "";
+      var displayIdx = Math.max(1, Math.floor(Number(currentIdx) || 0) + 1);
+      var total = Math.max(
+        Number(totalSegments || 0) || 0,
+        payload && payload.metrics ? Number(payload.metrics.segments_total || 0) || 0 : 0,
+        payload && Array.isArray(payload.segments_plan) ? payload.segments_plan.length : 0,
+        track.segmentPlan && Array.isArray(track.segmentPlan) ? track.segmentPlan.length : 0,
+        raw.length,
+        displayIdx
+      );
+      return "当前在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
+    }
     function trackDurationHintSec(track) {
       if (!track) return 0;
       var d = Number(track.duration_s || (track.metrics && track.metrics.audio_duration_s));

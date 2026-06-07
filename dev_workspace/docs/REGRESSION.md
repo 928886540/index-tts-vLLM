@@ -58,7 +58,8 @@ Current smoke must prove:
 - same-key LIVE recovery never POSTs another job or DELETEs the job;
 - restored LIVE pending jobs from `tavo.get` reconnect same key with `start_s`;
 - avatar-side header status keeps only stable voice labels or "音色未设置";
-- transient generation/playback progress appears in a one-line transparent player-bottom hint, not in the avatar-side status or lyric toolbar;
+- transient generation/playback progress appears in a one-line transparent hint floating above the lyric panel near the seek/time area, not in the avatar-side status or lyric toolbar;
+- floating progress can combine synthesis progress with current playback segment, such as `合成第 13/36 段中 · 当前在播第 3/36 段`, and must not rapidly cycle through connection/buffer micro-states;
 - lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
 - the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps delete/page counter in place.
 - loading spinner keeps a stable center/size and must not visibly wobble.
@@ -96,7 +97,7 @@ Current smoke must prove:
 - Completed cache handoff must stop WebAudio before mounting native saved `<audio>` only when LIVE never became audible, was interrupted, or entered explicit saved-cache fallback; stable/audible LIVE should not be stolen just because cache landed.
 - Cache落盘 must not steal an already audible LIVE stream into saved `<audio>` or show a fresh loading handoff just because a transient stalled/buffering flag was recorded.
 - Short buffering after LIVE playback starts must not immediately reset the main button to idle or show "还没收到实时音频".
-- If cache audio becomes ready while WebAudio is unstable, stalled, loading, or buffering, the frontend may force native saved `<audio>` handoff so the user gets audible playback.
+- If cache audio becomes ready while LIVE never became audible, was interrupted, or entered explicit saved-cache fallback, the frontend may force native saved `<audio>` handoff so the user gets audible playback.
 - Saved/cache audio uses native `<audio>` with `/cache_audio/<cache_key>` or offline blob.
 
 ## LLM / Status Guard
@@ -105,7 +106,9 @@ Current smoke must prove:
 - Frontend submits one `/tts_dialogue_stream_job` body containing text, parse mode, voices, LLM config, Tavo user/character context, role hints, and generation parameters.
 - Backend-owned status/error should surface through `/tts_dialogue_job_status/{cache_key}`.
 - UI should translate raw backend phases into clear text, such as LLM call, role/emotion analysis, waiting first audio, or synthesizing segment x/y.
+- LIVE synthesis status should include current playback segment when known, and should be throttled enough that users can read it.
 - Do not expose raw internal copy like "文本已拆分" as the main user-facing status.
+- Native `<audio>` `seeking` / `seeked` logs should be hidden unless the script URL explicitly enables `debugSeek=1`.
 - AI LIVE should not label backend-owned LLM/TTS phases as the wrong mode; mode-specific status should say whether it is checking/reusing LLM parse, waiting first audio, or synthesizing.
 
 ## Launcher Guard
