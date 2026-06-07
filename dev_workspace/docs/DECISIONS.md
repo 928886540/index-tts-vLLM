@@ -4,7 +4,13 @@
 
 Status: accepted
 
-`dev_workspace/README.md` stays short and structural. Current state, bugs, regression, decisions, and TODOs live in `dev_workspace/docs/`.
+`dev_workspace/README.md` is the active working README for Codex sessions. It should explain the project boundary, startup path, active docs, and common validation commands.
+
+The root `README.md` is the project introduction / public-facing overview. Do not rely on it as the active handoff context for repository work.
+
+The root `AGENTS.md` was moved into `dev_workspace/AGENTS.md`; new Codex sessions should start in `dev_workspace` when the user wants lightweight working context.
+
+Detailed current state, bugs, regression, decisions, and TODOs still live in `dev_workspace/docs/`.
 
 `dev_workspace/handoff_docs/` remains archive/historical context.
 
@@ -83,7 +89,7 @@ Status: accepted
 
 Live/pending Tavo tracks are transient job UI, not history audio. They should expose only play/pause and live exit. Normal history controls such as previous, next, add, delete, rewind, forward, and seek belong to saved/cache-ready audio.
 
-Saved/cache audio must keep using the native `<audio>` element with `/cache_audio/<cache_key>` or an offline object URL because this is the most important path for mobile background playback, lock-screen controls, MediaSession, and seek stability.
+Saved/cache audio must keep using the native `<audio>` element with `/cache_audio/<cache_key>` or an offline Tavo file URL because this is the most important path for mobile background playback, lock-screen controls, MediaSession, and seek stability.
 
 Do not copy GPT-SoVITS saved WebAudio behavior into IndexTTS2. The user explicitly noted GPT-SoVITS background playback is poor; only copy the live-card state boundary and exit semantics.
 

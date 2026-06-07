@@ -632,7 +632,7 @@
         parseMode: restoredMode === "single" ? "normal" : restoredMode,
         playbackMode: normalizePlaybackMode(t.playbackMode || "live"),
         backgroundOnly: false,
-        offlineKey: t.offlineKey || offlineAudioKey(t.cacheKey),
+        offlineKey: offlineAudioKey(t.cacheKey),
         offlineReady: !!t.offlineReady,
         offlineWanted: !!t.offlineWanted,
         offlineSavedAt: t.offlineSavedAt || 0,

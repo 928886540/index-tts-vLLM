@@ -1,57 +1,60 @@
-# leon_api
+# LEON IndexTTS2 Tavo Voice Player
 
-This is the root workspace for the LEON IndexTTS2 Tavo integration.
+LEON is a local IndexTTS2 integration for Tavo. It turns a Tavo chat message into a multi-role voice player: AI can split narration, user lines, and character dialogue, map each role to a configured voice, stream audio while synthesis is still running, and keep saved audio history for replay.
 
-## Layout
+<p align="center">
+  <img src="assets/readme/leon-hero.png" alt="LEON multi-voice Tavo player" width="100%">
+</p>
 
-- `vllm/`: vLLM quality version.
-- `fast6g/`: double-accelerated 6 GB friendly version.
-- `static/`: shared Tavo injected frontend (`tavo.js`, runtime parts, test page).
-- `launcher/`: shared Windows launcher source and assets.
-- `scripts/`: shared start scripts used by the launcher.
-- `dev_workspace/`: Codex handoff docs, smoke tests, screenshots, and historical notes.
-- `packages/`: local archives/backups only; not committed.
+## What It Does
 
-## Entry Points
+- Multi-role TTS for Tavo messages, including narrator, user, current character, and custom roles.
+- AI-assisted role and style parsing for dialogue-heavy text.
+- LIVE streaming playback before the final cache audio is saved.
+- Saved/cache audio playback with native browser audio for replay, seek, and mobile background behavior.
+- Local launcher flow for choosing the `vllm` or `fast6g` backend.
 
-- User launcher: `LEON-Launcher.exe` from this root folder.
-- Launcher script source: `launcher/LEON-Launcher.ps1`.
-- vLLM API script: `scripts/start-vllm-api.bat`.
-- fast6g API script: `scripts/start-fast6g-api.bat`.
+## How It Runs
 
-The launcher selects one backend version at startup. `static/`, `launcher/`, and `scripts/` are shared by both versions.
+Start from the root launcher:
 
-## Terminology
-
-- `后端` / backend: the API backend layer (`vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, HTTP routes, job/cache/status).
-- `前端` / frontend: Tavo injected scripts and UI (`static/tavo.js`, runtime parts, Tavo storage/playback behavior).
-- `TTS服务`: the IndexTTS / IndexTTS2 inference and synthesis pipeline. This is not called "backend" in this project.
-- `启动器`: `LEON-Launcher.exe`, `launcher/`, and startup scripts.
-
-## Tavo Script
-
-The app does not require a public domain. For same-LAN phone testing, use:
-
-```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v30"></script>
+```text
+D:\apiWorkSpace\leon_api\LEON-Launcher.exe
 ```
 
-For a public tunnel, configure the tunnel/reverse proxy outside this repository and replace only the script host.
-The only runtime code that should depend on the script host is `static/tavo.js`, which uses its own loaded script origin as the API origin.
+The launcher selects one API backend:
 
-## Communication Style
+- `vllm/`: quality-oriented backend.
+- `fast6g/`: lower-VRAM friendly backend.
 
-- Default to Simplified Chinese, direct and practical. Call the user `bro` when it fits the flow. 🙂
-- Keep handoffs human: say what changed, what evidence was checked, what still needs validation, and the next useful move.
-- Emojis are welcome when they make the note easier to scan, but keep commands, logs, API paths, and errors precise.
-- Do not bury the result under templates. If something is risky, slow, or only partially verified, say it plainly. 👍
+The shared Tavo frontend is served from `static/`. Same-LAN Tavo testing can load:
 
-## Development Notes
+```html
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-tavo-file-v31"></script>
+```
 
-- Active collaboration state lives in `dev_workspace/docs/`.
-- A request to "read README" is only a lightweight project overview request. Read/summarize this file; load `AGENTS.md` and active docs only when code changes, debugging, validation, commits, or planning are needed.
-- Tavo frontend changes must follow the local `tavo` Codex skill.
-- A user-reported bug is an action item, not just a ledger entry. Diagnose and fix the relevant code path first; update `dev_workspace/docs/BUGS.md` only as a concise tracking/fix note when it helps handoff.
-- Do not stop after only writing a bug entry. Do not paste raw user reports into docs; summarize boundary, evidence, fix, and regression guard.
-- Do not commit model weights, runtime folders, generated audio cache, logs, package archives, or local Git backups.
-- Startup options are selected in the launcher: backend version (`vllm` / `fast6g`) and vLLM GPU memory ratio (`0.15` default or `0.11` conservative). Qwen emotion is deprecated for the launcher path; AI mode should use LLM-selected style/emotion parameters instead.
+For public access, configure your own tunnel or reverse proxy outside this repository and replace only the script host.
+
+## Workspace Layout
+
+- `static/`: Tavo injected frontend, runtime parts, CSS, and test page.
+- `vllm/`: vLLM API backend.
+- `fast6g/`: 6 GB friendly API backend.
+- `launcher/`: Windows launcher source and assets.
+- `scripts/`: shared startup scripts.
+- `dev_workspace/`: Codex handoff docs, regression notes, and smoke tests.
+- `assets/readme/`: README visuals.
+
+## Codex Work Notes
+
+This root README is the project introduction. For repository work, debugging, handoff, or future Codex sessions, use:
+
+```text
+dev_workspace\README.md
+```
+
+That file is the active working README and links to the current state, bug ledger, and regression checklist.
+
+<p align="center">
+  <img src="assets/readme/leon-main-poster.png" alt="LEON main poster" width="420">
+</p>

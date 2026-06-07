@@ -2,9 +2,27 @@
 
 This folder tracks launcher-only issues separately from Tavo/player work.
 
+## BUG-LAUNCHER-039: Generated multivoice hero asset is not wired into the live launcher header
+
+Status: fixed and visually confirmed in real launcher window
+
+Reported: 2026-06-07
+
+Boundary: launcher / visual assets
+
+Repro: Generate `launcher/leon-launcher-hero-multivoice.png` and open the launcher. The window still shows the plain dark header because the active form builder never references the new asset.
+
+Evidence: The worktree had the generated PNG as an untracked launcher asset, but `launcher/LEON-Launcher.ps1` only defined the older `leon-launcher-banner-avatar-ai.png` path and the final active `Build-LauncherForm` painted the header with a solid background. Earlier `Build-LauncherForm` definitions either are superseded or contain disabled banner code.
+
+Root cause: The asset generation step stopped before the script wiring step. The final PowerShell function definition at the bottom of the file overrides earlier versions, so changing or inspecting the older banner block would not affect the real launcher.
+
+Fix: `launcher/LEON-Launcher.ps1` now defines `HeroPath`, loads `leon-launcher-hero-multivoice.png` into the current header background, keeps title/subtitle labels transparent over the banner, and disposes the loaded image on form close. A real WinForms screenshot confirmed the banner renders behind the title without covering the sidebar or log area.
+
+Guard: Future launcher visual changes must target the last active `Build-LauncherForm` definition unless the duplicate historical definitions are intentionally cleaned up. Project-referenced launcher assets must be committed under `launcher/` and actually referenced by the live form builder.
+
 ## BUG-LAUNCHER-038: Home logs show mojibake and do not default to the newest line
 
-Status: fixed in script, needs visual confirmation in real launcher window
+Status: fixed in script, visually confirmed for home launcher log display; fresh startup stdout/stderr still needs confirmation after the next real service restart
 
 Reported: 2026-06-07
 
@@ -14,7 +32,7 @@ Evidence: User report: "启动器现在显示的日志有乱码" and "日志列�
 
 Root cause: Startup stdout/stderr could be produced under the console default code page while the launcher decoded it as UTF-8 or system ANSI only. Existing logs written in GBK/GB18030 were not reliably decoded on every Windows locale. The log text box also did not schedule a post-layout scroll, so WinForms could leave the scrollbar slightly above the end after refresh or resize.
 
-Fix: `launcher/LEON-Launcher.ps1` now sets the launcher console/output encoding to UTF-8, starts service BAT files through `cmd /d /s /c chcp 65001`, passes `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` during startup, reads log files with shared access, and scores UTF-8 / GB18030 / GBK / system-default decodes before normalizing. The home log RichTextBox now uses a shared scroll helper that moves the caret to `TextLength` immediately and again after layout via `BeginInvoke`.
+Fix: `launcher/LEON-Launcher.ps1` now sets the launcher console/output encoding to UTF-8, starts service BAT files through `cmd /d /s /c chcp 65001`, passes `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` during startup, reads log files with shared access, and scores UTF-8 / GB18030 / GBK / system-default decodes before normalizing. Follow-up fix: launcher local API JSON calls now use an explicit UTF-8 byte decode helper instead of `Invoke-RestMethod`, because Windows PowerShell can misdecode UTF-8 JSON without charset; display normalization also repairs existing Latin-1-shaped UTF-8 mojibake runs such as `ä¸ª...` without rewriting historical log files. The home log RichTextBox now uses a shared scroll helper that moves the caret to `TextLength` immediately and again after layout via `BeginInvoke`.
 
 Guard: Starting from the launcher should generate UTF-8 Python logs. Old GBK/GB18030 logs should still display readable Chinese where possible. Switching log tabs, refreshing logs, opening home, and resizing the launcher should leave the active log view at the newest line unless the user is actively selecting text in the same tab.
 

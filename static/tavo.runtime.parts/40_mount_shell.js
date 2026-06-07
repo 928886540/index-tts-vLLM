@@ -64,7 +64,7 @@
           + '<label class="idx-check"><input type="checkbox" data-field="reuseLlmParse"><span><strong>复用 LLM 拆段</strong><span>同一消息、角色和 LLM 配置未变时，由后端复用拆段结果。</span></span></label>'
         + '</div>'
         + '<div class="idx-section-title">播放 / 离线</div>'
-        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>已落盘音频存到本机，下次优先放本地。</span></span></label>'
+        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>已落盘音频存到 Tavo 当前聊天，下次优先放本地。</span></span></label>'
         + '<div class="idx-actions"><button class="idx-btn" type="button" data-role="save">保存</button></div>'
         + '</dialog>'
         // 音色选择器:模态弹窗,走原生 dialog top-layer,跟设置面板同级

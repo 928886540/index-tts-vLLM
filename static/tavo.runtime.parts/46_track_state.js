@@ -225,7 +225,7 @@
     }
     function ensureTrackOfflineKey(track) {
       if (!track) return "";
-      if (!track.offlineKey) track.offlineKey = offlineAudioKey(track.cacheKey);
+      track.offlineKey = offlineAudioKey(track.cacheKey);
       return track.offlineKey || "";
     }
     async function hydrateOfflineAudio(track, label) {
@@ -233,28 +233,29 @@
         if (track) setTrackOfflineState(track, cfg.offlineAudioEnabled ? "missing" : "disabled");
         return false;
       }
-      if (track.offlineReady && track.offlineUrl && /^blob:/i.test(String(track.offlineUrl))) {
+      if (track.offlineReady && track.offlineUrl && !/^blob:/i.test(String(track.offlineUrl))) {
         setTrackOfflineState(track, "ready");
         return true;
       }
       var key = ensureTrackOfflineKey(track);
       if (!key) return false;
       var rec = await getOfflineAudioRecord(key);
-      if (!rec || !rec.blob) {
+      if (!rec || !rec.path) {
         revokeOfflineObjectUrl(track);
+        track.offlineUrl = "";
         track.offlineReady = false;
         setTrackOfflineState(track, "missing");
         return false;
       }
       revokeOfflineObjectUrl(track);
-      track.offlineUrl = URL.createObjectURL(rec.blob);
-      track.offlineObjectUrl = track.offlineUrl;
+      track.offlineUrl = rec.path;
+      track.offlineObjectUrl = "";
       track.offlineReady = true;
       track.offlineWanted = false;
-      track.offlineSavedAt = rec.updatedAt || rec.createdAt || Date.now();
-      track.offlineSize = rec.size || (rec.blob && rec.blob.size) || 0;
+      track.offlineSavedAt = rec.updatedAt || Date.now();
+      track.offlineSize = rec.size || track.offlineSize || 0;
       setTrackOfflineState(track, "ready");
-      debugLog("📦 " + (label || "offline") + " 命中 IndexedDB: " + key, "#9f9");
+      debugLog("📦 " + (label || "offline") + " 命中 Tavo 文件: " + key, "#9f9");
       return true;
     }
     async function saveOfflineAudioForTrack(track, label) {
@@ -268,40 +269,36 @@
       setTrackOfflineState(track, "saving");
       try {
         var existing = await getOfflineAudioRecord(key);
-        if (existing && existing.blob) {
+        if (existing && existing.path) {
           await hydrateOfflineAudio(track, label || "offline");
           if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
           return true;
         }
-        var res = await fetch(track.cacheUrl, { cache: "no-store" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        var blob = await res.blob();
-        if (!blob || !blob.size) throw new Error("空音频");
         var now = Date.now();
-        await putOfflineAudioRecord({
+        var saved = await putOfflineAudioRecord({
           key: key,
           cacheKey: track.cacheKey,
           sourceUrl: track.cacheUrl,
           mode: track.mode || "",
           voice: track.voice || "",
-          contentType: blob.type || "audio/wav",
-          size: blob.size,
-          blob: blob,
+          contentType: "audio/wav",
+          size: track.offlineSize || 0,
           createdAt: track.offlineSavedAt || now,
           updatedAt: now
         });
         revokeOfflineObjectUrl(track);
-        track.offlineUrl = URL.createObjectURL(blob);
-        track.offlineObjectUrl = track.offlineUrl;
+        track.offlineUrl = saved.path;
+        track.offlineObjectUrl = "";
         track.offlineReady = true;
         track.offlineWanted = false;
         track.offlineSavedAt = now;
-        track.offlineSize = blob.size;
+        track.offlineSize = saved.size || track.offlineSize || 0;
         setTrackOfflineState(track, "ready");
         if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-        debugLog("💾 " + (label || "offline") + " 已保存离线音频: " + key + " (" + Math.round(blob.size / 1024) + " KB)", "#9f9");
+        debugLog("💾 " + (label || "offline") + " 已保存 Tavo 离线音频: " + key, "#9f9");
         return true;
       } catch (e) {
+        track.offlineUrl = "";
         track.offlineWanted = true;
         setTrackOfflineState(track, "failed");
         debugLog("⚠️ " + (label || "offline") + " 离线保存失败；不影响在线播放: " + (e && e.message ? e.message : e), "#fc9");
@@ -336,6 +333,7 @@
       if (!key) return false;
       var ok = await deleteOfflineAudioRecord(key);
       if (ok) {
+        track.offlineUrl = "";
         track.offlineReady = false;
         track.offlineWanted = false;
         setTrackOfflineState(track, cfg.offlineAudioEnabled ? "missing" : "disabled");

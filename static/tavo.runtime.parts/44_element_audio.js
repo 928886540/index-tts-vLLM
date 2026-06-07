@@ -83,6 +83,7 @@
       try { sourceKind = audio.dataset.idxSourceKind || ""; } catch (_) {}
       if ((sourceKind === "offline" || (track.offlineUrl && src === track.offlineUrl)) && track.cacheUrl) {
         revokeOfflineObjectUrl(track);
+        track.offlineUrl = "";
         track.offlineReady = false;
         track.offlineWanted = true;
         setTrackOfflineState(track, "failed");

@@ -168,52 +168,43 @@
     }
     return out;
   }
-  var OFFLINE_DB_NAME = "indextts_tavo_audio_v1";
-  var OFFLINE_DB_STORE = "audio";
-  var OFFLINE_DB_PROMISE = null;
+  var OFFLINE_FILE_SCOPE = "chat";
   function offlineAudioKey(cacheKey) {
     cacheKey = String(cacheKey || "").trim();
-    return cacheKey ? "cache:" + cacheKey : "";
+    if (!cacheKey) return "";
+    return "indextts-" + cacheKey.replace(/[^A-Za-z0-9_-]/g, "_") + ".wav";
   }
-  function openOfflineAudioDb() {
-    if (!("indexedDB" in window)) return Promise.reject(new Error("当前 WebView 不支持 IndexedDB"));
-    if (OFFLINE_DB_PROMISE) return OFFLINE_DB_PROMISE;
-    OFFLINE_DB_PROMISE = new Promise(function (resolve, reject) {
-      var req;
-      try { req = indexedDB.open(OFFLINE_DB_NAME, 1); }
-      catch (e) { reject(e); return; }
-      req.onupgradeneeded = function () {
-        var db = req.result;
-        if (!db.objectStoreNames.contains(OFFLINE_DB_STORE)) db.createObjectStore(OFFLINE_DB_STORE, { keyPath: "key" });
-      };
-      req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { reject(req.error || new Error("IndexedDB 打开失败")); };
-      req.onblocked = function () { reject(new Error("IndexedDB 被旧页面占用")); };
-    });
-    return OFFLINE_DB_PROMISE;
+  function offlineFileApi() {
+    if (!(window.tavo && tavo.file && typeof tavo.file.save === "function" && typeof tavo.file.exists === "function" && typeof tavo.file.delete === "function" && typeof tavo.file.url === "function")) {
+      throw new Error("当前 Tavo 不支持文件存储");
+    }
+    return tavo.file;
   }
-  function offlineDbRequest(mode, fn) {
-    return openOfflineAudioDb().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(OFFLINE_DB_STORE, mode);
-        var store = tx.objectStore(OFFLINE_DB_STORE);
-        var req;
-        try { req = fn(store); } catch (e) { reject(e); return; }
-        req.onsuccess = function () { resolve(req.result); };
-        req.onerror = function () { reject(req.error || tx.error || new Error("IndexedDB 操作失败")); };
-      });
-    });
+  async function getOfflineAudioRecord(key) {
+    if (!key) return null;
+    try {
+      var api = offlineFileApi();
+      if (!await api.exists(key, { scope: OFFLINE_FILE_SCOPE })) return null;
+      var path = api.url(key, OFFLINE_FILE_SCOPE);
+      return path ? { key: key, path: path, updatedAt: Date.now() } : null;
+    } catch (_) {
+      return null;
+    }
   }
-  function getOfflineAudioRecord(key) {
-    if (!key) return Promise.resolve(null);
-    return offlineDbRequest("readonly", function (store) { return store.get(key); }).catch(function () { return null; });
+  async function putOfflineAudioRecord(record) {
+    if (!record || !record.key || !record.sourceUrl) throw new Error("离线音频记录缺少文件名或来源");
+    var path = await offlineFileApi().save(record.key, record.sourceUrl, { scope: OFFLINE_FILE_SCOPE });
+    if (!path) throw new Error("Tavo 文件保存失败");
+    return { key: record.key, path: path, size: record.size || 0, updatedAt: Date.now() };
   }
-  function putOfflineAudioRecord(record) {
-    return offlineDbRequest("readwrite", function (store) { return store.put(record); });
-  }
-  function deleteOfflineAudioRecord(key) {
-    if (!key) return Promise.resolve(false);
-    return offlineDbRequest("readwrite", function (store) { return store.delete(key); }).then(function () { return true; }).catch(function () { return false; });
+  async function deleteOfflineAudioRecord(key) {
+    if (!key) return false;
+    try {
+      await offlineFileApi().delete(key, { scope: OFFLINE_FILE_SCOPE });
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
   async function saveConfig(cfg, characterId) {
     // 写入前 normalize 一次,杜绝脏数据回到 storage
@@ -412,5 +403,5 @@
     return { text: finalText, avatarUrl: avatarUrl, characterName: characterName, characterId: characterId, messageId: messageId, userName: userName, userAvatarUrl: userAvatarUrl };
   }
   // 每条消息的播放历史持久化：key = "indextts_tracks_<messageId>"。
-  // 只存可重建的元信息（cacheKey + voice + mode + offlineKey），不存 blob。
-  // 重新进页面时优先从 IndexedDB 读离线音频；缺失时通过 /cache_audio/{cacheKey} 接上。
+  // 只存可重建的元信息（cacheKey + voice + mode + offlineKey），音频字节放 Tavo chat 文件。
+  // 重新进页面时优先从 tavo.file 读离线音频；缺失时通过 /cache_audio/{cacheKey} 接上。

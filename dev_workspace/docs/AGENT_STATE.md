@@ -26,15 +26,18 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v30"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-tavo-file-v31"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v30`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260607-tavo-file-v31`.
+- Root `README.md` is now the project introduction with README images. `dev_workspace/README.md` is the active working README for Codex repository work.
+- Root `AGENTS.md` was moved into `dev_workspace/AGENTS.md`; start new Codex sessions in `dev_workspace` for the shortest working context.
 - Tavo settings/config read `tavo.get` first; `localStorage` is fallback only.
 - `tavo.set` failures surface as "设置保存失败".
 - Saved tracks and pending jobs prefer `tavo.get`; deletion writes through `tavo.set`.
+- Offline audio bytes now use Tavo chat-scoped `tavo.file` storage (`indextts-<cacheKey>.wav`) instead of IndexedDB; saved track metadata still uses `tavo.set`.
 - Main play button only plays/pauses current audio. The music-note button creates new audio.
 - Empty player disables play and keeps music-note enabled.
 - AI mode does not submit `voices.default`; explicit role mappings are required.

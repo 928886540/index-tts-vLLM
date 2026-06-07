@@ -35,6 +35,9 @@ function Get-PreferredLanHost {
 $Script:LauncherScriptPath = if ($env:LEON_LAUNCHER_SCRIPT) { $env:LEON_LAUNCHER_SCRIPT } else { $MyInvocation.MyCommand.Path }
 $Script:LauncherDir = if ($Script:LauncherScriptPath) { Split-Path -Parent $Script:LauncherScriptPath } else { (Get-Location).Path }
 $Script:WorkspaceRoot = (Resolve-Path (Join-Path $Script:LauncherDir "..")).Path
+$Script:LauncherWindowTitle = "LEON 启动器 - IndexTTS2"
+$Script:SingleInstanceMutexName = "Local\LEON.IndexTTS2.Launcher"
+$Script:SingleInstanceMutex = $null
 $Script:ApiPort = 9880
 $Script:ApiBase = "http://127.0.0.1:$Script:ApiPort"
 $Script:WebUiPort = 7860
@@ -57,7 +60,9 @@ $Script:WebUiStartupBat = $null
 $Script:RuntimePython = $null
 $Script:RuntimeScripts = $null
 $Script:LogDir = $null
-$Script:BannerPath = Join-Path $Script:LauncherDir "leon-launcher-banner-avatar-ai.png"
+$Script:BannerPath = Join-Path $Script:LauncherDir "head.png"
+$Script:HeroPath = Join-Path $Script:LauncherDir "head.png"
+$Script:SideImagePath = Join-Path $Script:LauncherDir "left.png"
 $Script:AvatarPath = Join-Path $Script:LauncherDir "leon-avatar.jpeg"
 $Script:IconPath = Join-Path $Script:LauncherDir "leon-launcher.ico"
 $Script:SvmlSource = $null
@@ -81,6 +86,7 @@ $Script:VllmGpuCombo = $null
 $Script:Tabs = $null
 $Script:BackendLogTimer = $null
 $Script:WarmupStarted = $false
+$Script:ApiReadyWaitActive = $false
 $Script:WebUiBrowser = $null
 $Script:WebUiStatusLabel = $null
 $Script:HomePanel = $null
@@ -279,9 +285,162 @@ catch {
     # Older Windows shells can ignore this; Form.Icon below still controls the window icon.
 }
 
+try {
+    if (-not ([System.Management.Automation.PSTypeName]'LeonLauncherNative').Type) {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class LeonLauncherNative
+{
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+    }
+}
+catch {
+}
+
+function Show-ExistingLauncherWindow {
+    try {
+        $hwnd = [LeonLauncherNative]::FindWindow($null, $Script:LauncherWindowTitle)
+        if ($hwnd -and $hwnd -ne [IntPtr]::Zero) {
+            [void][LeonLauncherNative]::ShowWindow($hwnd, 9)
+            [void][LeonLauncherNative]::SetForegroundWindow($hwnd)
+            return $true
+        }
+    }
+    catch {
+    }
+    return $false
+}
+
+function Initialize-LauncherSingleInstance {
+    if ($env:LEON_LAUNCHER_SMOKE_TEST -eq "1") { return }
+    if (Show-ExistingLauncherWindow) {
+        exit 0
+    }
+    $createdNew = $false
+    try {
+        $Script:SingleInstanceMutex = New-Object System.Threading.Mutex($true, $Script:SingleInstanceMutexName, [ref]$createdNew)
+        if (-not $createdNew) {
+            [void](Show-ExistingLauncherWindow)
+            if ($Script:SingleInstanceMutex) {
+                $Script:SingleInstanceMutex.Dispose()
+                $Script:SingleInstanceMutex = $null
+            }
+            exit 0
+        }
+    }
+    catch {
+    }
+}
+
+function Release-LauncherSingleInstance {
+    if (-not $Script:SingleInstanceMutex) { return }
+    try {
+        $Script:SingleInstanceMutex.ReleaseMutex()
+    }
+    catch {
+    }
+    try {
+        $Script:SingleInstanceMutex.Dispose()
+    }
+    catch {
+    }
+    $Script:SingleInstanceMutex = $null
+}
+
 function New-Font {
     param([float]$Size, [System.Drawing.FontStyle]$Style = [System.Drawing.FontStyle]::Regular)
     return New-Object System.Drawing.Font("Microsoft YaHei UI", $Size, $Style)
+}
+
+function Get-CoverImageRectangle {
+    param(
+        [System.Drawing.Image]$Image,
+        [System.Drawing.Rectangle]$Bounds,
+        [string]$HorizontalAlign = "Center",
+        [string]$VerticalAlign = "Center"
+    )
+    if (-not $Image -or $Bounds.Width -le 0 -or $Bounds.Height -le 0 -or $Image.Width -le 0 -or $Image.Height -le 0) {
+        return [System.Drawing.Rectangle]::Empty
+    }
+    $scale = [Math]::Max($Bounds.Width / [double]$Image.Width, $Bounds.Height / [double]$Image.Height)
+    $drawWidth = [int][Math]::Ceiling($Image.Width * $scale)
+    $drawHeight = [int][Math]::Ceiling($Image.Height * $scale)
+    switch ($HorizontalAlign) {
+        "Left" { $x = $Bounds.Left }
+        "Right" { $x = $Bounds.Right - $drawWidth }
+        default { $x = $Bounds.Left + [int][Math]::Floor(($Bounds.Width - $drawWidth) / 2) }
+    }
+    switch ($VerticalAlign) {
+        "Top" { $y = $Bounds.Top }
+        "Bottom" { $y = $Bounds.Bottom - $drawHeight }
+        default { $y = $Bounds.Top + [int][Math]::Floor(($Bounds.Height - $drawHeight) / 2) }
+    }
+    return (New-Object System.Drawing.Rectangle -ArgumentList @($x, $y, $drawWidth, $drawHeight))
+}
+
+function Add-CoverImageBackground {
+    param(
+        [System.Windows.Forms.Control]$Control,
+        [string]$ImagePath,
+        [string]$Description,
+        [string]$HorizontalAlign = "Center",
+        [string]$VerticalAlign = "Center",
+        [int]$OverlayAlpha = 0
+    )
+    if (-not (Test-Path -LiteralPath $ImagePath)) { return $null }
+    try {
+        $image = [System.Drawing.Image]::FromFile($ImagePath)
+        $Control.Add_Paint({
+            param($sender, $e)
+            if (-not $image) { return }
+            $rect = Get-CoverImageRectangle -Image $image -Bounds $sender.ClientRectangle -HorizontalAlign $HorizontalAlign -VerticalAlign $VerticalAlign
+            if ($rect.IsEmpty) { return }
+            $oldInterpolation = $e.Graphics.InterpolationMode
+            $oldSmoothing = $e.Graphics.SmoothingMode
+            $oldPixelOffset = $e.Graphics.PixelOffsetMode
+            try {
+                $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $e.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+                $e.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                $e.Graphics.DrawImage($image, $rect)
+                if ($OverlayAlpha -gt 0) {
+                    $alpha = [Math]::Max(0, [Math]::Min(255, $OverlayAlpha))
+                    $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb($alpha, 8, 11, 15))
+                    try {
+                        $e.Graphics.FillRectangle($brush, $sender.ClientRectangle)
+                    }
+                    finally {
+                        $brush.Dispose()
+                    }
+                }
+            }
+            finally {
+                $e.Graphics.InterpolationMode = $oldInterpolation
+                $e.Graphics.SmoothingMode = $oldSmoothing
+                $e.Graphics.PixelOffsetMode = $oldPixelOffset
+            }
+        }.GetNewClosure())
+        $Control.Add_Resize({
+            param($sender, $e)
+            $sender.Invalidate()
+        })
+        return $image
+    }
+    catch {
+        Add-Log "加载$Description 失败: $($_.Exception.Message)" "WARN"
+        return $null
+    }
 }
 
 function Add-Log {
@@ -337,6 +496,56 @@ function Test-LogTextSelected {
     }
 }
 
+function Invoke-LeonJson {
+    param(
+        [string]$Uri,
+        [string]$Method = "GET",
+        [string]$Body = $null,
+        [string]$ContentType = "application/json; charset=utf-8",
+        [int]$TimeoutSec = 30
+    )
+    $request = [System.Net.HttpWebRequest][System.Net.WebRequest]::Create($Uri)
+    $request.Method = $Method
+    $request.Accept = "application/json"
+    $request.Timeout = [Math]::Max(1, $TimeoutSec) * 1000
+    $request.ReadWriteTimeout = [Math]::Max(1, $TimeoutSec) * 1000
+    if ($PSBoundParameters.ContainsKey("Body") -and $null -ne $Body) {
+        $bodyBytes = $Script:Utf8NoBomEncoding.GetBytes($Body)
+        $request.ContentType = $ContentType
+        $request.ContentLength = $bodyBytes.Length
+        $requestStream = $null
+        try {
+            $requestStream = $request.GetRequestStream()
+            $requestStream.Write($bodyBytes, 0, $bodyBytes.Length)
+        }
+        finally {
+            if ($requestStream) { $requestStream.Dispose() }
+        }
+    }
+    elseif ($Method -ne "GET" -and $Method -ne "HEAD") {
+        $request.ContentType = $ContentType
+        $request.ContentLength = 0
+    }
+
+    $response = $null
+    $stream = $null
+    $memory = $null
+    try {
+        $response = $request.GetResponse()
+        $stream = $response.GetResponseStream()
+        $memory = New-Object System.IO.MemoryStream
+        $stream.CopyTo($memory)
+        $text = $Script:Utf8NoBomEncoding.GetString($memory.ToArray())
+        if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+        return ($text | ConvertFrom-Json)
+    }
+    finally {
+        if ($memory) { $memory.Dispose() }
+        if ($stream) { $stream.Dispose() }
+        if ($response) { $response.Dispose() }
+    }
+}
+
 function Scroll-LogBoxToEnd {
     param([bool]$Defer = $true)
     if (-not $Script:LogBox) { return }
@@ -382,10 +591,46 @@ function Test-NoisyServerLogLine {
     return ($Line -match 'INFO:\s+.*"\s*(GET|HEAD)\s+/(health|server_log/tail)(\?|\s|/)')
 }
 
+function Repair-Utf8MojibakeRuns {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    if ($Text -notmatch '[\u0080-\u00ff]{2,}') { return $Text }
+
+    $latin1 = $null
+    $cp1252 = $null
+    try { $latin1 = [System.Text.Encoding]::GetEncoding("iso-8859-1") } catch {}
+    try { $cp1252 = [System.Text.Encoding]::GetEncoding(1252) } catch {}
+    $encodings = @($latin1, $cp1252) | Where-Object { $null -ne $_ }
+    if ($encodings.Count -eq 0) { return $Text }
+
+    return [regex]::Replace($Text, '[\u0080-\u00ff]{2,}', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match)
+        $value = [string]$match.Value
+        $best = $value
+        $valueCjk = ([regex]::Matches($value, '[\u4e00-\u9fff]')).Count
+        $valueLatin1 = ([regex]::Matches($value, '[\u0080-\u00ff]')).Count
+        foreach ($encoding in $encodings) {
+            try {
+                $decoded = $Script:Utf8NoBomEncoding.GetString($encoding.GetBytes($value))
+                if ($decoded -match [string][char]0xFFFD) { continue }
+                $decodedCjk = ([regex]::Matches($decoded, '[\u4e00-\u9fff]')).Count
+                $decodedLatin1 = ([regex]::Matches($decoded, '[\u0080-\u00ff]')).Count
+                if ($decodedCjk -gt $valueCjk -or ($decodedLatin1 -lt $valueLatin1 -and $decoded.Length -lt $value.Length)) {
+                    $best = $decoded
+                    break
+                }
+            }
+            catch {
+            }
+        }
+        return $best
+    })
+}
+
 function Normalize-LauncherLogText {
     param([string]$Text)
     if ($null -eq $Text) { return "" }
-    $text = [string]$Text
+    $text = Repair-Utf8MojibakeRuns ([string]$Text)
     $lines = $text -split "`r?`n"
     $lines = @($lines | Where-Object { -not (Test-NoisyLauncherLogLine $_) })
     $text = $lines -join "`n"
@@ -1076,7 +1321,7 @@ function Initialize-RepairRows {
 
 function Test-ApiHealth {
     try {
-        $resp = Invoke-RestMethod -Uri "$Script:ApiBase/health" -TimeoutSec 2
+        $resp = Invoke-LeonJson -Uri "$Script:ApiBase/health" -TimeoutSec 2
         return $resp
     }
     catch {
@@ -1107,6 +1352,71 @@ function Get-ListeningPidsForPort {
     }
     catch {}
     return $pids | Sort-Object -Unique
+}
+
+function Get-ChildProcessIds {
+    param([int]$ParentPid)
+    $children = @()
+    try {
+        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentPid" -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.ProcessId })
+    }
+    catch {
+        $children = @()
+    }
+    return $children
+}
+
+function Stop-ProcessTreeById {
+    param([int]$RootPid)
+    if ($RootPid -le 0 -or $RootPid -eq $PID) { return }
+    $ordered = @()
+    $pending = @($RootPid)
+    $seen = @{}
+    while ($pending.Count -gt 0) {
+        $current = [int]$pending[0]
+        if ($pending.Count -gt 1) { $pending = @($pending[1..($pending.Count - 1)]) } else { $pending = @() }
+        if ($seen.ContainsKey($current)) { continue }
+        $seen[$current] = $true
+        $ordered += $current
+        foreach ($child in @(Get-ChildProcessIds -ParentPid $current)) {
+            if (-not $seen.ContainsKey($child)) { $pending += $child }
+        }
+    }
+    for ($i = $ordered.Count - 1; $i -ge 0; $i--) {
+        $pidToStop = [int]$ordered[$i]
+        if ($pidToStop -le 0 -or $pidToStop -eq $PID) { continue }
+        try {
+            Stop-Process -Id $pidToStop -Force -ErrorAction Stop
+            Add-Log "已停止 LEON 服务进程 PID $pidToStop"
+        }
+        catch {
+            Add-Log "停止 PID $pidToStop 失败: $($_.Exception.Message)" "WARN"
+        }
+    }
+}
+
+function Get-LauncherBackendWrapperPids {
+    $needles = @(
+        $Script:StartupBat,
+        (Join-Path $Script:WorkspaceRoot "scripts\start-vllm-api.bat"),
+        (Join-Path $Script:WorkspaceRoot "scripts\start-fast6g-api.bat")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $matches = @()
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $cmd = [string]$_.CommandLine
+            if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
+            foreach ($needle in $needles) {
+                if ($cmd.IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+            }
+            return $false
+        })
+        $matches = @($processes | ForEach-Object { [int]$_.ProcessId } | Where-Object { $_ -ne $PID } | Sort-Object -Unique)
+    }
+    catch {
+        $matches = @()
+    }
+    return $matches
 }
 
 function Get-VsInstallPath {
@@ -1584,6 +1894,8 @@ function Refresh-StartupLogPaths {
 }
 
 function Wait-ApiReadyAsync {
+    if ($Script:ApiReadyWaitActive) { return }
+    $Script:ApiReadyWaitActive = $true
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 3000
     $start = Get-Date
@@ -1593,6 +1905,7 @@ function Wait-ApiReadyAsync {
         if ($health) {
             $timer.Stop()
             $timer.Dispose()
+            $Script:ApiReadyWaitActive = $false
             Set-StatusText "LEON 服务已启动：$Script:ApiBase" "LightGreen"
             Add-Log "LEON 服务 ready: $Script:ApiBase"
             $Script:ServiceTransition = $false
@@ -1610,6 +1923,7 @@ function Wait-ApiReadyAsync {
         if ($elapsed -gt 300) {
             $timer.Stop()
             $timer.Dispose()
+            $Script:ApiReadyWaitActive = $false
             Set-StatusText "LEON 服务启动超时，请查看日志。" "LightCoral"
             Add-Log "LEON 服务启动等待超时。" "ERROR"
             $Script:ServiceTransition = $false
@@ -1623,8 +1937,8 @@ function Wait-ApiReadyAsync {
 function Start-WarmupAsync {
     if ($Script:WarmupStarted) { return }
     $Script:WarmupStarted = $true
-    Add-Log "开始请求 LEON 服务模型预热..."
-    Set-StatusText "LEON 服务已启动，正在预热模型..." "Khaki"
+    Add-Log "检查 LEON 服务模型预热状态..."
+    Set-StatusText "LEON 服务已启动，正在检查预热状态..." "Khaki"
 
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 400
@@ -1632,7 +1946,28 @@ function Start-WarmupAsync {
         $timer.Stop()
         $timer.Dispose()
         try {
-            $resp = Invoke-RestMethod -Uri "$Script:ApiBase/warmup" -Method Post -TimeoutSec 180
+            $state = $null
+            try {
+                $state = Invoke-LeonJson -Uri "$Script:ApiBase/warmup" -TimeoutSec 5
+            }
+            catch {
+                $state = $null
+            }
+            if ($state -and ($state.status -eq "ok" -or $state.status -eq "already_warmed")) {
+                Set-StatusText "模型已预热，服务地址：$Script:ApiBase" "LightGreen"
+                Add-Log "模型已预热: status=$($state.status), elapsed=$($state.elapsed_s)s, voice=$($state.voice)"
+                Refresh-BackendLogTail
+                return
+            }
+            if ($state -and $state.status -eq "running") {
+                Set-StatusText "模型预热正在进行中..." "Khaki"
+                Add-Log "模型预热正在进行中。"
+                Refresh-BackendLogTail
+                return
+            }
+            Add-Log "开始请求 LEON 服务模型预热..."
+            Set-StatusText "LEON 服务已启动，正在预热模型..." "Khaki"
+            $resp = Invoke-LeonJson -Uri "$Script:ApiBase/warmup" -Method Post -TimeoutSec 180
             if ($resp.status -eq "ok" -or $resp.status -eq "already_warmed") {
                 Set-StatusText "模型预热完成，服务地址：$Script:ApiBase" "LightGreen"
                 Add-Log "模型预热完成: status=$($resp.status), elapsed=$($resp.elapsed_s)s, voice=$($resp.voice)"
@@ -1653,34 +1988,65 @@ function Start-WarmupAsync {
 
 function Stop-LeonService {
     Show-HomeLog
+    $health = Test-ApiHealth
+    if ($health) {
+        try {
+            Add-Log "向 LEON 服务发送退出请求..."
+            Invoke-LeonJson -Uri "$Script:ApiBase/control?command=exit" -TimeoutSec 2 | Out-Null
+        }
+        catch {
+            Add-Log "退出请求未返回，继续按端口 PID 停止服务。" "WARN"
+        }
+        $deadline = (Get-Date).AddSeconds(5)
+        do {
+            Start-Sleep -Milliseconds 500
+            $pidsAfterExit = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
+            if ($pidsAfterExit.Count -eq 0) {
+                Add-Log "LEON 服务已停止。"
+                Set-StatusText "服务已停止。" "Khaki"
+                Update-StartButtonState $false
+                $Script:WarmupStarted = $false
+                return
+            }
+        } while ((Get-Date) -lt $deadline)
+    }
+
     $pids = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
     if ($pids.Count -eq 0) {
         Add-Log "端口 $Script:ApiPort 没有监听进程。"
+        Set-StatusText "服务已停止。" "Khaki"
+        Update-StartButtonState $false
+        $Script:WarmupStarted = $false
         return
     }
+
+    Add-Log "强制停止监听端口 $Script:ApiPort 的进程: $($pids -join ', ')"
     foreach ($pid in $pids) {
-        try {
-            $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction SilentlyContinue
-            $cmd = [string]($proc.CommandLine)
-            if ($proc -and $cmd -and ($cmd -like "*$($Script:WorkspaceRoot)*" -or $cmd -like "*$($Script:RepoRoot)*")) {
-                Stop-Process -Id $pid -Force
-                Add-Log "已停止项目 LEON 服务进程 PID $pid"
-                Update-StartButtonState $false
-            }
-            else {
-                Add-Log "PID $pid 不像本项目进程，未停止。" "WARN"
-            }
-        }
-        catch {
-            Add-Log "停止 PID $pid 失败: $($_.Exception.Message)" "WARN"
-        }
+        Stop-ProcessTreeById -RootPid ([int]$pid)
+    }
+    foreach ($wrapperPid in @(Get-LauncherBackendWrapperPids)) {
+        Stop-ProcessTreeById -RootPid ([int]$wrapperPid)
+    }
+
+    Start-Sleep -Milliseconds 700
+    $remaining = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
+    if ($remaining.Count -eq 0) {
+        Add-Log "LEON 服务已停止。"
+        Set-StatusText "服务已停止。" "Khaki"
+        Update-StartButtonState $false
+        $Script:WarmupStarted = $false
+    }
+    else {
+        Add-Log "端口 $Script:ApiPort 仍被占用，剩余 PID: $($remaining -join ', ')" "WARN"
+        Set-StatusText "服务仍在运行，请查看剩余 PID。" "Khaki"
+        Update-StartButtonState $true
     }
 }
 
 function Refresh-Voices {
     Add-Log "刷新音色列表..."
     try {
-        $resp = Invoke-RestMethod -Uri "$Script:ApiBase/voices" -TimeoutSec 10
+        $resp = Invoke-LeonJson -Uri "$Script:ApiBase/voices" -TimeoutSec 10
         $Script:VoiceItems = @($resp.voices)
         $names = @($Script:VoiceItems | ForEach-Object { $_.name })
         foreach ($cb in @($Script:VoiceDefaultBox, $Script:VoiceNarratorBox, $Script:VoiceDialogueBox, $Script:VoiceUserBox)) {
@@ -1763,7 +2129,7 @@ function Start-MultiVoiceTest {
     } | ConvertTo-Json -Depth 8
     try {
         Add-Log "提交普通模式多音色测试..."
-        $resp = Invoke-RestMethod -Uri "$Script:ApiBase/tts_dialogue_stream_job" -Method Post -ContentType "application/json; charset=utf-8" -Body $body -TimeoutSec 20
+        $resp = Invoke-LeonJson -Uri "$Script:ApiBase/tts_dialogue_stream_job" -Method Post -ContentType "application/json; charset=utf-8" -Body $body -TimeoutSec 20
         $Script:LastJobKey = $resp.cache_key
         $Script:LastJobLabel.Text = "测试任务: $Script:LastJobKey"
         Add-Log "测试任务已创建: $Script:LastJobKey"
@@ -1781,7 +2147,7 @@ function Poll-TestJob {
     $start = Get-Date
     $timer.Add_Tick({
         try {
-            $status = Invoke-RestMethod -Uri "$Script:ApiBase/tts_dialogue_job_status/$Script:LastJobKey" -TimeoutSec 5
+            $status = Invoke-LeonJson -Uri "$Script:ApiBase/tts_dialogue_job_status/$Script:LastJobKey" -TimeoutSec 5
             $state = [string]$status.state
             $segments = [int]($status.segments_done)
             $phase = ""
@@ -1935,7 +2301,7 @@ function Refresh-BackendLogTail {
     }
     $apiText = ""
     try {
-        $apiTail = Invoke-RestMethod -Uri "$Script:ApiBase/server_log/tail?n=220" -TimeoutSec 2
+        $apiTail = Invoke-LeonJson -Uri "$Script:ApiBase/server_log/tail?n=220" -TimeoutSec 2
         if ($apiTail -and $apiTail.lines) {
             foreach ($line in @($apiTail.lines)) {
                 $lineText = [string]$line.line
@@ -2522,7 +2888,7 @@ Tavo 接入步骤
 
 function Build-LauncherForm {
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "LEON 启动器 - IndexTTS2"
+    $form.Text = $Script:LauncherWindowTitle
     $form.StartPosition = "CenterScreen"
     $form.Size = New-Object System.Drawing.Size(1040, 720)
     $form.MinimumSize = New-Object System.Drawing.Size(920, 620)
@@ -2794,7 +3160,7 @@ function New-LauncherSection {
 
 function Build-LauncherForm {
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "LEON 启动器 - IndexTTS2"
+    $form.Text = $Script:LauncherWindowTitle
     $form.StartPosition = "CenterScreen"
     $form.Size = New-Object System.Drawing.Size(1120, 760)
     $form.MinimumSize = New-Object System.Drawing.Size(980, 660)
@@ -2826,27 +3192,13 @@ function Build-LauncherForm {
     $header.Padding = New-Object System.Windows.Forms.Padding(28, 18, 28, 14)
     $header.BackColor = [System.Drawing.Color]::FromArgb(10, 14, 19)
     $root.Controls.Add($header)
-
-    $title = New-Object System.Windows.Forms.Label
-    $title.Text = "LEON 启动器"
-    $title.Font = New-Font 22 ([System.Drawing.FontStyle]::Bold)
-    $title.ForeColor = [System.Drawing.Color]::White
-    $title.Location = New-Object System.Drawing.Point(28, 20)
-    $title.Size = New-Object System.Drawing.Size(420, 38)
-    $header.Controls.Add($title)
-
-    $sub = New-Object System.Windows.Forms.Label
-    $sub.Text = "IndexTTS2 本地语音服务 · vLLM / fast6g"
-    $sub.Font = New-Font 10
-    $sub.ForeColor = [System.Drawing.Color]::FromArgb(190, 202, 214)
-    $sub.Location = New-Object System.Drawing.Point(31, 62)
-    $sub.Size = New-Object System.Drawing.Size(520, 22)
-    $header.Controls.Add($sub)
+    $heroImage = Add-CoverImageBackground -Control $header -ImagePath $Script:HeroPath -Description "启动器横幅" -HorizontalAlign "Center" -VerticalAlign "Center"
 
     $Script:StatusLabel = New-Object System.Windows.Forms.Label
     $Script:StatusLabel.Text = "就绪"
     $Script:StatusLabel.Font = New-Font 9
     $Script:StatusLabel.ForeColor = [System.Drawing.Color]::FromArgb(178, 188, 198)
+    $Script:StatusLabel.BackColor = [System.Drawing.Color]::Transparent
     $Script:StatusLabel.Tag = "hidden-header-status"
     $Script:StatusLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
     $Script:StatusLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
@@ -2867,6 +3219,13 @@ function Build-LauncherForm {
     $side.Padding = New-Object System.Windows.Forms.Padding(18, 18, 18, 18)
     $side.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
     $body.Controls.Add($side)
+    $sideImage = Add-CoverImageBackground -Control $side -ImagePath $Script:SideImagePath -Description "启动器左侧背景" -HorizontalAlign "Center" -VerticalAlign "Center" -OverlayAlpha 178
+
+    $navBack = New-Object System.Windows.Forms.Panel
+    $navBack.Location = New-Object System.Drawing.Point(18, 18)
+    $navBack.Size = New-Object System.Drawing.Size(208, 88)
+    $navBack.BackColor = [System.Drawing.Color]::FromArgb(13, 18, 24)
+    $side.Controls.Add($navBack)
 
     $content = New-Object System.Windows.Forms.Panel
     $content.Dock = "Fill"
@@ -2907,17 +3266,20 @@ function Build-LauncherForm {
     $Script:NavButtons["home"] = $homeNav
     $envNav = Add-SideButton "环境检测" 66 { Show-EnvironmentPanel; if (-not $Script:EnvCheckRows -or $Script:EnvCheckRows.Count -eq 0) { Initialize-EnvironmentCheckRows }; Set-Progress 0 } ([System.Drawing.Color]::FromArgb(30, 39, 49))
     $Script:NavButtons["env"] = $envNav
+    $navBack.SendToBack()
+    $homeNav.BringToFront()
+    $envNav.BringToFront()
 
     $bottomPanel = New-Object System.Windows.Forms.Panel
     $bottomPanel.Dock = "Bottom"
     $bottomPanel.Height = 132
-    $bottomPanel.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
+    $bottomPanel.BackColor = [System.Drawing.Color]::FromArgb(13, 18, 24)
     $side.Controls.Add($bottomPanel)
 
     $configRow = New-Object System.Windows.Forms.Panel
     $configRow.Size = New-Object System.Drawing.Size(204, 32)
     $configRow.Location = New-Object System.Drawing.Point(0, 0)
-    $configRow.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
+    $configRow.BackColor = [System.Drawing.Color]::FromArgb(13, 18, 24)
     $bottomPanel.Controls.Add($configRow)
 
     $Script:VersionCombo = New-Object System.Windows.Forms.Panel
@@ -3155,6 +3517,12 @@ function Build-LauncherForm {
         }
     })
     $form.Add_FormClosed({
+        if ($heroImage) {
+            $heroImage.Dispose()
+        }
+        if ($sideImage) {
+            $sideImage.Dispose()
+        }
         if ($Script:LauncherIcon) {
             $Script:LauncherIcon.Dispose()
             $Script:LauncherIcon = $null
@@ -3163,6 +3531,7 @@ function Build-LauncherForm {
     return $form
 }
 
+Initialize-LauncherSingleInstance
 $form = Build-LauncherForm
 if ($env:LEON_LAUNCHER_SMOKE_TEST -eq "1") {
     $form.Dispose()
@@ -3170,4 +3539,9 @@ if ($env:LEON_LAUNCHER_SMOKE_TEST -eq "1") {
     exit 0
 }
 Add-Log "LEON 启动器已打开。"
-[void][System.Windows.Forms.Application]::Run($form)
+try {
+    [void][System.Windows.Forms.Application]::Run($form)
+}
+finally {
+    Release-LauncherSingleInstance
+}
