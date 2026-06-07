@@ -849,6 +849,26 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     await page.click('[data-role="lazy-open"]');
     await page.waitForSelector(".idx-card", { timeout: 10000 });
     await page.evaluate(() => {
+      window.__idxProgressSnapshots = [];
+      const capture = () => {
+        const progress = document.querySelector('[data-role="progress"]');
+        const status = document.querySelector('[data-role="status"]');
+        const subtitle = document.querySelector(".idx-subtitle");
+        window.__idxProgressSnapshots.push({
+          progressText: progress ? progress.textContent || "" : "",
+          progressParentClass: progress && progress.parentElement ? progress.parentElement.className : "",
+          progressInSubtitle: !!(progress && progress.closest(".idx-subtitle")),
+          status: status ? status.textContent || "" : "",
+          notice: subtitle ? subtitle.textContent || "" : ""
+        });
+        if (window.__idxProgressSnapshots.length > 60) window.__idxProgressSnapshots.shift();
+      };
+      const observer = new MutationObserver(capture);
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+      window.__idxProgressObserver = observer;
+      capture();
+    });
+    await page.evaluate(() => {
       const add = document.querySelector('[data-role="add"]');
       if (!add) throw new Error("missing add button");
       add.click();
@@ -883,6 +903,12 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         notice,
         progressText: progress ? progress.textContent || "" : "",
         progressParentClass: progress && progress.parentElement ? progress.parentElement.className : "",
+        progressInSubtitle: !!(progress && progress.closest(".idx-subtitle")),
+        progressPosition: progressStyle ? progressStyle.position : "",
+        progressBottom: progressStyle ? progressStyle.bottom : "",
+        progressTextAlign: progressStyle ? progressStyle.textAlign : "",
+        progressBackgroundColor: progressStyle ? progressStyle.backgroundColor : "",
+        progressHeight: progress ? progress.getBoundingClientRect().height : 0,
         progressWhiteSpace: progressStyle ? progressStyle.whiteSpace : "",
         curText,
         totalText,
@@ -892,8 +918,13 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         cacheChecks: fetches.filter((r) => /\/cache_audio\//.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
-        liveExitVisible: getComputedStyle(document.querySelector('[data-role="live-exit"]')).display !== "none"
+        liveExitVisible: getComputedStyle(document.querySelector('[data-role="live-exit"]')).display !== "none",
+        progressSnapshots: Array.isArray(window.__idxProgressSnapshots) ? window.__idxProgressSnapshots.slice() : []
       };
+    });
+    await page.evaluate(() => {
+      try { if (window.__idxProgressObserver) window.__idxProgressObserver.disconnect(); } catch (_) {}
+      window.__idxProgressObserver = null;
     });
 
     if (/已暂停/.test(result.status) || /已暂停/.test(result.notice)) {
@@ -912,11 +943,17 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       throw new Error("LIVE exit button should stay visible on a waiting live card: " + JSON.stringify(result));
     }
     const transientProgressPattern = /等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频|合成第\s*\d+\/\d+\s*段/;
-    if (transientProgressPattern.test(result.notice) && !transientProgressPattern.test(result.progressText)) {
-      throw new Error("transient LIVE progress should live in the subtitle toolbar: " + JSON.stringify(result));
+    const progressBgTransparent = !result.progressBackgroundColor || /rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)|transparent/i.test(result.progressBackgroundColor);
+    const progressSnapshots = Array.isArray(result.progressSnapshots) ? result.progressSnapshots : [];
+    const hadBottomProgress = progressSnapshots.some((item) => transientProgressPattern.test(item.progressText || "") && /idx-card/.test(item.progressParentClass || "") && !item.progressInSubtitle);
+    if (!hadBottomProgress && !transientProgressPattern.test(result.progressText)) {
+      throw new Error("transient LIVE progress should render in the player-bottom hint while generation is active: " + JSON.stringify(result));
     }
-    if (!/idx-sub-toolbar/.test(result.progressParentClass) || result.progressWhiteSpace !== "nowrap") {
-      throw new Error("subtitle progress should stay one-line inside the sticky toolbar: " + JSON.stringify(result));
+    if (transientProgressPattern.test(result.notice) || result.progressInSubtitle || progressSnapshots.some((item) => transientProgressPattern.test(item.notice || "") || item.progressInSubtitle)) {
+      throw new Error("transient LIVE progress must stay out of the lyric panel: " + JSON.stringify(result));
+    }
+    if (!/idx-card/.test(result.progressParentClass) || result.progressPosition !== "absolute" || result.progressWhiteSpace !== "nowrap" || result.progressTextAlign !== "center" || !progressBgTransparent || parseFloat(result.progressBottom || "99") > 12 || result.progressHeight > 24) {
+      throw new Error("player-bottom progress should be one-line, centered, transparent, and pinned to the card bottom: " + JSON.stringify(result));
     }
     if (transientProgressPattern.test(result.status)) {
       throw new Error("transient LIVE progress must stay out of the avatar-side status: " + JSON.stringify(result));
@@ -1416,6 +1453,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       const subtitleDelete = document.querySelector('.idx-subtitle [data-role="delete"]');
       const subtitleToolbar = document.querySelector('.idx-subtitle [data-role="subtitle-toolbar"]');
       const subtitleProgress = document.querySelector('.idx-subtitle [data-role="progress"]');
+      const cardProgress = document.querySelector('.idx-card > [data-role="progress"]');
       const playBtn = document.querySelector('[data-role="play"]');
       const addBtn = document.querySelector('[data-role="add"]');
       const rewind10 = document.querySelector('[data-role="rewind10"]');
@@ -1522,16 +1560,23 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
             height: subtitleToolbar.getBoundingClientRect().height
           } : null,
           toolbarPosition: subtitleToolbar ? getComputedStyle(subtitleToolbar).position : "",
-          progressRect: subtitleProgress ? {
-            left: subtitleProgress.getBoundingClientRect().left,
-            top: subtitleProgress.getBoundingClientRect().top,
-            right: subtitleProgress.getBoundingClientRect().right,
-            bottom: subtitleProgress.getBoundingClientRect().bottom,
-            width: subtitleProgress.getBoundingClientRect().width,
-            height: subtitleProgress.getBoundingClientRect().height
+          toolbarBackgroundColor: subtitleToolbar ? getComputedStyle(subtitleToolbar).backgroundColor : "",
+          progressRect: cardProgress ? {
+            left: cardProgress.getBoundingClientRect().left,
+            top: cardProgress.getBoundingClientRect().top,
+            right: cardProgress.getBoundingClientRect().right,
+            bottom: cardProgress.getBoundingClientRect().bottom,
+            width: cardProgress.getBoundingClientRect().width,
+            height: cardProgress.getBoundingClientRect().height
           } : null,
-          progressParentClass: subtitleProgress && subtitleProgress.parentElement ? subtitleProgress.parentElement.className : "",
-          progressWhiteSpace: subtitleProgress ? getComputedStyle(subtitleProgress).whiteSpace : "",
+          progressParentClass: cardProgress && cardProgress.parentElement ? cardProgress.parentElement.className : "",
+          progressInSubtitle: !!subtitleProgress,
+          progressPosition: cardProgress ? getComputedStyle(cardProgress).position : "",
+          progressBottom: cardProgress ? getComputedStyle(cardProgress).bottom : "",
+          progressWhiteSpace: cardProgress ? getComputedStyle(cardProgress).whiteSpace : "",
+          progressTextAlign: cardProgress ? getComputedStyle(cardProgress).textAlign : "",
+          progressBackgroundColor: cardProgress ? getComputedStyle(cardProgress).backgroundColor : "",
+          progressPointerEvents: cardProgress ? getComputedStyle(cardProgress).pointerEvents : "",
           counterPointerEvents: headerCounter ? getComputedStyle(headerCounter).pointerEvents : "",
           subtitleMaskImage: sub ? (getComputedStyle(sub).maskImage || getComputedStyle(sub).webkitMaskImage || "") : "",
           statusWhiteSpace: status ? getComputedStyle(status).whiteSpace : "",
@@ -1611,8 +1656,13 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     if (!home.toolbarRect || home.toolbarPosition !== "sticky") {
       throw new Error("subtitle toolbar should stay sticky while lyrics scroll: " + JSON.stringify(home));
     }
-    if (!home.progressRect || !/idx-sub-toolbar/.test(home.progressParentClass) || home.progressWhiteSpace !== "nowrap" || home.progressRect.height > 28) {
-      throw new Error("generation progress should be one line inside the subtitle toolbar: " + JSON.stringify(home));
+    const toolbarBgTransparent = !home.toolbarBackgroundColor || /rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)|transparent/i.test(home.toolbarBackgroundColor);
+    const progressBgTransparent = !home.progressBackgroundColor || /rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)|transparent/i.test(home.progressBackgroundColor);
+    if (!toolbarBgTransparent) {
+      throw new Error("subtitle toolbar should stay transparent behind delete/page controls: " + JSON.stringify(home));
+    }
+    if (!home.progressRect || home.progressInSubtitle || !/idx-card/.test(home.progressParentClass) || home.progressPosition !== "absolute" || home.progressWhiteSpace !== "nowrap" || home.progressTextAlign !== "center" || home.progressPointerEvents !== "none" || !progressBgTransparent || parseFloat(home.progressBottom || "99") > 12 || home.progressRect.height > 24) {
+      throw new Error("generation progress should be a transparent one-line hint at the player bottom: " + JSON.stringify(home));
     }
     if (home.counterRect.top < home.subtitleRect.top || home.counterRect.right > home.subtitleRect.right + 1 || home.counterRect.bottom > home.subtitleRect.top + 42) {
       throw new Error("history page counter should stay at the subtitle toolbar right without covering the lyric body: " + JSON.stringify(home));

@@ -58,9 +58,9 @@ Current smoke must prove:
 - same-key LIVE recovery never POSTs another job or DELETEs the job;
 - restored LIVE pending jobs from `tavo.get` reconnect same key with `start_s`;
 - avatar-side header status keeps only stable voice labels or "音色未设置";
-- transient generation/playback progress appears in the one-line sticky lyric toolbar beside delete/page counter, not in the avatar-side status;
+- transient generation/playback progress appears in a one-line transparent player-bottom hint, not in the avatar-side status or lyric toolbar;
 - lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
-- the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and long progress text does not wrap.
+- the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps delete/page counter in place.
 - loading spinner keeps a stable center/size and must not visibly wobble.
 
 ## Tavo Storage Guard

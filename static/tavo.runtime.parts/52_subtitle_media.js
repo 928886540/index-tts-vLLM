@@ -18,20 +18,18 @@
         if (subtitleToolbar) {
           if (subtitleToolbar.parentNode !== subBox) subBox.insertBefore(subtitleToolbar, subBox.firstChild || null);
           if (del && del.parentNode !== subtitleToolbar) subtitleToolbar.insertBefore(del, subtitleToolbar.firstChild || null);
-          if (progressLine && progressLine.parentNode !== subtitleToolbar) subtitleToolbar.insertBefore(progressLine, counter && counter.parentNode === subtitleToolbar ? counter : null);
           if (counter && counter.parentNode !== subtitleToolbar) subtitleToolbar.appendChild(counter);
           return;
         }
       } catch (_) {}
       try { if (del && del.parentNode !== subBox) subBox.appendChild(del); } catch (_) {}
-      try { if (progressLine && progressLine.parentNode !== subBox) subBox.appendChild(progressLine); } catch (_) {}
       try { if (counter && counter.parentNode !== subBox) subBox.appendChild(counter); } catch (_) {}
     }
     function isTransientProgressNotice(titleText) {
       var title = String(titleText || "");
       if (!title) return false;
       if (/失败|错误|不可用|取消|删除|退出/.test(title)) return false;
-      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
+      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|合成第\s*\d+\s*\/\s*\d+\s*段|音频合成中|等待首段音频|等待\s*TTS\s*合成|TTS\s*合成|分段完成|任务已创建|音频已合成|正在保存|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
     }
     function normalizedNoticeKey(titleText, detailText) {
       return String(titleText || "").replace(/\d+\s*s/g, "Ns") + "\n" + String(detailText || "");
