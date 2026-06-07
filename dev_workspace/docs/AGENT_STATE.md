@@ -26,12 +26,12 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v28"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v29"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v28`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v29`.
 - Tavo settings/config read `tavo.get` first; `localStorage` is fallback only.
 - `tavo.set` failures surface as "设置保存失败".
 - Saved tracks and pending jobs prefer `tavo.get`; deletion writes through `tavo.set`.
@@ -41,7 +41,7 @@ Current code state:
 - AI mode with no explicit mapping shows "音色未设置" / mapping error instead of falling back to a default voice.
 - Avatar-side status is only the configured/current voice label; LLM/TTS/LIVE progress uses a transparent one-line hint floating near the seek/time area. During LIVE playback, synthesis progress can include compact "播第 x/y 段" text; noisy connection/buffer micro-states are filtered/throttled. Delete and page counter stay in the lyric panel toolbar.
 - LIVE controls keep the main play/pause button at the same position as saved-history playback; the live-exit button occupies the music-note position while previous/next only reserve invisible layout space.
-- Lazy snapshot open/play gestures now pre-prime WebAudio and native audio before the runtime script loads, so the later LIVE path can reuse an already user-gesture-unlocked audio context.
+- Lazy snapshot open/play gestures now pre-prime WebAudio and native audio before the runtime script loads. The loader syncs the resolved `tavo.message.current().id` back to the click closure and pre-primed owner, and the runtime no longer lets the music-note generate gesture destroy that pre-unlocked AudioContext.
 - The loader shell shows a small loading bar while the runtime opens, and its history counter is refreshed from the same Tavo/local track snapshot as the lazy card.
 - The subtitle toolbar counter keeps `margin-left:auto`, so during LIVE playback it stays at the right edge even when the delete button is hidden.
 - LIVE WebAudio now starts with a slightly larger PCM prebuffer, especially for AI mode, to reduce short stalls at segment boundaries when the next synthesized segment arrives late.

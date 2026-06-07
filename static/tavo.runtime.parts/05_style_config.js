@@ -343,6 +343,15 @@
     text = normalizeMessageTextForTts(text);
     return /[\u4e00-\u9fffA-Za-z0-9]/.test(text) ? text : "";
   }
+  function domMessageIdForRuntime(scriptEl, msgEl) {
+    var id = "";
+    try {
+      if (scriptEl && scriptEl.dataset) id = String(scriptEl.dataset.indexttsMessageId || "").trim();
+      if (!id && msgEl && msgEl.dataset) id = String(msgEl.dataset.messageId || msgEl.dataset.id || msgEl.dataset.mid || "").trim();
+      if (!id && msgEl && msgEl.getAttribute) id = String(msgEl.getAttribute("mesid") || msgEl.getAttribute("data-message-id") || msgEl.id || "").trim();
+    } catch (_) {}
+    return id;
+  }
 
   async function currentMessageContext() {
     var apiText = "";
@@ -374,6 +383,7 @@
         avatarUrl = avatarUrl || pickAvatarUrl(msg) || pickAvatarUrl(msg && (msg.character || msg.role || msg.sender || msg.author));
       }
     } catch (_) {}
+    if (!messageId) messageId = domMessageIdForRuntime(script, msgEl);
     try {
       if (window.tavo && tavo.chat && typeof tavo.chat.current === "function") {
         var chat = await tavo.chat.current();

@@ -62,7 +62,7 @@ Current smoke must prove:
 - floating progress can combine synthesis progress with current playback segment, such as `AI 合成 13/36 · 播第 3/36 段`, and must not rapidly cycle through connection/buffer micro-states;
 - LIVE controls keep play/pause at the saved-audio play button position and put live-exit at the music-note position;
 - LIVE page counter remains on the right side of the subtitle toolbar when delete is hidden;
-- lazy snapshot open/play gestures pre-prime WebAudio/native audio before runtime loading;
+- lazy snapshot open/play gestures pre-prime WebAudio/native audio before runtime loading, and the resolved `tavo.message.current().id` is synced back to the loader click closure/pre-primed owner;
 - loader shell shows a loading bar and refreshes the history counter from Tavo/local saved tracks;
 - lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
 - the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps delete/page counter in place.
@@ -93,6 +93,7 @@ Current smoke must prove:
 - `/pcm` chunk headers must only send `X-IndexTTS-Live-Done=1` when `X-IndexTTS-PCM-Next-Offset >= X-IndexTTS-PCM-Total`; frontend should keep polling if a stale/old backend sends premature done.
 - PCM playback should prefer AudioWorklet queued output, then ScriptProcessor, then BufferSource scheduling. Real Tavo logs should show which output path is active.
 - User play/generate gestures should prime both WebAudio and native `<audio>` output, so a later same-key native live fallback can start without waiting for final cache.
+- The music-note generate gesture must not force-close a recently pre-primed AudioContext unless it is explicitly retrying a stuck live/pending track.
 - LIVE pending/restored tracks keep `playbackMode=live`, `state=live`, and last resume seconds.
 - LIVE pause/resume reconnects `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>` without a new POST.
 - Repeated WebAudio underrun returns to idle/resumable state and keeps cache polling alive; it must not force saved-cache autoplay or leave a permanent spinner.

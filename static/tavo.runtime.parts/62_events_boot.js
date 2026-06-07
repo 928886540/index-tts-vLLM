@@ -60,13 +60,14 @@
       var forceNew = false;
       try {
         var t = currentTrack();
-        if (action === "add") forceNew = !(t && t.webAudioPlaying);
-        else if (action === "play") forceNew = !!(t && (isLiveTrack(t) || trackState(t) === "pending") && !t.webAudioPlaying);
+        // "add" 是新生成入口，但不能默认销毁快照点击时刚预解锁的 AudioContext。
+        // 真正需要重建只发生在正在重试一个已有 live/pending 轨道时。
+        if (action === "play") forceNew = !!(t && (isLiveTrack(t) || trackState(t) === "pending") && !t.webAudioPlaying);
       } catch (_) {}
       var now = Date.now();
       if (forceNew && now - lastFreshAudioPrimeAt < 700) forceNew = false;
       if (forceNew) lastFreshAudioPrimeAt = now;
-      primeAudioContext(messageId, forceNew ? { forceNew: true, reason: action + " live retry" } : null);
+      primeAudioContext(messageId, forceNew ? { forceNew: true, reason: action + " live retry" } : { reason: action + " gesture" });
     }
     on(play, 'pointerdown', function () { primeAudioForGesture("play"); });
     on(add, 'pointerdown', function () { primeAudioForGesture("add"); });

@@ -335,7 +335,16 @@
   function ownerMatchesAudioContext(ownerMessageId, existingOwner) {
     ownerMessageId = normalizeAudioOwner(ownerMessageId);
     existingOwner = normalizeAudioOwner(existingOwner);
-    return !ownerMessageId || existingOwner === ownerMessageId;
+    return !ownerMessageId || !existingOwner || existingOwner === ownerMessageId;
+  }
+  function canAdoptAudioOwner(ownerMessageId, existingOwner, previousOwner) {
+    ownerMessageId = normalizeAudioOwner(ownerMessageId);
+    existingOwner = normalizeAudioOwner(existingOwner);
+    previousOwner = normalizeAudioOwner(previousOwner);
+    if (!ownerMessageId) return false;
+    if (!existingOwner || existingOwner === ownerMessageId) return true;
+    if (previousOwner && existingOwner === previousOwner) return true;
+    return false;
   }
   function adoptPreprimedAudioOwner(ownerMessageId, previousOwner) {
     ownerMessageId = normalizeAudioOwner(ownerMessageId);
@@ -345,10 +354,7 @@
       var ctx = PRIMED_CTX || window.__indextts_tavo_preprimed_audio_context;
       if (!ctx) return false;
       var globalOwner = globalPreprimedAudioOwner();
-      var ageMs = Math.max(0, Date.now() - (Number(window.__indextts_tavo_preprimed_audio_owner_at || 0) || 0));
-      var canAdopt = !globalOwner || globalOwner === ownerMessageId || (previousOwner && globalOwner === previousOwner);
-      if (!canAdopt && /^message-[a-f0-9]+$/i.test(globalOwner) && ageMs <= 6000) canAdopt = true;
-      if (!canAdopt) return false;
+      if (!canAdoptAudioOwner(ownerMessageId, globalOwner, previousOwner)) return false;
       registerPreprimedAudioContext(ctx, ownerMessageId);
       debugLog("🔊 WebAudio ctx 认领到当前消息 owner=" + ownerMessageId + (previousOwner ? " from=" + previousOwner : ""), "#9ff");
       return true;
@@ -507,8 +513,17 @@
   }
   function takePreprimedAudioContext(ownerMessageId) {
     ownerMessageId = normalizeAudioOwner(ownerMessageId);
-    if (PRIMED_CTX && ownerMatchesAudioContext(ownerMessageId, PRIMED_CTX_OWNER)) return PRIMED_CTX;
+    if (PRIMED_CTX && ownerMatchesAudioContext(ownerMessageId, PRIMED_CTX_OWNER)) {
+      if (ownerMessageId && PRIMED_CTX_OWNER !== ownerMessageId) registerPreprimedAudioContext(PRIMED_CTX, ownerMessageId);
+      return PRIMED_CTX;
+    }
     if (PRIMED_CTX && ownerMessageId && PRIMED_CTX_OWNER && PRIMED_CTX_OWNER !== ownerMessageId) {
+      if (canAdoptAudioOwner(ownerMessageId, PRIMED_CTX_OWNER, "")) {
+        registerPreprimedAudioContext(PRIMED_CTX, ownerMessageId);
+        try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
+        startRuntimeAudioKeepalive(PRIMED_CTX);
+        return PRIMED_CTX;
+      }
       debugLog("⚠️ 跳过旧消息 WebAudio ctx owner=" + PRIMED_CTX_OWNER + " current=" + ownerMessageId, "#fc9");
     }
     try {
@@ -516,11 +531,18 @@
       var owner = globalPreprimedAudioOwner();
       if (existing && ownerMatchesAudioContext(ownerMessageId, owner)) {
         PRIMED_CTX = existing;
-        PRIMED_CTX_OWNER = owner;
+        PRIMED_CTX_OWNER = owner || ownerMessageId;
+        if (ownerMessageId && owner !== ownerMessageId) registerPreprimedAudioContext(PRIMED_CTX, ownerMessageId);
         try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
         startRuntimeAudioKeepalive(PRIMED_CTX);
         return PRIMED_CTX;
       } else if (existing && ownerMessageId && owner && owner !== ownerMessageId) {
+        if (canAdoptAudioOwner(ownerMessageId, owner, "")) {
+          registerPreprimedAudioContext(existing, ownerMessageId);
+          try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
+          startRuntimeAudioKeepalive(PRIMED_CTX);
+          return PRIMED_CTX;
+        }
         debugLog("⚠️ 全局 WebAudio ctx 属于其他消息 owner=" + owner + " current=" + ownerMessageId, "#fc9");
       }
     } catch (_) {}

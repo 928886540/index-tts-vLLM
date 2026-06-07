@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260607-ai-live-v28";
+  var LOADER_VERSION = "20260607-ai-live-v29";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
@@ -259,6 +259,25 @@
     try { window[TAP_GUARD_KEY] = Date.now() + Math.max(800, Number(ms || 0) || 0); } catch (_) {}
   }
 
+  function adoptLoaderPreprimedAudioOwner(ownerMessageId, previousOwner) {
+    ownerMessageId = String(ownerMessageId || "").trim();
+    previousOwner = String(previousOwner || "").trim();
+    if (!ownerMessageId) return false;
+    try {
+      var ctx = window.__indextts_tavo_preprimed_audio_context;
+      if (!ctx) return false;
+      try { if (ctx.state === "closed") return false; } catch (_) {}
+      var owner = String(window.__indextts_tavo_preprimed_audio_owner || "").trim();
+      var canAdopt = !owner || owner === ownerMessageId || (previousOwner && owner === previousOwner);
+      if (!canAdopt) return false;
+      window.__indextts_tavo_preprimed_audio_owner = ownerMessageId;
+      window.__indextts_tavo_preprimed_audio_owner_at = Date.now();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function stopPreprimedAudioKeepaliveForDifferentContext(ctx) {
     try {
       var src = window.__indextts_tavo_preprimed_keepalive_source;
@@ -365,10 +384,14 @@
       ownerMessageId = String(ownerMessageId || "").trim();
       var ctx = window.__indextts_tavo_preprimed_audio_context;
       var owner = String(window.__indextts_tavo_preprimed_audio_owner || "").trim();
-      var canReuse = !!(ctx && (!ownerMessageId || owner === ownerMessageId));
+      var canReuse = !!(ctx && (!ownerMessageId || !owner || owner === ownerMessageId));
       try { if (ctx && ctx.state === "closed") canReuse = false; } catch (_) {}
       if (canReuse) {
         try { if (ctx.state === "suspended") ctx.resume(); } catch (_) {}
+        if (ownerMessageId && owner !== ownerMessageId) {
+          try { window.__indextts_tavo_preprimed_audio_owner = ownerMessageId; } catch (_) {}
+        }
+        try { window.__indextts_tavo_preprimed_audio_owner_at = Date.now(); } catch (_) {}
         startPreprimedAudioKeepalive(ctx);
         return ctx;
       }
@@ -549,13 +572,15 @@
     } catch (_) {}
   }
 
-  function scheduleLazyHistoryRefresh(root, messageId) {
+  function scheduleLazyHistoryRefresh(root, messageId, onResolved) {
     var attempts = 0;
     function run() {
       attempts++;
       resolveTavoMessageId(messageId).then(function (resolvedId) {
         if (resolvedId && resolvedId !== messageId) {
+          var previousId = messageId;
           messageId = resolvedId;
+          if (typeof onResolved === "function") onResolved(resolvedId, previousId);
           try { root.setAttribute("data-indextts-message-id", messageId); } catch (_) {}
           try { if (loaderScript && loaderScript.dataset) loaderScript.dataset.indexttsMessageId = messageId; } catch (_) {}
         }
@@ -598,6 +623,23 @@
     try { window.__indextts_tavo_loader_version = LOADER_VERSION; } catch (_) {}
 
     var messageId = pickMessageId(loaderScript);
+    function setLoaderMessageId(nextId, previousId) {
+      nextId = String(nextId || "").trim();
+      if (!nextId) return messageId || "";
+      previousId = String(previousId || messageId || "").trim();
+      messageId = nextId;
+      try { root.setAttribute("data-indextts-message-id", messageId); } catch (_) {}
+      try { if (loaderScript && loaderScript.dataset) loaderScript.dataset.indexttsMessageId = messageId; } catch (_) {}
+      adoptLoaderPreprimedAudioOwner(messageId, previousId);
+      return messageId;
+    }
+    function currentLoaderMessageId() {
+      try {
+        var id = String(root.getAttribute("data-indextts-message-id") || "").trim();
+        if (id) return id;
+      } catch (_) {}
+      return messageId || "";
+    }
     try { root.setAttribute("data-indextts-message-id", messageId || ""); } catch (_) {}
     try { if (loaderScript && loaderScript.dataset) loaderScript.dataset.indexttsMessageId = messageId || ""; } catch (_) {}
     var latest = latestTrack(messageId);
@@ -614,7 +656,7 @@
       '  </div>',
       '</div>'
     ].join("");
-    scheduleLazyHistoryRefresh(root, messageId);
+    scheduleLazyHistoryRefresh(root, messageId, setLoaderMessageId);
 
     try {
       window.addEventListener("indextts:tracks-updated", function (ev) {
@@ -623,8 +665,7 @@
         var own = String(root.getAttribute("data-indextts-message-id") || messageId || "").trim();
         if (incoming && own && incoming !== own) return;
         if (incoming && !own) {
-          messageId = incoming;
-          try { root.setAttribute("data-indextts-message-id", messageId); } catch (_) {}
+          setLoaderMessageId(incoming, messageId);
         }
         refreshLazyHistoryAsync(root, messageId);
       });
@@ -641,8 +682,9 @@
       ev.preventDefault();
       ev.stopPropagation();
       armTapGuard(1800);
-      if (action === "play" || action === "add") primeRuntimeAudioContext(messageId);
-      renderLoaderShell(root, messageId, action);
+      var activeMessageId = currentLoaderMessageId();
+      if (action === "play" || action === "add") primeRuntimeAudioContext(activeMessageId);
+      renderLoaderShell(root, activeMessageId, action);
       route(selector);
     });
 
@@ -651,7 +693,8 @@
       if (clickSelector === '[data-role="play"]') action = "play";
       else if (clickSelector === '[data-role="add"]') action = "add";
       else if (clickSelector === '[data-role="gear"]') action = "gear";
-      renderLoaderShell(root, messageId, action);
+      var activeMessageId = currentLoaderMessageId();
+      renderLoaderShell(root, activeMessageId, action);
       if (bootPromise) return bootPromise.then(function () { return clickSelector; });
       var playBtn = $(root, '[data-role="lazy-play"]');
       if (playBtn) playBtn.setAttribute("data-loading", "1");
@@ -692,13 +735,13 @@
       });
     }
 
-    on($(root, '[data-role="lazy-play"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
-    on($(root, '[data-role="lazy-play"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
-    on($(root, '[data-role="lazy-open"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
-    on($(root, '[data-role="lazy-open"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
-    on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(messageId); route('[data-role="play"]'); });
-    on($(root, '[data-role="lazy-open"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(messageId); mountRuntime(""); });
-    on($(root, '[data-role="lazy-open"]'), "keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); primeRuntimeAudioContext(messageId); mountRuntime(""); } });
+    on($(root, '[data-role="lazy-play"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(currentLoaderMessageId()); });
+    on($(root, '[data-role="lazy-play"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(currentLoaderMessageId()); });
+    on($(root, '[data-role="lazy-open"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(currentLoaderMessageId()); });
+    on($(root, '[data-role="lazy-open"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(currentLoaderMessageId()); });
+    on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(currentLoaderMessageId()); route('[data-role="play"]'); });
+    on($(root, '[data-role="lazy-open"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(currentLoaderMessageId()); mountRuntime(""); });
+    on($(root, '[data-role="lazy-open"]'), "keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); primeRuntimeAudioContext(currentLoaderMessageId()); mountRuntime(""); } });
   } catch (e) {
     try { console.error("[IndexTTS TAVO loader]", e && e.stack ? e.stack : e); } catch (_) {}
   }
