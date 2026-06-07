@@ -10,6 +10,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -71,9 +72,12 @@ internal sealed class LauncherForm : Form
     private readonly string lanHost;
     private readonly object logLock = new object();
     private readonly Dictionary<string, string> logTexts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<EnvRow>> envRowsByVersion = new Dictionary<string, List<EnvRow>>(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> envCompletedVersions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private readonly JavaScriptSerializer json = new JavaScriptSerializer();
 
     private string versionKey = "vllm";
+    private string envTargetKey = "vllm";
     private string versionRoot;
     private string runtimePython;
     private string startupBat;
@@ -93,7 +97,7 @@ internal sealed class LauncherForm : Form
     private Panel homePanel;
     private Panel logPanel;
     private Panel envPanel;
-    private RichTextBox logBox;
+    private WrappedLogView logBox;
     private DataGridView envGrid;
     private Label statusLabel;
     private Button startButton;
@@ -106,11 +110,17 @@ internal sealed class LauncherForm : Form
     private Button tabStderrButton;
     private Button vllmButton;
     private Button fast6gButton;
+    private Button envVllmButton;
+    private Button envFast6gButton;
+    private Button envCheckButton;
+    private Button envRepairButton;
     private TextBox ratioBox;
     private System.Windows.Forms.Timer logTimer;
     private System.Windows.Forms.Timer healthTimer;
     private string activeView = "home";
     private string activeLogTab = "launcher";
+    private bool envCheckRunning;
+    private bool envRepairRunning;
 
     public LauncherForm()
     {
@@ -133,6 +143,7 @@ internal sealed class LauncherForm : Form
         {
             versionKey = "fast6g";
         }
+        envTargetKey = versionKey;
 
         double parsedRatio;
         string envRatio = Environment.GetEnvironmentVariable("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION");
@@ -144,6 +155,7 @@ internal sealed class LauncherForm : Form
         }
 
         SetVersion(versionKey, false);
+        ClearLauncherSessionLogs();
         BuildUi();
         AddLauncherLog("LEON 启动器已打开。");
     }
@@ -196,7 +208,7 @@ internal sealed class LauncherForm : Form
         CachedImagePanel banner = new CachedImagePanel();
         banner.Dock = DockStyle.Fill;
         banner.BackColor = header.BackColor;
-        banner.ScaleMode = ImageScaleMode.FitWidth;
+        banner.ScaleMode = ImageScaleMode.Cover;
         banner.HorizontalAlign = ImageHorizontalAlign.Center;
         banner.VerticalAlign = ImageVerticalAlign.Center;
         banner.SetImagePath(Path.Combine(launcherDir, "head.png"));
@@ -233,9 +245,19 @@ internal sealed class LauncherForm : Form
         side.BackColor = Color.FromArgb(17, 23, 30);
         body.Controls.Add(side);
 
+        CachedImagePanel sideBackground = new CachedImagePanel();
+        sideBackground.Dock = DockStyle.Fill;
+        sideBackground.BackColor = side.BackColor;
+        sideBackground.ScaleMode = ImageScaleMode.Cover;
+        sideBackground.HorizontalAlign = ImageHorizontalAlign.Center;
+        sideBackground.VerticalAlign = ImageVerticalAlign.Center;
+        sideBackground.SetImagePath(Path.Combine(launcherDir, "left.png"));
+        side.Controls.Add(sideBackground);
+        sideBackground.SendToBack();
+
         navHomeButton = CreateSideButton("首页", 18, delegate { ShowView("home"); });
         navLogButton = CreateSideButton("日志", 64, delegate { ShowView("log"); });
-        navEnvButton = CreateSideButton("环境检测", 110, delegate { ShowView("env"); RunEnvironmentCheckAsync(); });
+        navEnvButton = CreateSideButton("环境检测", 110, delegate { ShowView("env"); });
         side.Controls.Add(navHomeButton);
         side.Controls.Add(navLogButton);
         side.Controls.Add(navEnvButton);
@@ -243,13 +265,13 @@ internal sealed class LauncherForm : Form
         Panel bottomPanel = new Panel();
         bottomPanel.Dock = DockStyle.Bottom;
         bottomPanel.Height = 132;
-        bottomPanel.BackColor = side.BackColor;
+        bottomPanel.BackColor = Color.Transparent;
         side.Controls.Add(bottomPanel);
 
         Panel configRow = new Panel();
         configRow.Location = new Point(0, 0);
         configRow.Size = new Size(208, 34);
-        configRow.BackColor = side.BackColor;
+        configRow.BackColor = Color.Transparent;
         bottomPanel.Controls.Add(configRow);
 
         vllmButton = CreateSmallButton("vLLM", 0, 0, 64, delegate { SetVersion("vllm", true); });
@@ -284,16 +306,7 @@ internal sealed class LauncherForm : Form
         startButton.FlatAppearance.BorderColor = Color.FromArgb(95, 185, 140);
         bottomPanel.Controls.Add(startButton);
 
-        CachedImagePanel sidePoster = new CachedImagePanel();
-        sidePoster.BackColor = side.BackColor;
-        sidePoster.ScaleMode = ImageScaleMode.FitWidth;
-        sidePoster.HorizontalAlign = ImageHorizontalAlign.Center;
-        sidePoster.VerticalAlign = ImageVerticalAlign.Center;
-        sidePoster.SetImagePath(Path.Combine(launcherDir, "left.png"));
-        side.Controls.Add(sidePoster);
-        sidePoster.SendToBack();
-
-        EventHandler resizeSidePoster = delegate
+        EventHandler resizeSideLayout = delegate
         {
             int contentWidth = Math.Min(208, Math.Max(120, side.ClientSize.Width - 36));
             int left = Math.Max(0, (side.ClientSize.Width - contentWidth) / 2);
@@ -310,15 +323,15 @@ internal sealed class LauncherForm : Form
             startButton.Location = new Point(Math.Max(0, (bottomPanel.ClientSize.Width - contentWidth) / 2), 44);
             startButton.Size = new Size(contentWidth, 68);
 
-            int top = 164;
-            int bottomGap = bottomPanel.Height + 18;
-            int height = Math.Max(120, side.ClientSize.Height - top - bottomGap);
-            sidePoster.Location = new Point(left, top);
-            sidePoster.Size = new Size(contentWidth, height);
+            sideBackground.SendToBack();
+            navHomeButton.BringToFront();
+            navLogButton.BringToFront();
+            navEnvButton.BringToFront();
+            bottomPanel.BringToFront();
         };
-        side.Resize += resizeSidePoster;
-        bottomPanel.Resize += resizeSidePoster;
-        resizeSidePoster(side, EventArgs.Empty);
+        side.Resize += resizeSideLayout;
+        bottomPanel.Resize += resizeSideLayout;
+        resizeSideLayout(side, EventArgs.Empty);
 
         Panel content = new Panel();
         content.Dock = DockStyle.Fill;
@@ -382,12 +395,8 @@ internal sealed class LauncherForm : Form
         tabs.Controls.Add(tabStdoutButton);
         tabs.Controls.Add(tabStderrButton);
 
-        logBox = new RichTextBox();
+        logBox = new WrappedLogView();
         logBox.Dock = DockStyle.Fill;
-        logBox.BorderStyle = BorderStyle.None;
-        logBox.ReadOnly = true;
-        logBox.WordWrap = false;
-        logBox.DetectUrls = false;
         logBox.BackColor = Color.FromArgb(8, 12, 17);
         logBox.ForeColor = Color.FromArgb(222, 230, 238);
         logBox.Font = NewMonoFont(9.0f);
@@ -411,13 +420,20 @@ internal sealed class LauncherForm : Form
         top.BackColor = panel.BackColor;
         panel.Controls.Add(top);
 
-        Button refresh = CreateFlatButton("刷新检测", 0, 0, 116, 34, Color.FromArgb(48, 68, 88), delegate { RunEnvironmentCheckAsync(); });
-        top.Controls.Add(refresh);
+        envVllmButton = CreateFlatButton("vLLM", 0, 0, 64, 34, Color.FromArgb(48, 68, 88), delegate { SetEnvironmentTarget("vllm", true); });
+        envFast6gButton = CreateFlatButton("6G", 64, 0, 64, 34, Color.FromArgb(24, 31, 39), delegate { SetEnvironmentTarget("fast6g", true); });
+        top.Controls.Add(envVllmButton);
+        top.Controls.Add(envFast6gButton);
+
+        envCheckButton = CreateFlatButton("开始检测", 148, 0, 104, 34, Color.FromArgb(48, 68, 88), delegate { RunEnvironmentCheckAsync(); });
+        envRepairButton = CreateFlatButton("一键修复", 260, 0, 104, 34, Color.FromArgb(118, 78, 42), delegate { RepairEnvironmentAsync(); });
+        top.Controls.Add(envCheckButton);
+        top.Controls.Add(envRepairButton);
 
         Label tip = new Label();
-        tip.Text = "轻量检测只查启动必需项，不在打开页面时跑重型修复。";
-        tip.Location = new Point(132, 8);
-        tip.Size = new Size(620, 22);
+        tip.Text = "检测和修复按当前页选择的版本执行；vLLM 和 6G 的依赖不混在一起。";
+        tip.Location = new Point(382, 8);
+        tip.Size = new Size(700, 22);
         tip.ForeColor = Color.FromArgb(205, 214, 224);
         tip.BackColor = panel.BackColor;
         tip.Font = NewFont(9.0f, FontStyle.Regular);
@@ -453,6 +469,7 @@ internal sealed class LauncherForm : Form
         envGrid.Columns["detail"].FillWeight = 60;
         panel.Controls.Add(envGrid);
         envGrid.BringToFront();
+        SetEnvironmentTarget(envTargetKey, false);
         return panel;
     }
 
@@ -935,45 +952,119 @@ internal sealed class LauncherForm : Form
         startupSuccessBannerShown = true;
         string tavoScript = "http://" + lanHost + ":" + ApiPort + "/static/tavo.js?v=" + TavoCacheBust;
         AddLauncherLog(
-            " _      _____  ___  _   _\r\n" +
-            "| |    | ____|/ _ \\| \\ | |\r\n" +
-            "| |    |  _| | | | |  \\| |\r\n" +
-            "| |___ | |___| |_| | |\\  |\r\n" +
-            "|_____||_____|\\___/|_| \\_|\r\n\r\n" +
-            "LEON 启动成功，可以用了。\r\n" +
-            "API: " + ApiBase + "\r\n" +
-            "LAN: http://" + lanHost + ":" + ApiPort + "\r\n" +
-            "Tavo: " + tavoScript);
+            "\r\n" +
+            "============================================================\r\n" +
+            "                 L  E  O  N    启动成功\r\n" +
+            "============================================================\r\n" +
+            "本地 IndexTTS2 语音服务已经就绪，可以用了。\r\n" +
+            "API  : " + ApiBase + "\r\n" +
+            "LAN  : http://" + lanHost + ":" + ApiPort + "\r\n" +
+            "Tavo : " + tavoScript + "\r\n" +
+            "============================================================");
     }
 
     private void RunEnvironmentCheckAsync()
     {
-        SetStatus("正在做轻量环境检测...", Color.Khaki);
+        if (envCheckRunning)
+        {
+            AddLauncherLog("环境检测已经在运行，忽略重复点击。", "WARN");
+            return;
+        }
+
+        string target = NormalizeVersionKey(envTargetKey);
+        envCheckRunning = true;
+        SyncEnvironmentButtons();
+        SetStatus("正在检测 " + GetVersionLabel(target) + " 环境...", Color.Khaki);
         Task.Factory.StartNew(delegate
         {
-            List<EnvRow> rows = new List<EnvRow>();
-            rows.Add(new EnvRow("项目目录", Directory.Exists(workspaceRoot) ? "OK" : "FAIL", workspaceRoot));
-            rows.Add(new EnvRow("当前版本", "INFO", GetVersionLabel()));
-            rows.Add(new EnvRow("启动脚本", File.Exists(startupBat) ? "OK" : "FAIL", startupBat));
-            rows.Add(new EnvRow("项目 Python Runtime", File.Exists(runtimePython) ? "OK" : "FAIL", runtimePython));
-            rows.Add(new EnvRow("静态资源目录", Directory.Exists(staticDir) ? "OK" : "FAIL", staticDir));
-            rows.Add(new EnvRow("首页图", File.Exists(Path.Combine(launcherDir, "home.png")) ? "OK" : "WARN", Path.Combine(launcherDir, "home.png")));
-            rows.Add(new EnvRow("横幅图", File.Exists(Path.Combine(launcherDir, "head.png")) ? "OK" : "WARN", Path.Combine(launcherDir, "head.png")));
-            rows.Add(new EnvRow("左侧图", File.Exists(Path.Combine(launcherDir, "left.png")) ? "OK" : "WARN", Path.Combine(launcherDir, "left.png")));
-
-            List<int> portPids = GetListeningPidsForPort(ApiPort);
-            rows.Add(new EnvRow("API 端口 9880", portPids.Count > 0 ? "RUN" : "FREE", portPids.Count > 0 ? "监听 PID: " + string.Join(", ", ToStringArray(portPids)) : "端口未监听"));
-            rows.Add(new EnvRow("API 健康检查", TestApiHealth(1300) ? "OK" : "WAIT", TestApiHealth(1300) ? ApiBase + "/health 正常" : "服务未启动或还在加载"));
-
-            RefreshStartupLogPaths();
-            rows.Add(new EnvRow("日志目录", Directory.Exists(logDir) ? "OK" : "INFO", logDir));
-            rows.Add(new EnvRow("服务启动日志", !string.IsNullOrWhiteSpace(latestStartupLog) ? "OK" : "INFO", string.IsNullOrWhiteSpace(latestStartupLog) ? "暂无 api_restart_stable_*.log" : latestStartupLog));
-            rows.Add(new EnvRow("诊断日志", !string.IsNullOrWhiteSpace(latestStartupErr) ? "OK" : "INFO", string.IsNullOrWhiteSpace(latestStartupErr) ? "暂无 api_restart_stable_*.err" : latestStartupErr));
+            List<EnvRow> rows;
+            try
+            {
+                rows = BuildEnvironmentRows(target);
+                envRowsByVersion[target] = rows;
+                envCompletedVersions.Add(target);
+                AddLauncherLog(GetVersionLabel(target) + " 环境检测完成。");
+            }
+            catch (Exception ex)
+            {
+                rows = new List<EnvRow>();
+                rows.Add(new EnvRow("检测目标", "INFO", GetVersionLabel(target)));
+                rows.Add(new EnvRow("环境检测", "FAIL", ex.Message));
+                envRowsByVersion[target] = rows;
+                envCompletedVersions.Add(target);
+                AddLauncherLog(GetVersionLabel(target) + " 环境检测失败: " + ex.Message, "ERROR");
+            }
+            finally
+            {
+                BeginUi(delegate
+                {
+                    envCheckRunning = false;
+                    SyncEnvironmentButtons();
+                });
+            }
 
             BeginUi(delegate
             {
                 ApplyEnvironmentRows(rows);
-                SetStatus("轻量环境检测完成。", Color.LightGreen);
+                SetStatus(GetVersionLabel(target) + " 环境检测完成。", Color.LightGreen);
+            });
+        });
+    }
+
+    private void RepairEnvironmentAsync()
+    {
+        if (envRepairRunning)
+        {
+            AddLauncherLog("环境修复已经在运行，忽略重复点击。", "WARN");
+            return;
+        }
+
+        string target = NormalizeVersionKey(envTargetKey);
+        if (!envCompletedVersions.Contains(target))
+        {
+            AddLauncherLog(GetVersionLabel(target) + " 一键修复已取消：先点开始检测。", "WARN");
+            List<EnvRow> rows = GetEnvironmentRowsForDisplay(target);
+            rows.Add(new EnvRow("一键修复", "WAIT", "先点开始检测，再点一键修复。"));
+            ApplyEnvironmentRows(rows);
+            SetStatus("先检测 " + GetVersionLabel(target) + "，再修复。", Color.Khaki);
+            return;
+        }
+
+        envRepairRunning = true;
+        SyncEnvironmentButtons();
+        SetStatus("正在执行 " + GetVersionLabel(target) + " 一键修复...", Color.Khaki);
+        Task.Factory.StartNew(delegate
+        {
+            List<EnvRow> rows = GetEnvironmentRowsForDisplay(target);
+            List<EnvRow> repairRows = new List<EnvRow>(rows);
+            try
+            {
+                foreach (EnvRow row in RunEnvironmentRepair(target, rows))
+                {
+                    repairRows.Add(row);
+                }
+                envRowsByVersion[target] = repairRows;
+                AddLauncherLog(GetVersionLabel(target) + " 一键修复流程已执行。");
+            }
+            catch (Exception ex)
+            {
+                repairRows.Add(new EnvRow("一键修复", "FAIL", ex.Message));
+                envRowsByVersion[target] = repairRows;
+                AddLauncherLog(GetVersionLabel(target) + " 一键修复失败: " + ex.Message, "ERROR");
+            }
+            finally
+            {
+                BeginUi(delegate
+                {
+                    envRepairRunning = false;
+                    SyncEnvironmentButtons();
+                });
+            }
+
+            BeginUi(delegate
+            {
+                ApplyEnvironmentRows(repairRows);
+                SetStatus(GetVersionLabel(target) + " 修复流程已执行，建议重新检测。", Color.LightGreen);
             });
         });
     }
@@ -998,7 +1089,332 @@ internal sealed class LauncherForm : Form
             {
                 gridRow.DefaultCellStyle.ForeColor = Color.LightGreen;
             }
+            else if (row.Status == "INFO" || row.Status == "FREE")
+            {
+                gridRow.DefaultCellStyle.ForeColor = Color.FromArgb(205, 214, 224);
+            }
         }
+    }
+
+    private void SetEnvironmentTarget(string key, bool userAction)
+    {
+        envTargetKey = NormalizeVersionKey(key);
+        SyncEnvironmentButtons();
+        ApplyEnvironmentRows(GetEnvironmentRowsForDisplay(envTargetKey));
+        if (userAction)
+        {
+            AddLauncherLog("环境检测目标已切换到 " + GetVersionLabel(envTargetKey) + "。");
+            SetStatus("环境检测目标：" + GetVersionLabel(envTargetKey), Color.Khaki);
+        }
+    }
+
+    private void SyncEnvironmentButtons()
+    {
+        StyleVersionButton(envVllmButton, envTargetKey == "vllm");
+        StyleVersionButton(envFast6gButton, envTargetKey == "fast6g");
+        if (envCheckButton != null)
+        {
+            envCheckButton.Enabled = !envCheckRunning && !envRepairRunning;
+            envCheckButton.Text = envCheckRunning ? "检测中..." : "开始检测";
+        }
+        if (envRepairButton != null)
+        {
+            envRepairButton.Enabled = !envCheckRunning && !envRepairRunning;
+            envRepairButton.Text = envRepairRunning ? "修复中..." : "一键修复";
+        }
+    }
+
+    private List<EnvRow> GetEnvironmentRowsForDisplay(string key)
+    {
+        key = NormalizeVersionKey(key);
+        List<EnvRow> rows;
+        if (envRowsByVersion.TryGetValue(key, out rows))
+        {
+            return new List<EnvRow>(rows);
+        }
+
+        rows = new List<EnvRow>();
+        rows.Add(new EnvRow("检测目标", "INFO", GetVersionLabel(key)));
+        rows.Add(new EnvRow("检测状态", "WAIT", "未检测。点开始检测只检查当前版本。"));
+        rows.Add(new EnvRow("启动脚本", "WAIT", GetStartupBat(key)));
+        rows.Add(new EnvRow("项目 Python Runtime", "WAIT", GetRuntimePython(key)));
+        if (key == "vllm")
+        {
+            rows.Add(new EnvRow("vLLM 专属项", "WAIT", "CUDA Toolkit / MSVC / SVML / vLLM 插件"));
+        }
+        else
+        {
+            rows.Add(new EnvRow("6G 专属项", "WAIT", "DeepSpeed 6G 加速 / fast6g runtime"));
+        }
+        return rows;
+    }
+
+    private List<EnvRow> BuildEnvironmentRows(string key)
+    {
+        key = NormalizeVersionKey(key);
+        string targetRoot = GetVersionRoot(key);
+        string targetPython = GetRuntimePython(key);
+        string targetStartupBat = GetStartupBat(key);
+        string targetLogDir = GetVersionLogDir(key);
+        string targetStartupLog = FindLatestFile(targetLogDir, "api_restart_stable_*.log");
+        string targetStartupErr = FindLatestFile(targetLogDir, "api_restart_stable_*.err");
+
+        List<EnvRow> rows = new List<EnvRow>();
+        rows.Add(new EnvRow("检测目标", "INFO", GetVersionLabel(key)));
+        rows.Add(new EnvRow("项目目录", Directory.Exists(workspaceRoot) ? "OK" : "FAIL", workspaceRoot));
+        rows.Add(new EnvRow("版本目录", Directory.Exists(targetRoot) ? "OK" : "FAIL", targetRoot));
+        rows.Add(new EnvRow("启动脚本", File.Exists(targetStartupBat) ? "OK" : "FAIL", targetStartupBat));
+        rows.Add(new EnvRow("项目 Python Runtime", File.Exists(targetPython) ? "OK" : "FAIL", GetPythonVersion(targetPython)));
+        rows.Add(new EnvRow("静态资源目录", Directory.Exists(staticDir) ? "OK" : "FAIL", staticDir));
+        rows.Add(new EnvRow("首页图", File.Exists(Path.Combine(launcherDir, "home.png")) ? "OK" : "WARN", Path.Combine(launcherDir, "home.png")));
+        rows.Add(new EnvRow("横幅图", File.Exists(Path.Combine(launcherDir, "head.png")) ? "OK" : "WARN", Path.Combine(launcherDir, "head.png")));
+        rows.Add(new EnvRow("左侧图", File.Exists(Path.Combine(launcherDir, "left.png")) ? "OK" : "WARN", Path.Combine(launcherDir, "left.png")));
+
+        rows.Add(new EnvRow("管理员权限", IsAdmin() ? "OK" : "WARN", IsAdmin() ? "已用管理员权限运行，可安装系统组件。" : "不是管理员。检测可用，winget 安装或系统级修复可能需要提权。"));
+        rows.Add(new EnvRow("项目路径中文检查", PathHasChinese(workspaceRoot) ? "FAIL" : "OK", PathHasChinese(workspaceRoot) ? "当前路径包含中文，CUDA/ninja 编译容易失败。建议移动到纯英文路径。" : "路径未包含中文，适合 CUDA/ninja 编译。"));
+
+        AddGpuRows(rows);
+        if (key == "vllm")
+        {
+            AddVllmEnvironmentRows(rows, targetRoot, targetPython);
+        }
+        else
+        {
+            AddFast6gEnvironmentRows(rows, targetRoot, targetPython);
+        }
+
+        List<int> portPids = GetListeningPidsForPort(ApiPort);
+        bool healthOk = TestApiHealth(1300);
+        rows.Add(new EnvRow("API 端口 9880", portPids.Count > 0 ? "RUN" : "FREE", portPids.Count > 0 ? "监听 PID: " + string.Join(", ", ToStringArray(portPids)) : "端口未监听"));
+        rows.Add(new EnvRow("API 健康检查", healthOk ? "OK" : "WAIT", healthOk ? ApiBase + "/health 正常" : "服务未启动或还在加载"));
+        rows.Add(new EnvRow("日志目录", Directory.Exists(targetLogDir) ? "OK" : "INFO", targetLogDir));
+        rows.Add(new EnvRow("服务启动日志", !string.IsNullOrWhiteSpace(targetStartupLog) ? "OK" : "INFO", string.IsNullOrWhiteSpace(targetStartupLog) ? "暂无 api_restart_stable_*.log" : targetStartupLog));
+        rows.Add(new EnvRow("诊断日志", !string.IsNullOrWhiteSpace(targetStartupErr) ? "OK" : "INFO", string.IsNullOrWhiteSpace(targetStartupErr) ? "暂无 api_restart_stable_*.err" : targetStartupErr));
+        return rows;
+    }
+
+    private void AddGpuRows(List<EnvRow> rows)
+    {
+        string nvidia = GetCommandPath("nvidia-smi.exe");
+        if (string.IsNullOrWhiteSpace(nvidia))
+        {
+            rows.Add(new EnvRow("NVIDIA 显卡/驱动", "FAIL", "找不到 nvidia-smi。需要 NVIDIA 显卡和正常驱动。"));
+            return;
+        }
+
+        CaptureResult gpu = RunCapture(nvidia, "--query-gpu=name,memory.total,driver_version --format=csv,noheader", workspaceRoot, null, 10);
+        rows.Add(new EnvRow("NVIDIA 显卡/驱动", gpu.ExitCode == 0 ? "OK" : "FAIL", gpu.ExitCode == 0 ? FirstUsefulLine(gpu.Stdout) : Shorten(gpu.Stderr)));
+    }
+
+    private void AddVllmEnvironmentRows(List<EnvRow> rows, string targetRoot, string targetPython)
+    {
+        string cudaPath = GetCudaToolkitPath();
+        if (!string.IsNullOrWhiteSpace(cudaPath))
+        {
+            CaptureResult nvcc = RunCapture(Path.Combine(cudaPath, "bin\\nvcc.exe"), "-V", targetRoot, null, 10);
+            rows.Add(new EnvRow("CUDA Toolkit / nvcc", nvcc.ExitCode == 0 ? "OK" : "WARN", nvcc.ExitCode == 0 ? FirstMatchingLine(nvcc.Stdout + "\n" + nvcc.Stderr, "release") : "找到 CUDA 目录但 nvcc 执行失败: " + cudaPath));
+        }
+        else
+        {
+            rows.Add(new EnvRow("CUDA Toolkit / nvcc", "WARN", "未找到 CUDA Toolkit。Torch 自带 CUDA 可运行，但 BigVGAN CUDA kernel 编译需要 nvcc。"));
+        }
+
+        string clPath = GetMsvcClPath();
+        rows.Add(new EnvRow("MSVC C++ Build Tools", string.IsNullOrWhiteSpace(clPath) ? "WARN" : "OK", string.IsNullOrWhiteSpace(clPath) ? "未找到 cl.exe。BigVGAN CUDA kernel 编译可能失败。" : "cl.exe: " + clPath));
+
+        RuntimeProbe probe = ProbeRuntime(targetPython, targetRoot, "torch,torchaudio,vllm,fastapi,uvicorn,ninja,triton", 60);
+        if (!File.Exists(targetPython))
+        {
+            rows.Add(new EnvRow("Python 包 / Torch CUDA / vLLM", "FAIL", "缺少 runtime python。"));
+        }
+        else if (probe.ExitCode != 0 || probe.Info == null)
+        {
+            rows.Add(new EnvRow("Python 包 / Torch CUDA / vLLM", "FAIL", Shorten(probe.Text)));
+        }
+        else
+        {
+            List<string> bad = new List<string>();
+            foreach (string name in new[] { "torch", "torchaudio", "vllm", "fastapi", "uvicorn", "ninja" })
+            {
+                string value = GetDictString(probe.Info, name);
+                if (value.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase)) bad.Add(name + "=" + value);
+            }
+            bool cudaAvailable = string.Equals(GetDictString(probe.Info, "torch_cuda_available"), "True", StringComparison.OrdinalIgnoreCase);
+            string status = bad.Count == 0 && cudaAvailable ? "OK" : (bad.Count == 0 ? "WARN" : "FAIL");
+            string detail = bad.Count > 0
+                ? string.Join("; ", bad.ToArray())
+                : "torch=" + GetDictString(probe.Info, "torch") + "; cuda=" + GetDictString(probe.Info, "torch_cuda_version") + "; gpu=" + GetDictString(probe.Info, "torch_gpu") + "; vllm=" + GetDictString(probe.Info, "vllm") + "; ninja=" + GetDictString(probe.Info, "ninja");
+            rows.Add(new EnvRow("Python 包 / Torch CUDA / vLLM", status, detail));
+        }
+
+        string svml = FindSvmlDll(targetPython);
+        bool runtimeImportOk = probe.Info != null &&
+            !GetDictString(probe.Info, "torch").StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase) &&
+            !GetDictString(probe.Info, "vllm").StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(svml))
+        {
+            rows.Add(new EnvRow("Intel SVML 兼容兜底", "OK", "运行时可解析 svml_dispmd.dll: " + svml));
+        }
+        else if (runtimeImportOk)
+        {
+            rows.Add(new EnvRow("Intel SVML 兼容兜底", "OK", "未发现独立 svml_dispmd.dll，但当前 runtime 可 import torch/vllm；无需修复。"));
+        }
+        else if (SvmlRepairNeeded(probe.Text))
+        {
+            rows.Add(new EnvRow("Intel SVML 兼容兜底", "FAIL", "runtime import 失败且命中 SVML/LLVM/DLL 加载问题，可用一键修复复制随包 DLL。"));
+        }
+        else
+        {
+            rows.Add(new EnvRow("Intel SVML 兼容兜底", "WARN", "未发现独立 svml_dispmd.dll，但当前未证明它是启动阻塞项。"));
+        }
+
+        if (File.Exists(targetPython))
+        {
+            CaptureResult patch = RunPythonSnippet(targetPython, targetRoot, "import patch_vllm; print('patch_vllm OK')", 60);
+            rows.Add(new EnvRow("vLLM 插件 / GPT2TTSModel 注册", patch.ExitCode == 0 && patch.Stdout.IndexOf("OK", StringComparison.OrdinalIgnoreCase) >= 0 ? "OK" : "FAIL", patch.ExitCode == 0 ? Shorten(patch.Stdout) : Shorten(patch.Stdout + "\n" + patch.Stderr)));
+        }
+
+        AddRequiredModelRows(rows, targetRoot);
+    }
+
+    private void AddFast6gEnvironmentRows(List<EnvRow> rows, string targetRoot, string targetPython)
+    {
+        RuntimeProbe probe = ProbeRuntime(targetPython, targetRoot, "torch,torchaudio,deepspeed,fastapi,uvicorn", 60);
+        if (!File.Exists(targetPython))
+        {
+            rows.Add(new EnvRow("Python 包 / Torch CUDA / 6G", "FAIL", "缺少 runtime python。"));
+        }
+        else if (probe.ExitCode != 0 || probe.Info == null)
+        {
+            rows.Add(new EnvRow("Python 包 / Torch CUDA / 6G", "FAIL", Shorten(probe.Text)));
+        }
+        else
+        {
+            List<string> bad = new List<string>();
+            foreach (string name in new[] { "torch", "torchaudio", "fastapi", "uvicorn" })
+            {
+                string value = GetDictString(probe.Info, name);
+                if (value.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase)) bad.Add(name + "=" + value);
+            }
+            bool cudaAvailable = string.Equals(GetDictString(probe.Info, "torch_cuda_available"), "True", StringComparison.OrdinalIgnoreCase);
+            string status = bad.Count == 0 && cudaAvailable ? "OK" : (bad.Count == 0 ? "WARN" : "FAIL");
+            string detail = bad.Count > 0
+                ? string.Join("; ", bad.ToArray())
+                : "torch=" + GetDictString(probe.Info, "torch") + "; cuda=" + GetDictString(probe.Info, "torch_cuda_version") + "; gpu=" + GetDictString(probe.Info, "torch_gpu");
+            rows.Add(new EnvRow("Python 包 / Torch CUDA / 6G", status, detail));
+        }
+
+        string dsValue = probe.Info == null ? string.Empty : GetDictString(probe.Info, "deepspeed");
+        bool dsOk = !string.IsNullOrWhiteSpace(dsValue) && !dsValue.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase);
+        string wheel = Path.Combine(targetRoot, "deepspeed-0.17.1+unknown-cp312-cp312-win_amd64.whl");
+        rows.Add(new EnvRow("DeepSpeed 6G 加速", dsOk ? "OK" : (File.Exists(wheel) ? "WARN" : "FAIL"), dsOk ? "deepspeed=" + dsValue : (File.Exists(wheel) ? "可用随包 wheel 修复: " + wheel : "缺少 deepspeed，且未找到随包 wheel。")));
+        rows.Add(new EnvRow("6G API 文件", File.Exists(Path.Combine(targetRoot, "indextts2_api.py")) ? "OK" : "FAIL", Path.Combine(targetRoot, "indextts2_api.py")));
+        rows.Add(new EnvRow("6G 推理文件", File.Exists(Path.Combine(targetRoot, "indextts\\infer_v2.py")) ? "OK" : "FAIL", Path.Combine(targetRoot, "indextts\\infer_v2.py")));
+        AddRequiredModelRows(rows, targetRoot);
+    }
+
+    private void AddRequiredModelRows(List<EnvRow> rows, string targetRoot)
+    {
+        string[] required = new[] { "checkpoints\\config.yaml", "checkpoints\\gpt.pth", "checkpoints\\s2mel.pth", "checkpoints\\bpe.model", "checkpoints\\wav2vec2bert_stats.pt" };
+        List<string> missing = new List<string>();
+        foreach (string rel in required)
+        {
+            if (!File.Exists(Path.Combine(targetRoot, rel))) missing.Add(rel);
+        }
+        rows.Add(new EnvRow("模型文件", missing.Count == 0 ? "OK" : "FAIL", missing.Count == 0 ? "核心 checkpoint 文件存在。" : "缺少: " + string.Join(", ", missing.ToArray())));
+    }
+
+    private List<EnvRow> RunEnvironmentRepair(string key, List<EnvRow> latestRows)
+    {
+        key = NormalizeVersionKey(key);
+        List<EnvRow> rows = new List<EnvRow>();
+        if (key == "vllm")
+        {
+            rows.AddRange(RunVllmRepair(latestRows));
+        }
+        else
+        {
+            rows.AddRange(RunFast6gRepair());
+        }
+        return rows;
+    }
+
+    private List<EnvRow> RunVllmRepair(List<EnvRow> latestRows)
+    {
+        List<EnvRow> rows = new List<EnvRow>();
+        string targetPython = GetRuntimePython("vllm");
+        if (HasFailedOrWarn(latestRows, "Intel SVML"))
+        {
+            string source = FindBundledSvmlDll();
+            string target = GetSvmlRepairTarget(targetPython);
+            if (!string.IsNullOrWhiteSpace(source) && !string.IsNullOrWhiteSpace(target))
+            {
+                try
+                {
+                    File.Copy(source, target, true);
+                    rows.Add(new EnvRow("修复 / SVML", "OK", "已复制 svml_dispmd.dll 到 " + target));
+                }
+                catch (Exception ex)
+                {
+                    rows.Add(new EnvRow("修复 / SVML", "FAIL", ex.Message));
+                }
+            }
+            else
+            {
+                rows.Add(new EnvRow("修复 / SVML", "WARN", "未找到随包 svml_dispmd.dll 或 runtime 目标目录。"));
+            }
+        }
+        else
+        {
+            rows.Add(new EnvRow("修复 / SVML", "INFO", "最近一次检测未显示 SVML 阻塞，跳过。"));
+        }
+
+        if (HasFailedOrWarn(latestRows, "MSVC"))
+        {
+            rows.Add(RunWingetRepairRow("修复 / MSVC Build Tools", "Microsoft.VisualStudio.2022.BuildTools", "--override \"--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended\""));
+        }
+        else
+        {
+            rows.Add(new EnvRow("修复 / MSVC Build Tools", "INFO", "最近一次检测未显示 MSVC 缺失，跳过。"));
+        }
+
+        if (HasFailedOrWarn(latestRows, "CUDA Toolkit"))
+        {
+            rows.Add(RunWingetRepairRow("修复 / CUDA Toolkit", "Nvidia.CUDA", string.Empty));
+        }
+        else
+        {
+            rows.Add(new EnvRow("修复 / CUDA Toolkit", "INFO", "最近一次检测未显示 CUDA Toolkit 缺失，跳过。"));
+        }
+
+        if (File.Exists(targetPython) && HasFailedOrWarn(latestRows, "ninja"))
+        {
+            CaptureResult pip = RunCapture(targetPython, "-m pip install ninja", GetVersionRoot("vllm"), GetRuntimeEnv(targetPython, GetVersionRoot("vllm")), 240);
+            rows.Add(new EnvRow("修复 / ninja", pip.ExitCode == 0 ? "OK" : "FAIL", pip.ExitCode == 0 ? "pip install ninja 已执行。" : Shorten(pip.Stdout + "\n" + pip.Stderr)));
+        }
+        return rows;
+    }
+
+    private List<EnvRow> RunFast6gRepair()
+    {
+        List<EnvRow> rows = new List<EnvRow>();
+        string targetRoot = GetVersionRoot("fast6g");
+        string targetPython = GetRuntimePython("fast6g");
+        string wheel = Path.Combine(targetRoot, "deepspeed-0.17.1+unknown-cp312-cp312-win_amd64.whl");
+        if (!File.Exists(targetPython))
+        {
+            rows.Add(new EnvRow("修复 / DeepSpeed", "FAIL", "缺少 fast6g runtime python。"));
+            return rows;
+        }
+        if (!File.Exists(wheel))
+        {
+            rows.Add(new EnvRow("修复 / DeepSpeed", "FAIL", "未找到随包 wheel: " + wheel));
+            return rows;
+        }
+
+        CaptureResult pip = RunCapture(targetPython, "-m pip install " + QuoteCmdArgument(wheel), targetRoot, GetRuntimeEnv(targetPython, targetRoot), 240);
+        rows.Add(new EnvRow("修复 / DeepSpeed", pip.ExitCode == 0 ? "OK" : "FAIL", pip.ExitCode == 0 ? "已安装随包 DeepSpeed wheel。" : Shorten(pip.Stdout + "\n" + pip.Stderr)));
+        return rows;
     }
 
     private void ShowView(string view)
@@ -1031,7 +1447,6 @@ internal sealed class LauncherForm : Form
     private void UpdateActiveLogBox(bool forceScroll)
     {
         if (logBox == null || logBox.IsDisposed) return;
-        if (logBox.SelectionLength > 0) return;
 
         string text;
         lock (logLock)
@@ -1039,17 +1454,7 @@ internal sealed class LauncherForm : Form
             if (!logTexts.TryGetValue(activeLogTab, out text)) text = string.Empty;
         }
         if (string.IsNullOrWhiteSpace(text)) text = "暂无日志。";
-        if (logBox.Text == text) return;
-
-        logBox.SuspendLayout();
-        logBox.Text = text;
-        if (forceScroll || logBox.SelectionLength == 0)
-        {
-            logBox.SelectionStart = logBox.TextLength;
-            logBox.SelectionLength = 0;
-            logBox.ScrollToCaret();
-        }
-        logBox.ResumeLayout();
+        logBox.SetText(text, forceScroll);
     }
 
     private void SetVersion(string key, bool userAction)
@@ -1074,6 +1479,10 @@ internal sealed class LauncherForm : Form
         }
 
         SyncVersionUi();
+        if (userAction)
+        {
+            SetEnvironmentTarget(key, false);
+        }
         if (userAction)
         {
             AddLauncherLog("已切换到 " + GetVersionLabel() + "。");
@@ -1180,6 +1589,28 @@ internal sealed class LauncherForm : Form
         {
             if (activeLogTab == "launcher") UpdateActiveLogBox(true);
         });
+    }
+
+    private void ClearLauncherSessionLogs()
+    {
+        foreach (string key in new[] { "vllm", "fast6g" })
+        {
+            try
+            {
+                string dir = GetVersionLogDir(key);
+                Directory.CreateDirectory(dir);
+                string path = Path.Combine(dir, "launcher-" + DateTime.Now.ToString("yyyyMMdd") + ".log");
+                File.WriteAllText(path, string.Empty, new UTF8Encoding(false));
+            }
+            catch
+            {
+            }
+        }
+
+        lock (logLock)
+        {
+            logTexts["launcher"] = string.Empty;
+        }
     }
 
     private void RefreshStartupLogPaths()
@@ -1705,6 +2136,410 @@ internal sealed class LauncherForm : Form
         if (ratioBox != null) ratioBox.Text = GetRatioText();
     }
 
+    private string NormalizeVersionKey(string key)
+    {
+        return string.Equals(key, "fast6g", StringComparison.OrdinalIgnoreCase) ? "fast6g" : "vllm";
+    }
+
+    private string GetVersionRoot(string key)
+    {
+        return Path.Combine(workspaceRoot, NormalizeVersionKey(key));
+    }
+
+    private string GetRuntimePython(string key)
+    {
+        return Path.Combine(GetVersionRoot(key), "indextts2runtime\\python.exe");
+    }
+
+    private string GetStartupBat(string key)
+    {
+        return Path.Combine(scriptsDir, NormalizeVersionKey(key) == "fast6g" ? "start-fast6g-api.bat" : "start-vllm-api.bat");
+    }
+
+    private string GetVersionLogDir(string key)
+    {
+        return Path.Combine(workspaceRoot, "logs", NormalizeVersionKey(key));
+    }
+
+    private string GetPythonVersion(string pythonPath)
+    {
+        if (!File.Exists(pythonPath)) return pythonPath;
+        CaptureResult result = RunCapture(pythonPath, "--version", Path.GetDirectoryName(pythonPath), null, 10);
+        string text = (result.Stdout + " " + result.Stderr).Trim();
+        return string.IsNullOrWhiteSpace(text) ? pythonPath : text + " | " + pythonPath;
+    }
+
+    private bool IsAdmin()
+    {
+        try
+        {
+            WindowsPrincipal principal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool PathHasChinese(string path)
+    {
+        return !string.IsNullOrEmpty(path) && Regex.IsMatch(path, "[\u4e00-\u9fff]");
+    }
+
+    private static string GetCommandPath(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return null;
+        if (File.Exists(fileName)) return fileName;
+
+        string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        string[] pathDirs = pathEnv.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+        string[] exts = Path.HasExtension(fileName)
+            ? new[] { string.Empty }
+            : ((Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.BAT;.CMD").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries));
+
+        foreach (string dir in pathDirs)
+        {
+            string cleanDir = dir.Trim().Trim('"');
+            if (string.IsNullOrWhiteSpace(cleanDir)) continue;
+            foreach (string ext in exts)
+            {
+                string candidate = Path.Combine(cleanDir, fileName + ext);
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+        return null;
+    }
+
+    private CaptureResult RunPythonSnippet(string pythonPath, string workingDir, string code, int timeoutSeconds)
+    {
+        return RunCapture(pythonPath, "-c " + QuoteCmdArgument(code), workingDir, GetRuntimeEnv(pythonPath, workingDir), timeoutSeconds);
+    }
+
+    private RuntimeProbe ProbeRuntime(string pythonPath, string workingDir, string modulesCsv, int timeoutSeconds)
+    {
+        RuntimeProbe probe = new RuntimeProbe();
+        if (!File.Exists(pythonPath))
+        {
+            probe.ExitCode = 127;
+            probe.Text = "runtime python missing";
+            return probe;
+        }
+
+        string[] modules = modulesCsv.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < modules.Length; i++) modules[i] = modules[i].Trim();
+        string modulesJson = json.Serialize(modules);
+        string code =
+            "import importlib,json\n" +
+            "mods=" + modulesJson + "\n" +
+            "out={}\n" +
+            "for m in mods:\n" +
+            "    try:\n" +
+            "        mod=importlib.import_module(m)\n" +
+            "        out[m]=getattr(mod,'__version__','installed')\n" +
+            "    except Exception as e:\n" +
+            "        out[m]='ERROR: '+str(e)\n" +
+            "try:\n" +
+            "    import torch\n" +
+            "    out['torch_cuda_available']=bool(torch.cuda.is_available())\n" +
+            "    out['torch_cuda_version']=getattr(torch.version,'cuda',None)\n" +
+            "    out['torch_gpu']=torch.cuda.get_device_name(0) if torch.cuda.is_available() else ''\n" +
+            "except Exception as e:\n" +
+            "    out['torch_cuda_available']='ERROR: '+str(e)\n" +
+            "print('LEON_IMPORT_PROBE_JSON='+json.dumps(out,ensure_ascii=False))\n";
+
+        CaptureResult result = RunPythonSnippet(pythonPath, workingDir, code, timeoutSeconds);
+        probe.ExitCode = result.ExitCode;
+        probe.Text = (result.Stdout + "\n" + result.Stderr).Trim();
+        probe.Info = ExtractProbeInfo(probe.Text);
+        return probe;
+    }
+
+    private Dictionary<string, object> ExtractProbeInfo(string text)
+    {
+        const string marker = "LEON_IMPORT_PROBE_JSON=";
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        int index = text.LastIndexOf(marker, StringComparison.Ordinal);
+        if (index < 0) return null;
+        string tail = text.Substring(index + marker.Length);
+        int end = tail.IndexOfAny(new[] { '\r', '\n' });
+        string jsonText = (end >= 0 ? tail.Substring(0, end) : tail).Trim();
+        try
+        {
+            return json.DeserializeObject(jsonText) as Dictionary<string, object>;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private Dictionary<string, string> GetRuntimeEnv(string pythonPath, string versionRootForEnv)
+    {
+        Dictionary<string, string> env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        List<string> dirs = GetRuntimeDllSearchDirs(pythonPath, versionRootForEnv);
+        string path = string.Join(";", dirs.ToArray());
+        string existingPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        env["PATH"] = string.IsNullOrWhiteSpace(path) ? existingPath : path + ";" + existingPath;
+        env["HF_HOME"] = Path.Combine(versionRootForEnv, "checkpoints");
+        env["PYTHONUTF8"] = "1";
+        env["PYTHONIOENCODING"] = "utf-8";
+        return env;
+    }
+
+    private List<string> GetRuntimeDllSearchDirs(string pythonPath, string versionRootForEnv)
+    {
+        List<string> dirs = new List<string>();
+        string runtimeRoot = string.IsNullOrWhiteSpace(pythonPath) ? null : Path.GetDirectoryName(pythonPath);
+        AddExistingDir(dirs, runtimeRoot);
+        AddExistingDir(dirs, Path.Combine(runtimeRoot ?? string.Empty, "Scripts"));
+        AddExistingDir(dirs, Path.Combine(runtimeRoot ?? string.Empty, "DLLs"));
+        AddExistingDir(dirs, Path.Combine(runtimeRoot ?? string.Empty, "Library\\bin"));
+        AddExistingDir(dirs, Path.Combine(runtimeRoot ?? string.Empty, "Lib\\site-packages\\torch\\lib"));
+        AddExistingDir(dirs, Path.Combine(runtimeRoot ?? string.Empty, "Lib\\site-packages\\nvidia\\cublas\\bin"));
+        AddExistingDir(dirs, Path.Combine(runtimeRoot ?? string.Empty, "Lib\\site-packages\\nvidia\\cuda_runtime\\bin"));
+        AddExistingDir(dirs, Path.Combine(runtimeRoot ?? string.Empty, "Lib\\site-packages\\nvidia\\cudnn\\bin"));
+        AddExistingDir(dirs, versionRootForEnv);
+        AddExistingDir(dirs, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32"));
+        return dirs;
+    }
+
+    private static void AddExistingDir(List<string> dirs, string dir)
+    {
+        if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) return;
+        foreach (string existing in dirs)
+        {
+            if (string.Equals(existing, dir, StringComparison.OrdinalIgnoreCase)) return;
+        }
+        dirs.Add(dir);
+    }
+
+    private CaptureResult RunCapture(string fileName, string arguments, string workingDir, Dictionary<string, string> env, int timeoutSeconds)
+    {
+        CaptureResult result = new CaptureResult();
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo();
+            psi.FileName = fileName;
+            psi.Arguments = arguments ?? string.Empty;
+            psi.WorkingDirectory = Directory.Exists(workingDir) ? workingDir : workspaceRoot;
+            psi.UseShellExecute = false;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            psi.CreateNoWindow = true;
+            if (env != null)
+            {
+                foreach (KeyValuePair<string, string> item in env)
+                {
+                    psi.EnvironmentVariables[item.Key] = item.Value ?? string.Empty;
+                }
+            }
+
+            using (Process proc = Process.Start(psi))
+            {
+                if (proc == null)
+                {
+                    result.ExitCode = 127;
+                    result.Stderr = "process start returned null";
+                    return result;
+                }
+
+                Task<string> stdoutTask = Task.Factory.StartNew(delegate { return proc.StandardOutput.ReadToEnd(); });
+                Task<string> stderrTask = Task.Factory.StartNew(delegate { return proc.StandardError.ReadToEnd(); });
+                bool exited = proc.WaitForExit(Math.Max(1, timeoutSeconds) * 1000);
+                if (!exited)
+                {
+                    result.TimedOut = true;
+                    result.ExitCode = 124;
+                    try { proc.Kill(); }
+                    catch { }
+                }
+                else
+                {
+                    result.ExitCode = proc.ExitCode;
+                }
+                stdoutTask.Wait(1000);
+                stderrTask.Wait(1000);
+                result.Stdout = stdoutTask.IsCompleted ? stdoutTask.Result : string.Empty;
+                result.Stderr = stderrTask.IsCompleted ? stderrTask.Result : string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            result.ExitCode = 127;
+            result.Stderr = ex.Message;
+        }
+        return result;
+    }
+
+    private string GetCudaToolkitPath()
+    {
+        string cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
+        if (!string.IsNullOrWhiteSpace(cudaPath) && File.Exists(Path.Combine(cudaPath, "bin\\nvcc.exe")))
+        {
+            return cudaPath;
+        }
+
+        string root = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA";
+        try
+        {
+            if (!Directory.Exists(root)) return null;
+            string[] dirs = Directory.GetDirectories(root);
+            Array.Sort(dirs, delegate(string a, string b) { return string.Compare(b, a, StringComparison.OrdinalIgnoreCase); });
+            foreach (string dir in dirs)
+            {
+                if (File.Exists(Path.Combine(dir, "bin\\nvcc.exe"))) return dir;
+            }
+        }
+        catch
+        {
+        }
+        return null;
+    }
+
+    private string GetMsvcClPath()
+    {
+        string cl = GetCommandPath("cl.exe");
+        if (!string.IsNullOrWhiteSpace(cl)) return cl;
+
+        string vswhere = @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe";
+        if (File.Exists(vswhere))
+        {
+            CaptureResult result = RunCapture(vswhere, "-latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath", workspaceRoot, null, 10);
+            string root = FirstUsefulLine(result.Stdout);
+            cl = FindClUnderVs(root);
+            if (!string.IsNullOrWhiteSpace(cl)) return cl;
+        }
+
+        foreach (string root in new[]
+        {
+            @"C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
+            @"C:\Program Files\Microsoft Visual Studio\2022\Community",
+            @"C:\Program Files\Microsoft Visual Studio\2022\Professional",
+            @"C:\Program Files\Microsoft Visual Studio\2022\Enterprise",
+            @"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools",
+            @"C:\Program Files (x86)\Microsoft Visual Studio\2022\Community"
+        })
+        {
+            cl = FindClUnderVs(root);
+            if (!string.IsNullOrWhiteSpace(cl)) return cl;
+        }
+        return null;
+    }
+
+    private static string FindClUnderVs(string vsRoot)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(vsRoot)) return null;
+            string msvcRoot = Path.Combine(vsRoot.Trim(), "VC\\Tools\\MSVC");
+            if (!Directory.Exists(msvcRoot)) return null;
+            string[] dirs = Directory.GetDirectories(msvcRoot);
+            Array.Sort(dirs, delegate(string a, string b) { return string.Compare(b, a, StringComparison.OrdinalIgnoreCase); });
+            foreach (string dir in dirs)
+            {
+                string candidate = Path.Combine(dir, "bin\\Hostx64\\x64\\cl.exe");
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+        catch
+        {
+        }
+        return null;
+    }
+
+    private string FindSvmlDll(string pythonPath)
+    {
+        foreach (string dir in GetRuntimeDllSearchDirs(pythonPath, Path.GetDirectoryName(Path.GetDirectoryName(pythonPath) ?? string.Empty) ?? workspaceRoot))
+        {
+            string candidate = Path.Combine(dir, "svml_dispmd.dll");
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private static bool SvmlRepairNeeded(string text)
+    {
+        return !string.IsNullOrWhiteSpace(text) && Regex.IsMatch(text, "svml_dispmd|LLVM ERROR|dll load failed|找不到指定的模块|specified module", RegexOptions.IgnoreCase);
+    }
+
+    private bool HasFailedOrWarn(List<EnvRow> rows, string namePart)
+    {
+        foreach (EnvRow row in rows)
+        {
+            if (row.Name.IndexOf(namePart, StringComparison.OrdinalIgnoreCase) < 0 &&
+                row.Detail.IndexOf(namePart, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                continue;
+            }
+            if (row.Status == "FAIL" || row.Status == "WARN") return true;
+        }
+        return false;
+    }
+
+    private string FindBundledSvmlDll()
+    {
+        foreach (string candidate in new[]
+        {
+            Path.Combine(workspaceRoot, "dev_workspace\\llvm_error_fix\\svml_dispmd.dll"),
+            Path.Combine(workspaceRoot, "llvm_error_fix\\svml_dispmd.dll")
+        })
+        {
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private string GetSvmlRepairTarget(string pythonPath)
+    {
+        if (!File.Exists(pythonPath)) return null;
+        string runtimeRoot = Path.GetDirectoryName(pythonPath);
+        foreach (string dir in new[] { Path.Combine(runtimeRoot, "Library\\bin"), runtimeRoot })
+        {
+            if (Directory.Exists(dir)) return Path.Combine(dir, "svml_dispmd.dll");
+        }
+        return null;
+    }
+
+    private EnvRow RunWingetRepairRow(string name, string packageId, string extraArgs)
+    {
+        string winget = GetCommandPath("winget.exe");
+        if (string.IsNullOrWhiteSpace(winget)) return new EnvRow(name, "FAIL", "找不到 winget。");
+        string args = "install -e --id " + packageId + " " + (extraArgs ?? string.Empty) + " --accept-package-agreements --accept-source-agreements";
+        CaptureResult result = RunCapture(winget, args, workspaceRoot, null, 900);
+        return new EnvRow(name, result.ExitCode == 0 ? "OK" : "FAIL", result.ExitCode == 0 ? packageId + " 安装/修复命令已执行。" : Shorten(result.Stdout + "\n" + result.Stderr));
+    }
+
+    private static string FirstUsefulLine(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        string[] lines = Regex.Split(text, "\r?\n");
+        foreach (string line in lines)
+        {
+            if (!string.IsNullOrWhiteSpace(line)) return Shorten(line.Trim());
+        }
+        return string.Empty;
+    }
+
+    private static string FirstMatchingLine(string text, string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        string[] lines = Regex.Split(text, "\r?\n");
+        foreach (string line in lines)
+        {
+            if (line.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0) return Shorten(line.Trim());
+        }
+        return FirstUsefulLine(text);
+    }
+
+    private static string Shorten(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        text = Regex.Replace(text.Replace("\r", "\n"), "\n{2,}", "\n").Trim();
+        text = text.Replace("\n", " | ");
+        return text.Length <= 260 ? text : text.Substring(0, 257) + "...";
+    }
+
     private string GetRatioText()
     {
         return vllmGpuRatio.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
@@ -1712,7 +2547,12 @@ internal sealed class LauncherForm : Form
 
     private string GetVersionLabel()
     {
-        return versionKey == "fast6g" ? "fast6g 双加速 6G" : "vLLM 质量版";
+        return GetVersionLabel(versionKey);
+    }
+
+    private string GetVersionLabel(string key)
+    {
+        return NormalizeVersionKey(key) == "fast6g" ? "fast6g 双加速 6G" : "vLLM 质量版";
     }
 
     private static Font NewFont(float size, FontStyle style)
@@ -1842,6 +2682,21 @@ internal sealed class LauncherForm : Form
         }
     }
 
+    private sealed class CaptureResult
+    {
+        public int ExitCode;
+        public string Stdout = string.Empty;
+        public string Stderr = string.Empty;
+        public bool TimedOut;
+    }
+
+    private sealed class RuntimeProbe
+    {
+        public int ExitCode;
+        public string Text = string.Empty;
+        public Dictionary<string, object> Info;
+    }
+
     private sealed class ProcessInfo
     {
         public int ProcessId;
@@ -1882,6 +2737,271 @@ internal enum ImageVerticalAlign
     Top,
     Center,
     Bottom
+}
+
+internal sealed class WrappedLogView : Control
+{
+    private const int PadLeft = 14;
+    private const int PadTop = 12;
+    private const int PadRight = 20;
+    private const int PadBottom = 12;
+    private const int ScrollbarWidth = 8;
+
+    private readonly List<string> visualLines = new List<string>();
+    private string rawText = string.Empty;
+    private int scrollLine;
+    private int maxScrollLine;
+    private int lineHeight = 16;
+    private int charWidth = 8;
+    private bool layoutDirty = true;
+    private bool draggingThumb;
+    private int dragStartY;
+    private int dragStartScroll;
+    private Rectangle thumbRect = Rectangle.Empty;
+
+    public WrappedLogView()
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        TabStop = true;
+    }
+
+    public void SetText(string text, bool forceScroll)
+    {
+        text = text ?? string.Empty;
+        bool wasAtBottom = scrollLine >= maxScrollLine - 1;
+        if (!forceScroll && string.Equals(rawText, text, StringComparison.Ordinal)) return;
+
+        rawText = text;
+        layoutDirty = true;
+        EnsureLayout();
+        if (forceScroll || wasAtBottom)
+        {
+            ScrollToBottom();
+        }
+        else
+        {
+            ClampScroll();
+        }
+        Invalidate();
+    }
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        layoutDirty = true;
+        base.OnFontChanged(e);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        bool wasAtBottom = scrollLine >= maxScrollLine - 1;
+        layoutDirty = true;
+        EnsureLayout();
+        if (wasAtBottom) ScrollToBottom();
+        else ClampScroll();
+        base.OnResize(e);
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        EnsureLayout();
+        int delta = e.Delta > 0 ? -3 : 3;
+        scrollLine += delta;
+        ClampScroll();
+        Invalidate();
+        base.OnMouseWheel(e);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        Focus();
+        EnsureLayout();
+        if (thumbRect.Contains(e.Location))
+        {
+            draggingThumb = true;
+            dragStartY = e.Y;
+            dragStartScroll = scrollLine;
+            Capture = true;
+        }
+        else if (e.X >= ClientSize.Width - ScrollbarWidth - 4)
+        {
+            int page = Math.Max(1, VisibleLineCount() - 1);
+            scrollLine += e.Y < thumbRect.Top ? -page : page;
+            ClampScroll();
+            Invalidate();
+        }
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if (draggingThumb)
+        {
+            int trackHeight = Math.Max(1, ClientSize.Height - PadTop - PadBottom);
+            int thumbHeight = Math.Max(28, thumbRect.Height);
+            int travel = Math.Max(1, trackHeight - thumbHeight);
+            int lineTravel = Math.Max(1, maxScrollLine);
+            int moved = e.Y - dragStartY;
+            scrollLine = dragStartScroll + (int)Math.Round(moved * (lineTravel / (double)travel));
+            ClampScroll();
+            Invalidate();
+        }
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        draggingThumb = false;
+        Capture = false;
+        base.OnMouseUp(e);
+    }
+
+    protected override bool IsInputKey(Keys keyData)
+    {
+        Keys key = keyData & Keys.KeyCode;
+        if (key == Keys.Up || key == Keys.Down || key == Keys.PageUp || key == Keys.PageDown || key == Keys.Home || key == Keys.End)
+        {
+            return true;
+        }
+        return base.IsInputKey(keyData);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        EnsureLayout();
+        int page = Math.Max(1, VisibleLineCount() - 1);
+        if (e.KeyCode == Keys.Up) scrollLine--;
+        else if (e.KeyCode == Keys.Down) scrollLine++;
+        else if (e.KeyCode == Keys.PageUp) scrollLine -= page;
+        else if (e.KeyCode == Keys.PageDown) scrollLine += page;
+        else if (e.KeyCode == Keys.Home) scrollLine = 0;
+        else if (e.KeyCode == Keys.End) scrollLine = maxScrollLine;
+        else
+        {
+            base.OnKeyDown(e);
+            return;
+        }
+        ClampScroll();
+        Invalidate();
+        e.Handled = true;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        EnsureLayout();
+        e.Graphics.Clear(BackColor);
+        e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+        using (Brush textBrush = new SolidBrush(ForeColor))
+        {
+            int y = PadTop;
+            int visible = VisibleLineCount() + 1;
+            for (int i = 0; i < visible; i++)
+            {
+                int lineIndex = scrollLine + i;
+                if (lineIndex < 0 || lineIndex >= visualLines.Count) break;
+                e.Graphics.DrawString(visualLines[lineIndex], Font, textBrush, PadLeft, y);
+                y += lineHeight;
+            }
+        }
+
+        PaintScrollbar(e.Graphics);
+        base.OnPaint(e);
+    }
+
+    private void EnsureLayout()
+    {
+        if (!layoutDirty) return;
+        visualLines.Clear();
+        lineHeight = Math.Max(14, Font.Height + 3);
+        Size charSize = TextRenderer.MeasureText(
+            "00000000000000000000000000000000",
+            Font,
+            new Size(2000, 200),
+            TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+        charWidth = Math.Max(5, (int)Math.Ceiling(charSize.Width / 32.0));
+        int usableWidth = Math.Max(charWidth, ClientSize.Width - PadLeft - PadRight - ScrollbarWidth - 8);
+        int maxChars = Math.Max(10, usableWidth / charWidth);
+
+        string normalized = (rawText ?? string.Empty).Replace("\r\n", "\n").Replace("\r", "\n");
+        string[] lines = normalized.Split('\n');
+        foreach (string rawLine in lines)
+        {
+            WrapLine(rawLine, maxChars);
+        }
+
+        if (visualLines.Count == 0) visualLines.Add(string.Empty);
+        layoutDirty = false;
+        ClampScroll();
+    }
+
+    private void WrapLine(string line, int maxChars)
+    {
+        if (line == null) line = string.Empty;
+        string remaining = line.Replace("\t", "    ");
+        if (remaining.Length == 0)
+        {
+            visualLines.Add(string.Empty);
+            return;
+        }
+
+        while (remaining.Length > maxChars)
+        {
+            int cut = maxChars;
+            for (int i = Math.Min(maxChars, remaining.Length - 1); i > Math.Max(0, maxChars - 24); i--)
+            {
+                if (char.IsWhiteSpace(remaining[i]))
+                {
+                    cut = i + 1;
+                    break;
+                }
+            }
+            visualLines.Add(remaining.Substring(0, cut).TrimEnd());
+            remaining = remaining.Substring(cut).TrimStart();
+        }
+        visualLines.Add(remaining);
+    }
+
+    private int VisibleLineCount()
+    {
+        return Math.Max(1, (ClientSize.Height - PadTop - PadBottom) / Math.Max(1, lineHeight));
+    }
+
+    private void ClampScroll()
+    {
+        maxScrollLine = Math.Max(0, visualLines.Count - VisibleLineCount());
+        if (scrollLine < 0) scrollLine = 0;
+        if (scrollLine > maxScrollLine) scrollLine = maxScrollLine;
+    }
+
+    private void ScrollToBottom()
+    {
+        maxScrollLine = Math.Max(0, visualLines.Count - VisibleLineCount());
+        scrollLine = maxScrollLine;
+    }
+
+    private void PaintScrollbar(Graphics g)
+    {
+        int trackHeight = ClientSize.Height - PadTop - PadBottom;
+        if (trackHeight <= 0 || visualLines.Count <= VisibleLineCount())
+        {
+            thumbRect = Rectangle.Empty;
+            return;
+        }
+
+        int x = ClientSize.Width - ScrollbarWidth - 6;
+        Rectangle track = new Rectangle(x, PadTop, ScrollbarWidth, trackHeight);
+        int thumbHeight = Math.Max(28, (int)Math.Round(track.Height * (VisibleLineCount() / (double)visualLines.Count)));
+        int travel = Math.Max(1, track.Height - thumbHeight);
+        int thumbTop = track.Top + (maxScrollLine == 0 ? 0 : (int)Math.Round(travel * (scrollLine / (double)maxScrollLine)));
+        thumbRect = new Rectangle(track.Left, thumbTop, track.Width, thumbHeight);
+
+        using (SolidBrush trackBrush = new SolidBrush(Color.FromArgb(24, 31, 39)))
+        using (SolidBrush thumbBrush = new SolidBrush(draggingThumb ? Color.FromArgb(96, 124, 150) : Color.FromArgb(67, 87, 106)))
+        {
+            g.FillRectangle(trackBrush, track);
+            g.FillRectangle(thumbBrush, thumbRect);
+        }
+    }
 }
 
 internal sealed class CachedImagePanel : Panel
