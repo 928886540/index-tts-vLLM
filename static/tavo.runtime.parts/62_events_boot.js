@@ -137,6 +137,7 @@
         if (e.target && e.target.dataset && e.target.dataset.field) e.target.__indexttsComposing = false;
       }, true);
     } catch (_) {}
+    on(field("qualityMode"), 'change', function () { readFields(); syncUI(); });
     on(first(panel, '[data-role="reload"]'), 'click', function () {
       voicesLoaded = false;
       ensureVoicesLoaded().catch(function (e) { setStatus("音色列表读取失败"); setError(e && e.message ? e.message : String(e)); });
@@ -256,7 +257,7 @@
       var t = currentTrack();
       if (seek) seek.disabled = isCancelableLiveTrack(t);
       var dur = Number(audio.duration);
-      var progressDur = progressDurationSec(t);
+      var progressDur = progressDurationSec(t, elementPlaybackTimeSec(t));
       if (total) total.textContent = progressDur > 0 ? formatTime(progressDur) : "--:--";
       debugLog("📐 audio metadata loaded: duration=" + (isFinite(dur) ? dur.toFixed(2) : String(audio.duration)) + "s seekable=" + (audio.seekable.length > 0 ? audio.seekable.end(0).toFixed(2) : "0"), "#9ff");
     });
@@ -276,13 +277,14 @@
       var activeTrack = currentTrack();
       var pos = elementPlaybackTimeSec(activeTrack);
       if (activeTrack) activeTrack.lastElementSec = pos;
-      var progressDur = progressDurationSec(activeTrack);
+      var progressDur = progressDurationSec(activeTrack, pos);
+      var meterDur = progressMeterDurationSec(activeTrack, pos);
       if (cur) cur.textContent = formatTime(pos);
       if (total) total.textContent = progressDur > 0 ? formatTime(progressDur) : "--:--";
       if (seek) {
         seekProgrammaticUpdate = true;
-        seek.disabled = isCancelableLiveTrack(activeTrack) || !(progressDur > 0);
-        seek.value = progressDur > 0 ? String(Math.floor(Math.min(pos, progressDur) / progressDur * 1000)) : "0";
+        seek.disabled = isCancelableLiveTrack(activeTrack) || !(meterDur > 0);
+        seek.value = meterDur > 0 ? String(Math.floor(Math.min(pos, meterDur) / meterDur * 1000)) : "0";
         setTimeout(function () { seekProgrammaticUpdate = false; }, 0);
       }
     });

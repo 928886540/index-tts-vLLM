@@ -87,7 +87,7 @@ Saved/cache audio must keep using the native `<audio>` element with `/cache_audi
 
 Do not copy GPT-SoVITS saved WebAudio behavior into IndexTTS2. The user explicitly noted GPT-SoVITS background playback is poor; only copy the live-card state boundary and exit semantics.
 
-Live native stream playback is opt-in only through script flags such as `nativeLive=1` / `elementLive=1`; `start_s > 0` live stream URLs must not be assigned to native `<audio>`. By default, live jobs should poll until `/cache_audio/<cache_key>` is ready and then switch to saved native playback.
+Live `<audio>` element streaming is opt-in only through script flags such as `nativeLive=1` / `elementLive=1`; `start_s > 0` live stream URLs must not be assigned to native `<audio>`. By default, LIVE uses the backend live buffer with WebAudio: `GET /tts_dialogue_stream_job/<cache_key>` reads PCM while the backend keeps generating into the same cache-key buffer. Frontend recovery must not create another generation job; it may only reconnect the same `cache_key` stream with larger prebuffer, then wait for `/cache_audio/<cache_key>` as the last audible fallback after same-job live recovery is exhausted.
 
 ## DEC-011: LLM owns dialogue role assignment
 

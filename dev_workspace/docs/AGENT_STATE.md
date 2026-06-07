@@ -1,10 +1,132 @@
 # Agent State
 
-Updated: 2026-06-06
+Updated: 2026-06-07
 
 ## Current Goal
 
 Finish the root workspace migration and keep IndexTTS2 as the Tavo mainline without copying GPT-SoVITS engine behavior into this project.
+
+## Latest Fix Snapshot: Tavo Normal Mapping / Cleaner / LIVE Resume v13
+
+Updated: 2026-06-07
+
+Fix now in code:
+
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` are bumped to `20260607-live-audio-v15`.
+- Normal mode settings show only `旁白` and `对白`. `对白` blank is omitted from request voices and inherits narrator/default; explicit `对白` submits all aliases: `对白`, `对话`, `台词`, `dialogue`.
+- Frontend and both backends canonicalize dialogue aliases to `对白`; duplicate empty aliases no longer overwrite a non-empty user-selected dialogue voice.
+- Normal-mode text cleaning now removes tag blocks plus their contents, residual tags, Tavo script markers, injected player/UI controls, emoji/symbol noise, and hidden AR fragments before submitting text. Both backend versions also run stricter normal-text sanitation.
+- Follow-up audit fix: `currentMessageContext()` now prefers cleaned `tavo.message.current().content` over rendered DOM text, so sender/header/test chrome cannot override the actual API message body.
+- LIVE stream recovery exhaustion now returns the card to an idle/resumable state on the same `cache_key` instead of forcing saved-cache autoplay. Manual play reconnects the same stream and must not create another job or delete audio.
+- Follow-up audit fix: WebAudio LIVE resume now requests the backend stream with `?start_s=<last_second>`, separates backend offset from local PCM skipping, and persists/restores LIVE pending resume seconds (`lastWebAudioSec`, `lastElementSec`, `lastStalledSec`) across Tavo re-entry.
+- LIVE header/status follow-up: transient progress such as `正在合成音频` / `后端处理中` is suppressed from the avatar-side status line while a track exists; the line falls back to the stable current voice/role label.
+- LIVE subtitle/progress follow-up: backend status now exposes `segments_plan` and live `duration_s`; the frontend merges planned lyrics with completed `segments_meta`, so later lyrics can render before their audio segment has fully completed, and WebAudio progress is no longer clamped to the first known segment duration.
+- Settings expose `自定义` synthesis parameters and submit the custom generation values already accepted by the backends.
+
+Validation target for this snapshot:
+
+```powershell
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+python -m py_compile vllm\indextts2_api.py fast6g\indextts2_api.py vllm\indextts\llm_proxy.py fast6g\indextts\llm_proxy.py
+$env:TAVO_TEST_URL='http://127.0.0.1:9882/static/tavo_widget_test.html'; node dev_workspace\dev_tools\test_tavo_widget_playwright.js
+```
+
+Latest Playwright v13 follow-up also asserts:
+
+- normal request text does not include DOM chrome such as `assistant message mock`;
+- restored LIVE resume sends `GET /tts_dialogue_stream_job/<cache_key>?start_s=2.750` with no extra `POST` or `DELETE`.
+- LIVE planned-subtitle smoke keeps the header status at a stable voice label (`高圆圆` in mock), renders second/third planned lyric lines while only the first `segments_meta` has timing, and keeps current time/progress moving past the first segment.
+
+## Latest Fix Snapshot: Tavo First-Open Player Shell v12
+
+Updated: 2026-06-06
+
+User clarified the first-open player optimization: the actual load time can stay similar, but tapping the lazy card should show a full player surface immediately while runtime loading continues invisibly.
+
+Fix now in code:
+
+- This older first-open shell snapshot used the previous v12 cache-bust. Current cache-bust is recorded in the v13 snapshot above.
+- `static/tavo.js` still keeps first paint cheap: no runtime, no manifest/parts, no `/voices`, and no TTS job before user interaction.
+- On first click, the loader immediately renders a full-size `.idx-card[data-loader-shell="1"]` that mirrors the real player layout and shows visible loading state.
+- Loader-shell buttons queue the intended action and forward it after the real runtime mounts. This covers play, generate/add, settings, prev/next, delete, and L/D toggle.
+- The loader shell does not change LIVE job semantics: it does not create `/tts_dialogue_stream_job` by itself and it keeps the WebAudio user-gesture priming path for play/add.
+- v12 visual cleanup removes the fake seek/progress bar from the loader shell, uses `static/tavo.assets/narrator.png` as the default loader cover, and removes the extra dialog focus ring from settings/picker so only one outer border remains.
+- `dev_workspace/dev_tools/test_tavo_widget_playwright.js` now asserts the immediate shell appears synchronously after lazy click, still has `/voices=0` and job requests `0`, has no loader `.idx-seek`, uses the narrator cover, and keeps settings/picker dialog outline at `none` / `0px`.
+
+Validation passed on a temporary static server at `http://127.0.0.1:9882/static/tavo_widget_test.html`:
+
+```powershell
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+git diff --check -- static/tavo.js static/tavo.runtime.js static/tavo.runtime.manifest.json README.md dev_workspace/dev_tools/test_tavo_widget_playwright.js dev_workspace/docs/BUGS.md
+$env:TAVO_TEST_URL='http://127.0.0.1:9882/static/tavo_widget_test.html'; node dev_workspace\dev_tools\test_tavo_widget_playwright.js
+```
+
+Playwright still passed the LIVE guards: one generation `POST`, same-key stream reconnects, and exhausted recovery auto-mounts `/cache_audio/<cache_key>` without leaving the play button spinning.
+
+## Latest Fix Snapshot: Tavo LIVE Playback Lifecycle v10
+
+Updated: 2026-06-06
+
+User clarified the key LIVE regression:落盘兜底 is allowed and must work, but LIVE must first try the backend live buffer and should not silently skip audible streaming before the cache file lands. If LIVE recovery exhausts, saved/cache audio must auto-play or stop loading cleanly.
+
+Fix now in code:
+
+- `static/tavo.js`, `static/tavo.runtime.js`, and `static/tavo.runtime.manifest.json` are bumped to `20260606-live-audio-v10`.
+- `static/tavo.runtime.parts/60_generate_flow.js` no longer blocks LIVE startup on a pre-live status refresh. Status/segments metadata refresh runs in the background while WebAudio immediately opens `GET /tts_dialogue_stream_job/<cache_key>`.
+- `static/tavo.runtime.parts/46_track_state.js` keeps same-job recovery on the original `cache_key`, increases recovery attempts, and only sets `playSavedWhenReady` when entering the actual saved-cache fallback.
+- `static/tavo.runtime.parts/48_track_history.js` decides saved-cache fallback autoplay before `setTrackState(saved)` resets loading/buffering state, stops WebAudio before native cache handoff, seeks to the preserved second, and settles `audio.play()` success/reject so loading cannot spin forever.
+- `static/tavo.runtime.parts/44_element_audio.js` clears loading when native playback is rejected by the WebView.
+- `static/tavo.runtime.parts/52_subtitle_media.js` keeps transient progress including `后端处理中 Ns` out of the lyric panel.
+- `dev_workspace/dev_tools/test_tavo_widget_playwright.js` now asserts one LIVE `POST`, same-key stream reconnects, no transient LIVE progress text in the lyric panel, and exhausted same-key stream recovery auto-plays `/cache_audio/<cache_key>` without leaving the play button loading.
+
+Validated with Playwright mock on `http://127.0.0.1:9882/static/tavo_widget_test.html`: LIVE fallback submitted one `POST`, opened four same-key stream `GET`s, then mounted `/cache_audio/dddd...dddd` as native saved audio and ended with `playState=playing`.
+
+Still requires real Tavo/mobile validation: confirm real LIVE becomes audible before cache landing when backend first PCM is available, pause/resume continues from the current second, and cache landing does not leave an unkillable WebAudio voice or a spinning play button.
+
+## Latest Fix Snapshot: Tavo LIVE Same-Job Audio Recovery
+
+Updated: 2026-06-06
+
+User reported that Tavo LIVE streaming reached the WebAudio path but the phone had no audible sound. The product constraint is unchanged: LIVE must stay streaming. Do not replace it with default落盘 playback.
+
+Fix now in code:
+
+- `static/tavo.js`, `static/tavo.runtime.js`, and `static/tavo.runtime.manifest.json` are bumped to `20260606-live-audio-v8`.
+- `static/tavo.runtime.parts/20_generation_params.js` reuses the loader-created, user-gesture AudioContext and keeps the WebAudio output chain warm.
+- `static/tavo.runtime.parts/25_web_audio_stream.js` now supports configurable `prebufferSec` / `flushSec`, starts with a larger default prebuffer, and emits `stable_playing` only after the scheduled buffer survives the early window.
+- `static/tavo.runtime.parts/46_track_state.js` now treats early `buffering`, `audio_suspended`, `interrupted`, and network stream failures as same-job recovery triggers.
+- `static/tavo.runtime.parts/40_mount_shell.js` removes the redundant `文本模式` title above the large AI/normal mode buttons.
+- Recovery reconnects `GET /tts_dialogue_stream_job/<cache_key>` on the same cache key with larger prebuffer. It must not send another `POST /tts_dialogue_stream_job`.
+- Only after same-job recovery attempts are exhausted does the frontend wait for `/cache_audio/<cache_key>` as the last audible fallback.
+- `dev_workspace/dev_tools/test_tavo_widget_playwright.js` now guards the key behavior: one LIVE `POST`, repeated same-key stream `GET`, no re-POST during recovery.
+
+Validation:
+
+```powershell
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check static\tavo.runtime.parts\20_generation_params.js
+node --check static\tavo.runtime.parts\25_web_audio_stream.js
+node --check static\tavo.runtime.parts\46_track_state.js
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+node dev_workspace\dev_tools\test_tavo_widget_playwright.js
+git diff --check
+```
+
+The Playwright mock passed on `http://127.0.0.1:9882/static/tavo_widget_test.html`: LIVE submitted exactly one generation job, the first stream GET was forced to fail, and recovery opened `GET /tts_dialogue_stream_job/cccccccccccccccccccccccccccccccccccccccc` twice with the same cache key. No second generation POST was made.
+
+Runtime note:
+
+- The interrupted local static test server on `127.0.0.1:9880` left PID `5504`; it was confirmed as `python -m http.server` and stopped.
+- The real vLLM API remained running on `0.0.0.0:9880` as PID `16000` with worker PID `8076`.
+- `/health` currently reports `version=vllm`, `qwen_emo=false`, `vllm_gpu_memory_utilization=0.15`, and `vllm_enforce_eager=true`.
+- `nvidia-smi` showed about `10755 MiB / 12288 MiB` used with low GPU utilization. That is model/KV/CUDA context residency from the warm vLLM service, not active synthesis. It will not release fully unless the service processes are stopped.
+
+Real Tavo/mobile validation is still required: confirm that LIVE is audible after loading the v7 script, that early silent/stalled playback performs same-cache recovery, and that saved/cache audio still uses native `<audio>` for background/lock-screen behavior.
 
 ## Latest Validation Snapshot: vLLM GPU Ratio RTF Benchmark
 
@@ -243,7 +365,7 @@ Home player UI changes now in code:
 Current cache-busted Tavo URL:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v8"></script>
 ```
 
 Current validation for this `L`/`D` follow-up:
@@ -293,7 +415,7 @@ Screenshots saved for layout evidence:
 Tavo regex cache-busting URL should be updated to:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v8"></script>
 ```
 
 ## Latest Packaging Snapshot: LEON Launcher
@@ -449,8 +571,8 @@ Fixes now in code:
 - Foreground LIVE polling updates `segments_meta` by content signature, not only when the list grows.
 - Foreground LIVE polling can confirm `/cache_audio/{cache_key}` with `HEAD` and switch to saved if the file is already readable but `job_status` lags. This fallback is disabled for failed/cancelled/background-generate jobs.
 - Player card/control height is stabilized to reduce pending/live/saved layout jumps.
-- Settings order is now: `文本模式`, `合成质量`, voice mapping, `播放 / 离线`.
-- Cache-busted Tavo URL is now `http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6` for LAN examples; public hosts are user-managed outside the program.
+- Settings order is now: mode buttons directly, then `合成质量`, voice mapping, `播放 / 离线`.
+- Cache-busted Tavo URL is now `http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v8` for LAN examples; public hosts are user-managed outside the program.
 
 RTF evidence from recent real cache metadata:
 

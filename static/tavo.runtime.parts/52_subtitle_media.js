@@ -11,13 +11,28 @@
       return avatarUrl || DEFAULT_AVATARS.character;
     }
     var subBox = first(root, '[data-role="subtitle"]');
+    var subtitleNoticeState = { key: "", at: 0 };
     function keepSubtitleChrome() {
       if (!subBox) return;
       try { if (del && del.parentNode !== subBox) subBox.appendChild(del); } catch (_) {}
       try { if (counter && counter.parentNode !== subBox) subBox.appendChild(counter); } catch (_) {}
     }
+    function isTransientProgressNotice(titleText) {
+      var title = String(titleText || "");
+      if (!title) return false;
+      if (/失败|错误|不可用|取消|删除|退出/.test(title)) return false;
+      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
+    }
+    function normalizedNoticeKey(titleText, detailText) {
+      return String(titleText || "").replace(/\d+\s*s/g, "Ns") + "\n" + String(detailText || "");
+    }
     function showSubtitleNotice(titleText, detailText) {
       if (!subBox) return;
+      var key = normalizedNoticeKey(titleText, detailText);
+      var now = Date.now();
+      if (subtitleNoticeState.key === key && now - subtitleNoticeState.at < 900) return;
+      subtitleNoticeState.key = key;
+      subtitleNoticeState.at = now;
       subBox.classList.remove('idx-hidden');
       var detailHtml = detailText ? escapeHtml(detailText).replace(/\n/g, "<br>") : "";
       Array.prototype.slice.call(subBox.children).forEach(function (node) {
@@ -41,6 +56,10 @@
       }
       var title = String(titleText || "");
       var allowLyricInterrupt = /失败|错误|不可用|取消|删除|退出/.test(title);
+      var transientProgress = isTransientProgressNotice(title);
+      if (transientProgress) {
+        return;
+      }
       if (!allowLyricInterrupt) {
         if (track && hasActiveSubtitleRows(track)) return;
         if (!track && activeSubtitle && hasActiveSubtitleRows(activeSubtitle.track)) return;
@@ -246,8 +265,50 @@
       var timeline = [];
       var lastIdx = -1;
       var lastMetaSignature = "";
+      var lastPlanSignature = "";
       var state = { tickHandle: null, pollHandle: null, track: trackEntry };
       activeSubtitle = state;
+      function normalizeSubtitleSegments(list) {
+        return (Array.isArray(list) ? list : []).map(function (s, i) {
+          return {
+            idx: s && s.idx != null ? Number(s.idx) : i,
+            role: (s && s.role) || "",
+            text: (s && s.text) || "",
+            style: (s && s.style) || "neutral",
+            style_alpha: s && s.style_alpha,
+            start_s: s && s.start_s,
+            start_offset_bytes: s && s.start_offset_bytes,
+            duration_s: s && s.duration_s
+          };
+        }).filter(function (s) { return String(s.text || "").trim(); });
+      }
+      function subtitleSegmentSignature(list) {
+        return normalizeSubtitleSegments(list).map(function (m) {
+          return [m.idx, m.role || "", m.text || "", Number(m.start_s || 0).toFixed(3), Number(m.start_offset_bytes || 0), Number(m.duration_s || 0).toFixed(3)].join(":");
+        }).join("|");
+      }
+      function plannedSegmentsFromStatus(j) {
+        if (!j) return [];
+        if (Array.isArray(j.segments_plan) && j.segments_plan.length) return normalizeSubtitleSegments(j.segments_plan);
+        if (j.metrics && Array.isArray(j.metrics.segments_plan) && j.metrics.segments_plan.length) return normalizeSubtitleSegments(j.metrics.segments_plan);
+        return [];
+      }
+      function mergeMetaWithPlan(metaList, planList) {
+        var meta = normalizeSubtitleSegments(metaList);
+        var plan = normalizeSubtitleSegments(planList);
+        var count = Math.max(meta.length, plan.length);
+        var out = [];
+        for (var i = 0; i < count; i += 1) {
+          var p = plan[i] || {};
+          var m = meta[i] || {};
+          var row = Object.assign({}, p, m);
+          if (!row.text) row.text = p.text || m.text || "";
+          if (!row.role) row.role = p.role || m.role || "旁白";
+          if (row.idx == null || !isFinite(Number(row.idx))) row.idx = i;
+          if (String(row.text || "").trim()) out.push(row);
+        }
+        return out;
+      }
       function showWaitingSubtitleNotice() {
         if (trackEntry && trackEntry.cacheKey && !isSavedTrack(trackEntry)) {
           showSubtitleNotice("等待歌词…", "后端返回分段后自动显示");
@@ -302,14 +363,15 @@
         try { t = getTimeSec(); } catch (_) { t = NaN; }
         if (!isFinite(t) || t < 0) return;
         t = clampPlaybackTimeSec(trackEntry, t);
+        var displayT = t + clampNumber(cfg.subtitleLeadSec == null ? 0.30 : cfg.subtitleLeadSec, 0.30, 0, 1.0);
         if (timeline.length && isFinite(Number(timeline[timeline.length - 1].end))) {
           var end = Number(timeline[timeline.length - 1].end);
-          if (end > 0 && t >= end) t = Math.max(0, end - 0.001);
+          if (end > 0 && displayT >= end) displayT = Math.max(0, end - 0.001);
         }
         var idx = -1;
         for (var i = 0; i < timeline.length; i++) {
-          if (t >= timeline[i].start && t < timeline[i].end) { idx = i; break; }
-          if (t >= timeline[i].start) idx = i;
+          if (displayT >= timeline[i].start && displayT < timeline[i].end) { idx = i; break; }
+          if (displayT >= timeline[i].start) idx = i;
         }
         if (idx >= 0 && idx !== lastIdx) {
           lastIdx = idx;
@@ -318,7 +380,7 @@
           // 左上角 cover/标题 + 系统媒体面板同步当前说话人
           syncHeaderToSpeaker(timeline[idx].role, timeline[idx].text);
         }
-      }, 150);
+      }, 100);
       // 后台轮询 job_status 拿真实 segments_meta 校准时间轴
       if (trackEntry.cacheKey) {
         function pollSubtitleMeta() {
@@ -327,27 +389,31 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (j) {
               if (!j) return;
-              if (Array.isArray(j.segments_meta) && j.segments_meta.length) {
-                var metaSig = j.segments_meta.map(function (m) {
-                  return [m.role || "", m.text || "", Number(m.start_s || 0).toFixed(3), Number(m.start_offset_bytes || 0), Number(m.duration_s || 0).toFixed(3)].join(":");
-                }).join("|");
+              var plan = plannedSegmentsFromStatus(j);
+              var meta = normalizeSubtitleSegments(j.segments_meta || []);
+              if (plan.length) {
+                var planSig = subtitleSegmentSignature(plan);
+                if (planSig && planSig !== lastPlanSignature) {
+                  lastPlanSignature = planSig;
+                  trackEntry.segmentPlan = plan;
+                }
+              }
+              if (meta.length || (trackEntry.segmentPlan && trackEntry.segmentPlan.length)) {
+                var merged = mergeMetaWithPlan(meta, trackEntry.segmentPlan || []);
+                var metaSig = subtitleSegmentSignature(merged);
                 if (metaSig && metaSig !== trackEntry.segmentsSignature) {
                   trackEntry.segmentsSignature = metaSig;
-                  segs = j.segments_meta.map(function (s) {
-                    return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
-                  });
-                  trackEntry.segments = segs;
+                  segs = merged;
+                  trackEntry.segments = merged;
                   if (messageId && isSavedTrack(trackEntry)) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
                 }
                 if (j.sample_rate) trackEntry.sampleRate = j.sample_rate;
                 if (j.duration_s) trackEntry.duration_s = j.duration_s;
                 if (j.metrics) trackEntry.metrics = j.metrics;
-                var sig = j.segments_meta.map(function (m) {
-                  return [m.role || "", m.text || "", Number(m.start_s || 0).toFixed(3), Number(m.start_offset_bytes || 0), Number(m.duration_s || 0).toFixed(3)].join(":");
-                }).join("|");
+                var sig = subtitleSegmentSignature(merged);
                 if (sig !== lastMetaSignature) {
                   lastMetaSignature = sig;
-                  rebuild(j.segments_meta, j.sample_rate);
+                  rebuild(meta, j.sample_rate);
                 }
               }
               if (j.state === "done" || j.state === "failed") {
@@ -356,7 +422,7 @@
             })
             .catch(function () {});
         }
-        state.pollHandle = setInterval(pollSubtitleMeta, 1500);
+        state.pollHandle = setInterval(pollSubtitleMeta, 800);
         pollSubtitleMeta();
       }
     }

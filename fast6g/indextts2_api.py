@@ -166,10 +166,22 @@ CACHE_DIR = os.path.join("outputs", "cache")
 snapshot_cache.CACHE_DIR = CACHE_DIR
 snapshot_cache.READABLE_CACHE_DIR = os.path.join(CACHE_DIR, "by_role")
 HTML_TAG_RE = re.compile(r"<[^>]+>")
+HTML_BLOCK_RE = re.compile(r"<([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^>]*)?>[\s\S]*?</\1\s*>", re.IGNORECASE)
+HTML_VOID_RE = re.compile(r"<\s*(?:br|hr|img|input|meta|link|source|track|wbr|area|base|col|embed|param)\b[^>]*\/?\s*>", re.IGNORECASE)
+EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"
+    "\U0001F300-\U0001FAFF"
+    "\U00002700-\U000027BF"
+    "\U00002600-\U000026FF"
+    "]+",
+    re.UNICODE,
+)
+CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 SENTENCE_SPLIT_RE = re.compile(r"([^。！？!?；;\n]+[。！？!?；;]*|\n+)")
 LIVE_JOB_LINGER_SECONDS = 300
 BACKEND_LLM_PARSE_PROMPT_VERSION = "20260606-fast6g-backend-v1"
-BACKEND_NORMAL_PARSE_VERSION = "20260606-fast6g-normal-v1"
+BACKEND_NORMAL_PARSE_VERSION = "20260607-fast6g-normal-v2"
 LLM_PARSE_CACHE_MAX = 64
 LLM_PARSE_CACHE: Dict[str, dict] = {}
 STREAM_MODE_SETTINGS = {
@@ -402,14 +414,21 @@ def _audio_file_meta(path: str) -> dict:
 
 def _clean_tavo_body_text(text: str) -> str:
     text = html.unescape(str(text or ""))
-    for _ in range(4):
+    for _ in range(12):
         before = text
-        text = re.sub(r"<(script|style|template)\b[^>]*>[\s\S]*?</\1>", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"</(p|div|br|li|section|article|blockquote|h[1-6])\s*>", "\n", text, flags=re.IGNORECASE)
-        text = HTML_TAG_RE.sub("", text)
+        text = html.unescape(text)
+        text = re.sub(r"<!--[\s\S]*?-->", "\n", text)
+        text = HTML_BLOCK_RE.sub("\n", text)
+        text = HTML_VOID_RE.sub("\n", text)
+        text = HTML_TAG_RE.sub("\n", text)
         if text == before:
             break
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = re.sub(r"\[[A-Za-z0-9_-]*TAVO[A-Za-z0-9_-]*\]", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[IndexTTS_TAVO_SCRIPT\]", "\n", text, flags=re.IGNORECASE)
+    text = text.replace("<", "\n").replace(">", "\n")
+    text = CONTROL_RE.sub("", text)
+    text = EMOJI_RE.sub("", text)
+    text = re.sub(r"^[ \t>*#\-_=~`]+", "", text, flags=re.MULTILINE)
     text = re.sub(r"[ \t\u3000]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
@@ -597,7 +616,7 @@ def _style_cache_fragment(seg: dict) -> dict:
 
 def _segment_cache_payload(seg: dict) -> dict:
     item = {
-        "role": str(seg.get("role") or "").strip(),
+        "role": _normalize_role(seg.get("role") or ""),
         "text": str(seg.get("text") or "").strip(),
     }
     if args.qwen_emo:
@@ -640,7 +659,9 @@ def _normalize_dialogue_voices(voices: dict) -> Dict[str, str]:
     normalized: Dict[str, str] = {}
     for key, value in (voices or {}).items():
         role = "default" if key == "default" else _normalize_role(key)
-        normalized[role] = str(value or "").strip()
+        voice = str(value or "").strip()
+        if voice or role not in normalized:
+            normalized[role] = voice
     return normalized
 
 
@@ -1089,7 +1110,9 @@ def _job_status_from_cache(cache_key: str) -> Optional[dict]:
         "cache_url": f"/cache_audio/{cache_key}",
         "segments_done": len(meta.get("segments_meta") or []),
         "segments_meta": meta.get("segments_meta") or [],
+        "segments_plan": meta.get("segments_plan") or (meta.get("metrics") or {}).get("segments_plan") or [],
         "sample_rate": meta.get("sample_rate") or 22050,
+        "duration_s": meta.get("duration_s"),
         "metrics": meta.get("metrics") or {},
         "error": None,
     }
@@ -1409,7 +1432,21 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
             job.metrics["state"] = "running"
             job.metrics["phase"] = "tts"
             job.metrics["message"] = "正在合成音频"
-            job.metrics["segments_total"] = len(segments)
+            segments_plan = []
+            for plan_idx, plan_seg in enumerate(segments):
+                plan_role = _normalize_role(plan_seg.get("role") or "旁白")
+                plan_text = str(plan_seg.get("text") or "").strip()
+                if not plan_text:
+                    continue
+                segments_plan.append({
+                    "idx": plan_idx,
+                    "role": plan_role,
+                    "text": plan_text,
+                    "style": _segment_style_name(plan_seg) or "neutral",
+                    "style_alpha": plan_seg.get("style_alpha"),
+                })
+            job.metrics["segments_total"] = len(segments_plan)
+            job.metrics["segments_plan"] = segments_plan
             for idx, seg in enumerate(segments):
                 if job.cancelled:
                     _mark_job_cancelled(job)
@@ -1529,6 +1566,7 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
         metadata = {
             "kind": "fast6g_dialogue_stream_v1",
             "segments_meta": job.segments_meta,
+            "segments_plan": job.metrics.get("segments_plan") or [],
             "sample_rate": job.sample_rate,
             "duration_s": audio_duration,
             "metrics": job.metrics,
@@ -1745,7 +1783,9 @@ async def tts_dialogue_job_status_endpoint(cache_key: str):
             "pcm_bytes": len(job.pcm),
             "segments_done": len(job.segments_meta),
             "segments_meta": job.segments_meta,
+            "segments_plan": job.metrics.get("segments_plan") or [],
             "sample_rate": job.sample_rate,
+            "duration_s": job.metrics.get("audio_duration_s") or 0.0,
             "metrics": job.metrics,
             "error": job.error,
         })

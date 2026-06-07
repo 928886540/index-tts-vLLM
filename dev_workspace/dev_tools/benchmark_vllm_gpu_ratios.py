@@ -8,10 +8,13 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-"""Benchmark vLLM GPU memory ratio presets with a fixed dialogue sample.
+"""Benchmark vLLM with a fixed dialogue sample.
 
 Generated JSON/JSONL/log outputs are written under dev_workspace/benchmarks/
 and intentionally stay untracked.
+
+Default mode uses the API that is already running, typically started by the
+root launcher. Use --restart-service explicitly when changing vLLM ratio.
 """
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,11 +24,14 @@ OUT_DIR = ROOT / "dev_workspace" / "benchmarks"
 API = "http://127.0.0.1:9880"
 RATIOS = [0.11, 0.15, 0.20, 0.25]
 RUNS_PER_RATIO = 3
+RESTART_SERVICE = False
 FAIL_FAST = True
-MAX_IDLE_GPU_MIB = 9500
+MAX_IDLE_GPU_MIB = 10500
 MAX_WARMUP_GPU_MIB = 11200
 MAX_RUN_GPU_MIB = 11200
 MAX_RTF = 2.0
+MAX_WARMUP_SECONDS = 90
+MAX_JOB_SECONDS = 240
 
 VOICE_MAP = {
     "default": "400个火爆音色/短剧解说",
@@ -54,6 +60,20 @@ GENERATION_PARAMS = {
 
 def log(message: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
+
+
+def ratio_label(value) -> str:
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
+
+
+def ratio_slug(value) -> str:
+    text = ratio_label(value).strip() or "current"
+    safe = []
+    for ch in text:
+        safe.append(ch if ch.isalnum() else "_")
+    return "".join(safe).strip("_") or "current"
 
 
 def append_jsonl(path: Path, record) -> None:
@@ -106,25 +126,58 @@ def _first_positive_int(text: str):
     return None
 
 
+def _listening_pid_from_netstat(port: int):
+    try:
+        out = subprocess.check_output(["netstat", "-ano", "-p", "tcp"], text=True, stderr=subprocess.STDOUT)
+    except Exception:
+        return None
+    suffix = f":{port}"
+    for raw_line in out.splitlines():
+        line = raw_line.strip()
+        if "LISTENING" not in line:
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        local = parts[1]
+        if local.endswith(suffix):
+            try:
+                return int(parts[-1])
+            except ValueError:
+                return None
+    return None
+
+
 def api_processes():
+    port = 9880
     ps = (
-        "Get-NetTCPConnection -LocalPort 9880 -State Listen -ErrorAction SilentlyContinue | "
+        f"Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | "
         "Select-Object -First 1 -ExpandProperty OwningProcess"
     )
     try:
-        api_pid_text = subprocess.check_output(["powershell.exe", "-NoProfile", "-Command", ps], text=True).strip()
+        api_pid_text = subprocess.check_output(
+            ["powershell.exe", "-NoProfile", "-Command", ps],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
         api_pid = _first_positive_int(api_pid_text)
     except Exception:
         api_pid = None
+    if not api_pid:
+        api_pid = _listening_pid_from_netstat(port)
     worker_pid = None
     if api_pid:
         ps_worker = (
-            f"Get-CimInstance Win32_Process | "
+            f"Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | "
             f"Where-Object {{ $_.ParentProcessId -eq {api_pid} -and $_.CommandLine -like '*multiprocessing.spawn*' }} | "
             "Select-Object -First 1 -ExpandProperty ProcessId"
         )
         try:
-            worker_text = subprocess.check_output(["powershell.exe", "-NoProfile", "-Command", ps_worker], text=True).strip()
+            worker_text = subprocess.check_output(
+                ["powershell.exe", "-NoProfile", "-Command", ps_worker],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
             worker_pid = _first_positive_int(worker_text)
         except Exception:
             worker_pid = None
@@ -141,6 +194,13 @@ def wait_health(timeout=300):
             last_error = exc
             time.sleep(3)
     raise RuntimeError(f"health timeout: {last_error}")
+
+
+def require_vllm_health(health):
+    version = (health or {}).get("version")
+    engine = (health or {}).get("engine")
+    if version != "vllm" and engine != "vllm":
+        raise RuntimeError(f"expected vLLM API on {API}, got version={version!r} engine={engine!r}")
 
 
 def recent_fatal_startup_error(started_at: float):
@@ -274,16 +334,16 @@ def resolve_voice_names():
 def warmup(ratio: float):
     payload = {"text": "你好。", "voice": VOICE_MAP["旁白"], "force": True}
     started = time.perf_counter()
-    result = http_json("POST", "/warmup", payload=payload, timeout=600)
+    result = http_json("POST", "/warmup", payload=payload, timeout=MAX_WARMUP_SECONDS)
     result["client_elapsed_s"] = round(time.perf_counter() - started, 3)
     result["gpu_after"] = gpu_snapshot()
-    log(f"warmup ratio={ratio} status={result.get('status')} elapsed={result.get('elapsed_s')} gpu={result['gpu_after'].get('memory_used_mib')}MiB")
-    require_gpu_below(f"warmup ratio={ratio}", result["gpu_after"], MAX_WARMUP_GPU_MIB)
+    log(f"warmup ratio={ratio_label(ratio)} status={result.get('status')} elapsed={result.get('elapsed_s')} gpu={result['gpu_after'].get('memory_used_mib')}MiB")
+    require_gpu_below(f"warmup ratio={ratio_label(ratio)}", result["gpu_after"], MAX_WARMUP_GPU_MIB)
     return result
 
 
 def run_job(ratio: float, run_idx: int, segments, out_jsonl: Path):
-    nonce = f"vllm-ratio-{ratio:.2f}-run-{run_idx}-{int(time.time() * 1000)}"
+    nonce = f"vllm-ratio-{ratio_slug(ratio)}-run-{run_idx}-{int(time.time() * 1000)}"
     payload = {
         **GENERATION_PARAMS,
         "voices": VOICE_MAP,
@@ -300,13 +360,14 @@ def run_job(ratio: float, run_idx: int, segments, out_jsonl: Path):
         **api_processes(),
     }
     started = time.perf_counter()
+    cache_key = None
     try:
         created = http_json("POST", "/tts_dialogue_stream_job", payload=payload, timeout=60)
         record["job_create"] = created
         cache_key = created.get("cache_key")
         if not cache_key:
             raise RuntimeError(f"missing cache_key: {created}")
-        log(f"job start ratio={ratio} run={run_idx} key={cache_key} gpu={record['gpu_before'].get('memory_used_mib')}MiB")
+        log(f"job start ratio={ratio_label(ratio)} run={run_idx} key={cache_key} gpu={record['gpu_before'].get('memory_used_mib')}MiB")
         max_gpu = dict(record["gpu_before"])
         last_report = 0.0
         while True:
@@ -319,7 +380,20 @@ def run_job(ratio: float, run_idx: int, segments, out_jsonl: Path):
             elapsed = time.perf_counter() - started
             if FAIL_FAST and snap.get("memory_used_mib") is not None and snap["memory_used_mib"] > MAX_RUN_GPU_MIB:
                 reason = f"GPU memory guard tripped: {snap['memory_used_mib']}MiB > {MAX_RUN_GPU_MIB}MiB"
-                log(f"job abort ratio={ratio} run={run_idx}: {reason}")
+                log(f"job abort ratio={ratio_label(ratio)} run={run_idx}: {reason}")
+                try:
+                    http_json("DELETE", f"/tts_dialogue_stream_job/{cache_key}", timeout=30)
+                    status = http_json("GET", f"/tts_dialogue_job_status/{cache_key}", timeout=30)
+                except Exception as cancel_exc:
+                    record["cancel_error"] = repr(cancel_exc)
+                record["status"] = status
+                record["state"] = "aborted"
+                record["error"] = reason
+                record["abort_remaining"] = reason
+                break
+            if MAX_JOB_SECONDS and elapsed > MAX_JOB_SECONDS:
+                reason = f"job wall-time guard tripped: {elapsed:.1f}s > {MAX_JOB_SECONDS}s"
+                log(f"job abort ratio={ratio_label(ratio)} run={run_idx}: {reason}")
                 try:
                     http_json("DELETE", f"/tts_dialogue_stream_job/{cache_key}", timeout=30)
                     status = http_json("GET", f"/tts_dialogue_job_status/{cache_key}", timeout=30)
@@ -332,7 +406,7 @@ def run_job(ratio: float, run_idx: int, segments, out_jsonl: Path):
                 break
             if elapsed - last_report >= 30:
                 log(
-                    f"job poll ratio={ratio} run={run_idx} state={state} "
+                    f"job poll ratio={ratio_label(ratio)} run={run_idx} state={state} "
                     f"segments={metrics.get('segments_done')}/{metrics.get('segments_total')} "
                     f"elapsed={elapsed:.0f}s gpu={snap.get('memory_used_mib')}MiB"
                 )
@@ -341,21 +415,26 @@ def run_job(ratio: float, run_idx: int, segments, out_jsonl: Path):
                 record["status"] = status
                 record["state"] = state
                 break
-            if elapsed > 1200:
-                raise TimeoutError(f"job timeout after {elapsed:.1f}s")
             time.sleep(5)
         record["client_elapsed_s"] = round(time.perf_counter() - started, 3)
         record["gpu_after"] = gpu_snapshot()
         record["gpu_peak"] = max_gpu
         metrics = (record.get("status") or {}).get("metrics") or {}
+        if FAIL_FAST and record.get("state") in ("failed", "cancelled") and not record.get("abort_remaining"):
+            reason = f"job ended with state={record.get('state')}"
+            error_text = (record.get("status") or {}).get("error")
+            if error_text:
+                reason = f"{reason}: {error_text}"
+            record["abort_remaining"] = reason
+            log(f"job abnormal ratio={ratio_label(ratio)} run={run_idx}: {reason}")
         if FAIL_FAST and record.get("state") == "done":
             rtf = metrics.get("rtf")
             if rtf is not None and float(rtf) > MAX_RTF:
                 reason = f"RTF guard tripped: {float(rtf):.3f} > {MAX_RTF:.3f}"
                 record["abort_remaining"] = reason
-                log(f"job abnormal ratio={ratio} run={run_idx}: {reason}")
+                log(f"job abnormal ratio={ratio_label(ratio)} run={run_idx}: {reason}")
         log(
-            f"job done ratio={ratio} run={run_idx} state={record['state']} "
+            f"job done ratio={ratio_label(ratio)} run={run_idx} state={record['state']} "
             f"rtf={metrics.get('rtf')} wall_rtf={metrics.get('wall_rtf')} "
             f"audio={metrics.get('audio_duration_s')}s wall={metrics.get('total_wall_s')}s "
             f"peak_gpu={max_gpu.get('memory_used_mib')}MiB"
@@ -363,9 +442,11 @@ def run_job(ratio: float, run_idx: int, segments, out_jsonl: Path):
     except Exception as exc:
         record["state"] = "error"
         record["error"] = repr(exc)
+        if FAIL_FAST:
+            record["abort_remaining"] = repr(exc)
         record["client_elapsed_s"] = round(time.perf_counter() - started, 3)
         record["gpu_after"] = gpu_snapshot()
-        log(f"job error ratio={ratio} run={run_idx}: {exc!r}")
+        log(f"job error ratio={ratio_label(ratio)} run={run_idx}: {exc!r}")
     append_jsonl(out_jsonl, record)
     return record
 
@@ -382,7 +463,7 @@ def summarize(records, meta, out_path: Path):
         "by_ratio": {},
     }
     for ratio in RATIOS:
-        rows = [r for r in done if abs(float(r.get("ratio")) - ratio) < 1e-9]
+        rows = [r for r in done if ratio_label(r.get("ratio")) == ratio_label(ratio)]
         if not rows:
             continue
         metrics = [(r.get("status") or {}).get("metrics") or {} for r in rows]
@@ -413,29 +494,45 @@ def summarize(records, meta, out_path: Path):
 
 def main():
     global API, RATIOS, RUNS_PER_RATIO, SOURCE_JSON
-    global FAIL_FAST, MAX_IDLE_GPU_MIB, MAX_WARMUP_GPU_MIB, MAX_RUN_GPU_MIB, MAX_RTF
+    global RESTART_SERVICE, FAIL_FAST, MAX_IDLE_GPU_MIB, MAX_WARMUP_GPU_MIB, MAX_RUN_GPU_MIB, MAX_RTF, MAX_WARMUP_SECONDS, MAX_JOB_SECONDS
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", default=API)
     parser.add_argument("--source-json", default=str(SOURCE_JSON))
-    parser.add_argument("--ratios", nargs="*", type=float, default=RATIOS)
+    parser.add_argument("--ratios", nargs="*", type=float, default=None)
     parser.add_argument("--runs", type=int, default=RUNS_PER_RATIO)
+    parser.add_argument(
+        "--restart-service",
+        action="store_true",
+        help="Restart vLLM for each ratio. Default is to benchmark the current launcher-started service.",
+    )
+    parser.add_argument("--skip-warmup", action="store_true")
     parser.add_argument("--no-fail-fast", action="store_true")
     parser.add_argument("--max-idle-gpu-mib", type=int, default=MAX_IDLE_GPU_MIB)
     parser.add_argument("--max-warmup-gpu-mib", type=int, default=MAX_WARMUP_GPU_MIB)
     parser.add_argument("--max-run-gpu-mib", type=int, default=MAX_RUN_GPU_MIB)
     parser.add_argument("--max-rtf", type=float, default=MAX_RTF)
+    parser.add_argument("--max-warmup-seconds", type=int, default=MAX_WARMUP_SECONDS)
+    parser.add_argument("--max-job-seconds", type=int, default=MAX_JOB_SECONDS)
     args = parser.parse_args()
 
     API = args.api.rstrip("/")
     SOURCE_JSON = Path(args.source_json)
-    RATIOS = args.ratios
+    RESTART_SERVICE = args.restart_service
+    if RESTART_SERVICE:
+        RATIOS = args.ratios if args.ratios is not None else RATIOS
+    else:
+        if args.ratios and len(args.ratios) > 1:
+            log(f"current-service mode ignores extra ratio labels: {args.ratios[1:]}")
+        RATIOS = [args.ratios[0] if args.ratios else "current"]
     RUNS_PER_RATIO = args.runs
     FAIL_FAST = not args.no_fail_fast
     MAX_IDLE_GPU_MIB = args.max_idle_gpu_mib
     MAX_WARMUP_GPU_MIB = args.max_warmup_gpu_mib
     MAX_RUN_GPU_MIB = args.max_run_gpu_mib
     MAX_RTF = args.max_rtf
+    MAX_WARMUP_SECONDS = args.max_warmup_seconds
+    MAX_JOB_SECONDS = args.max_job_seconds
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -452,6 +549,9 @@ def main():
                 "max_warmup_gpu_mib": MAX_WARMUP_GPU_MIB,
                 "max_run_gpu_mib": MAX_RUN_GPU_MIB,
                 "max_rtf": MAX_RTF,
+                "max_warmup_seconds": MAX_WARMUP_SECONDS,
+                "max_job_seconds": MAX_JOB_SECONDS,
+                "restart_service": RESTART_SERVICE,
             },
             ensure_ascii=False,
         )
@@ -461,17 +561,69 @@ def main():
     log(f"loaded segments={len(segments)} source_duration={source.get('duration_s')}")
 
     # Validate against the live API before the long run.
-    wait_health(timeout=30)
+    health = wait_health(timeout=30)
+    require_vllm_health(health)
+    log("health=" + json.dumps({k: health.get(k) for k in ("version", "engine", "qwen_emo", "llm_parse")}, ensure_ascii=False))
     resolved = resolve_voice_names()
     log("resolved voices=" + json.dumps(resolved, ensure_ascii=False))
 
     records = []
+    if not RESTART_SERVICE:
+        ratio = RATIOS[0]
+        current_record = {
+            "ratio": ratio,
+            "type": "current_service",
+            "health": health,
+            **api_processes(),
+            "gpu": gpu_snapshot(),
+        }
+        records.append(current_record)
+        append_jsonl(out_jsonl, current_record)
+        log(
+            f"current service ok label={ratio_label(ratio)} "
+            f"gpu={current_record['gpu'].get('memory_used_mib')}MiB "
+            f"pids={current_record.get('api_pid')}/{current_record.get('worker_pid')}"
+        )
+        try:
+            require_gpu_below("current service idle", current_record["gpu"], MAX_IDLE_GPU_MIB)
+        except Exception as exc:
+            current_record["state"] = "preflight_error"
+            current_record["error"] = repr(exc)
+            log(f"current service preflight error: {exc!r}")
+            summarize(records, source, out_summary)
+            return 2
+        if not args.skip_warmup:
+            try:
+                current_record["warmup"] = warmup(ratio)
+            except Exception as exc:
+                current_record["state"] = "warmup_error"
+                current_record["error"] = repr(exc)
+                log(f"warmup error label={ratio_label(ratio)}: {exc!r}")
+                summarize(records, source, out_summary)
+                return 2
+        if RUNS_PER_RATIO <= 0:
+            summary = summarize(records, source, out_summary)
+            log("dry run complete: no synthesis jobs requested")
+            log("summary=" + json.dumps(summary.get("by_ratio"), ensure_ascii=False))
+            return 0
+        for run_idx in range(1, RUNS_PER_RATIO + 1):
+            record = run_job(ratio, run_idx, segments, out_jsonl)
+            records.append(record)
+            if FAIL_FAST and record.get("abort_remaining"):
+                log(f"benchmark fail-fast stop: {record.get('abort_remaining')}")
+                summarize(records, source, out_summary)
+                return 2
+        summary = summarize(records, source, out_summary)
+        log("summary=" + json.dumps(summary.get("by_ratio"), ensure_ascii=False))
+        return 0
+
     for ratio in RATIOS:
         ratio_record = {"ratio": ratio, "type": "restart"}
         try:
             ratio_record["restart"] = restart_vllm(ratio)
             log(f"restart ok ratio={ratio} gpu={ratio_record['restart']['gpu'].get('memory_used_mib')}MiB pids={ratio_record['restart'].get('api_pid')}/{ratio_record['restart'].get('worker_pid')}")
-            ratio_record["warmup"] = warmup(ratio)
+            if not args.skip_warmup:
+                ratio_record["warmup"] = warmup(ratio)
         except Exception as exc:
             ratio_record["state"] = "restart_error"
             ratio_record["error"] = repr(exc)

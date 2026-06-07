@@ -20,6 +20,8 @@ _NARRATOR_CANONICAL = "旁白"
 # 不能归到用户。前端会把具体用户身份名也规范成「用户」。
 _USER_ALIASES = {"你", "用户", "user", "you"}
 _USER_CANONICAL = "用户"
+_DIALOGUE_ALIASES = {"对白", "对话", "台词", "dialogue"}
+_DIALOGUE_CANONICAL = "对白"
 
 
 def parse_text_openai_compatible(
@@ -251,6 +253,8 @@ def _normalize_role(value: Any) -> str:
         return _NARRATOR_CANONICAL
     if lowered in _USER_ALIASES:
         return _USER_CANONICAL
+    if lowered in _DIALOGUE_ALIASES:
+        return _DIALOGUE_CANONICAL
     return role or _NARRATOR_CANONICAL
 
 

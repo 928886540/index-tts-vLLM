@@ -3,6 +3,13 @@
       if (!track) return;
       track.pausedByUser = true;
       try {
+        var webSec = webAudioPlaybackSecForTrack(track);
+        if (isFinite(Number(webSec)) && Number(webSec) > 0) {
+          track.lastWebAudioSec = Math.max(0, Number(webSec));
+          track.lastElementSec = track.lastWebAudioSec;
+        }
+      } catch (_) {}
+      try {
         if (isFinite(Number(audio.currentTime))) track.lastElementSec = Math.max(0, elementPlaybackTimeSec(track));
       } catch (_) {}
       try { audio.pause(); } catch (_) {}
@@ -10,7 +17,7 @@
       track.playSavedWhenReady = false;
       setPlayState("idle");
       setStatus("已暂停");
-      showTrackNotice(track, "已暂停", track.cacheKey ? "不会自动恢复流式；完整音频就绪后点播放会检查历史音频" : "已停止等待");
+      showTrackNotice(track, "已暂停", track.cacheKey ? "点播放从当前位置继续实时流；后台仍会自动落盘" : "已停止等待");
     }
 
     async function generate(force) {
@@ -146,18 +153,18 @@
         if (backgroundDetached && currentTrack() !== track) {
           if (!currentTrack()) {
             setStatus(titleText);
-            showTrackNotice(null, titleText, detailText);
+            if (!isTransientProgressNotice(titleText)) showTrackNotice(null, titleText, detailText);
           }
           return;
         }
         setStatus(titleText);
-        showTrackNotice(track, titleText, detailText);
+        if (!isTransientProgressNotice(titleText)) showTrackNotice(track, titleText, detailText);
       }
       if (parseMode === "ai" && (!cfg.llmEndpoint || !cfg.llmModel)) throw new Error("AI模式需要填写 LLM 接口地址和模型。");
       var voicesMap = parseMode === "normal" ? normalModeVoicesMap(cfg) : rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
       var rolesHint = parseMode === "normal"
         ? ["旁白", "对白"]
-        : normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName).map(function (r) { return String((r && r.role) || "").trim(); }).filter(Boolean);
+        : normalizeAiRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName).map(function (r) { return String((r && r.role) || "").trim(); }).filter(Boolean);
       var placeholder = {
         url: null,
         streamUrl: "",
@@ -215,7 +222,7 @@
           emo_alpha: cfg.emoAlpha,
           speed_factor: clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25),
           bypass_cache: !!force
-        }, generationQualityOverrides(cfg.qualityMode));
+        }, generationQualityOverrides(cfg.qualityMode, cfg));
         if (parseMode === "ai") {
           body.llm_endpoint = cfg.llmEndpoint;
           body.llm_model = cfg.llmModel;
@@ -301,22 +308,7 @@
           return;
         }
         if (parseMode === "ai" && placeholder.cacheKey) {
-          await refreshTrackFromStatus(placeholder, "pre-live status");
-          if (isSavedTrack(placeholder)) {
-            setPlayState("loading");
-            startElementAudioFrom(placeholder, 0);
-            stopServerLogPolling();
-            return;
-          }
-          var preLiveState = trackState(placeholder);
-          if (preLiveState === "failed" || preLiveState === "cancelled") {
-            setPlayState("idle");
-            setStatus(preLiveState === "cancelled" ? "任务已取消" : "生成失败");
-            showTrackNotice(placeholder, preLiveState === "cancelled" ? "任务已取消" : "生成失败", placeholder.error || "后端任务未能生成音频");
-            updateTrackButtons();
-            stopServerLogPolling();
-            return;
-          }
+          refreshTrackFromStatus(placeholder, "pre-live status").catch(function () {});
         }
         if (placeholder.pausedByUser) {
           setStatus("已暂停，后台合成中");

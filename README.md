@@ -26,15 +26,22 @@ The launcher selects one backend version at startup. `static/`, `launcher/`, and
 The app does not require a public domain. For same-LAN phone testing, use:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260606-live-audio-v6"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-live-audio-v15"></script>
 ```
 
 For a public tunnel, configure the tunnel/reverse proxy outside this repository and replace only the script host.
 The only runtime code that should depend on the script host is `static/tavo.js`, which uses its own loaded script origin as the API origin.
+
+## Communication Style
+
+- Default to Simplified Chinese, direct and practical. Call the user `bro` when it fits the flow. 🙂
+- Keep handoffs human: say what changed, what evidence was checked, what still needs validation, and the next useful move.
+- Emojis are welcome when they make the note easier to scan, but keep commands, logs, API paths, and errors precise.
+- Do not bury the result under templates. If something is risky, slow, or only partially verified, say it plainly. 👍
 
 ## Development Notes
 
 - Active collaboration state lives in `dev_workspace/docs/`.
 - Tavo frontend changes must follow the local `tavo` Codex skill.
 - Do not commit model weights, runtime folders, generated audio cache, logs, package archives, or local Git backups.
-- Startup options are selected in the launcher: backend version (`vllm` / `fast6g`) and vLLM GPU memory ratio (`0.18` default or `0.11` conservative). Qwen emotion is deprecated for the launcher path; AI mode should use LLM-selected style/emotion parameters instead.
+- Startup options are selected in the launcher: backend version (`vllm` / `fast6g`) and vLLM GPU memory ratio (`0.15` default or `0.11` conservative). Qwen emotion is deprecated for the launcher path; AI mode should use LLM-selected style/emotion parameters instead.

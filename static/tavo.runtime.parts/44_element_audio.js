@@ -126,6 +126,9 @@
     }
     function handleAudioPlayReject(label, err, fallbackStatus) {
       if (err && err.name === "AbortError") return;
+      var t = currentTrack();
+      if (t) setTrackPlaybackState(t, "idle");
+      setPlayState("idle");
       if (isUnsupportedPlayError(err)) {
         debugLog("⚠️ " + label + " audio.play() 不支持，已等待用户重试: " + (err && err.message ? err.message : err), "#fc9");
         setStatus(fallbackStatus || "当前 WebView 暂时没放行播放，请再点一次播放");

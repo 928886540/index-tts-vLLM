@@ -20,28 +20,35 @@
       '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式" title="退出流式"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/><path d="M7 21h10"/></svg></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
-        + '<div class="idx-section-title">文本模式</div>'
-        + '<div class="idx-modes"><button class="idx-mode" data-mode="normal" type="button"><strong>普通模式</strong><span>后端规则拆旁白/对白</span></button><button class="idx-mode" data-mode="ai" type="button"><strong>AI模式</strong><span>后端 LLM 拆旁白/人物</span></button></div>'
+        + '<div class="idx-modes"><button class="idx-mode" data-mode="ai" type="button"><strong>AI模式</strong><span>后端 LLM 拆旁白/人物</span></button><button class="idx-mode" data-mode="normal" type="button"><strong>普通模式</strong><span>后端规则拆旁白/对白</span></button></div>'
         + '<div class="idx-section-title">合成质量</div>'
         + '<div class="idx-grid">'
-          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option><option value="ultra">落盘高质量</option></select></label>'
+          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option><option value="ultra">落盘高质量</option><option value="custom">自定义</option></select></label>'
           + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.00"></label>'
         + '</div>'
+        + '<details class="idx-llm-details idx-custom-quality"><summary>自定义参数</summary><div class="idx-grid">'
+          + '<label class="idx-field"><span class="idx-label">扩散步数</span><input class="idx-input" type="number" min="2" max="24" step="1" data-field="diffusionSteps" placeholder="14"></label>'
+          + '<label class="idx-field"><span class="idx-label">参考音频秒数</span><input class="idx-input" type="number" min="2" max="16" step="0.5" data-field="promptAudioSeconds" placeholder="10"></label>'
+          + '<label class="idx-field"><span class="idx-label">分段 token</span><input class="idx-input" type="number" min="8" max="120" step="1" data-field="segmentTokens" placeholder="60"></label>'
+          + '<label class="idx-field"><span class="idx-label">首段 token</span><input class="idx-input" type="number" min="4" max="120" step="1" data-field="firstTokens" placeholder="18"></label>'
+          + '<label class="idx-field"><span class="idx-label">S2Mel CFG</span><input class="idx-input" type="number" min="0" max="1.2" step="0.05" data-field="s2melCfgRate" placeholder="0.70"></label>'
+          + '<label class="idx-field"><span class="idx-label">Top P</span><input class="idx-input" type="number" min="0.1" max="1" step="0.01" data-field="topP" placeholder="0.80"></label>'
+          + '<label class="idx-field"><span class="idx-label">Top K</span><input class="idx-input" type="number" min="1" max="100" step="1" data-field="topK" placeholder="30"></label>'
+          + '<label class="idx-field"><span class="idx-label">Temperature</span><input class="idx-input" type="number" min="0.1" max="1.5" step="0.01" data-field="temperature" placeholder="0.70"></label>'
+          + '<label class="idx-field"><span class="idx-label">重复惩罚</span><input class="idx-input" type="number" min="1" max="2" step="0.01" data-field="repetitionPenalty" placeholder="1.20"></label>'
+          + '<label class="idx-field"><span class="idx-label">情绪强度</span><input class="idx-input" type="number" min="0" max="1" step="0.01" data-field="emoAlpha" placeholder="0.38"></label>'
+          + '<label class="idx-field"><span class="idx-label">歌词提前秒</span><input class="idx-input" type="number" min="0" max="1" step="0.05" data-field="subtitleLeadSec" placeholder="0.30"></label>'
+        + '</div></details>'
         + '<div class="idx-normal-only"><div class="idx-section-title">普通模式音色</div><div class="idx-normal-voices" data-role="normal-voices">'
-          + '<div class="idx-role-row idx-role-protected idx-normal-voice-row" data-normal-role="default">'
-            + '<input class="idx-role-name" type="text" value="默认" readonly>'
-            + '<button class="idx-voice-btn" type="button" data-role="default-voice-btn">选择默认音色…</button>'
-            + '<span class="idx-role-lock" title="默认槽位,不可删除">🔒</span>'
-          + '</div>'
           + '<div class="idx-role-row idx-role-protected idx-normal-voice-row" data-normal-role="narrator">'
             + '<input class="idx-role-name" type="text" value="旁白" readonly>'
-            + '<button class="idx-voice-btn" type="button" data-role="normal-narrator-voice-btn">继承默认音色</button>'
+            + '<button class="idx-voice-btn" type="button" data-role="normal-narrator-voice-btn">选择旁白音色…</button>'
             + '<span class="idx-role-lock" title="旁白槽位,不可删除">🔒</span>'
           + '</div>'
           + '<div class="idx-role-row idx-role-protected idx-normal-voice-row" data-normal-role="dialogue">'
-            + '<input class="idx-role-name" type="text" value="对话" readonly>'
-            + '<button class="idx-voice-btn" type="button" data-role="normal-dialogue-voice-btn">继承默认音色</button>'
-            + '<span class="idx-role-lock" title="对话槽位,不可删除">🔒</span>'
+            + '<input class="idx-role-name" type="text" value="对白" readonly>'
+            + '<button class="idx-voice-btn" type="button" data-role="normal-dialogue-voice-btn">继承旁白</button>'
+            + '<button class="idx-role-del" type="button" data-role="normal-dialogue-clear" title="清空对白音色，继承旁白">×</button>'
           + '</div>'
         + '</div></div>'
         + '<div class="idx-ai-only">'
@@ -154,15 +161,43 @@
     var currentTrackIndex = -1;
     var currentCacheKey = "";
     var webAudioController = null;
+    var webAudioActiveTrack = null;
     var webAudioPlayToken = 0;
     var webAudioProgressTimer = null;
 
     if (!panel) throw new Error("TAVO player missing settings panel");
     removeLegacyGlobalGear();
 
+    function isHeaderProgressStatus(v) {
+      var text = String(v == null ? "" : v);
+      if (!text) return false;
+      try {
+        if (typeof isTransientProgressNotice === "function" && isTransientProgressNotice(text)) return true;
+      } catch (_) {}
+      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(text);
+    }
+    function stableHeaderStatusText() {
+      try {
+        var t = currentTrack();
+        if (t) {
+          var label = trackPlaybackLabel(t);
+          if (label) return label;
+        }
+      } catch (_) {}
+      try {
+        if (typeof historyStatusText === "function") return historyStatusText();
+      } catch (_) {}
+      return "";
+    }
     function setStatus(v) {
       if (!status) return;
-      status.textContent = v == null ? "" : String(v);
+      var text = v == null ? "" : String(v);
+      if (isHeaderProgressStatus(text)) {
+        var stableText = stableHeaderStatusText();
+        if (stableText) text = stableText;
+        else if (status.textContent) return;
+      }
+      status.textContent = text;
       try { status.title = status.textContent || ""; } catch (_) {}
       try {
         if (status.__idxScrollTimer) { clearInterval(status.__idxScrollTimer); status.__idxScrollTimer = null; }

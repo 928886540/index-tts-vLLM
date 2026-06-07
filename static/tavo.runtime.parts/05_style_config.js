@@ -13,7 +13,7 @@
       ".idx-subtitle{position:relative;display:flex;flex-direction:column;gap:3px;margin:12px 0 0;padding:28px 10px 9px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.48) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:172px;min-height:172px;max-height:172px;overflow-y:auto;scroll-behavior:auto;-webkit-overflow-scrolling:touch;mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 86%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 86%,transparent 100%)}.idx-subtitle.idx-hidden{display:none}.idx-sub-row{display:flex;align-items:center;justify-content:center;min-height:31px;padding:5px 8px;border-radius:10px;flex-shrink:0;text-align:center;cursor:pointer;color:rgba(244,231,255,.42);font-size:13px;line-height:1.32;font-weight:500;transition:color .18s,background .18s,box-shadow .18s}.idx-sub-row:hover{background:rgba(255,255,255,.04)}.idx-sub-row.is-current{color:#fff;font-size:13px;font-weight:800;background:rgba(216,167,255,.10);box-shadow:inset 3px 0 0 rgba(216,167,255,.75)}.idx-sub-row.is-past{color:rgba(244,231,255,.30)}.idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}.idx-sub-avatar{width:24px;height:24px;border-radius:50%;background:#241a2c;object-fit:cover;border:1.5px solid rgba(206,170,230,.40);opacity:.85}.idx-sub-avatar.idx-hidden{display:none}.idx-sub-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;max-width:100%}",
       ".idx-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:14px;min-height:66px;flex-wrap:wrap}.idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease}@media(hover:hover){.idx-ctrl:hover{background:rgba(206,170,230,.16)}}.idx-ctrl:focus{outline:none}.idx-ctrl svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}.idx-ctrl-sm{width:42px;height:42px}.idx-ctrl-skip{width:42px;height:42px;background:rgba(130,190,255,.10);color:#cfe6ff}.idx-ctrl-skip svg{width:22px;height:22px}.idx-ctrl-main{width:66px;height:66px;background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-ctrl-main[data-state='playing']{background:#e1b0f5}.idx-ctrl-main svg{width:28px;height:28px;fill:currentColor;stroke:none}.idx-ctrl-main[data-state='loading'] svg{animation:idx-spin .9s linear infinite}@keyframes idx-spin{to{transform:rotate(360deg)}}.idx-ctrl-add{width:66px;height:66px;background:rgba(154,94,182,.42);color:#f4e7ff;box-shadow:0 10px 24px rgba(154,94,182,.18)}.idx-ctrl-add svg,.idx-ctrl-delete svg,.idx-header-delete svg{width:28px;height:28px;fill:currentColor;stroke:none}.idx-ctrl-delete{width:48px;height:48px;background:rgba(120,38,52,.46);color:#ffd5dd}.idx-live-exit{width:56px;height:56px;background:rgba(150,38,58,.70);color:#ffe6ea;border-color:rgba(255,150,170,.32);box-shadow:0 10px 24px rgba(150,38,58,.18)}.idx-live-exit svg{width:24px;height:24px}.idx-ctrl:disabled,.idx-header-delete:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.25)}",
       ".idx-meta{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:12px}.idx-pill{font-size:11px;color:rgba(238,231,244,.75);background:rgba(255,255,255,.06);border:1px solid rgba(206,170,230,.14);border-radius:999px;padding:4px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.idx-playback-toggle{position:absolute;right:102px;top:14px;height:32px;min-width:70px;padding:0 10px;border:1px solid rgba(126,205,255,.34);border-radius:999px;background:rgba(40,94,128,.38);color:#d8f1ff;font-size:11px;font-weight:900;font-family:inherit;cursor:pointer;z-index:2}.idx-playback-toggle[data-mode='generate']{border-color:rgba(255,202,126,.38);background:rgba(128,86,32,.42);color:#ffe5b8}",
-      ".idx-panel,.idx-panel *{box-sizing:border-box}.idx-panel{margin:auto auto 8px auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:auto;max-height:min(88dvh,calc(100dvh - 12px));overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:2}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
+      ".idx-panel,.idx-panel *{box-sizing:border-box}.idx-panel:focus,.idx-picker:focus,.idx-panel:focus-visible,.idx-picker:focus-visible{outline:none!important;outline-width:0!important;outline-offset:0!important}.idx-panel{margin:auto auto 8px auto;border:1px solid rgba(206,170,230,.22);border-top-left-radius:18px;border-top-right-radius:18px;border-bottom-left-radius:0;border-bottom-right-radius:0;background:rgba(12,8,18,.985);color:#eee7f4;width:100%;max-width:100vw;height:auto;max-height:min(88dvh,calc(100dvh - 12px));overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;box-shadow:0 -8px 32px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);padding:14px;padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}.idx-panel::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}.idx-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-14px -14px 10px;padding:12px 14px 10px;position:sticky;top:-14px;background:linear-gradient(180deg,#120e18 0%,rgba(18,14,24,.94) 100%);z-index:2}.idx-panel-title{font-size:14px;font-weight:800;color:#e9c8ff}.idx-close{border:0;background:transparent;color:rgba(238,231,244,.70);font-size:22px;line-height:1;cursor:pointer;padding:0 6px}",
       ".idx-section-title{font-size:12px;font-weight:700;color:#d9b7f0;margin:10px 0 5px}.idx-voices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.idx-voice{min-height:58px;border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}.idx-voice:before{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,#c890e8,#d8a7ff);opacity:.30}.idx-voice strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-voice span{display:block;margin-top:4px;font-size:11px;color:rgba(238,231,244,.56)}.idx-voice.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.12)}",
       ".idx-modes{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.idx-mode{border:1px solid rgba(206,170,230,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eee7f4;text-align:left;padding:9px;cursor:pointer;font-family:inherit}.idx-mode strong{display:block;font-size:12px}.idx-mode span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56)}.idx-mode.is-active{border-color:#c890e8;background:rgba(200,144,232,.16);box-shadow:0 0 0 2px rgba(200,144,232,.10)}",
       ".idx-check{display:flex;align-items:flex-start;gap:8px;margin:10px 0 4px;padding:9px;border:1px solid rgba(206,170,230,.16);border-radius:9px;background:rgba(255,255,255,.04);cursor:pointer}.idx-check input{margin:2px 0 0;accent-color:#c890e8}.idx-check strong{display:block;font-size:12px;color:#eee7f4}.idx-check span{display:block;margin-top:3px;font-size:11px;color:rgba(238,231,244,.56);line-height:1.35}",
@@ -116,7 +116,7 @@
       .map(function (r) { return r.role + "=" + r.voice; }).join("\n");
   }
   function rolesListToVoicesMap(list, defaultVoice, characterRoleName) {
-    var normalized = normalizeRoleVoiceList(list || [], characterRoleName);
+    var normalized = normalizeAiRoleVoiceList(list || [], characterRoleName);
     var out = { default: defaultVoice || "" };
     (normalized || []).forEach(function (r) {
       if (r.role && r.voice) out[r.role] = r.voice;
@@ -129,12 +129,12 @@
   }
   function setVoiceForRoleInList(list, role, voice, characterRoleName) {
     list = normalizeRoleVoiceList(list || [], characterRoleName);
-    role = String(role || "").trim();
+    role = canonicalDialogueRoleName(role);
     voice = String(voice || "").trim();
     var found = false;
     list.forEach(function (item) {
       if (String(item.role || "").trim() === role) {
-        item.voice = voice;
+        if (voice || !String(item.voice || "").trim()) item.voice = voice;
         found = true;
       }
     });
@@ -142,12 +142,24 @@
     return normalizeRoleVoiceList(list, characterRoleName);
   }
   function normalModeVoicesMap(cfg) {
-    var def = String((cfg && cfg.defaultVoice) || "").trim();
-    return {
-      default: def,
-      "旁白": voiceForRoleInList(cfg && cfg.roleVoiceList, ["旁白", "narrator"], def, cfg && cfg.currentCharacterName),
-      "对白": voiceForRoleInList(cfg && cfg.roleVoiceList, ["对白", "dialogue", "台词"], def, cfg && cfg.currentCharacterName)
+    var narrator = String((cfg && cfg.defaultVoice) || "").trim();
+    var dialogue = "";
+    normalizeRoleVoiceList((cfg && cfg.roleVoiceList) || [], cfg && cfg.currentCharacterName).some(function (item) {
+      if (!item || !isNormalDialogueRole(item.role)) return false;
+      dialogue = String(item.voice || "").trim();
+      return !!dialogue;
+    });
+    var out = {
+      default: narrator,
+      "旁白": narrator
     };
+    if (dialogue) {
+      out["对白"] = dialogue;
+      out["对话"] = dialogue;
+      out["台词"] = dialogue;
+      out.dialogue = dialogue;
+    }
+    return out;
   }
   var OFFLINE_DB_NAME = "indextts_tavo_audio_v1";
   var OFFLINE_DB_STORE = "audio";
@@ -220,8 +232,114 @@
     return "";
   }
 
+  function decodeHtmlEntitiesForTts(value) {
+    var text = String(value == null ? "" : value);
+    if (!/[&][A-Za-z#0-9]+;/.test(text)) return text;
+    try {
+      var textarea = document.createElement("textarea");
+      textarea.innerHTML = text;
+      return textarea.value || text;
+    } catch (_) {
+      return text;
+    }
+  }
+  function normalizeMessageTextForTts(value) {
+    return String(value == null ? "" : value)
+      .replace(/\[IndexTTS_TAVO_SCRIPT\]/g, "")
+      .replace(/https?:\/\/\S+\/static\/tavo\.js(?:\?\S*)?/gi, "")
+      .replace(/\u200b|\u200c|\u200d|\ufeff/g, "")
+      .replace(/\r/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+  }
+  function removeEmojiSymbolsForTts(value) {
+    var text = String(value == null ? "" : value);
+    try {
+      return text
+        .replace(new RegExp("[\\p{Extended_Pictographic}\\p{Emoji_Presentation}\\uFE0F]", "gu"), "")
+        .replace(/\u200d/g, "");
+    } catch (_) {
+      return text
+        .replace(/[\u2600-\u27BF]\uFE0F?/g, "")
+        .replace(/[\uD83C-\uDBFF][\uDC00-\uDFFF]/g, "")
+        .replace(/\uFE0F|\u200d/g, "");
+    }
+  }
+  function stripTagBlocksForTts(value) {
+    var text = String(value == null ? "" : value);
+    for (var i = 0; i < 12; i += 1) {
+      var before = text;
+      text = decodeHtmlEntitiesForTts(text);
+      text = text.replace(/<!--[\s\S]*?-->/g, "\n");
+      text = text.replace(/<([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/gi, "\n");
+      text = text.replace(/<\s*(?:br|hr|img|input|meta|link|source|track|wbr|area|base|col|embed|param)\b[^>]*\/?\s*>/gi, "\n");
+      text = text.replace(/<[^>]+>/g, "\n");
+      if (text === before) break;
+    }
+    return text;
+  }
+  function stripResidualTagNoiseForTts(value) {
+    var text = String(value == null ? "" : value);
+    for (var i = 0; i < 8; i += 1) {
+      var before = text;
+      text = decodeHtmlEntitiesForTts(text);
+      text = text.replace(/<\/?[^<>\s]+(?:\s[^<>]*)?>/g, "\n");
+      text = text.replace(/[<>]/g, "\n");
+      if (text === before) break;
+    }
+    return text;
+  }
+  function cleanRawMessageText(value) {
+    var text = stripTagBlocksForTts(value);
+    text = text.replace(/\[[A-Za-z0-9_-]*TAVO[A-Za-z0-9_-]*\]/gi, "\n");
+    text = text.replace(/\[IndexTTS_TAVO_SCRIPT\]/gi, "\n");
+    text = stripResidualTagNoiseForTts(text);
+    text = removeEmojiSymbolsForTts(text);
+    return normalizeMessageTextForTts(text);
+  }
+  function cleanDomMessageText(el) {
+    if (!el) return "";
+    try {
+      var clone = el.cloneNode(true);
+      clone.querySelectorAll([
+        '.idx-tts',
+        '.idx-card',
+        '.idx-panel',
+        '.idx-picker',
+        '.idx-global-gear',
+        '[data-indextts-host]',
+        '[data-loader-shell]',
+        'script',
+        'style',
+        'template',
+        'noscript',
+        'svg',
+        'canvas',
+        'audio',
+        'video',
+        'button',
+        'input',
+        'select',
+        'textarea',
+        'dialog',
+        '[hidden]',
+        '[aria-hidden="true"]'
+      ].join(',')).forEach(function (n) { n.remove(); });
+      return cleanRawMessageText(clone.innerText || clone.textContent || "");
+    } catch (_) {
+      return cleanRawMessageText((el.innerText || el.textContent || ""));
+    }
+  }
+  function usefulMessageText(text) {
+    text = normalizeMessageTextForTts(text);
+    return /[\u4e00-\u9fffA-Za-z0-9]/.test(text) ? text : "";
+  }
+
   async function currentMessageContext() {
-    var text = "";
+    var apiText = "";
+    var domText = "";
     var msgEl = messageElement(script);
     var avatarUrl = domAvatarUrl(msgEl);
     var characterName = "";
@@ -232,7 +350,9 @@
     try {
       if (window.tavo && tavo.message && typeof tavo.message.current === "function") {
         var msg = await tavo.message.current();
-        if (msg && msg.content) text = String(msg.content);
+        if (msg && msg.content) {
+          apiText = cleanRawMessageText(msg.content);
+        }
         if (msg && msg.id != null) messageId = String(msg.id);
         if (msg && msg.characterId != null) {
           characterId = String(msg.characterId);
@@ -270,14 +390,9 @@
     if (!avatarUrl) avatarUrl = domAvatarUrl(script && script.parentElement);
     avatarUrl = normalizeTavoAssetUrl(avatarUrl);
     userAvatarUrl = normalizeTavoAssetUrl(userAvatarUrl);
-    if (!text && msgEl) {
-      try {
-        var clone = msgEl.cloneNode(true);
-        clone.querySelectorAll('.idx-tts, .idx-card, .idx-panel, .idx-global-gear, script').forEach(function (n) { n.remove(); });
-        text = clone.innerText || clone.textContent || "";
-      } catch (_) { text = msgEl.innerText || msgEl.textContent || ""; }
-    }
-    return { text: text.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/\[IndexTTS_TAVO_SCRIPT\]/g, "").trim(), avatarUrl: avatarUrl, characterName: characterName, characterId: characterId, messageId: messageId, userName: userName, userAvatarUrl: userAvatarUrl };
+    if (msgEl) domText = cleanDomMessageText(msgEl);
+    var finalText = usefulMessageText(apiText) || usefulMessageText(domText) || "";
+    return { text: finalText, avatarUrl: avatarUrl, characterName: characterName, characterId: characterId, messageId: messageId, userName: userName, userAvatarUrl: userAvatarUrl };
   }
   // 每条消息的播放历史持久化：key = "indextts_tracks_<messageId>"。
   // 只存可重建的元信息（cacheKey + voice + mode + offlineKey），不存 blob。

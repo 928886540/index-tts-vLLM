@@ -75,7 +75,18 @@
   - live stream failure and recovery behavior.
   - specifically confirm saved/cache audio still uses native `<audio>` and works in background/lock-screen after the live-card patch.
 
+- User distribution defaults:
+  - P1 users should run the author's built-in prompts, style mappings, voice strategy, and quality tiers by default;
+  - do not block P1 on profile editing or full user-tuning UI;
+  - keep defaults stable and update-safe before exposing user-editable tuning.
+
 ## P2
+
+- User tuning blueprint:
+  - planning folder: `dev_workspace/docs/USER_TUNING_PLAN/`;
+  - not started yet; treat it as a later product layer after default distribution is stable;
+  - launcher should be the main profile/tuning UI; Tavo should stay lightweight for playback and quick mode choices;
+  - future work can expose LLM prompt templates, style catalogs, role strategies, LIVE buffer settings, expert quality parameters, and import/export profiles.
 
 - Compare engines with a fixed sample suite:
   - IndexTTS2;

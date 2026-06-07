@@ -25,6 +25,280 @@ Notes:
 - When the bug is fixed, record the actual root cause, the code/files changed, and the regression guard.
 - If a fixed bug returns, update the same entry and add a stricter guard in `docs/REGRESSION.md`.
 
+## BUG-043: LIVE header progress text can fight the current voice label and subtitles can stay on the first generated segment
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-07
+
+Repro: Start LIVE streaming in Tavo. While audio is audible, the avatar-side status line can be overwritten by transient backend progress such as "正在合成音频" / "后端正在合成", fighting the current voice/role label. In the lyric panel, only the first generated sentence can be visible while later audio continues to play and the progress display appears stuck.
+
+Evidence: User reported the avatar-right text was still showing generation notices over the current voice name, and that LIVE playback had sound but only the first lyric/progress appeared. Code audit found `setStatus()` accepted every transient progress writer. WebAudio progress also clamped the current second to `trackDurationHintSec(track)`, which during LIVE can equal only the first completed `segments_meta` duration. Backend status exposed only completed `segments_meta`, so the frontend had no planned later lyrics until each segment finished.
+
+Hypothesis: confirmed.
+
+Root cause: Header status and playback identity shared one text field with no transient-progress gate. LIVE progress treated partial status metadata as final duration. The status API did not expose full planned segment text after normal/AI parsing, so frontend subtitles could not render later planned lines before synthesis reached them.
+
+Fix: `static/tavo.runtime.parts/40_mount_shell.js` now suppresses transient progress text in the avatar-side status and falls back to the stable current track label. `static/tavo.runtime.parts/42_playback_header.js`, `46_track_state.js`, and `62_events_boot.js` no longer clamp LIVE playback time to partial known duration and use a separate meter duration for live progress. `vllm/indextts2_api.py` and `fast6g/indextts2_api.py` now expose `segments_plan` and live `duration_s` through job status. `static/tavo.runtime.parts/52_subtitle_media.js` merges `segments_plan` with completed `segments_meta`, rendering planned later lyrics immediately and then calibrating timings as real metadata arrives.
+
+Guard: During LIVE, header status must not contain transient phrases such as `等待音频`, `后端处理中`, `后端正在合成`, `正在连接音频`, or `网络缓冲中` while a track exists; it should show the current stable voice/role label instead. If status returns only the first completed `segments_meta` but also returns full `segments_plan`, the lyric panel must show later planned lines and WebAudio current time/progress must keep moving beyond the first segment duration.
+
+## BUG-042: Restored LIVE playback can resume from the beginning instead of the last WebAudio second
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-07 audit after user reported LIVE pause/resume can return to the start.
+
+Repro: A LIVE card has already played or stalled at a non-zero WebAudio second, then the stream is paused/recovered or the Tavo message is re-entered from pending job storage. Press play again.
+
+Evidence: Code audit found `playTrackViaWebAudio()` accepted `startOffsetSec` but fetched the raw `/tts_dialogue_stream_job/<cache_key>` URL instead of `?start_s=<sec>`. Pending job persistence also did not save `lastWebAudioSec`, and `restoreTrackFromPending()` restored live pending jobs as `state="pending"`, which prevented the default WebAudio LIVE path from being selected.
+
+Hypothesis: confirmed.
+
+Root cause: Resume seconds were tracked only in frontend UI state. They were not consistently included in the backend stream request or persisted through Tavo re-render/re-entry. Restored LIVE cards also lost their live state boundary.
+
+Fix: `static/tavo.runtime.parts/46_track_state.js` now requests `liveStreamPlaybackUrlForTrack(track, startOffsetSec)` for WebAudio LIVE, so resumed requests include `start_s`. `static/tavo.runtime.parts/25_web_audio_stream.js` separates the playback timeline offset from local PCM skipping, avoiding double-skipping when the backend already starts the stream at `start_s`. `static/tavo.runtime.parts/48_track_history.js` persists/restores `lastWebAudioSec`, `lastElementSec`, and `lastStalledSec`, and restores live pending jobs as `state="live"` while keeping D-mode jobs pending/background.
+
+Guard: Manual LIVE resume and restored pending LIVE resume must GET the same `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>` without another POST or DELETE. Playwright `liveResumeStartOffset` now simulates a pending LIVE card at `2.75s` and asserts the stream GET contains `start_s=2.750`.
+
+## BUG-041: Tavo message body can prefer DOM chrome over clean API content
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-07 audit while checking normal-mode cleaner regressions.
+
+Repro: In the Tavo/test rendered message, `tavo.message.current().content` contains the actual story text, but the surrounding DOM also contains role name, assistant/message metadata, or test/control text. Generate normal/AI audio.
+
+Evidence: Code audit found `currentMessageContext()` selected `domText` before `apiText` whenever the API content did not contain tags. In the mock page this could include `assistant message mock`; in real Tavo the same pattern can leak message chrome if DOM fallback sees sender/header text.
+
+Hypothesis: confirmed.
+
+Root cause: DOM fallback was intended for dirty AR/HTML cases, but it was prioritized over authoritative Tavo API message content even when the API text was already clean.
+
+Fix: `static/tavo.runtime.parts/05_style_config.js` now prefers cleaned `tavo.message.current().content` whenever it contains useful text, and uses DOM text only as fallback.
+
+Guard: Submitted job `body.text` must not include message chrome such as `assistant message mock`, page labels, role headers, or player UI. Playwright `normalExplicitDialogueMapping` now asserts API content wins over DOM chrome.
+
+## BUG-040: Tavo normal mode can read tag/internal content as spoken text
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-07
+
+Repro: In Tavo normal mode, generate from a rendered message that contains AR/HTML/script/style/player markup or other tagged content. The frontend-cleaned `text` can include text from tags or injected UI instead of only the visible story/message body.
+
+Evidence: User reported "普通模式的js清洗正文不太对，把很多标签里的东西读了出来." Code evidence: `currentMessageContext()` prefers `tavo.message.current().content` when available and only strips `<script>` blocks plus the script marker before submitting `messageText`. DOM fallback removes only `.idx-tts`, `.idx-card`, `.idx-panel`, `.idx-global-gear`, and `script`, so style/template/hidden AR/player fragments can leak.
+
+Hypothesis: confirmed.
+
+Root cause: The frontend mixed raw Tavo message content and rendered DOM text without a shared sanitizer. Raw content can contain HTML/AR markup, while cloned DOM text can include hidden/injected controls unless known noisy nodes are removed first. The backend normal splitter had a weaker sanitizer, so even a future frontend miss could leak tag text into generated audio.
+
+Fix: `static/tavo.runtime.parts/05_style_config.js` now runs raw/API content and DOM fallback through a shared TTS cleaner: multi-pass HTML/entity decode, tag block removal including contents, residual tag cleanup, Tavo script marker removal, injected UI/control node removal, emoji/symbol removal, and visible-text fallback. `vllm/indextts2_api.py` and `fast6g/indextts2_api.py` apply the same stricter normal-mode body sanitizer before deterministic quote splitting. Normal parse cache versions were bumped to `20260607-normal-v2` / `20260607-fast6g-normal-v2`.
+
+Guard: Spoken `text` submitted to `/tts_dialogue_stream_job` in normal mode must not contain `<script>`, `<style>`, `<template>`, injected player UI, hidden AR blocks, raw HTML tags, emoji, or button/control labels from the Tavo player. Playwright `normalExplicitDialogueMapping` now submits a dirty message containing `<think>`, `<div>`, encoded `<style>`, and emoji, and asserts the request body keeps only readable story/dialogue text.
+
+## BUG-039: Normal mode voice mapping should be narrator/dialogue with dialogue blank inheriting narrator
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-07
+
+Repro: Open normal mode settings. The UI currently exposes `默认/旁白/对话`, and code fills missing `对白` with the default voice. This makes dialogue always explicitly inherited and also keeps a redundant default row.
+
+Evidence: User clarified normal mode should have only `旁白` and `对白`; `对白` should inherit only when it is not written/configured. Code evidence: `readFields()` writes `旁白` and `对白` into `cfg.roleVoiceList` when `cfg.defaultVoice` exists, and `normalModeVoicesMap()` uses default fallback for both.
+
+Hypothesis: confirmed.
+
+Root cause: Normal mode used the old `defaultVoice` row as a visible role and persisted implicit fallback into `cfg.roleVoiceList`. That blurred "blank inherits" with "explicitly mapped", and created an unnecessary third/default slot. Dialogue aliases such as `对白` / `对话` / `台词` / `dialogue` were also not handled as one canonical role end to end, so explicit user configuration could be lost or overwritten by fallback/default data.
+
+Fix: Normal-mode UI now shows only two rows: `旁白` and `对白`. `旁白` writes `cfg.defaultVoice`; blank `对白` is not submitted and inherits narrator/default on the backend. When `对白` is explicitly configured, the frontend submits `对白`, `对话`, `台词`, and `dialogue` aliases with the same user-selected voice. Frontend role normalization canonicalizes dialogue aliases to `对白`, AI role mapping filters normal-only dialogue rows, and old positional fallback no longer copies a dialogue voice into the `用户` slot. Both backends normalize dialogue aliases to `对白`; duplicate/empty aliases can no longer overwrite a non-empty explicit mapping.
+
+Guard: Normal mode settings should show fixed `旁白` and `对白` rows only. `旁白` is the default voice. `对白` should be omitted from the submitted/stored voice map unless the user explicitly chooses a separate voice; when omitted, backend fallback inherits `旁白/default`. If the user explicitly configures any dialogue alias to any voice name, request `voices` must carry that voice under all dialogue aliases and the backend must resolve the generated `对白` segment to that path. Playwright now tests a mixed legacy list with empty `dialogue`, non-empty `对话`, and empty `对白` to prove empty aliases do not override the explicit voice.
+
+## BUG-038: LIVE stream recovery can exhaust into saved fallback and block manual resume
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-07
+
+Repro: In LIVE mode, if WebAudio stream recovery fails several times, the frontend enters a saved-cache fallback path and can keep the card loading/waiting instead of letting the user pause and request the same stream again.
+
+Evidence: User clarified the product rule: stream failures must not remove manual control. The user must be able to pause/recover at any time. Only explicit live exit should stop/delete the task/audio. Auto落盘 continues as backend behavior, but it should not replace the user's ability to reconnect the same `cache_key`.
+
+Hypothesis: confirmed. Code evidence: `playTrackViaWebAudio()` has a fixed `maxRecoveryAttempts`; after exhaustion it calls `waitForSameJobSavedFallback()` / `waitForSavedLiveTrack()`, sets `playSavedWhenReady`, and waits for `/cache_audio`.
+
+Root cause: Recovery treated "same-job stream currently unstable" as "give up realtime and wait for saved audio." That is a useful safety fallback, but it violates the product's LIVE-first control model because user play can become a passive wait rather than a same-key stream reconnect.
+
+Fix: `static/tavo.runtime.parts/46_track_state.js` now routes exhausted same-job WebAudio recovery into `markLiveStreamResumable()` instead of forcing saved-cache autoplay. It stops the current WebAudio reader, preserves resume seconds, returns the play button to idle, keeps background cache polling alive, and leaves the same `cache_key` ready for manual replay. Manual play reconnects `GET /tts_dialogue_stream_job/<same_cache_key>` without a second `POST` and without `DELETE`.
+
+Guard: LIVE failures may stop the current WebAudio reader and keep polling cache in the background, but the play button must return to an idle/resumable state and reconnect `GET /tts_dialogue_stream_job/<same_cache_key>?start_s=...` on demand. No extra `POST` is allowed. No saved-cache autoplay is forced by recovery exhaustion. No `DELETE` is allowed unless the user presses live exit/delete. Playwright `liveResumableAfterFailures` covers this behavior.
+
+## BUG-037: Generation settings need preset/custom parameter UI
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-07
+
+Repro: Tavo settings only expose a coarse quality tier and a few hidden/default sampling values, even though the backend already accepts direct generation overrides such as `diffusion_steps`, `prompt_audio_seconds`, `segment_tokens`, `first_tokens`, and `s2mel_cfg_rate`.
+
+Evidence: User asked to keep selectable档位 but also expose adjustable custom parameters. Code evidence: frontend calls `generationQualityOverrides(cfg.qualityMode)` and submits hard-coded preset overrides; backend request models already accept the same fields.
+
+Hypothesis: confirmed.
+
+Root cause: The frontend collapsed generation controls to preset-only UI while the backend already supports direct numeric override values.
+
+Fix: Settings now include a `自定义` quality mode and an expandable custom parameter panel. The frontend persists and submits `diffusion_steps`, `prompt_audio_seconds`, `segment_tokens`, `first_tokens`, `s2mel_cfg_rate`, `top_p`, `top_k`, `temperature`, `repetition_penalty`, `emo_alpha`, `speed_factor`, and `subtitleLeadSec` where relevant, while presets keep the existing behavior. No backend logic change was needed beyond using the request fields already accepted by both backends.
+
+Guard: Settings should allow preset selection or `自定义`. Presets should preserve existing behavior. `自定义` should submit the user's numeric values for diffusion steps, prompt audio seconds, segment tokens, first streaming tokens, S2Mel CFG, top-p/top-k/temperature/repetition penalty, emotion strength, and speed without backend changes. Playwright `normalExplicitDialogueMapping` asserts representative custom values are present in the job body.
+
+## BUG-035: Tavo first player open feels stuck while runtime fragments load
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-06
+
+Repro: In Tavo, tap the lazy player card for the first time. The lightweight lazy card reacts, but the full player does not become visible until `tavo.runtime.js`, the manifest, and 16 runtime fragments are fetched and executed.
+
+Evidence: User clarified the desired behavior: the total loading time may stay the same, but the player should appear first so the remaining loading work is not visually perceived as a blank/stuck click.
+
+Hypothesis: confirmed. `static/tavo.js` only renders a small lazy card before user interaction. `mountRuntime()` waits for the full runtime promise before hiding the lazy card and showing the real `.idx-card`, so first-open network fan-out becomes visible UI jank.
+
+Root cause: The loader had only two visible states: compact lazy card and fully mounted runtime player. The full player DOM was created only after `tavo.runtime.js`, the manifest, and all runtime fragments finished loading/executing. On Tavo WebView/LAN/tunnel first load, that makes the click feel stalled even though network loading is progressing.
+
+Fix: `static/tavo.js` now renders a full-size loader-owned player shell immediately on first click. The shell mirrors the real player layout, shows visible loading status, keeps the user-gesture AudioContext priming path, and queues shell button clicks (`play`, `add`, settings, prev/next/delete, L/D) until the runtime finishes mounting, then forwards the original action to the real runtime button. It does not request `/voices`, create jobs, or change LIVE stream semantics. Cache busting was bumped to `20260606-live-audio-v11` for the first shell pass, then to `20260606-live-audio-v12` for the visual cleanup.
+
+Guard: The initial page render must still avoid loading runtime, `/voices`, or TTS jobs before user interaction. On first user click, a full-size player shell should appear immediately and queue clicks such as play/settings until the real runtime finishes mounting. This must not change LIVE generation semantics or create extra `/tts_dialogue_stream_job` requests. Playwright now asserts the immediate shell appears synchronously after a lazy click and that it still has `voices=0` and `jobs=0` before runtime takeover.
+
+## BUG-036: Tavo settings/picker dialogs show double outer lines and loader shell exposes fake seek bar
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-06
+
+Repro: Open Tavo voice settings or the voice picker on mobile. The outer dialog surface shows two visible border lines instead of one. On first player open, the loader shell briefly shows a seek/progress bar even though no real audio progress exists yet, and the default cover shows a text placeholder instead of the narrator avatar.
+
+Evidence: User screenshots show `语音设置` dialog with a second outer focus ring around the panel border. The loader-shell screenshot shows a visible horizontal progress/seek track while status says `播放器打开中...`, and the cover square contains `语`.
+
+Hypothesis: confirmed. The dialog CSS has both a normal border and a `:focus-visible` outline with offset, creating the double-line look. The loader shell renders a disabled `.idx-seek` input copied from the real player, exposing a fake progress bar before runtime takeover. Loader cover uses a text placeholder because the loader does not yet apply the runtime narrator avatar helper.
+
+Root cause: Two visual states leaked implementation details. First, native dialog focus styling was explicitly reintroduced through `.idx-panel:focus-visible,.idx-picker:focus-visible`, so mobile rendered a second outer ring outside the dialog border. Second, the loader shell reused the real player seek DOM before any audio existed, so global `.idx-seek` styling made a fake progress bar visible during first-open runtime loading.
+
+Fix: `static/tavo.ui.skin.default.css` and the fallback CSS in `static/tavo.runtime.parts/05_style_config.js` now force the dialog host outline off for focus/focus-visible, leaving only the panel's own border. `static/tavo.js` removes the loader-shell seek DOM and replaces it with a neutral spacer, and the loader cover uses `static/tavo.assets/narrator.png` as the default avatar. Cache busting is bumped to `20260606-live-audio-v12`.
+
+Guard: Settings and voice-picker top-layer dialogs should have exactly one outer panel border; the focused dialog host should not draw an additional outline/ring. Loader shell should not render any visible seek/progress bar before runtime takeover, and its default cover should use `static/tavo.assets/narrator.png` instead of a text placeholder. Playwright now asserts no loader `.idx-seek`, narrator cover background, and `outline-style:none` / `outline-width:0px` for both settings and picker dialogs.
+
+## BUG-034: Tavo LIVE playback lifecycle can overwrite lyrics, resume from start, and double-play after cache lands
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-06
+
+Repro: In Tavo LIVE playback, transient notices such as `等待音频` and backend LLM parsing/progress text compete for the lyric panel. During LIVE playback, subtitles can visibly lag or feel sticky. If live playback buffers and the user pauses/resumes, playback can restart from the beginning instead of the current position. When the completed cache lands, the native audio path can start while the previous WebAudio stream is still audible, creating two overlapping voices, one of which cannot be stopped from the visible controls.
+
+Evidence: User report after `20260606-live-audio-v8` real Tavo testing: streaming can now play, but lifecycle glitches remain in subtitle/status rendering, pause/resume, and WebAudio-to-cache handoff.
+
+Regression evidence, 2026-06-06 after `20260606-live-audio-v9`: `后端处理中 4s` can still remain in the lyric panel, header/status text under the speaker name is visually fighting, WebAudio recovery can fall back to completed cache too early so the experience looks like落盘 instead of LIVE, and after cache lands the play button can keep spinning until the user taps once more. User clarified the product constraint:落盘兜底 is allowed and must work, but LIVE must still try the same backend buffer first and should not silently skip audible streaming before the cache file lands.
+
+Hypothesis: The frontend has too many writers to the same subtitle panel: job-status polling, WebAudio waiting/buffering state, and LLM progress all call `showTrackNotice()`. Pause/resume depends on `trackResumeSec()`, but `stopWebAudioPlayback()` can lose the last WebAudio time or later state changes can reset UI to `00:00`. Cache promotion can call `attachCacheAudio(... forceElement/autoplay ...)` while an existing WebAudio controller/source is still alive or still represented by stale `track.webAudioPlaying`, allowing native `<audio>` and WebAudio to overlap.
+
+Root cause: Three frontend lifecycle paths were overlapping. First, transient progress/status writers for backend LLM/TTS state, WebAudio wait/buffer state, and cache polling all wrote through the same subtitle notice path, so they could replace the lyric panel. Second, WebAudio playback had no explicit owning track, so pause/stop/handoff could read the wrong track or lose the last WebAudio time. Third, cache promotion could autoplay the native `<audio>` path without first stopping the existing WebAudio controller/source and preserving its current second, which allowed double audio and restart-from-zero handoff. The v9 regression kept one more bad edge: LIVE generation performed a pre-live status refresh before opening the stream, same-job recovery marked `playSavedWhenReady` too early, and cache promotion computed autoplay after `setTrackState(saved)` had already reset `loading/buffering` to `idle`, so a completed cache could sit there spinning until the user tapped again.
+
+Fix: `static/tavo.runtime.parts/52_subtitle_media.js` now treats waiting/connecting/buffering/backend-progress notices as transient status only, including `后端处理中 Ns`, deduplicates subtitle notices, polls `segments_meta` faster, and ticks subtitles at `100ms`. `static/tavo.runtime.parts/60_generate_flow.js` no longer blocks LIVE startup on a pre-live status refresh; status metadata refresh now runs in the background while WebAudio immediately opens `GET /tts_dialogue_stream_job/<cache_key>`. `static/tavo.runtime.parts/46_track_state.js` keeps same-job recovery on the original `cache_key`, increases recovery attempts, and only sets `playSavedWhenReady` when entering the actual saved-cache fallback. `static/tavo.runtime.parts/48_track_history.js` decides fallback autoplay before saved-state reset, stops WebAudio before forced/autoplay native cache handoff, seeks the native element to the preserved second, and settles `audio.play()` success/reject so loading cannot spin forever. `static/tavo.runtime.parts/44_element_audio.js` also clears loading when native playback is rejected by the WebView. `dev_workspace/dev_tools/test_tavo_widget_playwright.js` now asserts LIVE recovery reuses one job, transient progress text does not appear in the lyric panel, and exhausted same-key stream recovery auto-plays `/cache_audio/<cache_key>` without leaving the play button loading.
+
+Guard: Transient generation/progress status should update the compact status line, not keep replacing the lyric panel. Once lyric rows exist, only terminal/errors/delete/cancel messages should interrupt them. LIVE pause/resume must preserve the last WebAudio playback time and reconnect with `start_s`/`startOffsetSec`, not restart from zero. LIVE must open the same backend buffer before falling back to saved cache; recovery must never send another `POST /tts_dialogue_stream_job`. Before any saved/cache native `<audio>` autoplay or forced element handoff, all WebAudio sources, timers, subtitles, and stale WebAudio state for that track must be stopped and cleared. Cache landing must not create two audible playback paths, and cache fallback must either play automatically or leave an idle, tappable state, never a permanent spinner.
+
+## BUG-033: Tavo LIVE WebAudio can schedule PCM but remain silent
+
+Status: fixed in code, needs real Tavo validation
+
+Reported: 2026-06-06
+
+Repro: In Tavo JavaScript console, start an AI LIVE generation. The console shows `live track 使用 Web Audio API 真流式`, `AudioContext state=running`, `WAV header parsed`, and `Web Audio 首块音频开始播放`, followed by early `Web Audio buffering count=1`, but the phone has no audible sound.
+
+Evidence: User screenshots show the frontend reached the WebAudio path and parsed PCM from `/tts_dialogue_stream_job/<cache_key>`. This proves the backend live buffer endpoint is producing data. The failed path is frontend playback/output in the Tavo WebView, where `AudioBufferSource.start()` was treated as audible playback.
+
+Hypothesis: The runtime was not consistently reusing the AudioContext unlocked by the initial user gesture, and the WebAudio path marked playback as successful as soon as a buffer was scheduled. Early underrun/silent output had no same-job reconnect compensation.
+
+Root cause: The WebAudio live path treated a scheduled `AudioBufferSource` plus `AudioContext.state === "running"` as equivalent to audible/stable playback. In Tavo WebView that is not enough: the output chain may still be blocked or the first scheduled chunk can underrun immediately. Recovery also lacked a same-job reconnect path, so a silent/stalled live card could stay in fake playback or fall through to confusing pause/error states.
+
+Fix: `static/tavo.runtime.parts/20_generation_params.js` reuses the loader-created user-gesture `AudioContext` and keeps the WebAudio output chain warm. `25_web_audio_stream.js` now supports configurable prebuffer/flush windows and emits `stable_playing` after the first scheduled buffer survives the early window. `46_track_state.js` now treats early `buffering`, `audio_suspended`, `interrupted`, and network stream errors as same-job recovery triggers: it reconnects `GET /tts_dialogue_stream_job/<cache_key>` with a larger prebuffer and never sends a second generation `POST`. After recovery attempts are exhausted, it waits for `/cache_audio/<cache_key>` as the last audible fallback. Playwright smoke now asserts one `POST`, repeated same-key live `GET`, and no re-POST during recovery.
+
+Guard: LIVE mode must keep the backend buffer architecture: `POST /tts_dialogue_stream_job` creates a `LIVE_JOBS` task, backend appends PCM to the cache-key buffer, and frontend `GET /tts_dialogue_stream_job/<cache_key>` reads that buffer. The frontend must not start a second generation for playback recovery. If early WebAudio playback stalls or is likely silent, it should reconnect the same stream/cache key with a larger prebuffer and preserve subtitles/status. Only after repeated same-job stream recovery fails may it wait for `/cache_audio/<cache_key>` as a last-resort audible fallback.
+
+## BUG-031: Launcher UI is overbuilt, noisy, and auto-checks environment on open
+
+Status: open, fixing
+
+Reported: 2026-06-06
+
+Repro: Open `LEON-Launcher.exe`. The launcher immediately runs environment detection, the header/banner overlaps visually, log pages auto-scroll/jump with folded text, and the sidebar exposes too many pages/actions including a separate `停止服务` button.
+
+Evidence: User screenshots show the banner/header text competing with the image and progress bar, log text clipped/folded, and a crowded sidebar. User asked to remove the noisy feature pages, stop automatic environment detection on open, remove the dedicated stop-service page, and keep only basic start/stop, environment detection, and one-click repair.
+
+Additional evidence from follow-up screenshots: the launcher showed both left sidebar navigation and a top horizontal tab strip at the same time; the tab strip covered/clipped page content. The green progress bar in the top-right header was visually distracting and should live only inside the environment detection page. The environment check table grid lines were too harsh. One-click repair showed a completion popup even when the environment was already fine, and some wording implied unrelated “backend/background service” behavior. Later screenshots showed stacked logs looked like clipped CMD windows, left nav had no active state, repeated content titles wasted space, the compact version/ratio controls were too tall/noisy, and one intermediate layout pushed the primary start button below the visible window.
+
+Hypothesis: confirmed.
+
+Root cause: The launcher accumulated diagnostics, logs, voice testing, WebUI, and Tavo instructions into one WinForms shell. Opening the form also triggered the full environment check and extra refresh actions, making the launcher feel slow and visually unstable. The simplified rewrite still had UI-flow mistakes: `环境检测` nav directly called the check routine, the primary start button was positioned with fragile raw height math instead of a fixed bottom container, and `一键修复` re-ran its own environment probes instead of using the visible `开始检测` result.
+
+Fix: `launcher/LEON-Launcher.ps1` now uses the latest simplified form definition: full-width header; left nav with active colors for `首页` and `环境检测`; one large log viewer controlled by four readable dark tab-buttons `启动器` / `服务日志` / `服务启动` / `诊断日志`; no repeated content-page titles; hidden header status instead of a green repeated API URL; fixed bottom-left start/stop button; compact one-line segmented `vLLM` / `6G` switch directly above the button; centered dark `0.15` ratio input visible only for `vLLM`; and environment checks preloaded as `待检测` rows. Clicking `环境检测` only opens the page; the page-level `开始检测` button runs `Run-EnvironmentCheck`, and `一键修复` is a second page-level action beside it. `开始检测` now stores structured result state, and `一键修复` only repairs from that latest completed result; if the user has not run detection yet, it only asks the user to click `开始检测` first.
+
+Guard: Opening the launcher must not run `Run-EnvironmentCheck` automatically. The visible UI should only expose service start/stop, service version/vLLM ratio, environment detection, and one-click repair. Service stop should be controlled by the main service button when the API is already running, not by a separate sidebar page/button. The version selector should be a compact styled two-button switch, not a white dropdown. The short ratio value should be centered and explain itself through hover tooltip. The header should use a clean static layout without the avatar banner overlap, and no live log page should auto-scroll/jump. The UI must not show both a left navigation menu and a top tab strip. The log selector must show readable labels and selected state; use `启动器` / `服务日志` / `服务启动` / `诊断日志`, and do not call stderr `错误输出`. The green progress bar must not appear in the header; it belongs only on the environment page. Environment results should not use harsh grid lines. One-click repair should not show a popup or imply repair work when there is nothing to fix, and it belongs inside `环境检测` rather than as a duplicate sidebar page. The left-bottom start/stop button must remain visible at default and minimum window sizes. Sidebar `环境检测` must not execute checks directly; only `开始检测` may run them. `一键修复` must use the latest completed `开始检测` result; without that result it must not clear rows, rerun probes, or silently start detection.
+
+## BUG-032: vLLM ratio must be visible and user-editable
+
+Status: open, fixing
+
+Reported: 2026-06-06
+
+Repro: Start vLLM through the launcher and call `/health`. The response identifies `version=vllm` but does not show which `gpu_memory_utilization` ratio is currently active. The launcher also exposes the ratio as a fixed dropdown instead of a direct editable value.
+
+Evidence: User requested `/health` to print the current ratio parameter and asked the launcher ratio control to be directly hand-editable with default `0.15`.
+
+Hypothesis: confirmed.
+
+Root cause: The ratio was passed into startup but not surfaced in `/health`. Defaults also remained inconsistent: some paths still fell back to `0.18`, while recent runtime benchmarks favored `0.15` as the speed preset and `0.11` as conservative.
+
+Fix: pending.
+
+Guard: vLLM `/health` should include `vllm_gpu_memory_utilization` and `vllm_enforce_eager`. The launcher ratio control should accept direct typed numeric input, default to `0.15`, and pass the same value through `INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION`. Low-level restart defaults should also be `0.15` unless explicitly overridden.
+
+## BUG-030: Tavo settings leaks normal dialogue mapping into AI and D mode can lag after cache lands
+
+Status: open, fixing
+
+Reported: 2026-06-06
+
+Repro: Open Tavo settings. The user wants `AI模式` and `普通模式` positions swapped. AI mode can show an extra `对白` voice mapping even though `对白/对话` belongs to normal deterministic mode. In `D` mode, generated audio can already be written to disk while the card/page does not refresh promptly.
+
+Evidence: User report with screenshots. Code evidence: `40_mount_shell.js` renders mode buttons as `普通模式` then `AI模式`; `readFields()` can add `对白` into `cfg.roleVoiceList` when normal mode has a default voice, and that same role list is reused by AI mode; `pollCacheUpgrade()` only checks `/cache_audio` with `HEAD` as a stale-status fallback for LIVE tracks, not for `generate` / D-mode tracks.
+
+Hypothesis: confirmed.
+
+Root cause: Normal-mode voice rows and AI role mapping share `cfg.roleVoiceList`, so normal-only dialogue aliases can leak into AI configuration. D-mode completion relies on job status reaching `done`; if cache audio is already readable but status lags, the UI waits longer than necessary.
+
+Fix: pending.
+
+Guard: Settings should render `AI模式` before `普通模式` as requested. AI role mapping must show only AI roles such as `旁白`/`用户`/current character and must not show `对白`/`对话` by default. Normal mode submits `voices.default` / `voices.旁白`; it submits dialogue aliases only when `对白` is explicitly configured. D-mode polling should promote a card to saved history when `/cache_audio/{cache_key}` is readable, even if `job_status` lags briefly.
+
+## BUG-029: benchmark helper incorrectly owns launcher startup path
+
+Status: fixed in benchmark helper, needs one guarded synthesis run
+
+Reported: 2026-06-06
+
+Repro: After the user can start `vllm` successfully through `LEON-Launcher.exe`, run the benchmark helper for a short retest. The helper still tries to restart the service itself through `vllm/tools/restart_indextts_api.ps1`, and Codex also tried wrapping it through `Start-Process` / redirected logs. Several attempts exited quickly with empty outer logs and no GPU activity, while direct launcher startup worked.
+
+Evidence: Current `/health` from the launcher-started API returns `version=vllm`, and GPU memory is about `9.6 GB`, proving the backend can run. The failed helper attempts wrote empty `dev_workspace/benchmarks/retest_6f8b_ratio015_*.out.log/.err.log` files and did not start a listener. A direct short foreground probe of `restart_indextts_api.ps1` did execute and reached `>> constructing GPT wrapper`, so the backend/script was not generally broken; the benchmark wrapper/startup ownership was the wrong layer.
+
+Hypothesis: confirmed.
+
+Root cause: The benchmark helper mixed two responsibilities: benchmarking an already-started local API and owning service restart / GPU-ratio selection. That conflicts with the project startup rule that user-facing startup/restart goes through the root launcher. It also made retests fragile because a benchmark failure could be caused by wrapper startup behavior instead of TTS inference.
+
+Fix: `dev_workspace/dev_tools/benchmark_vllm_gpu_ratios.py` now defaults to current-service mode. It validates the already-running API with `/health`, requires `version=vllm` or `engine=vllm`, resolves the expected voices, records API PID/GPU snapshot, and only restarts the service when `--restart-service` is passed explicitly. Current-service mode ignores extra ratio labels instead of treating them as restart targets. The helper also adds configurable warmup/job wall-time guards and cancels the active job on timeout or GPU guard trips.
+
+Guard: Benchmark helpers must support a "use current service" mode that does not restart or kill the API. Any helper mode that changes vLLM GPU ratio must be explicit, named as a restart mode, and must not be used when the user has started the service through the launcher for an ad hoc retest. Validate with `--skip-warmup --runs 0` before submitting a real synthesis job.
+
 ## BUG-028: vLLM benchmark reused old healthy API after failed restart and did not fail fast
 
 Status: fixed in benchmark helper, needs one guarded re-run before trusting new numbers
@@ -408,11 +682,11 @@ Evidence: `static/tavo.ui.skin.default.css` and `static/tavo.runtime.parts/05_st
 
 Hypothesis: The normal/generate feature added new controls with one-off styling instead of reusing the existing player token and role-row components.
 
-Root cause: The LIVE/generate quick switch and normal-mode voice controls were added with one-off UI surfaces. The header controls did not share one sizing/alignment rule, and normal mode used standalone picker buttons instead of the existing role-row layout. The first fix also made 默认/旁白/对话 all look equally selectable, but the intended model is that 默认音色 is the locked base voice and only 旁白/对话 are configurable overrides.
+Root cause: The LIVE/generate quick switch and normal-mode voice controls were added with one-off UI surfaces. The header controls did not share one sizing/alignment rule, and normal mode used standalone picker buttons instead of the existing role-row layout. A later normal-mode cleanup replaced the old default/narrator/dialogue triple row with only `旁白` and optional `对白`.
 
 Fix: `static/tavo.runtime.parts/40_mount_shell.js` now renders 普通模式音色 as three role-style rows. 默认 is a locked display-only row (`default-voice-label`), while 旁白 and 对话 are the only voice picker buttons. `50_settings_fields.js` updates those labels without reading normal rows into the AI role list. `54_voice_picker.js` ignores the read-only default row and scopes role-row events to `[data-role="roles-list"]`. Header styles in `static/tavo.ui.skin.default.css` and fallback CSS keep only the `L`/`D` playback toggle and settings button in the top row. Cache busting is bumped to `20260605-ld-live-v1`.
 
-Guard: Player header controls should share the same top, height, glass background, border weight, and icon scale. Normal-mode voice settings must use role-row layout with `默认/旁白/对话`; 默认 must be display-only and not expose `[data-role="default-voice-btn"]`, while 旁白 and 对话 expose picker buttons. Normal-mode rows must not be saved into AI role mappings.
+Guard: Player header controls should share the same top, height, glass background, border weight, and icon scale. Normal-mode voice settings must use role-row layout with only `旁白` and optional `对白`; there must be no visible `默认` row or `[data-role="default-voice-btn"]`. Normal-mode rows must not be saved into AI role mappings.
 
 ## BUG-016: Launcher SVML check can warn even when the runtime works
 

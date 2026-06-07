@@ -35,7 +35,7 @@ if ($VllmGpuMemoryUtilization -le 0) {
     }
 }
 if ($VllmGpuMemoryUtilization -le 0) {
-    $VllmGpuMemoryUtilization = 0.18
+    $VllmGpuMemoryUtilization = 0.15
 }
 $VllmGpuMemoryUtilizationText = $VllmGpuMemoryUtilization.ToString("0.###", $InvariantCulture)
 

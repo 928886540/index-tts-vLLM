@@ -272,7 +272,7 @@
       repetition_penalty: cfg.repetitionPenalty,
       emo_alpha: cfg.emoAlpha,
       bypass_cache: !!force
-    }, generationQualityOverrides(cfg.qualityMode));
+    }, generationQualityOverrides(cfg.qualityMode, cfg));
   }
   async function createSingleStreamJob(base, cfg, text, force) {
     var res = await fetch(cleanBase(base) + "/tts_stream_job", {
@@ -322,9 +322,53 @@
   // 之后才创建的 ctx 会停在 suspended，永远不出声。
   var PRIMED_CTX = null;
   var PRIMED_UNLOCK_SOURCE = null;
+  var PRIMED_KEEPALIVE_SOURCE = null;
+  function startRuntimeAudioKeepalive(ctx) {
+    if (!ctx || PRIMED_KEEPALIVE_SOURCE) return;
+    try {
+      var rate = ctx.sampleRate || 44100;
+      var frames = Math.max(1, Math.floor(rate * 0.5));
+      var b = ctx.createBuffer(1, frames, rate);
+      var ch = b.getChannelData(0);
+      for (var i = 0; i < ch.length; i++) ch[i] = 0.00001;
+      var gain = ctx.createGain ? ctx.createGain() : null;
+      var src = ctx.createBufferSource();
+      src.buffer = b;
+      src.loop = true;
+      if (gain) {
+        gain.gain.value = 0.00001;
+        src.connect(gain);
+        gain.connect(ctx.destination);
+      } else {
+        src.connect(ctx.destination);
+      }
+      src.start(0);
+      PRIMED_KEEPALIVE_SOURCE = src;
+      try { window.__indextts_tavo_preprimed_keepalive_source = src; } catch (_) {}
+      debugLog("🔊 WebAudio keepalive 已接入同一个 AudioContext", "#9ff");
+    } catch (e) {
+      debugLog("⚠️ WebAudio keepalive 启动失败: " + (e && e.message ? e.message : e), "#fc9");
+    }
+  }
+  function takePreprimedAudioContext() {
+    if (PRIMED_CTX) return PRIMED_CTX;
+    try {
+      var existing = window.__indextts_tavo_preprimed_audio_context;
+      if (existing) {
+        PRIMED_CTX = existing;
+        try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
+        startRuntimeAudioKeepalive(PRIMED_CTX);
+        return PRIMED_CTX;
+      }
+    } catch (_) {}
+    return null;
+  }
   function primeAudioContext() {
+    var existing = takePreprimedAudioContext();
+    if (existing) return existing;
     if (PRIMED_CTX) {
       try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
+      startRuntimeAudioKeepalive(PRIMED_CTX);
       return PRIMED_CTX;
     }
     var AC = window.AudioContext || window.webkitAudioContext;
@@ -344,6 +388,8 @@
         s.onended = function () { if (PRIMED_UNLOCK_SOURCE === s) PRIMED_UNLOCK_SOURCE = null; };
       } catch (_) {}
       PRIMED_CTX = ctx;
+      try { window.__indextts_tavo_preprimed_audio_context = ctx; } catch (_) {}
+      startRuntimeAudioKeepalive(ctx);
       return ctx;
     } catch (_) { return null; }
   }

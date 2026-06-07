@@ -24,9 +24,9 @@ function loadPlaywright() {
   }
 }
 
-function tinyWavBuffer() {
+function wavBufferSeconds(seconds) {
   const sampleRate = 8000;
-  const samples = 800;
+  const samples = Math.max(1, Math.floor(sampleRate * (Number(seconds) || 0.1)));
   const dataSize = samples * 2;
   const buf = Buffer.alloc(44 + dataSize);
   buf.write("RIFF", 0);
@@ -42,7 +42,15 @@ function tinyWavBuffer() {
   buf.writeUInt16LE(16, 34);
   buf.write("data", 36);
   buf.writeUInt32LE(dataSize, 40);
+  for (let i = 0; i < samples; i += 1) {
+    const sample = Math.round(Math.sin((i / sampleRate) * Math.PI * 2 * 440) * 1600);
+    buf.writeInt16LE(sample, 44 + i * 2);
+  }
   return buf;
+}
+
+function tinyWavBuffer() {
+  return wavBufferSeconds(0.1);
 }
 
 async function runLlmReuseSmoke(browser, targetUrl) {
@@ -223,7 +231,7 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
   page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
   page.on("console", (msg) => {
     const text = msg.text();
-    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|服务端任务失败|后端 LLM 拆段失败|生成失败/i.test(text)) pageErrors.push(text);
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|服务端任务失败|后端 LLM 拆段失败|生成失败|status of 404/i.test(text)) pageErrors.push(text);
   });
 
   let parseCount = 0;
@@ -376,7 +384,7 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
   page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
   page.on("console", (msg) => {
     const text = msg.text();
-    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|任务已取消|生成被中断/i.test(text)) pageErrors.push(text);
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|任务已取消|生成被中断|status of 404/i.test(text)) pageErrors.push(text);
   });
 
   const pendingKey = "b".repeat(40);
@@ -422,6 +430,9 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
   });
   await page.route("**/cache/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: false }) });
+  });
+  await page.route("**/cache_audio/**", async (route) => {
+    await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
   });
   await page.route("**/tts_dialogue_job_status/**", async (route) => {
     statusCount += 1;
@@ -536,13 +547,158 @@ async function runNormalGenerateCancelSmoke(browser, targetUrl) {
     const body = jobBodies[0] || {};
     if (body.parse_mode !== "normal") throw new Error("normal mode should submit parse_mode=normal: " + JSON.stringify(body));
     if (body.llm_endpoint || body.llm_model || body.llm_api_key) throw new Error("normal mode should not submit LLM config: " + JSON.stringify(body));
-    if (!body.voices || body.voices.default !== "女声/高圆圆.wav" || body.voices["旁白"] !== "女声/高圆圆.wav" || body.voices["对白"] !== "女声/高圆圆.wav") {
-      throw new Error("normal mode should map default/旁白/对白 to the default voice: " + JSON.stringify(body));
+    if (!body.voices || body.voices.default !== "女声/高圆圆.wav" || body.voices["旁白"] !== "女声/高圆圆.wav") {
+      throw new Error("normal mode should map default/旁白 to the narrator voice: " + JSON.stringify(body));
+    }
+    if (Object.prototype.hasOwnProperty.call(body.voices || {}, "对白")) {
+      throw new Error("blank normal dialogue voice should be omitted so backend inherits narrator: " + JSON.stringify(body));
     }
     if (result.pendingActive) throw new Error("pending job storage should be cleared after delete: " + JSON.stringify(result));
     if (result.toggleText.trim() !== "D") throw new Error("generate/落盘 mode should display the single-letter D button: " + JSON.stringify(result));
     if (pageErrors.length) throw new Error("normal generate smoke page error: " + pageErrors.join(" | "));
     return { parseCount, jobCount, statusCount, streamGetCount, deleteCount, result, body };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+  });
+
+  const explicitKey = "e".repeat(40);
+  let jobCount = 0;
+  const jobBodies = [];
+  const wav = tinyWavBuffer();
+
+  await page.route("**/tts_dialogue_stream_job", async (route) => {
+    jobCount += 1;
+    try { jobBodies.push(JSON.parse(route.request().postData() || "{}")); } catch (_) { jobBodies.push({}); }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        url: "/tts_dialogue_stream_job/" + explicitKey,
+        cache_url: "/cache_audio/" + explicitKey,
+        cache_key: explicitKey,
+        cached: true,
+        live: false
+      })
+    });
+  });
+  await page.route("**/cache_audio/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "audio/wav", body: wav });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "done",
+        cache_key: explicitKey,
+        cache_url: "/cache_audio/" + explicitKey,
+        sample_rate: 8000,
+        duration_s: 0.1,
+        segments_meta: [
+          { idx: 0, role: "旁白", text: "潘金莲停了一下。", start_s: 0, duration_s: 0.05 },
+          { idx: 1, role: "对白", text: "我在这里。", start_s: 0.05, duration_s: 0.05 }
+        ],
+        metrics: { state: "done", phase: "done", message: "音频已保存", segments_total: 2, segments_done: 2 }
+      })
+    });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(() => {
+      const dirtyText = [
+        "潘金莲停了一下。「我在这里。」",
+        "<think>不要朗读这段推理</think>",
+        "<div class=\"idx-ui\">UI按钮文字不要读</div>",
+        "&lt;style&gt;坏样式不要读&lt;/style&gt;",
+        "🙂"
+      ].join("\n");
+      const textarea = document.getElementById("messageText");
+      if (textarea) textarea.value = dirtyText;
+      const preview = document.getElementById("messagePreview");
+      if (preview) preview.innerHTML = dirtyText;
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+        configVersion: 13,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        topP: 0.8,
+        topK: 30,
+        temperature: 0.7,
+        repetitionPenalty: 1.2,
+        emoAlpha: 0.38,
+        speedFactor: 1.0,
+        qualityMode: "custom",
+        diffusionSteps: 16,
+        promptAudioSeconds: 12,
+        segmentTokens: 72,
+        firstTokens: 24,
+        s2melCfgRate: 0.7,
+        subtitleLeadSec: 0.25,
+        offlineAudioEnabled: false
+      }));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: [
+          { role: "dialogue", voice: "" },
+          { role: "对话", voice: "女声/单独对白.wav" },
+          { role: "对白", voice: "" }
+        ]
+      }));
+    });
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.evaluate(() => {
+      const add = document.querySelector('[data-role="add"]');
+      if (!add) throw new Error("missing add button");
+      add.click();
+    });
+    await page.waitForFunction(() => {
+      return window.__idxTest.getFetchLog().filter((r) => /tts_dialogue_stream_job/.test(r.url)).length >= 1;
+    }, { timeout: 10000 });
+    await page.waitForTimeout(250);
+
+    const body = jobBodies[0] || {};
+    if (jobCount !== 1) throw new Error("explicit normal dialogue smoke should create one job: " + JSON.stringify({ jobCount, body }));
+    if (body.parse_mode !== "normal") throw new Error("explicit dialogue mapping should stay in normal mode: " + JSON.stringify(body));
+    if (!body.voices || body.voices.default !== "女声/高圆圆.wav" || body.voices["旁白"] !== "女声/高圆圆.wav") {
+      throw new Error("normal explicit mapping should keep narrator/default voice: " + JSON.stringify(body));
+    }
+    if (body.voices["对白"] !== "女声/单独对白.wav" || body.voices["对话"] !== "女声/单独对白.wav" || body.voices["台词"] !== "女声/单独对白.wav" || body.voices.dialogue !== "女声/单独对白.wav") {
+      throw new Error("normal explicit dialogue voice should be submitted under all dialogue aliases: " + JSON.stringify(body));
+    }
+    if (!body.text || !/潘金莲停了一下/.test(body.text) || !/我在这里/.test(body.text)) {
+      throw new Error("cleaned normal text should keep readable story/dialogue text: " + JSON.stringify(body));
+    }
+    if (/不要朗读|UI按钮文字|坏样式|[<>]|🙂/.test(body.text)) {
+      throw new Error("cleaned normal text leaked tag/internal/emoji content: " + JSON.stringify(body));
+    }
+    if (/assistant message mock|IndexTTS Tavo 测试页|用户身份名|角色名/.test(body.text)) {
+      throw new Error("message text should prefer Tavo API content over DOM chrome: " + JSON.stringify(body));
+    }
+    if (body.diffusion_steps !== 16 || body.prompt_audio_seconds !== 12 || body.segment_tokens !== 72 || body.first_tokens !== 24 || body.s2mel_cfg_rate !== 0.7) {
+      throw new Error("custom generation params should be submitted unchanged: " + JSON.stringify(body));
+    }
+    if (pageErrors.length) throw new Error("normal explicit dialogue smoke page error: " + pageErrors.join(" | "));
+    return { jobCount, body };
   } finally {
     await context.close();
   }
@@ -564,9 +720,13 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
   });
 
   const liveKey = "c".repeat(40);
+  let jobCount = 0;
   let headCount = 0;
   let statusCount = 0;
   let streamGetCount = 0;
+  const streamUrls = [];
+  const jobBodies = [];
+  const wav = wavBufferSeconds(2.4);
 
   await page.route("**/cache_audio/**", async (route) => {
     if (route.request().method().toUpperCase() === "HEAD") headCount += 1;
@@ -589,20 +749,53 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
           segments_total: 3
         },
         segments_meta: [
-          { idx: 0, role: "旁白", text: "第一段正在合成。", style: "neutral", start_s: 0, duration_s: 1.0 }
+          { idx: 0, role: "旁白", text: "第一段正在合成。", style: "neutral", start_s: 0, duration_s: 0.4 }
+        ],
+        segments_plan: [
+          { idx: 0, role: "旁白", text: "第一段正在合成。", style: "neutral" },
+          { idx: 1, role: "对白", text: "第二段计划歌词。", style: "neutral" },
+          { idx: 2, role: "旁白", text: "第三段计划歌词。", style: "neutral" }
         ]
       })
     });
   });
-  await page.route("**/tts_dialogue_stream_job/**", async (route) => {
-    streamGetCount += 1;
-    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "live smoke should wait for saved cache, not open stream" }) });
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+)?(?:[?#].*)?$/, async (route) => {
+    const req = route.request();
+    const method = req.method().toUpperCase();
+    const pathname = new URL(req.url()).pathname;
+    if (method === "POST" && /\/tts_dialogue_stream_job\/?$/.test(pathname)) {
+      jobCount += 1;
+      try { jobBodies.push(JSON.parse(req.postData() || "{}")); } catch (_) { jobBodies.push({}); }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          url: "/tts_dialogue_stream_job/" + liveKey,
+          cache_url: "/cache_audio/" + liveKey,
+          cache_key: liveKey,
+          cached: false,
+          live: true
+        })
+      });
+      return;
+    }
+    if (method === "GET" && pathname.indexOf("/tts_dialogue_stream_job/") >= 0) {
+      streamGetCount += 1;
+      streamUrls.push(req.url());
+      if (streamGetCount === 1) {
+        await route.abort("failed");
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "audio/wav", body: wav });
+      return;
+    }
+    await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "unexpected live smoke method" }) });
   });
 
   try {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
-    await page.evaluate((key) => {
+    await page.evaluate(() => {
       localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
         configVersion: 11,
         mode: "normal",
@@ -626,6 +819,405 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         characterName: "潘金莲",
         roleVoiceList: []
       }));
+    });
+
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.evaluate(() => {
+      const add = document.querySelector('[data-role="add"]');
+      if (!add) throw new Error("missing add button");
+      add.click();
+    });
+    await page.waitForFunction(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      return fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length === 1
+        && fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length >= 2;
+    }, { timeout: 10000 });
+    await page.waitForFunction(() => {
+      const curText = (document.querySelector('[data-role="current"]') || {}).textContent || "00:00";
+      const parts = curText.split(":").map((x) => Number(x) || 0);
+      const sec = parts.length >= 2 ? parts[0] * 60 + parts[1] : 0;
+      const subtitleText = (document.querySelector(".idx-subtitle") || {}).textContent || "";
+      return sec >= 1 && /第二段计划歌词/.test(subtitleText);
+    }, { timeout: 6000 });
+    await page.waitForTimeout(250);
+
+    const result = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const play = document.querySelector('[data-role="play"]');
+      const status = (document.querySelector('[data-role="status"]') || {}).textContent || "";
+      const notice = (document.querySelector(".idx-subtitle") || {}).textContent || "";
+      const curText = (document.querySelector('[data-role="current"]') || {}).textContent || "";
+      const totalText = (document.querySelector('[data-role="total"]') || {}).textContent || "";
+      const seek = document.querySelector('[data-role="seek"]');
+      return {
+        playState: play ? play.dataset.state : "",
+        status,
+        notice,
+        curText,
+        totalText,
+        seekValue: seek ? seek.value : "",
+        counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        cacheChecks: fetches.filter((r) => /\/cache_audio\//.test(r.url)).length,
+        statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
+        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        liveExitVisible: getComputedStyle(document.querySelector('[data-role="live-exit"]')).display !== "none"
+      };
+    });
+
+    if (/已暂停/.test(result.status) || /已暂停/.test(result.notice)) {
+      throw new Error("clicking a waiting LIVE card should not immediately pause itself: " + JSON.stringify(result));
+    }
+    if (jobCount !== 1 || result.jobs !== 1) {
+      throw new Error("LIVE generation should submit exactly one dialogue job, not re-POST during recovery: " + JSON.stringify({ jobCount, result, jobBodies }));
+    }
+    if (streamGetCount < 2 || result.streamGets < 2) {
+      throw new Error("default LIVE should open live buffer and recovery should reconnect the same stream: " + JSON.stringify({ streamGetCount, streamUrls, result }));
+    }
+    if (streamUrls.some((u) => !u.includes(liveKey))) {
+      throw new Error("LIVE recovery must reuse the same cache key: " + JSON.stringify({ liveKey, streamUrls }));
+    }
+    if (!result.liveExitVisible) {
+      throw new Error("LIVE exit button should stay visible on a waiting live card: " + JSON.stringify(result));
+    }
+    if (/等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频/.test(result.notice)) {
+      throw new Error("transient LIVE progress must stay out of the lyric panel: " + JSON.stringify(result));
+    }
+    if (/等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频/.test(result.status)) {
+      throw new Error("transient LIVE progress must stay out of the avatar-side status: " + JSON.stringify(result));
+    }
+    if (!/第二段计划歌词/.test(result.notice) || !/第三段计划歌词/.test(result.notice)) {
+      throw new Error("LIVE subtitle should render planned later lyrics before all segments are synthesized: " + JSON.stringify(result));
+    }
+    if (!/^00:0[1-9]/.test(result.curText) || Number(result.seekValue || 0) <= 0) {
+      throw new Error("LIVE progress should keep moving beyond the first known segment: " + JSON.stringify(result));
+    }
+    if (!/^\d+\/\d+$/.test(result.counterText) || result.counterText === "L") {
+      throw new Error("LIVE card counter should stay as page text, not the L mode badge: " + JSON.stringify(result));
+    }
+    if (pageErrors.length) throw new Error("LIVE play-click smoke page error: " + pageErrors.join(" | "));
+    return { jobCount, headCount, statusCount, streamGetCount, streamUrls, result, body: jobBodies[0] };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runLiveResumableAfterFailuresSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__cachePlayCalls = [];
+    try {
+      const originalPlay = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        try {
+          window.__cachePlayCalls.push({
+            src: this.currentSrc || this.src || "",
+            kind: this.dataset ? (this.dataset.idxSourceKind || "") : ""
+          });
+        } catch (_) {}
+        try {
+          this.dispatchEvent(new Event("play"));
+          this.dispatchEvent(new Event("playing"));
+        } catch (_) {}
+        if (originalPlay && this.dataset && this.dataset.idxSourceKind !== "saved") {
+          try { return originalPlay.apply(this, arguments); } catch (_) {}
+        }
+        return Promise.resolve();
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404|Web Audio 流式异常|实时流暂不可用/i.test(text)) pageErrors.push(text);
+  });
+
+  const liveKey = "d".repeat(40);
+  let jobCount = 0;
+  let headCount = 0;
+  let cacheGetCount = 0;
+  let statusCount = 0;
+  let streamGetCount = 0;
+  let deleteCount = 0;
+  const streamUrls = [];
+  const jobBodies = [];
+
+  await page.route("**/cache_audio/**", async (route) => {
+    const method = route.request().method().toUpperCase();
+    if (method === "HEAD") {
+      headCount += 1;
+      await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+      return;
+    }
+    cacheGetCount += 1;
+    await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    statusCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "running",
+        cache_key: liveKey,
+        cache_url: "/cache_audio/" + liveKey,
+        sample_rate: 8000,
+        duration_s: 0.1,
+        metrics: {
+          state: "running",
+          phase: "tts",
+          message: "后端正在合成…",
+          segments_done: 1,
+          segments_total: 1
+        },
+        segments_meta: [
+          { idx: 0, role: "旁白", text: "兜底自动播放。", style: "neutral", start_s: 0, duration_s: 0.1 }
+        ]
+      })
+    });
+  });
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+)?(?:[?#].*)?$/, async (route) => {
+    const req = route.request();
+    const method = req.method().toUpperCase();
+    const pathname = new URL(req.url()).pathname;
+    if (method === "POST" && /\/tts_dialogue_stream_job\/?$/.test(pathname)) {
+      jobCount += 1;
+      try { jobBodies.push(JSON.parse(req.postData() || "{}")); } catch (_) { jobBodies.push({}); }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          url: "/tts_dialogue_stream_job/" + liveKey,
+          cache_url: "/cache_audio/" + liveKey,
+          cache_key: liveKey,
+          cached: false,
+          live: true
+        })
+      });
+      return;
+    }
+    if (method === "GET" && pathname.indexOf("/tts_dialogue_stream_job/") >= 0) {
+      streamGetCount += 1;
+      streamUrls.push(req.url());
+      await route.abort("failed");
+      return;
+    }
+    if (method === "DELETE" && pathname.indexOf("/tts_dialogue_stream_job/") >= 0) {
+      deleteCount += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: true }) });
+      return;
+    }
+    await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "unexpected live fallback method" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(() => {
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+        configVersion: 12,
+        mode: "normal",
+        playbackMode: "live",
+        llmEndpoint: "http://127.0.0.1:8317/v1",
+        llmModel: "live-fallback-smoke-model",
+        llmApiKey: "",
+        reuseLlmParse: true,
+        intervalMs: 50,
+        topP: 0.8,
+        topK: 30,
+        temperature: 0.7,
+        repetitionPenalty: 1.2,
+        emoAlpha: 0.38,
+        speedFactor: 1.0,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }));
+    });
+
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.evaluate(() => {
+      const add = document.querySelector('[data-role="add"]');
+      if (!add) throw new Error("missing add button");
+      add.click();
+    });
+    await page.waitForFunction(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const streamGets = fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length;
+      const play = document.querySelector('[data-role="play"]');
+      return streamGets >= 4 && play && play.dataset.state !== "loading";
+    }, { timeout: 15000 });
+    await page.waitForTimeout(250);
+
+    const beforeResume = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const play = document.querySelector('[data-role="play"]');
+      const audio = document.querySelector("audio");
+      const notice = (document.querySelector(".idx-subtitle") || {}).textContent || "";
+      const status = (document.querySelector('[data-role="status"]') || {}).textContent || "";
+      return {
+        playState: play ? play.dataset.state : "",
+        status,
+        notice,
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioCacheKey: audio && audio.dataset ? audio.dataset.idxCacheKey || "" : "",
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
+        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        cacheChecks: fetches.filter((r) => /\/cache_audio\//.test(r.url)).length,
+        cachePlays: (window.__cachePlayCalls || []).filter((x) => x && x.kind === "saved").length,
+        allPlays: window.__cachePlayCalls || []
+      };
+    });
+
+    if (jobCount !== 1 || beforeResume.jobs !== 1) {
+      throw new Error("LIVE failures must not create a second job: " + JSON.stringify({ jobCount, beforeResume, jobBodies }));
+    }
+    if (streamGetCount < 4 || beforeResume.streamGets < 4 || streamUrls.some((u) => !u.includes(liveKey))) {
+      throw new Error("LIVE failures should retry the same cache-key stream before pausing: " + JSON.stringify({ streamGetCount, streamUrls, beforeResume }));
+    }
+    if (beforeResume.playState === "loading") {
+      throw new Error("LIVE failures must return the play button to a tappable state: " + JSON.stringify(beforeResume));
+    }
+    if (beforeResume.cachePlays || beforeResume.audioKind === "saved") {
+      throw new Error("LIVE failures must not force autoplay saved-cache fallback: " + JSON.stringify(beforeResume));
+    }
+    if (deleteCount || beforeResume.deletes) {
+      throw new Error("LIVE failures must not delete the backend job: " + JSON.stringify({ deleteCount, beforeResume }));
+    }
+    if (!/点播放|继续|不稳定|中断|超时|暂不可用/.test(beforeResume.status + beforeResume.notice)) {
+      throw new Error("LIVE failure state should tell the user it can be resumed: " + JSON.stringify(beforeResume));
+    }
+
+    const streamGetsBeforeManualResume = streamGetCount;
+    await page.click('[data-role="play"]');
+    await page.waitForFunction((n) => {
+      const fetches = window.__idxTest.getFetchLog();
+      return fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length > n;
+    }, streamGetsBeforeManualResume, { timeout: 10000 });
+    await page.waitForTimeout(150);
+
+    const afterResume = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const play = document.querySelector('[data-role="play"]');
+      return {
+        playState: play ? play.dataset.state : "",
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        cachePlays: (window.__cachePlayCalls || []).filter((x) => x && x.kind === "saved").length
+      };
+    });
+    if (afterResume.jobs !== 1 || jobCount !== 1) {
+      throw new Error("manual LIVE resume must reuse the existing job, not POST again: " + JSON.stringify({ jobCount, beforeResume, afterResume, jobBodies }));
+    }
+    if (afterResume.streamGets <= streamGetsBeforeManualResume || streamUrls.some((u) => !u.includes(liveKey))) {
+      throw new Error("manual LIVE resume must GET the same cache-key stream again: " + JSON.stringify({ liveKey, streamGetsBeforeManualResume, streamUrls, afterResume }));
+    }
+    if (afterResume.deletes || deleteCount) {
+      throw new Error("manual LIVE resume must not delete the backend job: " + JSON.stringify({ deleteCount, afterResume }));
+    }
+    if (afterResume.cachePlays) {
+      throw new Error("manual LIVE resume should request live stream, not autoplay saved cache: " + JSON.stringify({ beforeResume, afterResume }));
+    }
+    if (/等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|收到音频|网络缓冲中/.test(beforeResume.notice)) {
+      throw new Error("LIVE resumable progress must stay out of the lyric panel: " + JSON.stringify(beforeResume));
+    }
+    if (pageErrors.length) throw new Error("LIVE resumable-after-failures smoke page error: " + pageErrors.join(" | "));
+    return { jobCount, headCount, cacheGetCount, statusCount, streamGetCount, streamUrls, beforeResume, afterResume, body: jobBodies[0] };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404|Web Audio 流式异常/i.test(text)) pageErrors.push(text);
+  });
+
+  const liveKey = "f".repeat(40);
+  const streamUrls = [];
+  let jobCount = 0;
+  let statusCount = 0;
+
+  await page.route("**/cache_audio/**", async (route) => {
+    await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    statusCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "running",
+        cache_key: liveKey,
+        cache_url: "/cache_audio/" + liveKey,
+        sample_rate: 8000,
+        duration_s: 8,
+        metrics: { state: "running", phase: "tts", message: "后端正在合成…", segments_done: 1, segments_total: 2 },
+        segments_meta: [
+          { idx: 0, role: "旁白", text: "第一句。", start_s: 0, duration_s: 3 },
+          { idx: 1, role: "对白", text: "第二句。", start_s: 3, duration_s: 5 }
+        ]
+      })
+    });
+  });
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+)?(?:[?#].*)?$/, async (route) => {
+    const req = route.request();
+    const method = req.method().toUpperCase();
+    const pathname = new URL(req.url()).pathname;
+    if (method === "POST" && /\/tts_dialogue_stream_job\/?$/.test(pathname)) {
+      jobCount += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ cache_key: liveKey, url: "/tts_dialogue_stream_job/" + liveKey }) });
+      return;
+    }
+    if (method === "GET" && pathname.indexOf("/tts_dialogue_stream_job/") >= 0) {
+      streamUrls.push(req.url());
+      await route.abort("failed");
+      return;
+    }
+    await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "unexpected live resume method" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate((key) => {
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+        configVersion: 13,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }));
       localStorage.setItem("indextts_pending_jobs_test-message-1", JSON.stringify([{
         cacheKey: key,
         cacheUrl: "/cache_audio/" + key,
@@ -638,7 +1230,11 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         backgroundOnly: false,
         state: "live",
         status: "running",
-        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav", "对白": "女声/高圆圆.wav" },
+        pendingBlob: true,
+        streaming: true,
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav" },
+        lastWebAudioSec: 2.75,
+        lastElementSec: 2.75,
         segments: []
       }]));
     }, liveKey);
@@ -647,50 +1243,34 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     await page.waitForSelector(".idx-card", { timeout: 10000 });
     await page.click('[data-role="play"]');
     await page.waitForFunction(() => {
-      const play = document.querySelector('[data-role="play"]');
       const fetches = window.__idxTest.getFetchLog();
-      return play && play.dataset.state === "loading"
-        && fetches.some((r) => /\/cache_audio\//.test(r.url) || /\/tts_dialogue_job_status\//.test(r.url));
+      return fetches.some((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url));
     }, { timeout: 10000 });
-
-    await page.evaluate(() => window.__idxTest.clearFetchLog());
-    await page.click('[data-role="play"]');
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(150);
 
     const result = await page.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
-      const play = document.querySelector('[data-role="play"]');
-      const status = (document.querySelector('[data-role="status"]') || {}).textContent || "";
-      const notice = (document.querySelector(".idx-subtitle") || {}).textContent || "";
       return {
-        playState: play ? play.dataset.state : "",
-        status,
-        notice,
-        counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
-        cacheChecks: fetches.filter((r) => /\/cache_audio\//.test(r.url)).length,
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        streamUrls: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).map((r) => r.url),
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
-        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
-        liveExitVisible: getComputedStyle(document.querySelector('[data-role="live-exit"]')).display !== "none"
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || ""
       };
     });
-
-    if (/已暂停/.test(result.status) || /已暂停/.test(result.notice) || result.playState !== "loading") {
-      throw new Error("clicking a waiting LIVE card should not immediately pause itself: " + JSON.stringify(result));
+    if (jobCount || result.jobs) {
+      throw new Error("restored LIVE resume must not POST a new job: " + JSON.stringify({ jobCount, result }));
     }
-    if (result.cacheChecks + result.statuses < 1) {
-      throw new Error("clicking LIVE play should visibly check cache/status instead of doing nothing: " + JSON.stringify(result));
+    const firstStream = streamUrls[0] || (result.streamUrls && result.streamUrls[0]) || "";
+    if (!firstStream.includes(liveKey)) {
+      throw new Error("restored LIVE resume should GET the original cache-key stream: " + JSON.stringify({ streamUrls, result }));
     }
-    if (streamGetCount !== 0 || result.streamGets !== 0) {
-      throw new Error("default LIVE card should wait for saved cache instead of opening native stream: " + JSON.stringify({ streamGetCount, result }));
+    const parsed = new URL(firstStream);
+    const startS = Number(parsed.searchParams.get("start_s"));
+    if (!Number.isFinite(startS) || Math.abs(startS - 2.75) > 0.02) {
+      throw new Error("restored LIVE resume should request backend stream with start_s from last WebAudio second: " + JSON.stringify({ firstStream, result, statusCount }));
     }
-    if (!result.liveExitVisible) {
-      throw new Error("LIVE exit button should stay visible on a waiting live card: " + JSON.stringify(result));
-    }
-    if (!/^\d+\/\d+$/.test(result.counterText) || result.counterText === "L") {
-      throw new Error("LIVE card counter should stay as page text, not the L mode badge: " + JSON.stringify(result));
-    }
-    if (pageErrors.length) throw new Error("LIVE play-click smoke page error: " + pageErrors.join(" | "));
-    return { headCount, statusCount, streamGetCount, result };
+    if (pageErrors.length) throw new Error("LIVE resume start offset smoke page error: " + pageErrors.join(" | "));
+    return { streamUrls, result, statusCount };
   } finally {
     await context.close();
   }
@@ -711,6 +1291,20 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
   const pageErrors = [];
   page.on("console", (msg) => consoleLines.push(msg.type() + ": " + msg.text()));
   page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  await page.route(/\/voices(?:[?#].*)?$/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        voices: [
+          { name: "女声/高圆圆.wav", subdir: "女声" },
+          { name: "男声/旁白.mp3", subdir: "男声" },
+          { name: "女声/风韵少妇.wav", subdir: "女声" },
+          { name: "女声/单独对白.wav", subdir: "女声" }
+        ]
+      })
+    });
+  });
 
   try {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
@@ -744,8 +1338,41 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (initialLazy.voices !== 0) throw new Error("lazy-load failed: /voices was requested on mount, count=" + initialLazy.voices);
     if (initialLazy.jobs !== 0) throw new Error("mount should not create TTS jobs, count=" + initialLazy.jobs);
 
-    await page.click('[data-role="lazy-open"]');
-    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    const immediateShell = await page.evaluate(() => {
+      const open = document.querySelector('[data-role="lazy-open"]');
+      if (!open) throw new Error("missing lazy open button");
+      open.click();
+      const fetches = window.__idxTest && window.__idxTest.getFetchLog ? window.__idxTest.getFetchLog() : [];
+      const shell = document.querySelector('[data-role="loader-shell"]');
+      return {
+        shell: !!shell,
+        card: !!document.querySelector(".idx-card"),
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        notice: (document.querySelector(".idx-sub-notice") || {}).textContent || "",
+        loaderSeek: !!(shell && shell.querySelector(".idx-seek")),
+        loaderGap: !!(shell && shell.querySelector(".idx-loader-gap")),
+        coverBg: shell ? getComputedStyle(shell.querySelector('[data-role="cover"]') || shell).backgroundImage : "",
+        coverText: (shell && shell.querySelector('[data-role="cover"]') ? shell.querySelector('[data-role="cover"]').textContent : "") || "",
+        voices: fetches.filter((r) => /\/voices(?:[?#]|$)/.test(r.url)).length,
+        jobs: fetches.filter((r) => /\/tts_(?:stream|dialogue).*job/.test(r.url)).length
+      };
+    });
+    if (!immediateShell.shell || !immediateShell.card) {
+      throw new Error("lazy click should show a full player shell immediately: " + JSON.stringify(immediateShell));
+    }
+    if (immediateShell.voices !== 0 || immediateShell.jobs !== 0) {
+      throw new Error("loader shell must not request voices or create jobs: " + JSON.stringify(immediateShell));
+    }
+    if (!/播放器打开中/.test(immediateShell.status + immediateShell.notice)) {
+      throw new Error("loader shell should show visible loading status: " + JSON.stringify(immediateShell));
+    }
+    if (immediateShell.loaderSeek || !immediateShell.loaderGap) {
+      throw new Error("loader shell must not expose a fake seek/progress bar: " + JSON.stringify(immediateShell));
+    }
+    if (!/narrator\.png/.test(immediateShell.coverBg || "")) {
+      throw new Error("loader shell should use narrator avatar as default cover: " + JSON.stringify(immediateShell));
+    }
+    await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
     await page.click('[data-role="gear"]');
     await page.waitForSelector('[data-role="panel"][open]', { timeout: 5000 });
     const afterRuntime = await page.evaluate(() => {
@@ -755,6 +1382,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       const card = document.querySelector(".idx-card");
       const panel = document.querySelector('[data-role="panel"]');
       const close = document.querySelector(".idx-close");
+      const panelStyle = panel ? getComputedStyle(panel) : null;
       const cardRect = card ? card.getBoundingClientRect() : null;
       const panelRect = panel ? panel.getBoundingClientRect() : null;
       const closeRect = close ? close.getBoundingClientRect() : null;
@@ -862,6 +1490,8 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         },
         card: !!document.querySelector(".idx-card"),
         panelOpen: !!document.querySelector('[data-role="panel"][open]'),
+        panelOutlineStyle: panelStyle ? panelStyle.outlineStyle : "",
+        panelOutlineWidth: panelStyle ? panelStyle.outlineWidth : "",
         cardRect: cardRect ? { left: cardRect.left, top: cardRect.top, width: cardRect.width, height: cardRect.height } : null,
         panelRect: panelRect ? { left: panelRect.left, top: panelRect.top, width: panelRect.width, height: panelRect.height } : null,
         closeRect: closeRect ? { width: closeRect.width, height: closeRect.height } : null,
@@ -874,6 +1504,12 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     });
 
     if (!afterRuntime.card || !afterRuntime.panelOpen) throw new Error("runtime player/settings was not mounted: " + JSON.stringify(afterRuntime));
+    if (afterRuntime.panelOutlineStyle !== "none" || afterRuntime.panelOutlineWidth !== "0px") {
+      throw new Error("settings panel should have one outer border and no dialog focus outline: " + JSON.stringify({
+        outlineStyle: afterRuntime.panelOutlineStyle,
+        outlineWidth: afterRuntime.panelOutlineWidth
+      }));
+    }
     if (afterRuntime.runtimeManifest !== 1) throw new Error("runtime manifest should load exactly once, got " + afterRuntime.runtimeManifest);
     if (afterRuntime.runtimeParts < 16) throw new Error("runtime parts were not loaded, count=" + afterRuntime.runtimeParts);
     if (afterRuntime.voices !== 0) throw new Error("opening settings should not request /voices before the picker, count=" + afterRuntime.voices);
@@ -936,6 +1572,9 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       throw new Error("settings should expose 普通模式/AI模式 labels: " + JSON.stringify(afterRuntime.modeLabels));
     }
     const settingTitles = afterRuntime.settingTitles || [];
+    if (settingTitles.includes("文本模式")) {
+      throw new Error("settings should not show the redundant 文本模式 section title: " + JSON.stringify(settingTitles));
+    }
     const qualityIdx = settingTitles.indexOf("合成质量");
     const normalVoiceIdx = settingTitles.indexOf("普通模式音色");
     const aiVoiceIdx = settingTitles.indexOf("角色音色映射");
@@ -944,20 +1583,20 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       throw new Error("voice mapping sections should be directly below quality and above playback/offline: " + JSON.stringify(settingTitles));
     }
     const normalRows = afterRuntime.normalRows || [];
-    if (normalRows.length !== 3 || normalRows.map((r) => r.role).join("/") !== "默认/旁白/对话") {
-      throw new Error("normal mode voices should use fixed role-style rows: " + JSON.stringify(normalRows));
+    if (normalRows.length !== 2 || normalRows.map((r) => r.role).join("/") !== "旁白/对白") {
+      throw new Error("normal mode voices should use only narrator/dialogue rows: " + JSON.stringify(normalRows));
     }
-    if (normalRows.some((r) => !r.readonly || r.deletable || !r.locked)) {
-      throw new Error("normal mode voice rows should be locked and non-deletable: " + JSON.stringify(normalRows));
+    if (normalRows.some((r) => !r.readonly)) {
+      throw new Error("normal mode role names should be readonly: " + JSON.stringify(normalRows));
     }
-    if (normalRows[0].voiceRole !== "default-voice-btn" || normalRows[0].voiceTag !== "BUTTON") {
-      throw new Error("default normal voice row should expose a default voice picker button: " + JSON.stringify(normalRows));
+    if (normalRows[0].voiceRole !== "normal-narrator-voice-btn" || normalRows[0].voiceTag !== "BUTTON" || !normalRows[0].locked || normalRows[0].deletable) {
+      throw new Error("normal narrator row should be locked and expose narrator picker only: " + JSON.stringify(normalRows));
     }
-    if (normalRows[1].voiceRole !== "normal-narrator-voice-btn" || normalRows[2].voiceRole !== "normal-dialogue-voice-btn") {
-      throw new Error("only narrator/dialogue normal rows should expose voice picker buttons: " + JSON.stringify(normalRows));
+    if (normalRows[1].voiceRole !== "normal-dialogue-voice-btn" || normalRows[1].voiceTag !== "BUTTON" || !normalRows[1].deletable) {
+      throw new Error("normal dialogue row should expose dialogue picker and a clear-to-inherit action: " + JSON.stringify(normalRows));
     }
-    if (!(await page.locator('[data-role="default-voice-btn"]').count())) {
-      throw new Error("default normal voice should expose a picker button");
+    if (await page.locator('[data-role="default-voice-btn"]').count()) {
+      throw new Error("normal mode should not expose a separate default voice row");
     }
 
     const roleMapping = afterRuntime.roleMapping;
@@ -968,23 +1607,9 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       throw new Error("default role mapping still contains literal placeholder '角色': " + JSON.stringify(roleMapping));
     }
 
-    await page.click('[data-role="default-voice-btn"]');
-    await page.waitForSelector('[data-role="voice-picker"][open]', { timeout: 5000 });
-    await page.waitForFunction(() => {
-      const fetches = window.__idxTest && window.__idxTest.getFetchLog ? window.__idxTest.getFetchLog() : [];
-      return fetches.some((r) => /\/voices(?:[?#]|$)/.test(r.url));
-    }, { timeout: 10000 });
-    await page.waitForFunction(() => {
-      const grid = document.querySelector('[data-role="picker-grid"]');
-      return grid && (grid.querySelector(".idx-picker-item") || /没有找到|没有匹配|读取失败/.test(grid.textContent || ""));
-    }, { timeout: 10000 });
-    await page.click(".idx-picker-close");
-    await page.waitForSelector('[data-role="voice-picker"][open]', { state: "detached", timeout: 5000 }).catch(async () => {
-      await page.waitForFunction(() => !document.querySelector('[data-role="voice-picker"][open]'), { timeout: 5000 });
-    });
-
     await page.click('[data-role="normal-narrator-voice-btn"]');
     await page.waitForSelector('[data-role="voice-picker"][open]', { timeout: 5000 });
+    await page.waitForSelector('[data-role="picker-grid"] .idx-picker-item', { timeout: 5000 });
 
     const afterPicker = await page.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
@@ -1000,6 +1625,8 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         narratorVoiceText: narratorBtn ? narratorBtn.textContent.trim() : "",
         pickerOpen: !!(picker && picker.open),
         pickerDisplay: pickerStyle ? pickerStyle.display : "",
+        pickerOutlineStyle: pickerStyle ? pickerStyle.outlineStyle : "",
+        pickerOutlineWidth: pickerStyle ? pickerStyle.outlineWidth : "",
         pickerRect: pickerRect ? { left: pickerRect.left, top: pickerRect.top, width: pickerRect.width, height: pickerRect.height } : null
       };
     });
@@ -1008,6 +1635,9 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (afterPicker.items < 1) throw new Error("voice picker rendered no voice items: " + afterPicker.gridText);
     if (!afterPicker.pickerOpen || afterPicker.pickerDisplay === "none") {
       throw new Error("voice picker should be visibly open: " + JSON.stringify(afterPicker));
+    }
+    if (afterPicker.pickerOutlineStyle !== "none" || afterPicker.pickerOutlineWidth !== "0px") {
+      throw new Error("voice picker should have one outer border and no dialog focus outline: " + JSON.stringify(afterPicker));
     }
     if (!afterPicker.pickerRect || afterPicker.pickerRect.height < 540) {
       throw new Error("voice picker should be slightly taller for one page of voices: " + JSON.stringify(afterPicker.pickerRect));
@@ -1019,7 +1649,10 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     const llmReuse = await runLlmReuseSmoke(browser, targetUrl);
     const llmErrorCopy = await runLlmErrorCopySmoke(browser, targetUrl);
     const normalGenerateCancel = await runNormalGenerateCancelSmoke(browser, targetUrl);
+    const normalExplicitDialogueMapping = await runNormalExplicitDialogueMappingSmoke(browser, targetUrl);
     const livePlayClick = await runLivePlayClickSmoke(browser, targetUrl);
+    const liveResumableAfterFailures = await runLiveResumableAfterFailuresSmoke(browser, targetUrl);
+    const liveResumeStartOffset = await runLiveResumeStartOffsetSmoke(browser, targetUrl);
 
     console.log(JSON.stringify({
       ok: true,
@@ -1031,7 +1664,10 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       llmReuse,
       llmErrorCopy,
       normalGenerateCancel,
+      normalExplicitDialogueMapping,
       livePlayClick,
+      liveResumableAfterFailures,
+      liveResumeStartOffset,
       consoleCount: consoleLines.length
     }, null, 2));
   } finally {

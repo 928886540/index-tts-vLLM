@@ -73,6 +73,11 @@
     }
     function trackResumeSec(track) {
       if (!track) return 0;
+      if (isSavedTrack(track) && String(track.playbackState || "") === "ended") return 0;
+      if (typeof webAudioPlaybackSecForTrack === "function" && webAudioActiveTrack === track) {
+        var webSec = webAudioPlaybackSecForTrack(track);
+        if (isFinite(Number(webSec)) && Number(webSec) > 0) return Math.max(0, Number(webSec));
+      }
       var src = "";
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       var playable = trackPlayableUrl(track);
@@ -108,6 +113,18 @@
       });
       return maxEnd;
     }
+    function isLiveProgressTrack(track) {
+      if (!track) return false;
+      try {
+        if (isSavedTrack(track)) return false;
+        if (track.webAudioPlaying || webAudioActiveTrack === track) return true;
+        if (isElementUsingTrackStream(track) || isElementPlayingTrackStream(track)) return true;
+        var state = trackState(track);
+        return state === "live" || state === "pending";
+      } catch (_) {
+        return !!(track && (track.webAudioPlaying || track.streaming || track.pendingBlob));
+      }
+    }
     function clampPlaybackTimeSec(track, sec) {
       sec = Math.max(0, Number(sec || 0) || 0);
       var dur = trackDurationHintSec(track);
@@ -115,14 +132,27 @@
       if (!isElementUsingTrackStream(track) && isFinite(audioDur) && audioDur > 0) {
         dur = dur > 0 ? Math.max(dur, audioDur) : audioDur;
       }
+      if (isLiveProgressTrack(track)) return sec;
       if (dur > 0 && sec > dur) return dur;
       return sec;
     }
-    function progressDurationSec(track) {
+    function progressDurationSec(track, positionSec) {
+      positionSec = Math.max(0, Number(positionSec || 0) || 0);
       var dur = Number(audio && audio.duration);
       var hint = trackDurationHintSec(track);
+      if (isLiveProgressTrack(track)) {
+        if (hint > 0 && positionSec <= hint + 0.25) return hint;
+        return 0;
+      }
       if (isFinite(dur) && dur > 0) return hint > dur + 0.5 ? hint : dur;
       return hint > 0 ? hint : 0;
+    }
+    function progressMeterDurationSec(track, positionSec) {
+      positionSec = Math.max(0, Number(positionSec || 0) || 0);
+      var dur = progressDurationSec(track, positionSec);
+      if (dur > 0) return dur;
+      if (isLiveProgressTrack(track)) return Math.max(10, positionSec + 5);
+      return 0;
     }
     function seekToSeconds(pos, opts) {
       opts = opts || {};

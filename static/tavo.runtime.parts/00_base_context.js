@@ -5,7 +5,7 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
   var script = (typeof window !== "undefined" && window.__indextts_tavo_runtime_script_override) || document.currentScript;
   var STYLE_ID = "indextts-tavo-player-v5";
   var CONFIG_KEY = "indextts_tavo_config_v3";
-  var CONFIG_VERSION = 12;
+  var CONFIG_VERSION = 13;
   var CHAR_SCOPE_CONFIG_KEY = "indextts_tavo_character_config_v1";
   // 角色级配置: defaultVoice + roleVoiceList。LLM/api/mode 参数走全局。
   var CHAR_KEY_PREFIX = "indextts_tavo_character_v1:";
@@ -14,6 +14,7 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     "apiBase", "mode", "playbackMode", "endpoint", "dialogueEndpoint", "parseEndpoint",
     "llmEndpoint", "llmModel", "llmApiKey", "reuseLlmParse",
     "intervalMs", "topP", "topK", "temperature", "repetitionPenalty", "emoAlpha", "speedFactor", "qualityMode",
+    "diffusionSteps", "promptAudioSeconds", "segmentTokens", "firstTokens", "s2melCfgRate", "subtitleLeadSec",
     "offlineAudioEnabled"
   ];
   var RESERVED_ROLES = ["旁白", "用户"];  // 这两个常驻不可删；具体人物用原名或 defaultVoice
@@ -27,6 +28,11 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     if (mode === "generate" || mode === "background" || mode === "file") return "generate";
     return "live";
   }
+  function clampNumber(value, fallback, min, max) {
+    var n = Number(value);
+    if (!isFinite(n)) n = fallback;
+    return Math.max(min, Math.min(max, n));
+  }
   function normalizeCharacterRoleName(name) {
     return String(name || "").trim();
   }
@@ -34,12 +40,20 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     role = String(role || "").trim();
     return role === "角色" || role === "character" || role === "当前角色";
   }
+  function isNormalDialogueRole(role) {
+    role = String(role || "").trim();
+    return role === "对白" || role === "对话" || role === "台词" || role.toLowerCase() === "dialogue";
+  }
+  function canonicalDialogueRoleName(role) {
+    return isNormalDialogueRole(role) ? "对白" : String(role || "").trim();
+  }
   function canonicalRoleName(role, characterRoleName, previousCharacterRoleName) {
     role = String(role || "").trim();
     characterRoleName = normalizeCharacterRoleName(characterRoleName);
     previousCharacterRoleName = normalizeCharacterRoleName(previousCharacterRoleName);
     if (characterRoleName && isCharacterPlaceholderRole(role)) return characterRoleName;
     if (characterRoleName && previousCharacterRoleName && role === previousCharacterRoleName) return characterRoleName;
+    if (isNormalDialogueRole(role)) return "对白";
     if (role === "narrator") return "旁白";
     if (role === "你" || role === "user" || role === "User" || role === "我") return "用户";
     return role;
@@ -50,7 +64,8 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     for (var i = 0; i < list.length; i++) {
       var rawRole = String((list[i] && list[i].role) || "").trim();
       var role = canonicalRoleName(rawRole, characterRoleName, previousCharacterRoleName);
-      if (names.indexOf(role) >= 0 || names.indexOf(rawRole) >= 0) return String((list[i] && list[i].voice) || "");
+      var voice = String((list[i] && list[i].voice) || "").trim();
+      if ((names.indexOf(role) >= 0 || names.indexOf(rawRole) >= 0) && voice) return voice;
     }
     return "";
   }
@@ -58,7 +73,13 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     list = (list && Array.isArray(list)) ? list.slice() : [];
     function findVoice(names, fallbackIndex) {
       var hit = voiceForRoleNames(list, names, characterRoleName, previousCharacterRoleName);
-      return hit || String((list[fallbackIndex] && list[fallbackIndex].voice) || "");
+      if (hit) return hit;
+      var fallback = list[fallbackIndex];
+      var rawRole = String((fallback && fallback.role) || "").trim();
+      var fallbackRole = canonicalRoleName(rawRole, characterRoleName, previousCharacterRoleName);
+      var fallbackVoice = String((fallback && fallback.voice) || "").trim();
+      if (fallbackVoice && (!rawRole || names.indexOf(fallbackRole) >= 0 || names.indexOf(rawRole) >= 0)) return fallbackVoice;
+      return "";
     }
     var reserved = [
       { role: "旁白", voice: findVoice(["旁白", "narrator"], 0) },
@@ -88,6 +109,11 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
       addExtra(role, voice);
     });
     return reserved.concat(extra);
+  }
+  function normalizeAiRoleVoiceList(list, characterRoleName, previousCharacterRoleName) {
+    return normalizeRoleVoiceList(list || [], characterRoleName, previousCharacterRoleName).filter(function (item) {
+      return item && !isNormalDialogueRole(item.role);
+    });
   }
   async function loadCharacterCfg(characterId) {
     if (characterId) {
@@ -222,6 +248,12 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     emoAlpha: 0.38,
     speedFactor: 1.0,
     qualityMode: "balanced",
+    diffusionSteps: 14,
+    promptAudioSeconds: 10,
+    segmentTokens: 60,
+    firstTokens: 18,
+    s2melCfgRate: 0.7,
+    subtitleLeadSec: 0.30,
     reuseLlmParse: true,
     offlineAudioEnabled: false
   };

@@ -95,7 +95,7 @@ parser.add_argument("--cuda_kernel", action="store_true", default=True, help="Us
 parser.add_argument("--no_cuda_kernel", dest="cuda_kernel", action="store_false", help="Disable BigVGAN CUDA kernel")
 parser.add_argument("--qwen_emo", action="store_true", default=False, help="Deprecated no-op. Qwen emotion is not used by the launcher path.")
 parser.add_argument("--no_qwen_emo", dest="qwen_emo", action="store_false", help="Disable deprecated Qwen emotion model.")
-parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=float(os.getenv("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION", "0.18")), help="vLLM GPU memory reservation ratio. Lower is safer on 12GB GPUs.")
+parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=float(os.getenv("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION", "0.15")), help="vLLM GPU memory reservation ratio. Lower is safer on 12GB GPUs.")
 parser.add_argument("--vllm_enforce_eager", action="store_true", default=os.getenv("INDEXTTS_VLLM_ENFORCE_EAGER", "1") != "0", help="Disable vLLM CUDA graph capture for lower memory pressure (default: on).")
 parser.add_argument("--no_vllm_enforce_eager", dest="vllm_enforce_eager", action="store_false", help="Allow vLLM CUDA graph capture for potentially faster GPT generation.")
 args = parser.parse_args()
@@ -622,7 +622,7 @@ def _make_complete_wav_bytes(pcm: bytes, sample_rate: int, channels: int = 1, bi
 
 
 BACKEND_LLM_PARSE_PROMPT_VERSION = "20260605-backend-v1"
-BACKEND_NORMAL_PARSE_VERSION = "20260605-normal-v1"
+BACKEND_NORMAL_PARSE_VERSION = "20260607-normal-v2"
 LLM_PARSE_CACHE_MAX = 64
 LLM_PARSE_CACHE: Dict[str, dict] = {}
 
@@ -654,7 +654,9 @@ def _normalize_dialogue_voices(voices: dict) -> Dict[str, str]:
     normalized: Dict[str, str] = {}
     for key, value in (voices or {}).items():
         role = "default" if key == "default" else _normalize_role(key)
-        normalized[role] = str(value or "").strip()
+        voice = str(value or "").strip()
+        if voice or role not in normalized:
+            normalized[role] = voice
     return normalized
 
 
@@ -862,6 +864,8 @@ def _put_parse_cache(key: str, segments: list):
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_BLOCK_RE = re.compile(r"<([A-Za-z][A-Za-z0-9:_-]*)(?:\s[^>]*)?>[\s\S]*?</\1\s*>", re.IGNORECASE)
+_HTML_VOID_RE = re.compile(r"<\s*(?:br|hr|img|input|meta|link|source|track|wbr|area|base|col|embed|param)\b[^>]*\/?\s*>", re.IGNORECASE)
 _EMOJI_RE = re.compile(
     "["
     "\U0001F1E6-\U0001F1FF"
@@ -876,15 +880,18 @@ _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 def _clean_tavo_body_text(text: str) -> str:
     text = html.unescape(str(text or ""))
-    for _ in range(6):
+    for _ in range(12):
         before = text
-        text = re.sub(r"<(script|style|template)\b[^>]*>[\s\S]*?</\1>", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\[[A-Za-z0-9_-]*TAVO[A-Za-z0-9_-]*\]", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\[IndexTTS_TAVO_SCRIPT\]", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"</(p|div|br|li|section|article|blockquote|h[1-6])\s*>", "\n", text, flags=re.IGNORECASE)
-        text = _HTML_TAG_RE.sub("", text)
+        text = html.unescape(text)
+        text = re.sub(r"<!--[\s\S]*?-->", "\n", text)
+        text = _HTML_BLOCK_RE.sub("\n", text)
+        text = _HTML_VOID_RE.sub("\n", text)
+        text = _HTML_TAG_RE.sub("\n", text)
         if text == before:
             break
+    text = re.sub(r"\[[A-Za-z0-9_-]*TAVO[A-Za-z0-9_-]*\]", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[IndexTTS_TAVO_SCRIPT\]", "\n", text, flags=re.IGNORECASE)
+    text = text.replace("<", "\n").replace(">", "\n")
     text = _CONTROL_RE.sub("", text)
     text = _EMOJI_RE.sub("", text)
     text = re.sub(r"^[ \t>*#\-_=~`]+", "", text, flags=re.MULTILINE)
@@ -1133,6 +1140,8 @@ def _resolve_dialogue_voices_for_segments(segments: list, voices: dict):
 
 
 def _dialogue_segments_cache_payload(segments: list, role_voice_paths: dict, default_path: str, req: dict, common: dict, parse_info: dict = None) -> dict:
+    from indextts.llm_proxy import _normalize_role
+
     sampling_kwargs = common["sampling_kwargs"]
     role_payload = {
         role: {"path": path, "meta": _audio_file_meta(path)}
@@ -1142,7 +1151,7 @@ def _dialogue_segments_cache_payload(segments: list, role_voice_paths: dict, def
         "kind": "tts_dialogue_stream_v1",
         "segments": [
             {
-                "role": (seg.get("role") or "").strip(),
+                "role": _normalize_role(seg.get("role") or ""),
                 "text": (seg.get("text") or "").strip(),
                 **_style_cache_fragment(seg),
                 "emo_vec": None if args.qwen_emo else (seg.get("emo_vec") or None),
@@ -1387,7 +1396,21 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             sampling_kwargs = prepared["sampling_kwargs"]
             interval_ms = prepared["interval_ms"]
             default_emo_alpha = prepared["default_emo_alpha"]
-            job.metrics["segments_total"] = len([s for s in segments if (s.get("text") or "").strip()])
+            segments_plan = []
+            for plan_idx, plan_seg in enumerate(segments):
+                plan_role = _normalize_role(plan_seg.get("role") or "")
+                plan_text = (plan_seg.get("text") or "").strip()
+                if not plan_text:
+                    continue
+                segments_plan.append({
+                    "idx": plan_idx,
+                    "role": plan_role,
+                    "text": plan_text,
+                    "style": _segment_style_name(plan_seg) or "neutral",
+                    "style_alpha": plan_seg.get("style_alpha"),
+                })
+            job.metrics["segments_total"] = len(segments_plan)
+            job.metrics["segments_plan"] = segments_plan
             job.metrics["performance_mode"] = sampling_kwargs.get("performance_mode")
             job.metrics["diffusion_steps"] = sampling_kwargs.get("diffusion_steps")
             job.metrics["s2mel_cfg_rate"] = sampling_kwargs.get("s2mel_cfg_rate", 0.7)
@@ -1542,6 +1565,7 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
             metadata = {
                 "kind": "tts_dialogue_stream_v1",
                 "segments_meta": job.segments_meta,
+                "segments_plan": job.metrics.get("segments_plan") or [],
                 "sample_rate": job.sample_rate,
                 "duration_s": audio_duration,
             }
@@ -2168,10 +2192,8 @@ async def tts_dialogue_stream_handle(req: dict):
     if not voices:
         return JSONResponse(status_code=400, content={"message": "voices is required"})
 
-    # Normalize voice-mapping keys so users can write either canonical or alias
-    # forms (e.g. "用户=高圆圆", "narrator=Jok", "旁白=Jok").
     from indextts.llm_proxy import _normalize_role
-    voices = {(_normalize_role(k) if k != "default" else "default"): v for k, v in voices.items()}
+    voices = _normalize_dialogue_voices(voices)
 
     # Pre-resolve every role -> voice path. Detect missing up-front.
     default_path = _resolve_voice(voices.get("default", ""))
@@ -2321,10 +2343,8 @@ async def tts_dialogue_cache_stream_handle(req: dict):
     if not voices:
         return JSONResponse(status_code=400, content={"message": "voices is required"})
 
-    # Normalize voice-mapping keys so users can write either canonical or alias
-    # forms (e.g. "用户=高圆圆", "narrator=Jok", "旁白=Jok").
     from indextts.llm_proxy import _normalize_role
-    voices = {(_normalize_role(k) if k != "default" else "default"): v for k, v in voices.items()}
+    voices = _normalize_dialogue_voices(voices)
 
     default_path = _resolve_voice(voices.get("default", ""))
     role_voice_paths: Dict[str, str] = {}
@@ -2535,6 +2555,8 @@ async def health():
         "engine": "vllm",
         "local_url": f"http://127.0.0.1:{port}",
         "qwen_emo": bool(args.qwen_emo),
+        "vllm_gpu_memory_utilization": float(args.vllm_gpu_memory_utilization),
+        "vllm_enforce_eager": bool(args.vllm_enforce_eager),
         "capabilities": {
             "tts": True,
             "dialogue_jobs": True,
@@ -3296,7 +3318,9 @@ async def tts_dialogue_job_status_endpoint(cache_key: str):
             "pcm_bytes": len(job.pcm),
             "segments_done": len(job.segments_meta),
             "segments_meta": job.segments_meta,
+            "segments_plan": job.metrics.get("segments_plan") or [],
             "sample_rate": job.sample_rate,
+            "duration_s": job.metrics.get("audio_duration_s") or 0.0,
             "metrics": job.metrics,
             "error": job.error,
         })
@@ -3315,11 +3339,13 @@ async def tts_dialogue_job_status_endpoint(cache_key: str):
         segments_meta = params.get("segments_meta") or meta.get("segments_meta") or []
         sample_rate = params.get("sample_rate") or meta.get("sample_rate") or 22050
         metrics = params.get("metrics") or meta.get("metrics") or {}
+        segments_plan = params.get("segments_plan") or meta.get("segments_plan") or metrics.get("segments_plan") or []
         duration_s = params.get("duration_s") or meta.get("duration_s")
         return JSONResponse(content={
             "state": "done", "cache_key": cache_key,
             "cache_url": f"/cache_audio/{cache_key}",
             "segments_meta": segments_meta,
+            "segments_plan": segments_plan,
             "sample_rate": sample_rate,
             "duration_s": duration_s,
             "metrics": metrics,

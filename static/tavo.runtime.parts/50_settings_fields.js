@@ -13,40 +13,52 @@
     function getField(name, fallback) { var el = field(name); return el ? el.value : fallback; }
     function setCheckedField(name, value) { var el = field(name); if (el) el.checked = !!value; }
     function getCheckedField(name, fallback) { var el = field(name); return el ? !!el.checked : !!fallback; }
-    function clampNumber(value, fallback, min, max) {
-      var n = Number(value);
-      if (!isFinite(n)) n = fallback;
-      return Math.max(min, Math.min(max, n));
-    }
     function readFields() {
       cfg.apiBase = String(getField("apiBase", cfg.apiBase || scriptOrigin())).trim() || scriptOrigin();
       cfg.intervalMs = Number(getField("intervalMs", cfg.intervalMs || 50) || 50);
       cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.0), 1.0, 0.85, 1.25);
       cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "balanced") || "balanced").trim();
-      if (["fast", "balanced", "expressive", "ultra"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
+      if (["fast", "balanced", "expressive", "ultra", "custom"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
+      cfg.diffusionSteps = clampNumber(getField("diffusionSteps", cfg.diffusionSteps || 14), 14, 2, 24);
+      cfg.promptAudioSeconds = clampNumber(getField("promptAudioSeconds", cfg.promptAudioSeconds || 10), 10, 2, 16);
+      cfg.segmentTokens = Math.round(clampNumber(getField("segmentTokens", cfg.segmentTokens || 60), 60, 8, 120));
+      cfg.firstTokens = Math.round(clampNumber(getField("firstTokens", cfg.firstTokens || 18), 18, 4, Math.max(4, cfg.segmentTokens)));
+      cfg.s2melCfgRate = clampNumber(getField("s2melCfgRate", cfg.s2melCfgRate == null ? 0.7 : cfg.s2melCfgRate), 0.7, 0, 1.2);
+      cfg.subtitleLeadSec = clampNumber(getField("subtitleLeadSec", cfg.subtitleLeadSec == null ? 0.30 : cfg.subtitleLeadSec), 0.30, 0, 1.0);
       cfg.mode = normalizeModeName(cfg.mode);
       cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode);
       cfg.offlineAudioEnabled = getCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       try { audio.playbackRate = cfg.speedFactor; } catch (_) {}
       // cfg.roleVoiceList 由 renderRoleList 实时维护(addRoleRow/setRowVoice 等),
       // 这里把行里的角色名/音色同步抓一遍(防止用户没失焦就保存)。
+      var preservedNormalRows = normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName).filter(function (item) {
+        return item && isNormalDialogueRole(item.role) && String(item.voice || "").trim();
+      });
       var rows = rolesListEl ? $all(rolesListEl, '.idx-role-row') : [];
       var newList = [];
-      rows.forEach(function (row) {
-        var nameEl = first(row, '.idx-role-name');
-        var role = nameEl ? String(nameEl.value || "").trim() : "";
-        var voice = row.dataset.voice || "";
-        if (role || voice) newList.push({ role: role, voice: voice });
-      });
-      if (newList.length) cfg.roleVoiceList = newList;
-      if (cfg.mode === "normal" && cfg.defaultVoice) {
-        if (!voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], "", cfg.currentCharacterName)) {
-          cfg.roleVoiceList = setVoiceForRoleInList(cfg.roleVoiceList, "旁白", cfg.defaultVoice, cfg.currentCharacterName);
-        }
-        if (!voiceForRoleInList(cfg.roleVoiceList, ["对白", "dialogue", "台词"], "", cfg.currentCharacterName)) {
-          cfg.roleVoiceList = setVoiceForRoleInList(cfg.roleVoiceList, "对白", cfg.defaultVoice, cfg.currentCharacterName);
-        }
+      if (cfg.mode === "ai") {
+        rows.forEach(function (row) {
+          var nameEl = first(row, '.idx-role-name');
+          var role = nameEl ? String(nameEl.value || "").trim() : "";
+          var voice = row.dataset.voice || "";
+          if (role || voice) newList.push({ role: role, voice: voice });
+        });
+        if (newList.length) cfg.roleVoiceList = newList.concat(preservedNormalRows);
       }
+      if (cfg.mode === "normal") {
+        var explicitNarrator = voiceForRoleNames(cfg.roleVoiceList, ["旁白", "narrator"], cfg.currentCharacterName);
+        if (!cfg.defaultVoice && explicitNarrator) cfg.defaultVoice = explicitNarrator;
+        cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName).filter(function (item) {
+          if (!item || !isNormalDialogueRole(item.role)) return true;
+          var voice = String(item.voice || "").trim();
+          return !!voice;
+        });
+      }
+      cfg.topP = clampNumber(getField("topP", cfg.topP || 0.8), 0.8, 0.1, 1);
+      cfg.topK = Math.round(clampNumber(getField("topK", cfg.topK || 30), 30, 1, 100));
+      cfg.temperature = clampNumber(getField("temperature", cfg.temperature || 0.7), 0.7, 0.1, 1.5);
+      cfg.repetitionPenalty = clampNumber(getField("repetitionPenalty", cfg.repetitionPenalty || 1.2), 1.2, 1, 2);
+      cfg.emoAlpha = clampNumber(getField("emoAlpha", cfg.emoAlpha || 0.38), 0.38, 0, 1);
       cfg.roleVoicesText = serializeRoleVoiceList(cfg.roleVoiceList);  // 同步序列化兜底
       cfg.llmModel = String(getField("llmModel", cfg.llmModel || "")).trim();
       cfg.llmEndpoint = String(getField("llmEndpoint", cfg.llmEndpoint || "")).trim();
@@ -88,11 +100,11 @@
     function validateVoiceMappingForGenerate() {
       cfg.mode = normalizeModeName(cfg.mode);
       if (cfg.mode === "normal") {
-        return cfg.defaultVoice ? "" : "请先在“普通模式音色”里选择默认音色。";
+        return cfg.defaultVoice ? "" : "请先在“普通模式音色”里选择旁白音色。";
       }
       if (cfg.defaultVoice) return "";
       var missing = [];
-      var list = normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName);
+      var list = normalizeAiRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName);
       ["旁白", "用户"].forEach(function (name) {
         if (!roleVoice(name)) missing.push(name);
       });
@@ -107,25 +119,17 @@
     function modeName() { return normalizeModeName(cfg.mode) === "ai" ? "AI模式" : "普通模式"; }
     function playbackModeName() { return normalizePlaybackMode(cfg.playbackMode) === "generate" ? "落盘" : "LIVE"; }
     function updateNormalVoiceButtons() {
-      var def = String(cfg.defaultVoice || "").trim();
-      var narrator = voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], def, cfg.currentCharacterName);
-      var dialogue = voiceForRoleInList(cfg.roleVoiceList, ["对白", "dialogue", "台词"], def, cfg.currentCharacterName);
-      var defBtn = first(panel, '[data-role="default-voice-btn"]') || first(panel, '[data-role="default-voice-label"]');
+      var narrator = String(cfg.defaultVoice || "").trim();
+      var dialogue = String(voiceForRoleNames(cfg.roleVoiceList, ["对白", "dialogue", "台词"], cfg.currentCharacterName) || "").trim();
       var narratorBtn = first(panel, '[data-role="normal-narrator-voice-btn"]');
       var dialogueBtn = first(panel, '[data-role="normal-dialogue-voice-btn"]');
-      if (defBtn) {
-        defBtn.textContent = def ? shortName(def) : "选择默认音色…";
-        defBtn.title = def || "选择默认音色";
-      }
       if (narratorBtn) {
-        var narratorOwn = narrator && narrator !== def;
-        narratorBtn.textContent = narratorOwn ? shortName(narrator) : (def ? ("继承默认：" + shortName(def)) : "选择旁白音色…");
-        narratorBtn.title = narratorOwn ? narrator : (def ? ("继承默认：" + def) : "选择旁白音色");
+        narratorBtn.textContent = narrator ? shortName(narrator) : "选择旁白音色…";
+        narratorBtn.title = narrator || "选择旁白音色";
       }
       if (dialogueBtn) {
-        var dialogueOwn = dialogue && dialogue !== def;
-        dialogueBtn.textContent = dialogueOwn ? shortName(dialogue) : (def ? ("继承默认：" + shortName(def)) : "选择对话音色…");
-        dialogueBtn.title = dialogueOwn ? dialogue : (def ? ("继承默认：" + def) : "选择对话音色");
+        dialogueBtn.textContent = dialogue ? shortName(dialogue) : (narrator ? ("继承旁白：" + shortName(narrator)) : "继承旁白");
+        dialogueBtn.title = dialogue || (narrator ? ("未单独配置，将继承旁白：" + narrator) : "未单独配置，将继承旁白");
       }
     }
     function syncUI() {
@@ -138,6 +142,17 @@
       setField("llmApiKey", cfg.llmApiKey || "");
       setField("speedFactor", cfg.speedFactor || 1.0);
       setField("qualityMode", cfg.qualityMode || "balanced");
+      setField("diffusionSteps", cfg.diffusionSteps || 14);
+      setField("promptAudioSeconds", cfg.promptAudioSeconds || 10);
+      setField("segmentTokens", cfg.segmentTokens || 60);
+      setField("firstTokens", cfg.firstTokens || 18);
+      setField("s2melCfgRate", cfg.s2melCfgRate == null ? 0.7 : cfg.s2melCfgRate);
+      setField("subtitleLeadSec", cfg.subtitleLeadSec == null ? 0.30 : cfg.subtitleLeadSec);
+      setField("topP", cfg.topP == null ? 0.8 : cfg.topP);
+      setField("topK", cfg.topK == null ? 30 : cfg.topK);
+      setField("temperature", cfg.temperature == null ? 0.7 : cfg.temperature);
+      setField("repetitionPenalty", cfg.repetitionPenalty == null ? 1.2 : cfg.repetitionPenalty);
+      setField("emoAlpha", cfg.emoAlpha == null ? 0.38 : cfg.emoAlpha);
       setCheckedField("offlineAudioEnabled", cfg.offlineAudioEnabled);
       setCheckedField("reuseLlmParse", cfg.reuseLlmParse !== false);
       try { audio.playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25); } catch (_) {}
@@ -146,6 +161,7 @@
         var aiShow = (cfg.mode === "ai");
         $all(panel, '.idx-ai-only').forEach(function (el) { el.style.display = aiShow ? "" : "none"; });
         $all(panel, '.idx-normal-only').forEach(function (el) { el.style.display = aiShow ? "none" : ""; });
+        $all(panel, '.idx-custom-quality').forEach(function (el) { el.style.display = cfg.qualityMode === "custom" ? "" : "none"; });
       } catch (_) {}
       // 当前 mode 按钮高亮
       try {

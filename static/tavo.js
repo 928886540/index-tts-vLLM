@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260606-live-audio-v6";
+  var LOADER_VERSION = "20260607-live-audio-v15";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
@@ -39,6 +39,19 @@
     }
   }
 
+  function assetUrl(fileName) {
+    try {
+      var src = loaderScript && loaderScript.src ? loaderScript.src : "";
+      if (src) return new URL(fileName, src).href;
+    } catch (_) {}
+    try {
+      var info = deriveBaseUrl(loaderScript && loaderScript.src);
+      return joinUrl(info.baseUrl || "", fileName, "");
+    } catch (_) {
+      return String(fileName || "");
+    }
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
@@ -65,6 +78,22 @@
 
   function gearIcon() {
     return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2.2"/><circle cx="15" cy="17" r="2.2"/></svg>';
+  }
+
+  function prevIcon() {
+    return '<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>';
+  }
+
+  function nextIcon() {
+    return '<svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg>';
+  }
+
+  function musicIcon() {
+    return '<svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg>';
+  }
+
+  function deleteIcon() {
+    return '<svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg>';
   }
 
   function $(root, sel) { return root && root.querySelector ? root.querySelector(sel) : null; }
@@ -176,6 +205,14 @@
       ".idx-lazy-card{position:relative;display:flex;align-items:center;gap:12px;border-radius:16px;background:radial-gradient(circle at 88% 8%,rgba(216,167,255,.18),transparent 40%),linear-gradient(160deg,rgba(27,21,34,.55),rgba(12,9,16,.55));border:1px solid rgba(206,170,230,.22);padding:14px;backdrop-filter:blur(18px) saturate(130%);-webkit-backdrop-filter:blur(18px) saturate(130%)}",
       ".idx-lazy-play{border:1px solid rgba(206,170,230,.30);background:rgba(20,14,28,.58);color:#eee7f4;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto;width:58px;height:58px;border-radius:50%}.idx-lazy-play svg{width:26px;height:26px;fill:currentColor}.idx-lazy-play[data-loading='1']{opacity:.65;cursor:progress}",
       ".idx-lazy-main{min-width:0;flex:1;cursor:pointer}.idx-lazy-title{font-size:17px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-lazy-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.66);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-lazy-progress{height:4px;margin-top:8px;background:rgba(206,170,230,.13);border-radius:999px;overflow:hidden}.idx-lazy-progress span{display:block;height:100%;background:linear-gradient(90deg,#c890e8,#8ecbff);border-radius:inherit}",
+      ".idx-card[data-loader-shell='1']{position:relative;overflow:hidden;height:450px;min-height:450px;border-radius:18px;background:radial-gradient(circle at 88% 8%,rgba(216,167,255,.22),transparent 40%),linear-gradient(160deg,rgba(27,21,34,.55) 0%,rgba(18,14,24,.48) 54%,rgba(12,9,16,.55) 100%);border:1px solid rgba(206,170,230,.22);padding:16px;display:flex;flex-direction:column;backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%)}",
+      ".idx-card[data-loader-shell='1'] .idx-gear,.idx-card[data-loader-shell='1'] .idx-playback-toggle{position:absolute;top:26px;height:36px;border-radius:999px;border:1px solid rgba(206,170,230,.24);background:rgba(20,14,28,.46);color:rgba(238,231,244,.86);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2}.idx-card[data-loader-shell='1'] .idx-gear{right:14px;width:42px}.idx-card[data-loader-shell='1'] .idx-gear svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}.idx-card[data-loader-shell='1'] .idx-playback-toggle{right:60px;width:38px;min-width:38px;font-size:11px;font-weight:900;font-family:inherit;color:rgba(216,241,255,.88)}",
+      ".idx-card[data-loader-shell='1'] .idx-top{display:flex;align-items:center;gap:12px;min-width:0;padding-right:94px;min-height:56px}.idx-card[data-loader-shell='1'] .idx-cover{width:56px;height:56px;flex:0 0 56px;border-radius:14px;background:#241a2c;display:flex;align-items:center;justify-content:center;color:#e9c8ff;font-size:18px;font-weight:800;background-size:cover;background-position:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 10px 24px rgba(0,0,0,.34)}.idx-card[data-loader-shell='1'] .idx-cover[data-has-image='1']{font-size:0;color:transparent}.idx-card[data-loader-shell='1'] .idx-info{flex:1;min-width:0}.idx-card[data-loader-shell='1'] .idx-name{font-size:18px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-card[data-loader-shell='1'] .idx-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+      ".idx-card[data-loader-shell='1'] .idx-loader-gap{height:64px;flex:0 0 64px}",
+      ".idx-card[data-loader-shell='1'] .idx-subtitle{position:relative;display:flex;flex-direction:column;justify-content:center;margin:12px 0 0;padding:28px 10px 9px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.48) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:172px;min-height:172px;max-height:172px;overflow:hidden}.idx-card[data-loader-shell='1'] .idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-card[data-loader-shell='1'] .idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-card[data-loader-shell='1'] .idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}",
+      ".idx-card[data-loader-shell='1'] .idx-card-counter{position:absolute;right:10px;top:8px;min-width:48px;height:24px;padding:0 9px;border:1px solid rgba(206,170,230,.20);border-radius:999px;background:rgba(20,14,28,.58);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none}.idx-card[data-loader-shell='1'] .idx-sub-delete{position:absolute;left:10px;top:8px;width:26px;height:24px;border:1px solid rgba(255,120,145,.26);border-radius:999px;background:rgba(120,38,52,.30);color:#ffd5dd;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2}.idx-card[data-loader-shell='1'] .idx-sub-delete svg{width:14px;height:14px;fill:currentColor;stroke:none}",
+      ".idx-card[data-loader-shell='1'] .idx-controls{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:18px;min-height:74px;flex:0 0 74px;flex-wrap:nowrap}.idx-card[data-loader-shell='1'] .idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}.idx-card[data-loader-shell='1'] .idx-ctrl svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}.idx-card[data-loader-shell='1'] .idx-ctrl-sm{width:42px;height:42px}.idx-card[data-loader-shell='1'] .idx-ctrl-main,.idx-card[data-loader-shell='1'] .idx-ctrl-add{width:66px;height:66px}.idx-card[data-loader-shell='1'] .idx-ctrl-main{background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-card[data-loader-shell='1'] .idx-ctrl-main svg,.idx-card[data-loader-shell='1'] .idx-ctrl-add svg{width:28px;height:28px;fill:currentColor;stroke:none}.idx-card[data-loader-shell='1'] .idx-ctrl-main[data-state='loading'] svg{animation:idx-loader-spin .9s linear infinite}.idx-card[data-loader-shell='1'] .idx-ctrl-add{margin-left:22px;background:rgba(154,94,182,.42);color:#f4e7ff;box-shadow:0 10px 24px rgba(154,94,182,.18)}.idx-card[data-loader-shell='1'] .idx-live-exit,.idx-card[data-loader-shell='1'] .idx-hidden{display:none!important}@keyframes idx-loader-spin{to{transform:rotate(360deg)}}",
+      "@media(max-width:520px){.idx-card[data-loader-shell='1']{height:430px;min-height:430px;padding:14px;border-radius:16px}.idx-card[data-loader-shell='1'] .idx-top{padding-right:84px}.idx-card[data-loader-shell='1'] .idx-gear,.idx-card[data-loader-shell='1'] .idx-playback-toggle{top:25px;height:34px}.idx-card[data-loader-shell='1'] .idx-gear{right:14px;width:40px}.idx-card[data-loader-shell='1'] .idx-playback-toggle{right:58px;width:34px;min-width:34px}.idx-card[data-loader-shell='1'] .idx-controls{gap:13px}.idx-card[data-loader-shell='1'] .idx-ctrl-main,.idx-card[data-loader-shell='1'] .idx-ctrl-add{width:62px;height:62px}.idx-card[data-loader-shell='1'] .idx-ctrl-add{margin-left:16px}}",
       ".idx-tts[data-touch-guard='1']{pointer-events:none!important}"
     ].join("");
     document.head.appendChild(style);
@@ -300,6 +337,78 @@
     if (progress) progress.style.width = (latest && latest.duration_s ? Math.max(2, Math.min(100, resumeSec / Number(latest.duration_s || 1) * 100)) : 0) + "%";
   }
 
+  function setLoaderShellStatus(root, title, detail, loading) {
+    if (!root) return;
+    var status = $(root, '[data-role="status"]');
+    var notice = $(root, ".idx-sub-notice");
+    var playBtn = $(root, '[data-role="play"]');
+    if (status && title) status.textContent = title;
+    if (notice && (title || detail)) {
+      notice.innerHTML = '<strong>' + escapeHtml(title || "播放器加载中") + '</strong><span>' + escapeHtml(detail || "正在准备播放器") + '</span>';
+    }
+    if (playBtn) {
+      if (loading) playBtn.setAttribute("data-state", "loading");
+      else playBtn.setAttribute("data-state", "idle");
+    }
+  }
+
+  function loaderShellActionSelector(action) {
+    action = String(action || "").trim();
+    if (action === "play") return '[data-role="play"]';
+    if (action === "add") return '[data-role="add"]';
+    if (action === "gear") return '[data-role="gear"]';
+    if (action === "prev") return '[data-role="prev"]';
+    if (action === "next") return '[data-role="next"]';
+    if (action === "delete") return '[data-role="delete"]';
+    if (action === "playback") return '[data-role="playback-mode-toggle"]';
+    return "";
+  }
+
+  function renderLoaderShell(root, messageId, action) {
+    if (!root) return;
+    var shell = $(root, '[data-role="loader-shell"]');
+    var latest = latestTrack(messageId);
+    var historyCount = persistableHistoryTracks(localTracksForMessage(messageId)).length;
+    var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
+    var title = shortName(latest && latest.voice);
+    var statusText = action === "play" ? "准备播放…" : "播放器打开中…";
+    var detail = action === "gear" ? "设置面板会在加载完成后自动打开" : "组件加载在后台继续，不会创建新的语音任务";
+    var narratorAvatar = assetUrl("tavo.assets/narrator.png");
+    var coverStyle = narratorAvatar ? ' style="background-image:url(&quot;' + escapeHtml(narratorAvatar).replace(/"/g, "%22") + '&quot;)" data-has-image="1"' : "";
+    if (shell) {
+      setLoaderShellStatus(root, statusText, detail, action === "play");
+      return;
+    }
+    root.removeAttribute("data-lazy-placeholder");
+    root.setAttribute("data-loader-shell", "1");
+    root.innerHTML = [
+      '<div class="idx-card" data-loader-shell="1" data-role="loader-shell">',
+      '  <button class="idx-gear" type="button" data-role="gear" data-loader-action="gear" aria-label="设置" title="设置">' + gearIcon() + '</button>',
+      '  <button class="idx-playback-toggle" type="button" data-role="playback-mode-toggle" data-loader-action="playback" aria-label="播放模式" title="播放模式">L</button>',
+      '  <div class="idx-top"><div class="idx-cover" data-role="cover"' + coverStyle + '>' + escapeHtml(title.slice(0, 1) || "旁") + '</div><div class="idx-info"><div class="idx-name" data-role="title">' + escapeHtml(title) + '</div><div class="idx-status" data-role="status">' + escapeHtml(statusText) + '</div></div></div>',
+      '  <div class="idx-loader-gap" aria-hidden="true"></div>',
+      '  <div class="idx-subtitle" data-role="subtitle"><button class="idx-sub-delete" type="button" data-role="delete" data-loader-action="delete" aria-label="删除当前音频" title="删除当前音频">' + deleteIcon() + '</button><div class="idx-card-counter" data-role="counter">' + (historyCount ? "1/" + historyCount : "0/0") + '</div><div class="idx-sub-notice"><strong>' + escapeHtml(statusText) + '</strong><span>' + escapeHtml(detail) + '</span></div></div>',
+      '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" data-loader-action="prev" aria-label="上一首" title="上一首">' + prevIcon() + '</button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-loader-action="play" data-state="' + (action === "play" ? "loading" : "idle") + '" aria-label="播放">' + playIcon() + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式"></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" data-loader-action="next" aria-label="下一首" title="下一首">' + nextIcon() + '</button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" data-loader-action="add" aria-label="生成音频" title="生成音频">' + musicIcon() + '</button></div>',
+      '</div>'
+    ].join("");
+  }
+
+  function findRuntimeTarget(scope, selector, shellRoot) {
+    var candidates = [];
+    try { candidates = candidates.concat($all(scope || document, selector)); } catch (_) {}
+    try { candidates = candidates.concat($all(document, selector)); } catch (_) {}
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+      if (!el) continue;
+      try {
+        if (shellRoot && shellRoot.contains && shellRoot.contains(el)) continue;
+        if (el.closest && el.closest('[data-loader-shell="1"]')) continue;
+      } catch (_) {}
+      return el;
+    }
+    return null;
+  }
+
   function refreshLazyHistoryAsync(root, messageId) {
     if (!root || !messageId || !window.tavo || typeof window.tavo.get !== "function") {
       updateLazyHistory(root, messageId);
@@ -355,7 +464,7 @@
 
     var msgEl = messageElement(loaderScript);
     if (msgEl && msgEl !== document.body && msgEl !== document.documentElement) {
-      var existingFull = $all(msgEl, ".idx-tts").filter(function (node) { return !!$(node, ".idx-card"); })[0];
+      var existingFull = $all(msgEl, ".idx-tts").filter(function (node) { return !!$(node, ".idx-card") && !$(node, '[data-role="loader-shell"]'); })[0];
       if (existingFull) {
         $all(msgEl, ".idx-tts").forEach(function (node) {
           if (node !== existingFull && $(node, ".idx-lazy-card") && node.parentNode) node.parentNode.removeChild(node);
@@ -408,7 +517,27 @@
     } catch (_) {}
 
     var bootPromise = null;
+    on(root, "click", function (ev) {
+      var target = ev.target;
+      var actionEl = target && target.closest ? target.closest("[data-loader-action]") : null;
+      if (!actionEl || !root.contains(actionEl)) return;
+      var action = String(actionEl.getAttribute("data-loader-action") || "");
+      var selector = loaderShellActionSelector(action);
+      if (!selector) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      armTapGuard(1800);
+      if (action === "play" || action === "add") primeRuntimeAudioContext();
+      renderLoaderShell(root, messageId, action);
+      route(selector);
+    });
+
     function mountRuntime(clickSelector) {
+      var action = "";
+      if (clickSelector === '[data-role="play"]') action = "play";
+      else if (clickSelector === '[data-role="add"]') action = "add";
+      else if (clickSelector === '[data-role="gear"]') action = "gear";
+      renderLoaderShell(root, messageId, action);
       if (bootPromise) return bootPromise.then(function () { return clickSelector; });
       var playBtn = $(root, '[data-role="lazy-play"]');
       if (playBtn) playBtn.setAttribute("data-loading", "1");
@@ -430,6 +559,7 @@
       }).catch(function (e) {
         bootPromise = null;
         if (playBtn) playBtn.removeAttribute("data-loading");
+        setLoaderShellStatus(root, "播放器加载失败", "请确认 /static/tavo.runtime.js 能访问；再次点击会重试", false);
         throw e;
       }).finally(function () {
         try { if (window.__indextts_tavo_runtime_script_override === loaderScript) window.__indextts_tavo_runtime_script_override = null; } catch (_) {}
@@ -441,7 +571,7 @@
       mountRuntime(selector).then(function (sel) {
         if (!sel) return;
         var scope = messageElement(loaderScript) || document;
-        var btn = $(scope, sel) || $(document, sel);
+        var btn = findRuntimeTarget(scope, sel, root);
         if (btn) btn.click();
       }).catch(function (e) {
         try { console.error("[IndexTTS TAVO loader]", e && e.message ? e.message : e); } catch (_) {}

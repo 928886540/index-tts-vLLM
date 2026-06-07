@@ -18,19 +18,24 @@
         cfg.roleVoiceList.push({ role: RESERVED_ROLES[cfg.roleVoiceList.length] || "", voice: "" });
       }
       cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList, cfg.currentCharacterName);
-      var list = cfg.roleVoiceList;
       // 渲染前同步用户当前在输入框里的值,避免重渲染清空未保存输入
       var rows = $all(rolesListEl, '.idx-role-row');
-      rows.forEach(function (row, i) {
+      rows.forEach(function (row) {
+        var i = Number(row.dataset.rowIdx);
         var nameEl = first(row, '.idx-role-name');
-        if (nameEl && list[i]) list[i].role = String(nameEl.value || "").trim();
+        if (nameEl && cfg.roleVoiceList[i]) cfg.roleVoiceList[i].role = String(nameEl.value || "").trim();
+      });
+      var list = cfg.roleVoiceList.map(function (item, idx) {
+        return { role: item.role || "", voice: item.voice || "", originalIdx: idx };
+      }).filter(function (item) {
+        return !isNormalDialogueRole(item.role);
       });
       rolesListEl.innerHTML = list.map(function (item, idx) {
         var role = String(item.role || "");
         var voice = String(item.voice || "");
-        var protectedRow = idx < RESERVED_ROLES.length;
+        var protectedRow = role === "旁白" || role === "用户";
         return ''
-          + '<div class="idx-role-row' + (protectedRow ? ' idx-role-protected' : '') + '" data-row-idx="' + idx + '" data-voice="' + escapeHtml(voice) + '">'
+          + '<div class="idx-role-row' + (protectedRow ? ' idx-role-protected' : '') + '" data-row-idx="' + item.originalIdx + '" data-voice="' + escapeHtml(voice) + '">'
           + '<input class="idx-role-name" type="text" placeholder="角色名" value="' + escapeHtml(role) + '"' + (protectedRow ? ' readonly' : '') + '>'
           + '<button class="idx-voice-btn" type="button">' + escapeHtml(voice || "选择音色…") + '</button>'
           + (protectedRow
@@ -203,9 +208,8 @@
       var start = (pickerState.page - 1) * pickerState.pageSize;
       var page = filtered.slice(start, start + pickerState.pageSize);
       var selectedVoice = "";
-      if (pickerState.rowIdx === -2) selectedVoice = cfg.defaultVoice || "";
-      else if (pickerState.rowIdx === -3) selectedVoice = voiceForRoleInList(cfg.roleVoiceList, ["旁白", "narrator"], cfg.defaultVoice || "", cfg.currentCharacterName);
-      else if (pickerState.rowIdx === -4) selectedVoice = voiceForRoleInList(cfg.roleVoiceList, ["对白", "dialogue", "台词"], cfg.defaultVoice || "", cfg.currentCharacterName);
+      if (pickerState.rowIdx === -2 || pickerState.rowIdx === -3) selectedVoice = cfg.defaultVoice || "";
+      else if (pickerState.rowIdx === -4) selectedVoice = voiceForRoleNames(cfg.roleVoiceList, ["对白", "dialogue", "台词"], cfg.currentCharacterName) || "";
       else if (pickerState.rowIdx >= 0 && cfg.roleVoiceList && cfg.roleVoiceList[pickerState.rowIdx]) selectedVoice = cfg.roleVoiceList[pickerState.rowIdx].voice || "";
       pickerGridEl.innerHTML = page.map(function (v) {
         var sd = v.subdir || "";
@@ -225,14 +229,10 @@
         var voiceName = item.dataset.voice;
         function applyVoice() {
           stopPickerPreview();
-          if (pickerState.rowIdx === -2) {
+          if (pickerState.rowIdx === -2 || pickerState.rowIdx === -3) {
             cfg.defaultVoice = voiceName;
             updateNormalVoiceButtons();
             syncUI();
-            saveConfig(cfg, characterId).catch(function(){});
-          } else if (pickerState.rowIdx === -3) {
-            cfg.roleVoiceList = setVoiceForRoleInList(cfg.roleVoiceList, "旁白", voiceName, cfg.currentCharacterName);
-            updateNormalVoiceButtons();
             saveConfig(cfg, characterId).catch(function(){});
           } else if (pickerState.rowIdx === -4) {
             cfg.roleVoiceList = setVoiceForRoleInList(cfg.roleVoiceList, "对白", voiceName, cfg.currentCharacterName);
@@ -266,10 +266,18 @@
     on(panel, 'click', function (e) {
       var t = e.target; if (!t || !t.closest) return;
       if (t.closest('[data-role="add-role"]')) { e.preventDefault(); addRoleRow(); return; }
-      if (t.closest('[data-role="default-voice-btn"]')) { e.preventDefault(); openVoicePicker(-2).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); return; }
       if (t.closest('.idx-voice-readonly')) { e.preventDefault(); return; }
       if (t.closest('[data-role="normal-narrator-voice-btn"]')) { e.preventDefault(); openVoicePicker(-3).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); return; }
       if (t.closest('[data-role="normal-dialogue-voice-btn"]')) { e.preventDefault(); openVoicePicker(-4).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); return; }
+      if (t.closest('[data-role="normal-dialogue-clear"]')) {
+        e.preventDefault();
+        cfg.roleVoiceList = normalizeRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName).filter(function (item) {
+          return !(item && isNormalDialogueRole(item.role));
+        });
+        updateNormalVoiceButtons();
+        saveConfig(cfg, characterId).catch(function(){});
+        return;
+      }
       var roleRow = t.closest('.idx-role-row');
       if (roleRow && rolesListEl && rolesListEl.contains(roleRow)) {
         var idx = Number(roleRow.dataset.rowIdx);

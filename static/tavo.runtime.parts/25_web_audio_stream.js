@@ -3,14 +3,18 @@
     hooks = hooks || {};
     var playbackRate = Math.max(0.85, Math.min(1.25, Number(hooks.playbackRate || 1) || 1));
     var startOffsetSec = Math.max(0, Number(hooks.startOffsetSec || 0) || 0);
+    var skipOffsetSec = hooks.skipOffsetSec == null ? startOffsetSec : Math.max(0, Number(hooks.skipOffsetSec || 0) || 0);
+    var prebufferSec = Math.max(0.5, Math.min(4.0, Number(hooks.prebufferSec || 1.25) || 1.25));
+    var flushSec = Math.max(0.25, Math.min(1.0, Number(hooks.flushSec || 0.5) || 0.5));
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) throw new Error("浏览器不支持 Web Audio API");
     hooks.onStateChange && hooks.onStateChange("connecting");
     // 优先复用 user-gesture 里 prime 出来的 ctx；没有再 new 一个（桌面/file://
     // 这种没经过 gesture 的场景也能跑）。
-    var ctx = PRIMED_CTX || new AC();
+    var ctx = (typeof takePreprimedAudioContext === "function" ? takePreprimedAudioContext() : null) || PRIMED_CTX || new AC();
     try { if (ctx.state === "suspended") await ctx.resume(); }
     catch (e) { throw new Error("[step:resume] " + (e && e.message ? e.message : e)); }
+    try { if (typeof startRuntimeAudioKeepalive === "function") startRuntimeAudioKeepalive(ctx); } catch (_) {}
     var output = ctx.createGain ? ctx.createGain() : null;
     if (output) {
       output.gain.value = 1;
@@ -27,6 +31,7 @@
     var readEnded = false;
     var bufferTimer = null;
     var playNotifyTimer = null;
+    var stableNotifyTimer = null;
     var bufferingState = false;
     var scheduledSpans = [];
     var scheduledAudioSec = 0;
@@ -87,6 +92,7 @@
       if (endTimer) { try { clearInterval(endTimer); } catch (_) {} endTimer = null; }
       if (bufferTimer) { try { clearInterval(bufferTimer); } catch (_) {} bufferTimer = null; }
       if (playNotifyTimer) { try { clearTimeout(playNotifyTimer); } catch (_) {} playNotifyTimer = null; }
+      if (stableNotifyTimer) { try { clearTimeout(stableNotifyTimer); } catch (_) {} stableNotifyTimer = null; }
       activeSources.slice().forEach(function (node) { try { node.stop(0); } catch (_) {} });
       if (reader && typeof reader.cancel === "function") {
         try { reader.cancel(stopReason).catch(function () {}); } catch (_) {}
@@ -135,13 +141,15 @@
         try { src.playbackRate.value = playbackRate; } catch (_) {}
         connectNode(src);
         keepSource(src);
-        var audioOffset = Math.min(startOffsetSec, Math.max(0, audioBuf.duration - 0.05));
+        var audioOffset = Math.min(skipOffsetSec, Math.max(0, audioBuf.duration - 0.05));
         var fallbackStartAt = ctx.currentTime + 0.03;
         var dur = Math.max(0, audioBuf.duration - audioOffset) / playbackRate;
+        var timelineStart = startOffsetSec;
+        var timelineEnd = timelineStart + Math.max(0, audioBuf.duration - audioOffset);
         playbackStartCtxTime = fallbackStartAt;
         nextAt = fallbackStartAt + dur;
-        scheduledSpans.push({ start: fallbackStartAt, end: nextAt, audioStart: audioOffset, audioEnd: audioBuf.duration });
-        scheduledAudioSec = audioBuf.duration;
+        scheduledSpans.push({ start: fallbackStartAt, end: nextAt, audioStart: timelineStart, audioEnd: timelineEnd });
+        scheduledAudioSec = timelineEnd;
         started = true;
         src.start(fallbackStartAt, audioOffset);
       } catch (e) { throw new Error("[step:bufferSource.start] " + (e && e.message ? e.message : e)); }
@@ -157,6 +165,10 @@
           if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
         });
       }, Math.max(0, (fallbackStartAt - (ctx.currentTime || 0)) * 1000 + 40));
+      stableNotifyTimer = setTimeout(function () {
+        stableNotifyTimer = null;
+        if (!stopped && String(ctx.state || "running") === "running") hooks.onStateChange && hooks.onStateChange("stable_playing");
+      }, Math.max(0, (fallbackStartAt - (ctx.currentTime || 0)) * 1000 + 850));
       armEndedWatcher();
       return { ctx: ctx, duration: dur, mode: "buffered" };
     }
@@ -208,18 +220,19 @@
     playbackStartCtxTime = null;
     var bytesPerSec = sampleRate * channels * 2;
     var blockAlign = Math.max(2 * channels, 2);
-    var skipBytesRemaining = Math.floor(startOffsetSec * bytesPerSec);
+    var skipBytesRemaining = Math.floor(skipOffsetSec * bytesPerSec);
     skipBytesRemaining = skipBytesRemaining - (skipBytesRemaining % blockAlign);
-    if (skipBytesRemaining > 0 && hooks.debug) hooks.debug("resume offset " + startOffsetSec.toFixed(2) + "s, skip " + skipBytesRemaining + " PCM bytes");
-    scheduledAudioSec = skipBytesRemaining > 0 ? startOffsetSec : scheduledAudioSec;
+    if (skipBytesRemaining > 0 && hooks.debug) hooks.debug("local skip offset " + skipOffsetSec.toFixed(2) + "s, skip " + skipBytesRemaining + " PCM bytes");
+    scheduledAudioSec = startOffsetSec;
     // 本机/LAN 也可能因为首段内部 chunk 间隔出现 underrun。起播前多攒一点
     // PCM，避免刚显示 playing 就立刻 buffering。
-    var flushBytes = Math.max(8192, Math.floor(bytesPerSec * 0.50));
+    var flushBytes = Math.max(8192, Math.floor(bytesPerSec * flushSec));
     flushBytes = flushBytes - (flushBytes % blockAlign);
     if (flushBytes < blockAlign) flushBytes = blockAlign;
-    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * 0.75));
+    var startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * prebufferSec));
     startBufferBytes = startBufferBytes - (startBufferBytes % blockAlign);
     if (startBufferBytes < flushBytes) startBufferBytes = flushBytes;
+    if (hooks.debug) hooks.debug("WebAudio prebuffer=" + prebufferSec.toFixed(2) + "s flush=" + flushSec.toFixed(2) + "s");
     var interrupted = false;
     startAt = ctx.currentTime + 0.12;
     nextAt = startAt;
@@ -277,6 +290,10 @@
               if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
             });
           }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 40));
+          stableNotifyTimer = setTimeout(function () {
+            stableNotifyTimer = null;
+            if (!stopped && String(ctx.state || "running") === "running" && !bufferingState) hooks.onStateChange && hooks.onStateChange("stable_playing");
+          }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 850));
           armBufferWatcher();
         } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.65) {
           bufferingState = false;
@@ -299,7 +316,7 @@
       skipBytesRemaining -= canDrop;
       if (skipBytesRemaining <= 0) {
         skipBytesRemaining = 0;
-        if (hooks.debug) hooks.debug("resume offset reached, scheduling from " + startOffsetSec.toFixed(2) + "s");
+        if (hooks.debug) hooks.debug("local skip offset reached, scheduling from " + startOffsetSec.toFixed(2) + "s");
       }
     }
     async function scheduleStartIfReady(force) {

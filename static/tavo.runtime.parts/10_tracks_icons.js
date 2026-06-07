@@ -97,17 +97,29 @@
   function formatTime(sec) { sec = Math.max(0, Number(sec || 0)); if (!isFinite(sec)) return "--:--"; return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0"); }
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/[\r\n,，;；]+/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
-  function generationQualityOverrides(mode) {
+  function generationQualityOverrides(mode, cfg) {
     mode = String(mode || "balanced").trim();
-    if (mode === "fast") return { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10 };
-    if (mode === "balanced") return { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18 };
-    if (mode === "ultra") return { diffusion_steps: 20, prompt_audio_seconds: 14, segment_tokens: 96, first_tokens: 32 };
-    return { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24 };
+    if (mode === "custom") {
+      cfg = cfg || {};
+      var segmentTokens = Math.round(clampNumber(cfg.segmentTokens, 60, 8, 120));
+      return {
+        diffusion_steps: Math.round(clampNumber(cfg.diffusionSteps, 14, 2, 24)),
+        prompt_audio_seconds: clampNumber(cfg.promptAudioSeconds, 10, 2, 16),
+        segment_tokens: segmentTokens,
+        first_tokens: Math.round(clampNumber(cfg.firstTokens, 18, 4, Math.max(4, segmentTokens))),
+        s2mel_cfg_rate: clampNumber(cfg.s2melCfgRate == null ? 0.7 : cfg.s2melCfgRate, 0.7, 0, 1.2)
+      };
+    }
+    if (mode === "fast") return { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7 };
+    if (mode === "balanced") return { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18, s2mel_cfg_rate: 0.7 };
+    if (mode === "ultra") return { diffusion_steps: 20, prompt_audio_seconds: 14, segment_tokens: 96, first_tokens: 32, s2mel_cfg_rate: 0.7 };
+    return { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24, s2mel_cfg_rate: 0.7 };
   }
   function applyGenerationParamsToSearchParams(p, cfg) {
-    var q = generationQualityOverrides(cfg && cfg.qualityMode);
+    var q = generationQualityOverrides(cfg && cfg.qualityMode, cfg);
     p.set("diffusion_steps", String(q.diffusion_steps));
     p.set("prompt_audio_seconds", String(q.prompt_audio_seconds));
     p.set("segment_tokens", String(q.segment_tokens));
     p.set("first_tokens", String(q.first_tokens));
+    p.set("s2mel_cfg_rate", String(q.s2mel_cfg_rate));
   }
