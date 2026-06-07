@@ -904,6 +904,18 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       window.__idxProgressObserver = observer;
       capture();
     });
+    const normalControlLayout = await page.evaluate(() => {
+      const rectFor = (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, width: r.width, height: r.height };
+      };
+      return {
+        playRect: rectFor('[data-role="play"]'),
+        addRect: rectFor('[data-role="add"]')
+      };
+    });
     await page.evaluate(() => {
       const add = document.querySelector('[data-role="add"]');
       if (!add) throw new Error("missing add button");
@@ -934,7 +946,16 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       const totalText = (document.querySelector('[data-role="total"]') || {}).textContent || "";
       const seek = document.querySelector('[data-role="seek"]');
       const audio = document.querySelector('[data-role="audio"]');
+      const prev = document.querySelector('[data-role="prev"]');
+      const next = document.querySelector('[data-role="next"]');
+      const add = document.querySelector('[data-role="add"]');
+      const liveExit = document.querySelector('[data-role="live-exit"]');
       const progressStyle = progress ? getComputedStyle(progress) : null;
+      const rectFor = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, width: r.width, height: r.height };
+      };
       return {
         playState: play ? play.dataset.state : "",
         status,
@@ -976,7 +997,12 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         cacheGets: fetches.filter((r) => r.method !== "HEAD" && /\/cache_audio\//.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
-        liveExitVisible: getComputedStyle(document.querySelector('[data-role="live-exit"]')).display !== "none",
+        liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
+        playRect: rectFor(play),
+        liveExitRect: rectFor(liveExit),
+        prevVisibility: prev ? getComputedStyle(prev).visibility : "",
+        nextVisibility: next ? getComputedStyle(next).visibility : "",
+        addDisplay: add ? getComputedStyle(add).display : "",
         progressSnapshots: Array.isArray(window.__idxProgressSnapshots) ? window.__idxProgressSnapshots.slice() : [],
         cachePlays: (window.__cachePlayCalls || []).filter((x) => x && x.kind === "saved").length,
         allPlays: window.__cachePlayCalls || []
@@ -1002,11 +1028,11 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (result.cachePlays || result.audioKind === "saved") {
       throw new Error("cache landing must not steal a currently audible LIVE stream into saved audio: " + JSON.stringify({ result, cacheGetCount }));
     }
-    const transientProgressPattern = /等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频|合成第\s*\d+\/\d+\s*段/;
+    const transientProgressPattern = /等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频|合成(?:第)?\s*\d+\/\d+(?:\s*段)?/;
     const progressBgTransparent = !result.progressBackgroundColor || /rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)|transparent/i.test(result.progressBackgroundColor);
     const progressSnapshots = Array.isArray(result.progressSnapshots) ? result.progressSnapshots : [];
     const hadFloatingProgress = progressSnapshots.some((item) => transientProgressPattern.test(item.progressText || "") && /idx-card/.test(item.progressParentClass || "") && !item.progressInSubtitle);
-    const hadPlaybackSegment = progressSnapshots.some((item) => /当前在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(item.progressText || "")) || /当前在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(result.progressText || "");
+    const hadPlaybackSegment = progressSnapshots.some((item) => /(?:当前在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(item.progressText || "")) || /(?:当前在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(result.progressText || "");
     if (!hadFloatingProgress && !transientProgressPattern.test(result.progressText)) {
       throw new Error("transient LIVE progress should render in the floating player hint while generation is active: " + JSON.stringify(result));
     }
@@ -1030,6 +1056,9 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     }
     if (!/^\d+\/\d+$/.test(result.counterText) || result.counterText === "L") {
       throw new Error("LIVE card counter should stay as page text, not the L mode badge: " + JSON.stringify(result));
+    }
+    if (!normalControlLayout.playRect || !normalControlLayout.addRect || !result.playRect || !result.liveExitRect || Math.abs(result.playRect.left - normalControlLayout.playRect.left) > 2 || Math.abs(result.liveExitRect.left - normalControlLayout.addRect.left) > 2 || result.prevVisibility !== "hidden" || result.nextVisibility !== "hidden" || result.addDisplay !== "none") {
+      throw new Error("LIVE controls should keep play at the saved-audio position and put exit where the music-note button was: " + JSON.stringify({ normalControlLayout, result }));
     }
     if (pageErrors.length) throw new Error("LIVE play-click smoke page error: " + pageErrors.join(" | "));
     return { jobCount, headCount, statusCount, streamGetCount, streamUrls, result, body: jobBodies[0] };

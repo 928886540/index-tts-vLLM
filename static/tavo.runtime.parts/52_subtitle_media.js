@@ -29,7 +29,7 @@
       var title = String(titleText || "");
       if (!title) return false;
       if (/失败|错误|不可用|取消|删除|退出/.test(title)) return false;
-      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|合成第\s*\d+\s*\/\s*\d+\s*段|音频合成中|等待首段音频|等待\s*TTS\s*合成|TTS\s*合成|分段完成|任务已创建|音频已合成|正在保存|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
+      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|播第)\s*\d+|音频合成中|等待首段音频|等待\s*TTS\s*合成|TTS\s*合成|分段完成|任务已创建|音频已合成|正在保存|保存中|正在.*LLM|LLM\s*分段|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
     }
     function normalizedNoticeKey(titleText, detailText) {
       return String(titleText || "").replace(/\d+\s*s/g, "Ns") + "\n" + String(detailText || "");

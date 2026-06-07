@@ -402,7 +402,7 @@
           raw.length,
           displayIdx
         );
-        return "当前在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
+        return "播第 " + displayIdx + (total ? "/" + total : "") + " 段";
       }
       function jobStatusMessage(metrics, trackEntry, payload) {
         var phase = String((metrics && metrics.phase) || "");
@@ -410,7 +410,7 @@
         var mode = normalizeModeName((trackEntry && (trackEntry.mode || trackEntry.parseMode)) || (metrics && metrics.parse_mode) || cfg.mode);
         var playback = normalizePlaybackMode((trackEntry && trackEntry.playbackMode) || cfg.playbackMode);
         var live = playback === "live";
-        var flow = (mode === "ai" ? "AI" : "普通") + "+" + (live ? "LIVE" : "落盘");
+        var flow = mode === "ai" ? (live ? "AI" : "AI落盘") : (live ? "LIVE" : "落盘");
         var total = Number((metrics && metrics.segments_total) || 0) || 0;
         if (!total && metrics && Array.isArray(metrics.segments_plan)) total = metrics.segments_plan.length;
         var doneSegs = payload && Array.isArray(payload.segments_meta) ? payload.segments_meta.length : 0;
@@ -419,21 +419,21 @@
         function withPlayingSegment(text) {
           return playingSeg ? (text + " · " + playingSeg) : text;
         }
-        if (phase === "created") return flow + " 任务已创建，等待后端接手";
-        if (phase === "llm_parse_cache") return flow + " 已复用上次 AI 分段，等待" + (live ? "首段音频" : "合成");
+        if (phase === "created") return flow + " 等待后端";
+        if (phase === "llm_parse_cache") return flow + " 复用分段，等" + (live ? "首音" : "合成");
         if (phase === "llm_parse") {
-          if (/检查|复用/i.test(msg)) return flow + " AI 分段复用检查中";
-          return flow + " LLM 调用中，分析角色和情绪";
+          if (/检查|复用/i.test(msg)) return flow + " 分段检查中";
+          return flow + " LLM 分段中";
         }
-        if (phase === "tts_queue") return flow + " 分段完成，等待" + (live ? "首段音频" : "TTS 合成");
+        if (phase === "tts_queue") return flow + " 等" + (live ? "首音" : "合成");
         if (phase === "tts") {
-          if (total) return withPlayingSegment(flow + " 合成第 " + nextSeg + "/" + total + " 段中");
-          return withPlayingSegment(flow + " 音频合成中");
+          if (total) return withPlayingSegment(flow + " 合成 " + nextSeg + "/" + total);
+          return withPlayingSegment(flow + " 合成中");
         }
-        if (phase === "saving") return withPlayingSegment(flow + " 音频已合成，正在保存完整音频");
-        if (phase === "done") return flow + " 音频已保存";
-        if (/文本已拆分|等待 TTS 合成|拆分文本|拆段/.test(msg)) return withPlayingSegment(flow + " 分段完成，等待" + (live ? "首段音频" : "TTS 合成"));
-        return withPlayingSegment(msg || (flow + " 正在处理"));
+        if (phase === "saving") return withPlayingSegment(flow + " 保存中");
+        if (phase === "done") return flow + " 已保存";
+        if (/文本已拆分|等待 TTS 合成|拆分文本|拆段/.test(msg)) return withPlayingSegment(flow + " 等" + (live ? "首音" : "合成"));
+        return withPlayingSegment(msg || (flow + " 处理中"));
       }
       (async function () {
         var done = false;
@@ -457,7 +457,7 @@
                   var phase = String(j.metrics.phase || "");
                   if (phase === "llm_parse" || phase === "llm_parse_cache" || phase === "created" || phase === "tts_queue" || phase === "tts" || phase === "saving") {
                     var uiMsg = jobStatusMessage(j.metrics, trackEntry, j);
-                    trackEntry.latestSynthesisStatusText = String(uiMsg || "").replace(/\s*·\s*当前在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/g, "");
+                    trackEntry.latestSynthesisStatusText = String(uiMsg || "").replace(/\s*·\s*(?:当前在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/g, "");
                     setStatus(uiMsg);
                     if (!isTransientProgressNotice(uiMsg)) showTrackNotice(trackEntry, uiMsg || "正在生成…", formatJobMetrics(j.metrics) || "请稍等");
                   }

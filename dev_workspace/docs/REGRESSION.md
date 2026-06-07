@@ -59,7 +59,8 @@ Current smoke must prove:
 - restored LIVE pending jobs from `tavo.get` reconnect same key with `start_s`;
 - avatar-side header status keeps only stable voice labels or "音色未设置";
 - transient generation/playback progress appears in a one-line transparent hint floating above the lyric panel near the seek/time area, not in the avatar-side status or lyric toolbar;
-- floating progress can combine synthesis progress with current playback segment, such as `合成第 13/36 段中 · 当前在播第 3/36 段`, and must not rapidly cycle through connection/buffer micro-states;
+- floating progress can combine synthesis progress with current playback segment, such as `AI 合成 13/36 · 播第 3/36 段`, and must not rapidly cycle through connection/buffer micro-states;
+- LIVE controls keep play/pause at the saved-audio play button position and put live-exit at the music-note position;
 - lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
 - the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps delete/page counter in place.
 - loading spinner keeps a stable center/size and must not visibly wobble.
@@ -97,6 +98,7 @@ Current smoke must prove:
 - Completed cache handoff must stop WebAudio before mounting native saved `<audio>` only when LIVE never became audible, was interrupted, or entered explicit saved-cache fallback; stable/audible LIVE should not be stolen just because cache landed.
 - Cache落盘 must not steal an already audible LIVE stream into saved `<audio>` or show a fresh loading handoff just because a transient stalled/buffering flag was recorded.
 - Short buffering after LIVE playback starts must not immediately reset the main button to idle or show "还没收到实时音频".
+- LIVE PCM playback should keep enough prebuffer to reduce audible 0.xs stalls when the next segment is still being synthesized.
 - If cache audio becomes ready while LIVE never became audible, was interrupted, or entered explicit saved-cache fallback, the frontend may force native saved `<audio>` handoff so the user gets audible playback.
 - Saved/cache audio uses native `<audio>` with `/cache_audio/<cache_key>` or offline blob.
 

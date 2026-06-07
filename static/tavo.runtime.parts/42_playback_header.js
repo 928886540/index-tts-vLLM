@@ -169,7 +169,7 @@
         raw.length,
         displayIdx
       );
-      return "当前在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
+      return "播第 " + displayIdx + (total ? "/" + total : "") + " 段";
     }
     function trackDurationHintSec(track) {
       if (!track) return 0;

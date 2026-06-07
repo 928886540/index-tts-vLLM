@@ -17,7 +17,7 @@
       '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点音符生成</div></div></div>',
       '  <div class="idx-seek-wrap"><input class="idx-seek" data-role="seek" type="range" min="0" max="1000" value="0" disabled><div class="idx-time"><span data-role="current">00:00</span><span data-role="total">--:--</span></div></div>',
       '  <div class="idx-subtitle" data-role="subtitle"><div class="idx-sub-toolbar" data-role="subtitle-toolbar"><button class="idx-sub-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button><div class="idx-card-counter" data-role="counter">0/0</div></div><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点音符生成音频</span></div></div>',
-      '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式" title="退出流式"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/><path d="M7 21h10"/></svg></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button></div>',
+      '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式" title="退出流式"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/><path d="M7 21h10"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button></div>',
       '  <div class="idx-progress-line idx-progress-empty" data-role="progress"></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
@@ -181,7 +181,7 @@
       try {
         if (typeof isTransientProgressNotice === "function" && isTransientProgressNotice(text)) return true;
       } catch (_) {}
-      return /等待音频|正在连接音频|连接实时音频|连接断点音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|合成第\s*\d+\s*\/\s*\d+\s*段|当前在播第\s*\d+|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中|音频已合成|正在保存/.test(text);
+      return /等待音频|正在连接音频|连接实时音频|连接断点音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|播第)\s*\d+|正在.*LLM|LLM\s*分段|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中|音频已合成|正在保存|保存中/.test(text);
     }
     function configuredVoiceLabelText() {
       try {
@@ -211,7 +211,7 @@
       try {
         var t = currentTrack();
         if (t && (t.webAudioPlaying || String(t.playbackState || "") === "playing")) {
-          if (/正在连接音频|等待音频|网络缓冲|缓冲中|实时音频重连/.test(text) && !/合成第|当前在播/.test(text)) return "";
+          if (/正在连接音频|等待音频|网络缓冲|缓冲中|实时音频重连/.test(text) && !/合成|当前在播|播第/.test(text)) return "";
         }
       } catch (_) {}
       return isHeaderProgressStatus(text) ? text : "";
@@ -219,7 +219,7 @@
     function progressStatusPriority(text) {
       text = String(text || "");
       if (!text) return 0;
-      if (/合成第\s*\d+\s*\/\s*\d+\s*段|当前在播第\s*\d+|音频合成中|音频已合成|正在保存/.test(text)) return 3;
+      if (/合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|播第)\s*\d+|音频合成中|音频已合成|正在保存|保存中/.test(text)) return 3;
       if (/LLM|分段|拆段|TTS|提交|后端正在|后端处理中|生成中|正在生成|正在合成/.test(text)) return 2;
       if (/等待音频|正在连接音频|连接实时音频|连接断点音频|网络缓冲|缓冲中|实时音频重连|正在加载音频/.test(text)) return 1;
       return 1;

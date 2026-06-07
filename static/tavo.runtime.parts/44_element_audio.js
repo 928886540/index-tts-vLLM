@@ -187,7 +187,8 @@
           else card.removeAttribute("data-live-active");
         }
       } catch (_) {}
-      [prev, next, rewind10, forward10, add].forEach(function (el) { setHidden(el, live); });
+      [prev, next].forEach(function (el) { setHidden(el, false); });
+      [rewind10, forward10, add].forEach(function (el) { setHidden(el, live); });
       setHidden(del, liveControlsOnly);
       setHidden(liveExit, !liveControlsOnly);
       var visibleCount = visibleTrackCards().length || (!tracksLoaded ? Number(knownHistoryCount || 0) : 0);

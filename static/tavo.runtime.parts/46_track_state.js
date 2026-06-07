@@ -605,7 +605,7 @@
         try {
           if (track && track.latestSynthesisStatusText && Date.now() - Number(track.lastPlaybackSegmentStatusAt || 0) > 1000) {
             var base = String(track.latestSynthesisStatusText || "");
-            if (/合成第\s*\d+\s*\/\s*\d+\s*段|音频合成中|音频已合成|正在保存/.test(base)) {
+            if (/合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|音频合成中|音频已合成|正在保存|保存中/.test(base)) {
               var segText = typeof playbackSegmentStatusTextForTrack === "function" ? playbackSegmentStatusTextForTrack(track, null, 0, sec) : "";
               if (segText) {
                 track.lastPlaybackSegmentStatusAt = Date.now();
@@ -628,7 +628,8 @@
       var playCardKey = webAudioTrackKey(track) || playbackUrl;
       var recoveryAttempt = Math.max(0, Number(opts.recoveryAttempt || 0) || 0);
       var maxRecoveryAttempts = Math.max(0, Number(opts.maxRecoveryAttempts == null ? 3 : opts.maxRecoveryAttempts) || 0);
-      var prebufferSec = Math.max(0.75, Math.min(4.0, Number(opts.prebufferSec || (recoveryAttempt ? (1.75 + recoveryAttempt * 0.75) : 1.25)) || 1.25));
+      var defaultPrebufferSec = normalizeModeName(track.mode || track.parseMode || cfg.mode) === "ai" ? 2.0 : 1.75;
+      var prebufferSec = Math.max(1.25, Math.min(4.0, Number(opts.prebufferSec || (recoveryAttempt ? (2.25 + recoveryAttempt * 0.75) : defaultPrebufferSec)) || defaultPrebufferSec));
       var startedAt = 0;
       var waitStartedAt = Date.now();
       var waitTimer = null;
