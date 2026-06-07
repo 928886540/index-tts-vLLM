@@ -321,22 +321,86 @@
   // 必须在 user gesture 里激活；后面经过 await saveConfig / await parseWithLlm
   // 之后才创建的 ctx 会停在 suspended，永远不出声。
   var PRIMED_CTX = null;
+  var PRIMED_CTX_OWNER = "";
   var PRIMED_UNLOCK_SOURCE = null;
   var PRIMED_KEEPALIVE_SOURCE = null;
+  var PRIMED_KEEPALIVE_CTX = null;
+  function normalizeAudioOwner(ownerMessageId) {
+    return String(ownerMessageId || "").trim();
+  }
+  function globalPreprimedAudioOwner() {
+    try { return normalizeAudioOwner(window.__indextts_tavo_preprimed_audio_owner); }
+    catch (_) { return ""; }
+  }
+  function ownerMatchesAudioContext(ownerMessageId, existingOwner) {
+    ownerMessageId = normalizeAudioOwner(ownerMessageId);
+    existingOwner = normalizeAudioOwner(existingOwner);
+    return !ownerMessageId || existingOwner === ownerMessageId;
+  }
+  function adoptPreprimedAudioOwner(ownerMessageId, previousOwner) {
+    ownerMessageId = normalizeAudioOwner(ownerMessageId);
+    previousOwner = normalizeAudioOwner(previousOwner);
+    if (!ownerMessageId) return false;
+    try {
+      var ctx = PRIMED_CTX || window.__indextts_tavo_preprimed_audio_context;
+      if (!ctx) return false;
+      var globalOwner = globalPreprimedAudioOwner();
+      var ageMs = Math.max(0, Date.now() - (Number(window.__indextts_tavo_preprimed_audio_owner_at || 0) || 0));
+      var canAdopt = !globalOwner || globalOwner === ownerMessageId || (previousOwner && globalOwner === previousOwner);
+      if (!canAdopt && /^message-[a-f0-9]+$/i.test(globalOwner) && ageMs <= 6000) canAdopt = true;
+      if (!canAdopt) return false;
+      registerPreprimedAudioContext(ctx, ownerMessageId);
+      debugLog("🔊 WebAudio ctx 认领到当前消息 owner=" + ownerMessageId + (previousOwner ? " from=" + previousOwner : ""), "#9ff");
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+  function registerPreprimedAudioContext(ctx, ownerMessageId) {
+    PRIMED_CTX = ctx || null;
+    PRIMED_CTX_OWNER = normalizeAudioOwner(ownerMessageId);
+    try {
+      window.__indextts_tavo_preprimed_audio_context = PRIMED_CTX;
+      window.__indextts_tavo_preprimed_audio_owner = PRIMED_CTX_OWNER;
+      window.__indextts_tavo_preprimed_audio_owner_at = Date.now();
+    } catch (_) {}
+  }
   function startRuntimeAudioKeepalive(ctx) {
-    if (!ctx || PRIMED_KEEPALIVE_SOURCE) return;
+    if (!ctx) return;
+    if (PRIMED_KEEPALIVE_SOURCE && PRIMED_KEEPALIVE_CTX === ctx) return;
+    if (PRIMED_KEEPALIVE_SOURCE && PRIMED_KEEPALIVE_CTX !== ctx) {
+      try { PRIMED_KEEPALIVE_SOURCE.stop(0); } catch (_) {}
+      PRIMED_KEEPALIVE_SOURCE = null;
+      PRIMED_KEEPALIVE_CTX = null;
+    }
+    try {
+      var globalSrc = window.__indextts_tavo_preprimed_keepalive_source;
+      var globalCtx = window.__indextts_tavo_preprimed_keepalive_ctx;
+      if (globalSrc && globalCtx === ctx) {
+        PRIMED_KEEPALIVE_SOURCE = globalSrc;
+        PRIMED_KEEPALIVE_CTX = ctx;
+        return;
+      }
+      if (globalSrc && globalCtx && globalCtx !== ctx) {
+        try { globalSrc.stop(0); } catch (_) {}
+        window.__indextts_tavo_preprimed_keepalive_source = null;
+        window.__indextts_tavo_preprimed_keepalive_ctx = null;
+      }
+    } catch (_) {}
     try {
       var rate = ctx.sampleRate || 44100;
       var frames = Math.max(1, Math.floor(rate * 0.5));
       var b = ctx.createBuffer(1, frames, rate);
       var ch = b.getChannelData(0);
-      for (var i = 0; i < ch.length; i++) ch[i] = 0.00001;
+      for (var i = 0; i < ch.length; i++) {
+        ch[i] = Math.sin(2 * Math.PI * 80 * i / rate) * 0.0006;
+      }
       var gain = ctx.createGain ? ctx.createGain() : null;
       var src = ctx.createBufferSource();
       src.buffer = b;
       src.loop = true;
       if (gain) {
-        gain.gain.value = 0.00001;
+        gain.gain.value = 0.35;
         src.connect(gain);
         gain.connect(ctx.destination);
       } else {
@@ -344,29 +408,98 @@
       }
       src.start(0);
       PRIMED_KEEPALIVE_SOURCE = src;
+      PRIMED_KEEPALIVE_CTX = ctx;
       try { window.__indextts_tavo_preprimed_keepalive_source = src; } catch (_) {}
+      try { window.__indextts_tavo_preprimed_keepalive_ctx = ctx; } catch (_) {}
       debugLog("🔊 WebAudio keepalive 已接入同一个 AudioContext", "#9ff");
     } catch (e) {
       debugLog("⚠️ WebAudio keepalive 启动失败: " + (e && e.message ? e.message : e), "#fc9");
     }
   }
-  function takePreprimedAudioContext() {
-    if (PRIMED_CTX) return PRIMED_CTX;
+  function wakeRuntimeAudioOutput(ctx, destination, label) {
+    if (!ctx) return false;
+    try {
+      var rate = ctx.sampleRate || 44100;
+      var frames = Math.max(1, Math.floor(rate * 0.08));
+      var b = ctx.createBuffer(1, frames, rate);
+      var ch = b.getChannelData(0);
+      for (var i = 0; i < ch.length; i++) {
+        var edge = Math.min(1, i / Math.max(1, Math.floor(rate * 0.012)), (ch.length - i) / Math.max(1, Math.floor(rate * 0.012)));
+        ch[i] = Math.sin(2 * Math.PI * 220 * i / rate) * 0.0016 * Math.max(0, edge);
+      }
+      var gain = ctx.createGain ? ctx.createGain() : null;
+      var src = ctx.createBufferSource();
+      src.buffer = b;
+      if (gain) {
+        gain.gain.value = 1;
+        src.connect(gain);
+        gain.connect(destination || ctx.destination);
+      } else {
+        src.connect(destination || ctx.destination);
+      }
+      src.start(0);
+      debugLog("🔊 WebAudio 输出通道唤醒 " + (label || ""), "#9ff");
+      return true;
+    } catch (e) {
+      debugLog("⚠️ WebAudio 输出通道唤醒失败: " + (e && e.message ? e.message : e), "#fc9");
+      return false;
+    }
+  }
+  function takePreprimedAudioContext(ownerMessageId) {
+    ownerMessageId = normalizeAudioOwner(ownerMessageId);
+    if (PRIMED_CTX && ownerMatchesAudioContext(ownerMessageId, PRIMED_CTX_OWNER)) return PRIMED_CTX;
+    if (PRIMED_CTX && ownerMessageId && PRIMED_CTX_OWNER && PRIMED_CTX_OWNER !== ownerMessageId) {
+      debugLog("⚠️ 跳过旧消息 WebAudio ctx owner=" + PRIMED_CTX_OWNER + " current=" + ownerMessageId, "#fc9");
+    }
     try {
       var existing = window.__indextts_tavo_preprimed_audio_context;
-      if (existing) {
+      var owner = globalPreprimedAudioOwner();
+      if (existing && ownerMatchesAudioContext(ownerMessageId, owner)) {
         PRIMED_CTX = existing;
+        PRIMED_CTX_OWNER = owner;
         try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
         startRuntimeAudioKeepalive(PRIMED_CTX);
         return PRIMED_CTX;
+      } else if (existing && ownerMessageId && owner && owner !== ownerMessageId) {
+        debugLog("⚠️ 全局 WebAudio ctx 属于其他消息 owner=" + owner + " current=" + ownerMessageId, "#fc9");
       }
     } catch (_) {}
     return null;
   }
-  function primeAudioContext() {
-    var existing = takePreprimedAudioContext();
+  function resetPreprimedAudioContext(reason) {
+    try {
+      if (PRIMED_KEEPALIVE_SOURCE) PRIMED_KEEPALIVE_SOURCE.stop(0);
+    } catch (_) {}
+    try {
+      var globalSrc = window.__indextts_tavo_preprimed_keepalive_source;
+      if (globalSrc) globalSrc.stop(0);
+    } catch (_) {}
+    try {
+      if (PRIMED_CTX && PRIMED_CTX.state !== "closed") PRIMED_CTX.close();
+    } catch (_) {}
+    try {
+      var globalCtx = window.__indextts_tavo_preprimed_audio_context;
+      if (globalCtx && globalCtx !== PRIMED_CTX && globalCtx.state !== "closed") globalCtx.close();
+    } catch (_) {}
+    PRIMED_KEEPALIVE_SOURCE = null;
+    PRIMED_KEEPALIVE_CTX = null;
+    PRIMED_CTX = null;
+    PRIMED_CTX_OWNER = "";
+    try {
+      window.__indextts_tavo_preprimed_keepalive_source = null;
+      window.__indextts_tavo_preprimed_keepalive_ctx = null;
+      window.__indextts_tavo_preprimed_audio_context = null;
+      window.__indextts_tavo_preprimed_audio_owner = "";
+    } catch (_) {}
+    debugLog("🔄 WebAudio ctx 已重建准备 " + (reason || ""), "#ffd479");
+  }
+  function primeAudioContext(ownerMessageId, opts) {
+    opts = opts || {};
+    ownerMessageId = normalizeAudioOwner(ownerMessageId);
+    if (opts.forceNew) resetPreprimedAudioContext(opts.reason || "forceNew");
+    var existing = takePreprimedAudioContext(ownerMessageId);
     if (existing) return existing;
-    if (PRIMED_CTX) {
+    if (PRIMED_CTX && ownerMatchesAudioContext(ownerMessageId, PRIMED_CTX_OWNER)) {
       try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
       startRuntimeAudioKeepalive(PRIMED_CTX);
       return PRIMED_CTX;
@@ -381,14 +514,16 @@
         var unlockRate = ctx.sampleRate || 44100;
         var b = ctx.createBuffer(1, Math.max(1, Math.floor(unlockRate * 0.03)), unlockRate);
         var ch = b.getChannelData(0);
-        if (ch && ch.length) ch[0] = 0.0005;
+        for (var i = 0; ch && i < ch.length; i++) {
+          var edge = Math.min(1, i / Math.max(1, Math.floor(unlockRate * 0.006)), (ch.length - i) / Math.max(1, Math.floor(unlockRate * 0.006)));
+          ch[i] = Math.sin(2 * Math.PI * 220 * i / unlockRate) * 0.0012 * Math.max(0, edge);
+        }
         var s = ctx.createBufferSource();
         s.buffer = b; s.connect(ctx.destination); s.start(0);
         PRIMED_UNLOCK_SOURCE = s;
         s.onended = function () { if (PRIMED_UNLOCK_SOURCE === s) PRIMED_UNLOCK_SOURCE = null; };
       } catch (_) {}
-      PRIMED_CTX = ctx;
-      try { window.__indextts_tavo_preprimed_audio_context = ctx; } catch (_) {}
+      registerPreprimedAudioContext(ctx, ownerMessageId);
       startRuntimeAudioKeepalive(ctx);
       return ctx;
     } catch (_) { return null; }

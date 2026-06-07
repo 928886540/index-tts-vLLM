@@ -49,6 +49,10 @@ function wavBufferSeconds(seconds) {
   return buf;
 }
 
+function pcmBufferSeconds(seconds) {
+  return wavBufferSeconds(seconds).slice(44);
+}
+
 function tinyWavBuffer() {
   return wavBufferSeconds(0.1);
 }
@@ -729,7 +733,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
   let streamGetCount = 0;
   const streamUrls = [];
   const jobBodies = [];
-  const wav = wavBufferSeconds(2.4);
+  const pcm = pcmBufferSeconds(2.4);
 
   await page.route("**/cache_audio/**", async (route) => {
     if (route.request().method().toUpperCase() === "HEAD") headCount += 1;
@@ -762,7 +766,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       })
     });
   });
-  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+)?(?:[?#].*)?$/, async (route) => {
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:\/pcm)?)?(?:[?#].*)?$/, async (route) => {
     const req = route.request();
     const method = req.method().toUpperCase();
     const pathname = new URL(req.url()).pathname;
@@ -789,7 +793,25 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         await route.abort("failed");
         return;
       }
-      await route.fulfill({ status: 200, contentType: "audio/wav", body: wav });
+      if (/\/pcm$/.test(pathname)) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/octet-stream",
+          headers: {
+            "X-IndexTTS-Cache-Key": liveKey,
+            "X-IndexTTS-Sample-Rate": "8000",
+            "X-IndexTTS-PCM-Offset": "0",
+            "X-IndexTTS-PCM-Next-Offset": String(pcm.length),
+            "X-IndexTTS-PCM-Total": String(pcm.length),
+            "X-IndexTTS-Live-Done": "1",
+            "X-IndexTTS-Live-State": "done",
+            "Access-Control-Expose-Headers": "X-IndexTTS-Cache-Key,X-IndexTTS-Sample-Rate,X-IndexTTS-PCM-Offset,X-IndexTTS-PCM-Next-Offset,X-IndexTTS-PCM-Total,X-IndexTTS-Live-Done,X-IndexTTS-Live-State"
+          },
+          body: pcm
+        });
+        return;
+      }
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "chunked wav fallback not used in PCM smoke" }) });
       return;
     }
     await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "unexpected live smoke method" }) });
@@ -947,6 +969,7 @@ async function runLiveResumableAfterFailuresSmoke(browser, targetUrl) {
   let cacheGetCount = 0;
   let statusCount = 0;
   let streamGetCount = 0;
+  let pcmPollCount = 0;
   let deleteCount = 0;
   const streamUrls = [];
   const jobBodies = [];
@@ -985,7 +1008,7 @@ async function runLiveResumableAfterFailuresSmoke(browser, targetUrl) {
       })
     });
   });
-  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+)?(?:[?#].*)?$/, async (route) => {
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:\/pcm)?)?(?:[?#].*)?$/, async (route) => {
     const req = route.request();
     const method = req.method().toUpperCase();
     const pathname = new URL(req.url()).pathname;
@@ -1008,6 +1031,24 @@ async function runLiveResumableAfterFailuresSmoke(browser, targetUrl) {
     if (method === "GET" && pathname.indexOf("/tts_dialogue_stream_job/") >= 0) {
       streamGetCount += 1;
       streamUrls.push(req.url());
+      if (/\/pcm$/.test(pathname)) {
+        pcmPollCount += 1;
+        await route.fulfill({
+          status: 204,
+          headers: {
+            "X-IndexTTS-Cache-Key": liveKey,
+            "X-IndexTTS-Sample-Rate": "8000",
+            "X-IndexTTS-PCM-Offset": "0",
+            "X-IndexTTS-PCM-Next-Offset": "0",
+            "X-IndexTTS-PCM-Total": "0",
+            "X-IndexTTS-Live-Done": "0",
+            "X-IndexTTS-Live-State": "live",
+            "Access-Control-Expose-Headers": "X-IndexTTS-Cache-Key,X-IndexTTS-Sample-Rate,X-IndexTTS-PCM-Offset,X-IndexTTS-PCM-Next-Offset,X-IndexTTS-PCM-Total,X-IndexTTS-Live-Done,X-IndexTTS-Live-State"
+          },
+          body: ""
+        });
+        return;
+      }
       await route.abort("failed");
       return;
     }
@@ -1057,9 +1098,9 @@ async function runLiveResumableAfterFailuresSmoke(browser, targetUrl) {
     });
     await page.waitForFunction(() => {
       const fetches = window.__idxTest.getFetchLog();
-      const streamGets = fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length;
+      const pcmPolls = fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/pcm/.test(r.url)).length;
       const play = document.querySelector('[data-role="play"]');
-      return streamGets >= 4 && play && play.dataset.state !== "loading";
+      return pcmPolls >= 3 && play && play.dataset.state === "loading";
     }, { timeout: 15000 });
     await page.waitForTimeout(250);
 
@@ -1078,6 +1119,7 @@ async function runLiveResumableAfterFailuresSmoke(browser, targetUrl) {
         jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        pcmPolls: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/pcm/.test(r.url)).length,
         deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
         cacheChecks: fetches.filter((r) => /\/cache_audio\//.test(r.url)).length,
         cachePlays: (window.__cachePlayCalls || []).filter((x) => x && x.kind === "saved").length,
@@ -1088,58 +1130,23 @@ async function runLiveResumableAfterFailuresSmoke(browser, targetUrl) {
     if (jobCount !== 1 || beforeResume.jobs !== 1) {
       throw new Error("LIVE failures must not create a second job: " + JSON.stringify({ jobCount, beforeResume, jobBodies }));
     }
-    if (streamGetCount < 4 || beforeResume.streamGets < 4 || streamUrls.some((u) => !u.includes(liveKey))) {
-      throw new Error("LIVE failures should retry the same cache-key stream before pausing: " + JSON.stringify({ streamGetCount, streamUrls, beforeResume }));
+    if (pcmPollCount < 3 || beforeResume.pcmPolls < 3 || streamUrls.some((u) => !u.includes(liveKey))) {
+      throw new Error("LIVE waiting should poll the same cache-key PCM before cache is saved: " + JSON.stringify({ streamGetCount, pcmPollCount, streamUrls, beforeResume }));
     }
-    if (beforeResume.playState === "loading") {
-      throw new Error("LIVE failures must return the play button to a tappable state: " + JSON.stringify(beforeResume));
+    if (beforeResume.playState !== "loading") {
+      throw new Error("LIVE waiting with no PCM should stay loading instead of failing early: " + JSON.stringify(beforeResume));
     }
     if (beforeResume.cachePlays || beforeResume.audioKind === "saved") {
-      throw new Error("LIVE failures must not force autoplay saved-cache fallback: " + JSON.stringify(beforeResume));
+      throw new Error("LIVE waiting must not force autoplay saved-cache fallback: " + JSON.stringify(beforeResume));
     }
     if (deleteCount || beforeResume.deletes) {
-      throw new Error("LIVE failures must not delete the backend job: " + JSON.stringify({ deleteCount, beforeResume }));
+      throw new Error("LIVE waiting must not delete the backend job: " + JSON.stringify({ deleteCount, beforeResume }));
     }
-    if (!/点播放|继续|不稳定|中断|超时|暂不可用/.test(beforeResume.status + beforeResume.notice)) {
-      throw new Error("LIVE failure state should tell the user it can be resumed: " + JSON.stringify(beforeResume));
-    }
-
-    const streamGetsBeforeManualResume = streamGetCount;
-    await page.click('[data-role="play"]');
-    await page.waitForFunction((n) => {
-      const fetches = window.__idxTest.getFetchLog();
-      return fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length > n;
-    }, streamGetsBeforeManualResume, { timeout: 10000 });
-    await page.waitForTimeout(150);
-
-    const afterResume = await page.evaluate(() => {
-      const fetches = window.__idxTest.getFetchLog();
-      const play = document.querySelector('[data-role="play"]');
-      return {
-        playState: play ? play.dataset.state : "",
-        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
-        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
-        deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
-        cachePlays: (window.__cachePlayCalls || []).filter((x) => x && x.kind === "saved").length
-      };
-    });
-    if (afterResume.jobs !== 1 || jobCount !== 1) {
-      throw new Error("manual LIVE resume must reuse the existing job, not POST again: " + JSON.stringify({ jobCount, beforeResume, afterResume, jobBodies }));
-    }
-    if (afterResume.streamGets <= streamGetsBeforeManualResume || streamUrls.some((u) => !u.includes(liveKey))) {
-      throw new Error("manual LIVE resume must GET the same cache-key stream again: " + JSON.stringify({ liveKey, streamGetsBeforeManualResume, streamUrls, afterResume }));
-    }
-    if (afterResume.deletes || deleteCount) {
-      throw new Error("manual LIVE resume must not delete the backend job: " + JSON.stringify({ deleteCount, afterResume }));
-    }
-    if (afterResume.cachePlays) {
-      throw new Error("manual LIVE resume should request live stream, not autoplay saved cache: " + JSON.stringify({ beforeResume, afterResume }));
-    }
-    if (/等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|收到音频|网络缓冲中/.test(beforeResume.notice)) {
-      throw new Error("LIVE resumable progress must stay out of the lyric panel: " + JSON.stringify(beforeResume));
+    if (/还没收到|跟不上|手动续播|失败|暂不可用/.test(beforeResume.status + beforeResume.notice)) {
+      throw new Error("LIVE waiting must not show failure-style prompts: " + JSON.stringify(beforeResume));
     }
     if (pageErrors.length) throw new Error("LIVE resumable-after-failures smoke page error: " + pageErrors.join(" | "));
-    return { jobCount, headCount, cacheGetCount, statusCount, streamGetCount, streamUrls, beforeResume, afterResume, body: jobBodies[0] };
+    return { jobCount, headCount, cacheGetCount, statusCount, streamGetCount, pcmPollCount, streamUrls, beforeResume, body: jobBodies[0] };
   } finally {
     await context.close();
   }
@@ -1187,7 +1194,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       })
     });
   });
-  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+)?(?:[?#].*)?$/, async (route) => {
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:\/pcm)?)?(?:[?#].*)?$/, async (route) => {
     const req = route.request();
     const method = req.method().toUpperCase();
     const pathname = new URL(req.url()).pathname;
@@ -1270,12 +1277,12 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     }
     const firstStream = streamUrls[0] || (result.streamUrls && result.streamUrls[0]) || "";
     if (!firstStream.includes(liveKey)) {
-      throw new Error("restored LIVE resume should GET the original cache-key stream: " + JSON.stringify({ streamUrls, result }));
+      throw new Error("restored LIVE resume should GET the original cache-key live PCM stream: " + JSON.stringify({ streamUrls, result }));
     }
     const parsed = new URL(firstStream);
     const startS = Number(parsed.searchParams.get("start_s"));
     if (!Number.isFinite(startS) || Math.abs(startS - 2.75) > 0.02) {
-      throw new Error("restored LIVE resume should request backend stream with start_s from last WebAudio second: " + JSON.stringify({ firstStream, result, statusCount }));
+      throw new Error("restored LIVE resume should request backend live PCM with start_s from last WebAudio second: " + JSON.stringify({ firstStream, result, statusCount }));
     }
     if (pageErrors.length) throw new Error("LIVE resume start offset smoke page error: " + pageErrors.join(" | "));
     return { streamUrls, result, statusCount };

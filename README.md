@@ -33,7 +33,7 @@ The launcher selects one backend version at startup. `static/`, `launcher/`, and
 The app does not require a public domain. For same-LAN phone testing, use:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v17"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v18"></script>
 ```
 
 For a public tunnel, configure the tunnel/reverse proxy outside this repository and replace only the script host.
@@ -49,6 +49,7 @@ The only runtime code that should depend on the script host is `static/tavo.js`,
 ## Development Notes
 
 - Active collaboration state lives in `dev_workspace/docs/`.
+- A request to "read README" is only a lightweight project overview request. Read/summarize this file; load `AGENTS.md` and active docs only when code changes, debugging, validation, commits, or planning are needed.
 - Tavo frontend changes must follow the local `tavo` Codex skill.
 - A user-reported bug is an action item, not just a ledger entry. Diagnose and fix the relevant code path first; update `dev_workspace/docs/BUGS.md` only as a concise tracking/fix note when it helps handoff.
 - Do not stop after only writing a bug entry. Do not paste raw user reports into docs; summarize boundary, evidence, fix, and regression guard.

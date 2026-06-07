@@ -4,6 +4,8 @@ Codex rules for `D:\apiWorkSpace\leon_api`.
 
 ## Required Reading
 
+If the user only asks to "读一下 README" or understand what the project does, treat it as a lightweight context request: read/summarize `README.md` only, and do not load the full docs set unless the user also asks to edit, debug, validate, commit, or plan repository work.
+
 Before repository work here, read the short active context:
 
 1. `C:\Users\Administrator\.codex\AGENTS.md`

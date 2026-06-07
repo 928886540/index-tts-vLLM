@@ -55,16 +55,29 @@
       if (action === "seek") return background ? "后台生成中，完成后才能拖动" : "流式生成中不能拖动";
       return background ? "后台生成中，先删除或等待完成" : "流式生成中，可点播放暂停或等待完成";
     }
-    on(play, 'pointerdown', function () { primeAudioContext(); });
-    on(add, 'pointerdown', function () { primeAudioContext(); });
-    on(rewind10, 'pointerdown', function () { primeAudioContext(); });
-    on(forward10, 'pointerdown', function () { primeAudioContext(); });
-    on(play, 'touchstart', function () { primeAudioContext(); });
-    on(add, 'touchstart', function () { primeAudioContext(); });
-    on(rewind10, 'touchstart', function () { primeAudioContext(); });
-    on(forward10, 'touchstart', function () { primeAudioContext(); });
+    var lastFreshAudioPrimeAt = 0;
+    function primeAudioForGesture(action) {
+      var forceNew = false;
+      try {
+        var t = currentTrack();
+        if (action === "add") forceNew = !(t && t.webAudioPlaying);
+        else if (action === "play") forceNew = !!(t && (isLiveTrack(t) || trackState(t) === "pending") && !t.webAudioPlaying);
+      } catch (_) {}
+      var now = Date.now();
+      if (forceNew && now - lastFreshAudioPrimeAt < 700) forceNew = false;
+      if (forceNew) lastFreshAudioPrimeAt = now;
+      primeAudioContext(messageId, forceNew ? { forceNew: true, reason: action + " live retry" } : null);
+    }
+    on(play, 'pointerdown', function () { primeAudioForGesture("play"); });
+    on(add, 'pointerdown', function () { primeAudioForGesture("add"); });
+    on(rewind10, 'pointerdown', function () { primeAudioForGesture("seek"); });
+    on(forward10, 'pointerdown', function () { primeAudioForGesture("seek"); });
+    on(play, 'touchstart', function () { primeAudioForGesture("play"); });
+    on(add, 'touchstart', function () { primeAudioForGesture("add"); });
+    on(rewind10, 'touchstart', function () { primeAudioForGesture("seek"); });
+    on(forward10, 'touchstart', function () { primeAudioForGesture("seek"); });
     on(play, 'click', function () {
-      primeAudioContext();
+      primeAudioForGesture("play");
       if (tryResumeOrPauseInGesture()) return;
       if (!canPlayCurrentTrack()) {
         setPlayState("idle");
@@ -76,19 +89,19 @@
       playOrPauseCurrentTrack().catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
     on(add, 'click', function () {
-      primeAudioContext();
+      primeAudioForGesture("add");
       var t = currentTrack();
       if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t)); return; }
       generate(true).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
     on(rewind10, 'click', function () {
-      primeAudioContext();
+      primeAudioForGesture("seek");
       var t = currentTrack();
       if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t, "seek")); return; }
       if (!seekBySeconds(-10)) setStatus("暂无可跳转音频");
     });
     on(forward10, 'click', function () {
-      primeAudioContext();
+      primeAudioForGesture("seek");
       var t = currentTrack();
       if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t, "seek")); return; }
       if (!seekBySeconds(10)) setStatus("暂无可跳转音频");
@@ -360,6 +373,10 @@
     if (script && script.parentNode) script.parentNode.insertBefore(root, script.nextSibling); else document.body.appendChild(root);
     var cfg = await getConfig();
     var ctx = await currentMessageContext();
+    try {
+      var loaderMessageId = script && script.dataset ? String(script.dataset.indexttsMessageId || "") : "";
+      if (typeof adoptPreprimedAudioOwner === "function") adoptPreprimedAudioOwner(ctx.messageId, loaderMessageId);
+    } catch (_) {}
     cfg.currentCharacterName = ctx.characterName || "";
     // 角色级 defaultVoice + roleVoiceList 覆盖全局 cfg。
     // 优先读 TAVO character scope；ctx.characterId 只用于旧版全局 key/localStorage 迁移。

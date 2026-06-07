@@ -3,7 +3,10 @@
     hooks = hooks || {};
     var playbackRate = Math.max(0.85, Math.min(1.25, Number(hooks.playbackRate || 1) || 1));
     var startOffsetSec = Math.max(0, Number(hooks.startOffsetSec || 0) || 0);
-    var skipOffsetSec = hooks.skipOffsetSec == null ? startOffsetSec : Math.max(0, Number(hooks.skipOffsetSec || 0) || 0);
+    var skipOffsetExplicit = hooks.skipOffsetSec != null;
+    var skipOffsetSec = skipOffsetExplicit ? Math.max(0, Number(hooks.skipOffsetSec || 0) || 0) : startOffsetSec;
+    var ownerMessageId = String(hooks.ownerMessageId || "").trim();
+    var ownerCacheKey = String(hooks.ownerCacheKey || "").trim();
     var prebufferSec = Math.max(0.5, Math.min(4.0, Number(hooks.prebufferSec || 1.25) || 1.25));
     var flushSec = Math.max(0.25, Math.min(1.0, Number(hooks.flushSec || 0.5) || 0.5));
     var AC = window.AudioContext || window.webkitAudioContext;
@@ -11,9 +14,17 @@
     hooks.onStateChange && hooks.onStateChange("connecting");
     // 优先复用 user-gesture 里 prime 出来的 ctx；没有再 new 一个（桌面/file://
     // 这种没经过 gesture 的场景也能跑）。
-    var ctx = (typeof takePreprimedAudioContext === "function" ? takePreprimedAudioContext() : null) || PRIMED_CTX || new AC();
+    var ctx = (typeof takePreprimedAudioContext === "function" ? takePreprimedAudioContext(ownerMessageId) : null) || new AC();
     try { if (ctx.state === "suspended") await ctx.resume(); }
     catch (e) { throw new Error("[step:resume] " + (e && e.message ? e.message : e)); }
+    try {
+      ctx.onstatechange = function () {
+        hooks.debug && hooks.debug("AudioContext statechange -> " + ctx.state);
+        if (ctx.state === "suspended" || ctx.state === "interrupted") {
+          hooks.onStateChange && hooks.onStateChange("audio_suspended");
+        }
+      };
+    } catch (_) {}
     try { if (typeof startRuntimeAudioKeepalive === "function") startRuntimeAudioKeepalive(ctx); } catch (_) {}
     var output = ctx.createGain ? ctx.createGain() : null;
     if (output) {
@@ -35,6 +46,7 @@
     var bufferingState = false;
     var scheduledSpans = [];
     var scheduledAudioSec = 0;
+    var reportedFirstPcmStats = false;
     function getPlaybackTimeSec() {
       if (!started || !scheduledSpans.length) return 0;
       var now = 0;
@@ -119,7 +131,15 @@
       }
       hooks.onStateChange && hooks.onStateChange("stopped");
     }
-    if (hooks.onController) hooks.onController({ stop: stopWebAudio, getTimeSec: getPlaybackTimeSec });
+    if (hooks.onController) hooks.onController({
+      stop: stopWebAudio,
+      getTimeSec: getPlaybackTimeSec,
+      ctx: ctx,
+      outputNode: output,
+      activeSources: activeSources,
+      messageId: ownerMessageId,
+      cacheKey: ownerCacheKey
+    });
     function connectNode(node) {
       node.connect(output || ctx.destination);
     }
@@ -130,12 +150,18 @@
         if (idx >= 0) activeSources.splice(idx, 1);
       };
     }
-    if (hooks.debug) hooks.debug("AudioContext state=" + ctx.state + " sr=" + ctx.sampleRate);
+    if (hooks.debug) hooks.debug("AudioContext state=" + ctx.state + " sr=" + ctx.sampleRate + (ownerMessageId ? " owner=" + ownerMessageId : "") + (ownerCacheKey ? " cacheKey=" + ownerCacheKey : ""));
 
     var res;
     try { res = await fetch(streamUrl); }
     catch (e) { throw new Error("[step:fetch] " + (e && e.message ? e.message : e)); }
     if (!res.ok) throw new Error("[step:fetch] HTTP " + res.status + " " + (await res.text().catch(function(){return"";})));
+    var cacheHeader = "";
+    try { cacheHeader = String(res.headers && res.headers.get && res.headers.get("X-IndexTTS-Cache") || "").toUpperCase(); } catch (_) { cacheHeader = ""; }
+    if (cacheHeader === "HIT" && startOffsetSec > 0.01 && (!skipOffsetExplicit || skipOffsetSec <= 0.01)) {
+      skipOffsetSec = startOffsetSec;
+      hooks.debug && hooks.debug("cache HIT 完整 WAV，前端按 startOffset 跳过 " + skipOffsetSec.toFixed(2) + "s PCM");
+    }
     hooks.onStateChange && hooks.onStateChange("connected");
 
     // 试 ReadableStream 真流式；如果 WebView 不支持 (常见于 iOS 老版 / 部分
@@ -162,6 +188,9 @@
         connectNode(src);
         keepSource(src);
         var audioOffset = Math.min(skipOffsetSec, Math.max(0, audioBuf.duration - 0.05));
+        try {
+          if (typeof wakeRuntimeAudioOutput === "function") wakeRuntimeAudioOutput(ctx, output || ctx.destination, "buffered-start");
+        } catch (_) {}
         var fallbackStartAt = ctx.currentTime + 0.03;
         var dur = Math.max(0, audioBuf.duration - audioOffset) / playbackRate;
         var timelineStart = startOffsetSec;
@@ -256,13 +285,19 @@
 
     async function ensureAudioContextRunning(step) {
       try {
-        if (ctx.state === "suspended") {
+        if (ctx.state === "suspended" || ctx.state === "interrupted") {
           await ctx.resume();
           hooks.debug && hooks.debug(step + " resume AudioContext -> " + ctx.state);
+        }
+        if (ctx.state === "suspended" || ctx.state === "interrupted") {
+          await new Promise(function (r) { setTimeout(r, 80); });
+          await ctx.resume();
+          hooks.debug && hooks.debug(step + " resume retry AudioContext -> " + ctx.state);
         }
       } catch (e) {
         throw new Error("[step:" + step + ".resume] " + (e && e.message ? e.message : e));
       }
+      if (ctx.state === "closed") throw new Error("[step:" + step + ".resume] AudioContext closed");
     }
 
     async function schedulePcm(bytes) {
@@ -273,15 +308,35 @@
         var samples = Math.floor(bytes.length / (2 * channels));
         var aBuf = ctx.createBuffer(channels, samples, sampleRate);
         var view = new DataView(bytes.buffer, bytes.byteOffset, samples * 2 * channels);
+        var maxAbs = 0;
+        var sumSq = 0;
+        var statCount = 0;
         for (var c = 0; c < channels; c++) {
           var chan = aBuf.getChannelData(c);
           for (var i = 0; i < samples; i++) {
-            chan[i] = view.getInt16((i * channels + c) * 2, true) / 32768;
+            var sample = view.getInt16((i * channels + c) * 2, true) / 32768;
+            chan[i] = sample;
+            if (!reportedFirstPcmStats) {
+              var abs = Math.abs(sample);
+              if (abs > maxAbs) maxAbs = abs;
+              sumSq += sample * sample;
+              statCount += 1;
+            }
           }
+        }
+        if (!reportedFirstPcmStats) {
+          reportedFirstPcmStats = true;
+          var rms = statCount ? Math.sqrt(sumSq / statCount) : 0;
+          hooks.debug && hooks.debug("first PCM stats peak=" + maxAbs.toFixed(4) + " rms=" + rms.toFixed(4) + " bytes=" + bytes.length);
         }
         var src = ctx.createBufferSource();
         src.buffer = aBuf;
         try { src.playbackRate.value = playbackRate; } catch (_) {}
+        if (!started) {
+          try {
+            if (typeof wakeRuntimeAudioOutput === "function") wakeRuntimeAudioOutput(ctx, output || ctx.destination, "first-pcm");
+          } catch (_) {}
+        }
         connectNode(src);
         keepSource(src);
         var t = Math.max(nextAt, ctx.currentTime + 0.02);
@@ -394,4 +449,351 @@
     var totalDur = Math.max(0, nextAt - startAt);
     armEndedWatcher();
     return { ctx: ctx, duration: totalDur, mode: "streaming", interrupted: interrupted };
+  }
+
+  async function streamLivePcmViaWebAudio(pcmUrl, hooks) {
+    hooks = hooks || {};
+    var playbackRate = Math.max(0.85, Math.min(1.25, Number(hooks.playbackRate || 1) || 1));
+    var startOffsetSec = Math.max(0, Number(hooks.startOffsetSec || 0) || 0);
+    var ownerMessageId = String(hooks.ownerMessageId || "").trim();
+    var ownerCacheKey = String(hooks.ownerCacheKey || "").trim();
+    var prebufferSec = Math.max(0.5, Math.min(4.0, Number(hooks.prebufferSec || 1.25) || 1.25));
+    var flushSec = Math.max(0.25, Math.min(1.0, Number(hooks.flushSec || 0.5) || 0.5));
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error("浏览器不支持 Web Audio API");
+    hooks.onStateChange && hooks.onStateChange("connecting");
+    var ctx = (typeof takePreprimedAudioContext === "function" ? takePreprimedAudioContext(ownerMessageId) : null) || new AC();
+    try { if (ctx.state === "suspended") await ctx.resume(); }
+    catch (e) { throw new Error("[step:pcm.resume] " + (e && e.message ? e.message : e)); }
+    try {
+      ctx.onstatechange = function () {
+        hooks.debug && hooks.debug("PCM AudioContext statechange -> " + ctx.state);
+        if (ctx.state === "suspended" || ctx.state === "interrupted") {
+          hooks.onStateChange && hooks.onStateChange("audio_suspended");
+        }
+      };
+    } catch (_) {}
+    try { if (typeof startRuntimeAudioKeepalive === "function") startRuntimeAudioKeepalive(ctx); } catch (_) {}
+    var output = ctx.createGain ? ctx.createGain() : null;
+    if (output) {
+      output.gain.value = 1;
+      output.connect(ctx.destination);
+    }
+    var activeSources = [];
+    var stopped = false;
+    var stopReason = "";
+    var endTimer = null;
+    var bufferTimer = null;
+    var playNotifyTimer = null;
+    var stableNotifyTimer = null;
+    var bufferingState = false;
+    var started = false;
+    var nextAt = 0;
+    var playbackStartCtxTime = null;
+    var readEnded = false;
+    var scheduledSpans = [];
+    var scheduledAudioSec = startOffsetSec;
+    var sampleRate = 22050;
+    var channels = 1;
+    var blockAlign = 2;
+    var bytesPerSec = sampleRate * channels * 2;
+    var flushBytes = 0;
+    var startBufferBytes = 0;
+    var pending = new Uint8Array(0);
+    var nextOffset = -1;
+    var reportedFirstPcmStats = false;
+    var pollCount = 0;
+
+    function recalcBufferSizes() {
+      bytesPerSec = sampleRate * channels * 2;
+      blockAlign = Math.max(2 * channels, 2);
+      flushBytes = Math.max(8192, Math.floor(bytesPerSec * flushSec));
+      flushBytes = flushBytes - (flushBytes % blockAlign);
+      if (flushBytes < blockAlign) flushBytes = blockAlign;
+      startBufferBytes = Math.max(flushBytes, Math.floor(bytesPerSec * prebufferSec));
+      startBufferBytes = startBufferBytes - (startBufferBytes % blockAlign);
+      if (startBufferBytes < flushBytes) startBufferBytes = flushBytes;
+    }
+    recalcBufferSizes();
+    function getPlaybackTimeSec() {
+      if (!started || !scheduledSpans.length) return 0;
+      var now = 0;
+      try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
+      for (var i = 0; i < scheduledSpans.length; i++) {
+        var sp = scheduledSpans[i];
+        if (now < sp.start) return sp.audioStart;
+        if (now >= sp.start && now <= sp.end) return sp.audioStart + ((now - sp.start) * playbackRate);
+      }
+      return scheduledSpans[scheduledSpans.length - 1].audioEnd;
+    }
+    function armEndedWatcher() {
+      if (endTimer) { try { clearInterval(endTimer); } catch (_) {} endTimer = null; }
+      if (bufferTimer) { try { clearInterval(bufferTimer); } catch (_) {} bufferTimer = null; }
+      endTimer = setInterval(function () {
+        if (stopped) {
+          try { clearInterval(endTimer); } catch (_) {}
+          endTimer = null;
+          return;
+        }
+        var now = 0;
+        try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
+        if (nextAt && now + 0.03 >= nextAt) {
+          try { clearInterval(endTimer); } catch (_) {}
+          endTimer = null;
+          hooks.onStateChange && hooks.onStateChange("ended");
+        }
+      }, 120);
+    }
+    function armBufferWatcher() {
+      if (bufferTimer) return;
+      bufferTimer = setInterval(function () {
+        if (stopped || readEnded || !started) return;
+        var now = 0;
+        try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
+        var ahead = nextAt - now;
+        if (ahead <= 0.12 && !bufferingState) {
+          bufferingState = true;
+          hooks.onStateChange && hooks.onStateChange("buffering");
+        } else if (bufferingState && ahead >= 0.65) {
+          bufferingState = false;
+          hooks.onStateChange && hooks.onStateChange("resumed");
+        }
+      }, 120);
+    }
+    function bufferedAheadSec() {
+      var now = 0;
+      try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
+      return Math.max(0, nextAt - now);
+    }
+    function notifyStableWhenBuffered(delayMs, minAheadSec) {
+      if (stableNotifyTimer) { try { clearTimeout(stableNotifyTimer); } catch (_) {} stableNotifyTimer = null; }
+      delayMs = Math.max(0, Number(delayMs || 0) || 0);
+      minAheadSec = Math.max(0.25, Number(minAheadSec || 0.65) || 0.65);
+      stableNotifyTimer = setTimeout(function () {
+        stableNotifyTimer = null;
+        if (stopped || String(ctx.state || "running") !== "running") return;
+        var ahead = bufferedAheadSec();
+        if (!bufferingState && ahead >= minAheadSec) {
+          hooks.onStateChange && hooks.onStateChange("stable_playing");
+          return;
+        }
+        if (!readEnded && !stopped) notifyStableWhenBuffered(500, minAheadSec);
+      }, delayMs);
+    }
+    function stopWebAudio(reason) {
+      stopped = true;
+      stopReason = reason || "播放已停止";
+      if (endTimer) { try { clearInterval(endTimer); } catch (_) {} endTimer = null; }
+      if (bufferTimer) { try { clearInterval(bufferTimer); } catch (_) {} bufferTimer = null; }
+      if (playNotifyTimer) { try { clearTimeout(playNotifyTimer); } catch (_) {} playNotifyTimer = null; }
+      if (stableNotifyTimer) { try { clearTimeout(stableNotifyTimer); } catch (_) {} stableNotifyTimer = null; }
+      activeSources.slice().forEach(function (node) { try { node.stop(0); } catch (_) {} });
+      hooks.onStateChange && hooks.onStateChange("stopped");
+    }
+    if (hooks.onController) hooks.onController({
+      stop: stopWebAudio,
+      getTimeSec: getPlaybackTimeSec,
+      ctx: ctx,
+      outputNode: output,
+      activeSources: activeSources,
+      messageId: ownerMessageId,
+      cacheKey: ownerCacheKey
+    });
+    function connectNode(node) {
+      node.connect(output || ctx.destination);
+    }
+    function keepSource(node) {
+      activeSources.push(node);
+      node.onended = function () {
+        var idx = activeSources.indexOf(node);
+        if (idx >= 0) activeSources.splice(idx, 1);
+      };
+    }
+    async function ensureAudioContextRunning(step) {
+      try {
+        if (ctx.state === "suspended" || ctx.state === "interrupted") {
+          await ctx.resume();
+          hooks.debug && hooks.debug(step + " resume AudioContext -> " + ctx.state);
+        }
+        if (ctx.state === "suspended" || ctx.state === "interrupted") {
+          await new Promise(function (r) { setTimeout(r, 80); });
+          await ctx.resume();
+          hooks.debug && hooks.debug(step + " resume retry AudioContext -> " + ctx.state);
+        }
+      } catch (e) {
+        throw new Error("[step:" + step + ".resume] " + (e && e.message ? e.message : e));
+      }
+      if (ctx.state === "closed") throw new Error("[step:" + step + ".resume] AudioContext closed");
+    }
+    function appendPending(chunk) {
+      if (!chunk || !chunk.length) return;
+      var nb = new Uint8Array(pending.length + chunk.length);
+      nb.set(pending);
+      nb.set(chunk, pending.length);
+      pending = nb;
+    }
+    function alignedLength(n) {
+      n = Math.max(0, Math.floor(n || 0));
+      return n - (n % blockAlign);
+    }
+    async function schedulePcm(bytes) {
+      if (!bytes || bytes.length < blockAlign) return;
+      try {
+        if (stopped) throw new Error(stopReason || "播放已停止");
+        await ensureAudioContextRunning("pcm.schedulePcm");
+        var samples = Math.floor(bytes.length / blockAlign);
+        var aBuf = ctx.createBuffer(channels, samples, sampleRate);
+        var view = new DataView(bytes.buffer, bytes.byteOffset, samples * blockAlign);
+        var maxAbs = 0;
+        var sumSq = 0;
+        var statCount = 0;
+        for (var c = 0; c < channels; c++) {
+          var chan = aBuf.getChannelData(c);
+          for (var i = 0; i < samples; i++) {
+            var sample = view.getInt16((i * channels + c) * 2, true) / 32768;
+            chan[i] = sample;
+            if (!reportedFirstPcmStats) {
+              var abs = Math.abs(sample);
+              if (abs > maxAbs) maxAbs = abs;
+              sumSq += sample * sample;
+              statCount += 1;
+            }
+          }
+        }
+        if (!reportedFirstPcmStats) {
+          reportedFirstPcmStats = true;
+          var rms = statCount ? Math.sqrt(sumSq / statCount) : 0;
+          hooks.debug && hooks.debug("poll first PCM stats peak=" + maxAbs.toFixed(4) + " rms=" + rms.toFixed(4) + " bytes=" + bytes.length);
+        }
+        var src = ctx.createBufferSource();
+        src.buffer = aBuf;
+        try { src.playbackRate.value = playbackRate; } catch (_) {}
+        if (!started) {
+          try {
+            if (typeof wakeRuntimeAudioOutput === "function") wakeRuntimeAudioOutput(ctx, output || ctx.destination, "pcm-poll-first");
+          } catch (_) {}
+        }
+        connectNode(src);
+        keepSource(src);
+        var t = Math.max(nextAt, ctx.currentTime + 0.02);
+        src.start(t);
+        var realDur = aBuf.duration / playbackRate;
+        var audioStart = scheduledAudioSec;
+        var audioEnd = audioStart + aBuf.duration;
+        nextAt = t + realDur;
+        scheduledSpans.push({ start: t, end: nextAt, audioStart: audioStart, audioEnd: audioEnd });
+        scheduledAudioSec = audioEnd;
+        if (!started) {
+          playbackStartCtxTime = t;
+          started = true;
+          hooks.onStateChange && hooks.onStateChange("scheduled");
+          playNotifyTimer = setTimeout(function () {
+            playNotifyTimer = null;
+            if (stopped) return;
+            ensureAudioContextRunning("pcm.playNotify").then(function () {
+              if (!stopped && String(ctx.state || "running") === "running") hooks.onStateChange && hooks.onStateChange("playing");
+              else if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
+            }).catch(function (e) {
+              hooks.onError && hooks.onError(e);
+              if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
+            });
+          }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 40));
+          notifyStableWhenBuffered(Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + Math.max(1400, prebufferSec * 900)), 0.65);
+          armBufferWatcher();
+        } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.65) {
+          bufferingState = false;
+          hooks.onStateChange && hooks.onStateChange("resumed");
+        }
+      } catch (e) {
+        throw new Error("[step:pcm.schedulePcm] " + (e && e.message ? e.message : e));
+      }
+    }
+    async function scheduleStartIfReady(force) {
+      if (started) return false;
+      var needBytes = force ? blockAlign : startBufferBytes;
+      if (pending.length < needBytes) return false;
+      var firstChunkBytes = force ? alignedLength(pending.length) : alignedLength(Math.min(pending.length, Math.max(startBufferBytes, flushBytes)));
+      if (firstChunkBytes <= 0) return false;
+      hooks.onStateChange && hooks.onStateChange("first_pcm");
+      var firstSlice = pending.slice(0, firstChunkBytes);
+      pending = pending.slice(firstChunkBytes);
+      await schedulePcm(firstSlice);
+      return true;
+    }
+    function pollUrl() {
+      var u = new URL(pcmUrl, location.href);
+      if (nextOffset >= 0) u.searchParams.set("offset", String(nextOffset));
+      else u.searchParams.set("start_s", startOffsetSec.toFixed(3));
+      u.searchParams.set("max_bytes", String(Math.max(startBufferBytes, flushBytes * 2)));
+      u.searchParams.set("wait_ms", "450");
+      u.searchParams.set("_", String(Date.now()));
+      return u.href;
+    }
+    if (hooks.debug) hooks.debug("PCM polling AudioContext state=" + ctx.state + " sr=" + ctx.sampleRate + (ownerMessageId ? " owner=" + ownerMessageId : "") + (ownerCacheKey ? " cacheKey=" + ownerCacheKey : ""));
+    hooks.onStateChange && hooks.onStateChange("connected");
+    nextAt = ctx.currentTime + 0.12;
+    while (!stopped) {
+      var res;
+      pollCount += 1;
+      try { res = await fetch(pollUrl(), { cache: "no-store" }); }
+      catch (e) { throw new Error("[step:pcm.fetch] " + (e && e.message ? e.message : e)); }
+      if (res.status === 204) {
+        var done204 = false;
+        try { done204 = String(res.headers.get("X-IndexTTS-Live-Done") || "") === "1"; } catch (_) {}
+        try {
+          var noDataNext = Number(res.headers.get("X-IndexTTS-PCM-Next-Offset"));
+          if (isFinite(noDataNext) && noDataNext >= 0) nextOffset = noDataNext;
+        } catch (_) {}
+        if (!started) hooks.onStateChange && hooks.onStateChange("waiting_pcm");
+        if (done204) { readEnded = true; break; }
+        await new Promise(function (r) { setTimeout(r, 120); });
+        continue;
+      }
+      if (!res.ok) throw new Error("[step:pcm.fetch] HTTP " + res.status + " " + (await res.text().catch(function(){return"";})));
+      try {
+        var sr = Number(res.headers.get("X-IndexTTS-Sample-Rate"));
+        if (isFinite(sr) && sr > 0 && sr !== sampleRate && !started) {
+          sampleRate = Math.round(sr);
+          recalcBufferSizes();
+        }
+      } catch (_) {}
+      var ab;
+      try { ab = await res.arrayBuffer(); }
+      catch (e) { throw new Error("[step:pcm.arrayBuffer] " + (e && e.message ? e.message : e)); }
+      var chunk = new Uint8Array(ab);
+      try {
+        var headerNext = Number(res.headers.get("X-IndexTTS-PCM-Next-Offset"));
+        if (isFinite(headerNext) && headerNext >= 0) nextOffset = headerNext;
+        else nextOffset = (nextOffset >= 0 ? nextOffset : 0) + chunk.length;
+      } catch (_) {
+        nextOffset = (nextOffset >= 0 ? nextOffset : 0) + chunk.length;
+      }
+      var done = false;
+      try { done = String(res.headers.get("X-IndexTTS-Live-Done") || "") === "1"; } catch (_) {}
+      if (chunk.length) {
+        if (pollCount <= 3 || !reportedFirstPcmStats) hooks.debug && hooks.debug("PCM poll chunk bytes=" + chunk.length + " next=" + nextOffset + " done=" + (done ? "1" : "0"));
+        appendPending(chunk);
+        await scheduleStartIfReady(false);
+        while (started && pending.length >= flushBytes) {
+          var len = alignedLength(flushBytes);
+          var slice = pending.slice(0, len);
+          pending = pending.slice(len);
+          await schedulePcm(slice);
+        }
+      } else if (!started) {
+        hooks.onStateChange && hooks.onStateChange("waiting_pcm");
+      }
+      if (done) { readEnded = true; break; }
+    }
+    if (!started) await scheduleStartIfReady(true);
+    if (pending && pending.length >= blockAlign) {
+      var remainLen = alignedLength(pending.length);
+      if (remainLen > 0) await schedulePcm(pending.slice(0, remainLen));
+    }
+    pending = null;
+    if (!started) throw new Error("[step:pcm.noAudio] 后端没有返回可播放 PCM");
+    if (stopped) return { ctx: ctx, duration: Math.max(0, nextAt - (playbackStartCtxTime || 0)), mode: "pcm-poll", stopped: true };
+    var totalDur = Math.max(0, nextAt - (playbackStartCtxTime || 0));
+    armEndedWatcher();
+    return { ctx: ctx, duration: totalDur, mode: "pcm-poll" };
   }

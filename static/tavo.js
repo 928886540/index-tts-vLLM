@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260607-ai-live-v17";
+  var LOADER_VERSION = "20260607-ai-live-v18";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
@@ -211,7 +211,7 @@
       ".idx-card[data-loader-shell='1'] .idx-loader-gap{height:64px;flex:0 0 64px}",
       ".idx-card[data-loader-shell='1'] .idx-subtitle{position:relative;display:flex;flex-direction:column;justify-content:center;margin:12px 0 0;padding:28px 10px 9px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.48) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:172px;min-height:172px;max-height:172px;overflow:hidden}.idx-card[data-loader-shell='1'] .idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-card[data-loader-shell='1'] .idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-card[data-loader-shell='1'] .idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}",
       ".idx-card[data-loader-shell='1'] .idx-card-counter{position:absolute;right:10px;top:8px;min-width:48px;height:24px;padding:0 9px;border:1px solid rgba(206,170,230,.20);border-radius:999px;background:rgba(20,14,28,.58);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none}.idx-card[data-loader-shell='1'] .idx-sub-delete{position:absolute;left:10px;top:8px;width:26px;height:24px;border:1px solid rgba(255,120,145,.26);border-radius:999px;background:rgba(120,38,52,.30);color:#ffd5dd;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2}.idx-card[data-loader-shell='1'] .idx-sub-delete svg{width:14px;height:14px;fill:currentColor;stroke:none}",
-      ".idx-card[data-loader-shell='1'] .idx-controls{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:18px;min-height:74px;flex:0 0 74px;flex-wrap:nowrap}.idx-card[data-loader-shell='1'] .idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}.idx-card[data-loader-shell='1'] .idx-ctrl svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}.idx-card[data-loader-shell='1'] .idx-ctrl-sm{width:42px;height:42px}.idx-card[data-loader-shell='1'] .idx-ctrl-main,.idx-card[data-loader-shell='1'] .idx-ctrl-add{width:66px;height:66px}.idx-card[data-loader-shell='1'] .idx-ctrl-main{background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-card[data-loader-shell='1'] .idx-ctrl-main svg,.idx-card[data-loader-shell='1'] .idx-ctrl-add svg{width:28px;height:28px;fill:currentColor;stroke:none}.idx-card[data-loader-shell='1'] .idx-ctrl-main[data-state='loading'] svg{animation:idx-loader-spin .9s linear infinite}.idx-card[data-loader-shell='1'] .idx-ctrl-add{margin-left:22px;background:rgba(154,94,182,.42);color:#f4e7ff;box-shadow:0 10px 24px rgba(154,94,182,.18)}.idx-card[data-loader-shell='1'] .idx-live-exit,.idx-card[data-loader-shell='1'] .idx-hidden{display:none!important}@keyframes idx-loader-spin{to{transform:rotate(360deg)}}",
+      ".idx-card[data-loader-shell='1'] .idx-controls{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:18px;margin-bottom:6px;min-height:74px;flex:0 0 74px;flex-wrap:nowrap}.idx-card[data-loader-shell='1'] .idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}.idx-card[data-loader-shell='1'] .idx-ctrl svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round;transform-origin:center;transform-box:fill-box}.idx-card[data-loader-shell='1'] .idx-ctrl-sm{width:42px;height:42px}.idx-card[data-loader-shell='1'] .idx-ctrl-main,.idx-card[data-loader-shell='1'] .idx-ctrl-add{width:66px;height:66px}.idx-card[data-loader-shell='1'] .idx-ctrl-main{background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-card[data-loader-shell='1'] .idx-ctrl-main svg,.idx-card[data-loader-shell='1'] .idx-ctrl-add svg{width:28px;height:28px;fill:currentColor;stroke:none}.idx-card[data-loader-shell='1'] .idx-ctrl-main[data-state='loading'] svg{animation:idx-loader-spin .9s linear infinite;will-change:transform}.idx-card[data-loader-shell='1'] .idx-ctrl-add{margin-left:22px;background:rgba(154,94,182,.42);color:#f4e7ff;box-shadow:0 10px 24px rgba(154,94,182,.18)}.idx-card[data-loader-shell='1'] .idx-live-exit,.idx-card[data-loader-shell='1'] .idx-hidden{display:none!important}@keyframes idx-loader-spin{to{transform:rotate(360deg)}}",
       "@media(max-width:520px){.idx-card[data-loader-shell='1']{height:430px;min-height:430px;padding:14px;border-radius:16px}.idx-card[data-loader-shell='1'] .idx-top{padding-right:84px}.idx-card[data-loader-shell='1'] .idx-gear,.idx-card[data-loader-shell='1'] .idx-playback-toggle{top:25px;height:34px}.idx-card[data-loader-shell='1'] .idx-gear{right:14px;width:40px}.idx-card[data-loader-shell='1'] .idx-playback-toggle{right:58px;width:34px;min-width:34px}.idx-card[data-loader-shell='1'] .idx-controls{gap:13px}.idx-card[data-loader-shell='1'] .idx-ctrl-main,.idx-card[data-loader-shell='1'] .idx-ctrl-add{width:62px;height:62px}.idx-card[data-loader-shell='1'] .idx-ctrl-add{margin-left:16px}}",
       ".idx-tts[data-touch-guard='1']{pointer-events:none!important}"
     ].join("");
@@ -247,21 +247,36 @@
     try { window[TAP_GUARD_KEY] = Date.now() + Math.max(800, Number(ms || 0) || 0); } catch (_) {}
   }
 
+  function stopPreprimedAudioKeepaliveForDifferentContext(ctx) {
+    try {
+      var src = window.__indextts_tavo_preprimed_keepalive_source;
+      var srcCtx = window.__indextts_tavo_preprimed_keepalive_ctx;
+      if (src && srcCtx && srcCtx !== ctx) {
+        try { src.stop(0); } catch (_) {}
+        window.__indextts_tavo_preprimed_keepalive_source = null;
+        window.__indextts_tavo_preprimed_keepalive_ctx = null;
+      }
+    } catch (_) {}
+  }
+
   function startPreprimedAudioKeepalive(ctx) {
     if (!ctx) return;
     try {
-      if (window.__indextts_tavo_preprimed_keepalive_source) return;
+      if (window.__indextts_tavo_preprimed_keepalive_source && window.__indextts_tavo_preprimed_keepalive_ctx === ctx) return;
+      stopPreprimedAudioKeepaliveForDifferentContext(ctx);
       var rate = ctx.sampleRate || 44100;
       var frames = Math.max(1, Math.floor(rate * 0.5));
       var buf = ctx.createBuffer(1, frames, rate);
       var data = buf.getChannelData(0);
-      for (var i = 0; i < data.length; i++) data[i] = 0.00001;
+      for (var i = 0; i < data.length; i++) {
+        data[i] = Math.sin(2 * Math.PI * 80 * i / rate) * 0.0006;
+      }
       var gain = ctx.createGain ? ctx.createGain() : null;
       var src = ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;
       if (gain) {
-        gain.gain.value = 0.00001;
+        gain.gain.value = 0.35;
         src.connect(gain);
         gain.connect(ctx.destination);
       } else {
@@ -269,13 +284,18 @@
       }
       src.start(0);
       window.__indextts_tavo_preprimed_keepalive_source = src;
+      window.__indextts_tavo_preprimed_keepalive_ctx = ctx;
     } catch (_) {}
   }
 
-  function primeRuntimeAudioContext() {
+  function primeRuntimeAudioContext(ownerMessageId) {
     try {
+      ownerMessageId = String(ownerMessageId || "").trim();
       var ctx = window.__indextts_tavo_preprimed_audio_context;
-      if (ctx) {
+      var owner = String(window.__indextts_tavo_preprimed_audio_owner || "").trim();
+      var canReuse = !!(ctx && (!ownerMessageId || owner === ownerMessageId));
+      try { if (ctx && ctx.state === "closed") canReuse = false; } catch (_) {}
+      if (canReuse) {
         try { if (ctx.state === "suspended") ctx.resume(); } catch (_) {}
         startPreprimedAudioKeepalive(ctx);
         return ctx;
@@ -288,13 +308,18 @@
         var rate = ctx.sampleRate || 44100;
         var buf = ctx.createBuffer(1, Math.max(1, Math.floor(rate * 0.025)), rate);
         var data = buf.getChannelData(0);
-        if (data && data.length) data[0] = 0.0005;
+        for (var i = 0; data && i < data.length; i++) {
+          var edge = Math.min(1, i / Math.max(1, Math.floor(rate * 0.006)), (data.length - i) / Math.max(1, Math.floor(rate * 0.006)));
+          data[i] = Math.sin(2 * Math.PI * 220 * i / rate) * 0.0012 * Math.max(0, edge);
+        }
         var src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(ctx.destination);
         src.start(0);
       } catch (_) {}
       window.__indextts_tavo_preprimed_audio_context = ctx;
+      window.__indextts_tavo_preprimed_audio_owner = ownerMessageId;
+      window.__indextts_tavo_preprimed_audio_owner_at = Date.now();
       startPreprimedAudioKeepalive(ctx);
       return ctx;
     } catch (_) { return null; }
@@ -445,6 +470,7 @@
         if (resolvedId && resolvedId !== messageId) {
           messageId = resolvedId;
           try { root.setAttribute("data-indextts-message-id", messageId); } catch (_) {}
+          try { if (loaderScript && loaderScript.dataset) loaderScript.dataset.indexttsMessageId = messageId; } catch (_) {}
         }
         refreshLazyHistoryAsync(root, messageId);
         if (attempts < 8) setTimeout(run, attempts < 3 ? 350 : 1200);
@@ -486,6 +512,7 @@
 
     var messageId = pickMessageId(loaderScript);
     try { root.setAttribute("data-indextts-message-id", messageId || ""); } catch (_) {}
+    try { if (loaderScript && loaderScript.dataset) loaderScript.dataset.indexttsMessageId = messageId || ""; } catch (_) {}
     var latest = latestTrack(messageId);
     var historyCount = persistableHistoryTracks(localTracksForMessage(messageId)).length;
     var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
@@ -527,7 +554,7 @@
       ev.preventDefault();
       ev.stopPropagation();
       armTapGuard(1800);
-      if (action === "play" || action === "add") primeRuntimeAudioContext();
+      if (action === "play" || action === "add") primeRuntimeAudioContext(messageId);
       renderLoaderShell(root, messageId, action);
       route(selector);
     });
@@ -578,11 +605,11 @@
       });
     }
 
-    on($(root, '[data-role="lazy-play"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(); });
-    on($(root, '[data-role="lazy-play"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(); });
+    on($(root, '[data-role="lazy-play"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
+    on($(root, '[data-role="lazy-play"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
     on($(root, '[data-role="lazy-open"]'), "pointerdown", function () { armTapGuard(1600); });
     on($(root, '[data-role="lazy-open"]'), "touchstart", function () { armTapGuard(1600); });
-    on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(); route('[data-role="play"]'); });
+    on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(messageId); route('[data-role="play"]'); });
     on($(root, '[data-role="lazy-open"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); mountRuntime(""); });
     on($(root, '[data-role="lazy-open"]'), "keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); mountRuntime(""); } });
   } catch (e) {

@@ -139,7 +139,7 @@
             }
             setTrackPlaybackState(existingTrack, "paused");
             setPlayState("idle");
-            setStatus("还没收到实时音频");
+            setStatus("实时音频等待中");
           }
           updateTrackButtons();
           return !!started;

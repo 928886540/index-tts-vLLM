@@ -26,12 +26,12 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v17"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v18"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v17`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v18`.
 - Tavo settings/config read `tavo.get` first; `localStorage` is fallback only.
 - `tavo.set` failures surface as "设置保存失败".
 - Saved tracks and pending jobs prefer `tavo.get`; deletion writes through `tavo.set`.
@@ -41,8 +41,8 @@ Current code state:
 - AI mode with no explicit mapping shows "音色未设置" / mapping error instead of falling back to a default voice.
 - Avatar-side status is only the configured/current voice label; LLM/TTS/LIVE progress uses the separate progress line.
 - Restored LIVE pending tracks keep resume seconds and reconnect the same key with `start_s`, without a new POST.
-- LIVE first-audio timeout returns to idle/retry after about 30s while background cache polling continues; short buffering after playback starts does not flash a noisy "还没收到实时音频" warning.
-- If LIVE WebAudio is unstable when the cache file lands, the frontend can stop WebAudio and force native saved `<audio>` playback.
+- LIVE uses same-key live PCM polling before cache落盘, so Tavo WebView does not have to rely on chunked fetch delivering PCM; first-audio waits keep loading without noisy "还没收到实时音频" warnings.
+- If LIVE WebAudio is unstable when the cache file lands, the frontend can stop WebAudio and force native saved `<audio>` playback as a final fallback, not the primary LIVE path.
 - Loading spinner has fixed SVG transform origin to reduce wobble.
 
 ## Latest Validation
@@ -63,7 +63,7 @@ git diff --check
 Additional evidence for the latest no-sound report:
 
 - Cache WAV `vllm/outputs/cache/a161f65daed31387d94bb5f5a0772b238830598c.wav` is non-silent: about `170.837s`, `22050 Hz`, mono 16-bit, RMS around `-14.08 dB`.
-- Boundary conclusion: the TTS service/API backend generated audible audio; the failing path is frontend/mobile playback or WebAudio-to-native handoff.
+- Boundary conclusion: the TTS service/API backend generated audible audio; the failing path is frontend/mobile LIVE playback. The current fix adds an API backend live PCM slice endpoint and makes Tavo WebAudio poll that same-key PCM before the final WAV is saved.
 
 Still needs real Tavo/mobile validation:
 

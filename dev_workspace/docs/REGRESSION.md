@@ -83,11 +83,12 @@ Current smoke must prove:
 ## LIVE Playback Guard
 
 - LIVE and saved playback are separate states.
+- LIVE WebAudio must prefer same-key `/tts_dialogue_stream_job/{cache_key}/pcm` polling before the final WAV cache is saved; chunked WAV is compatibility fallback only.
 - LIVE pending/restored tracks keep `playbackMode=live`, `state=live`, and last resume seconds.
 - LIVE pause/resume reconnects `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>` without a new POST.
 - Repeated WebAudio underrun returns to idle/resumable state and keeps cache polling alive; it must not force saved-cache autoplay or leave a permanent spinner.
 - User-facing copy must not say "实时生成跟不上" or "手动续播".
-- Completed cache handoff must stop WebAudio before mounting native saved `<audio>`.
+- Completed cache handoff must stop WebAudio before mounting native saved `<audio>` only when LIVE is unstable, waiting, buffering, or in final fallback; stable LIVE should not be stolen just because cache landed.
 - Short buffering after LIVE playback starts must not immediately reset the main button to idle or show "还没收到实时音频".
 - If cache audio becomes ready while WebAudio is unstable, stalled, loading, or buffering, the frontend may force native saved `<audio>` handoff so the user gets audible playback.
 - Saved/cache audio uses native `<audio>` with `/cache_audio/<cache_key>` or offline blob.

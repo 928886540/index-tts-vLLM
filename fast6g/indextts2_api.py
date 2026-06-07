@@ -1019,6 +1019,35 @@ def _wav_bytes_to_pcm_bytes(wav_bytes: bytes) -> tuple[int, bytes]:
     return rate, np.asarray(data, dtype=np.int16).tobytes()
 
 
+def _cached_wav_response_with_start_offset(path: str, cache_key: str, start_s: float):
+    headers = {
+        "X-IndexTTS-Cache": "HIT",
+        "X-IndexTTS-Cache-Key": cache_key,
+        "Access-Control-Expose-Headers": "X-IndexTTS-Cache,X-IndexTTS-Cache-Key,X-IndexTTS-Start-S",
+    }
+    try:
+        start_s = max(0.0, float(start_s or 0.0))
+    except Exception:
+        start_s = 0.0
+    if start_s <= 0.01:
+        return FileResponse(path, media_type="audio/wav", headers=headers)
+    try:
+        with open(path, "rb") as fp:
+            rate, pcm = _wav_bytes_to_pcm_bytes(fp.read())
+        block_align = 2
+        offset = int(start_s * int(rate or 22050) * block_align)
+        offset = max(0, min(len(pcm), offset - (offset % block_align)))
+        headers["X-IndexTTS-Start-S"] = f"{start_s:.3f}"
+        return Response(
+            _make_complete_wav_bytes(pcm[offset:], int(rate or 22050)),
+            media_type="audio/wav",
+            headers=headers,
+        )
+    except Exception as e:
+        print(f">> cached wav start_s fallback failed: {e}")
+        return FileResponse(path, media_type="audio/wav", headers=headers)
+
+
 def _array_to_pcm_bytes(data: np.ndarray) -> bytes:
     arr = np.asarray(data)
     if arr.ndim > 1:
@@ -1099,6 +1128,48 @@ async def _stream_from_live_job(job: "_LiveJob", start_offset_s: float = 0.0):
         await asyncio.sleep(0.08)
 
 
+LIVE_PCM_EXPOSE_HEADERS = (
+    "X-IndexTTS-Cache-Key,"
+    "X-IndexTTS-Sample-Rate,"
+    "X-IndexTTS-PCM-Offset,"
+    "X-IndexTTS-PCM-Next-Offset,"
+    "X-IndexTTS-PCM-Total,"
+    "X-IndexTTS-Live-Done,"
+    "X-IndexTTS-Live-State"
+)
+
+
+def _live_pcm_headers(
+    cache_key: str,
+    sample_rate: int,
+    offset: int,
+    next_offset: int,
+    total: int,
+    done: bool,
+    state: str = "live",
+) -> dict:
+    return {
+        "X-IndexTTS-Cache-Key": cache_key,
+        "X-IndexTTS-Sample-Rate": str(int(sample_rate or 22050)),
+        "X-IndexTTS-PCM-Offset": str(max(0, int(offset or 0))),
+        "X-IndexTTS-PCM-Next-Offset": str(max(0, int(next_offset or 0))),
+        "X-IndexTTS-PCM-Total": str(max(0, int(total or 0))),
+        "X-IndexTTS-Live-Done": "1" if done else "0",
+        "X-IndexTTS-Live-State": state,
+        "Access-Control-Expose-Headers": LIVE_PCM_EXPOSE_HEADERS,
+        "Cache-Control": "no-store",
+    }
+
+
+def _align_pcm_offset(value: int, block_align: int = 2) -> int:
+    try:
+        value = int(value or 0)
+    except Exception:
+        value = 0
+    value = max(0, value)
+    return value - (value % max(1, int(block_align or 2)))
+
+
 def _job_status_from_cache(cache_key: str) -> Optional[dict]:
     path = _get_cached_audio(cache_key)
     if not path:
@@ -1132,7 +1203,16 @@ APP.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-IndexTTS-Cache", "X-IndexTTS-Cache-Key"],
+    expose_headers=[
+        "X-IndexTTS-Cache",
+        "X-IndexTTS-Cache-Key",
+        "X-IndexTTS-Sample-Rate",
+        "X-IndexTTS-PCM-Offset",
+        "X-IndexTTS-PCM-Next-Offset",
+        "X-IndexTTS-PCM-Total",
+        "X-IndexTTS-Live-Done",
+        "X-IndexTTS-Live-State",
+    ],
 )
 
 tts_lock = asyncio.Lock()
@@ -1738,11 +1818,7 @@ async def tts_dialogue_stream_job_audio_endpoint(job_id: str, start_s: float = 0
     cache_key = job_id
     cached_path = _get_cached_audio(cache_key)
     if cached_path:
-        return FileResponse(
-            cached_path,
-            media_type="audio/wav",
-            headers={"X-IndexTTS-Cache": "HIT", "X-IndexTTS-Cache-Key": cache_key},
-        )
+        return _cached_wav_response_with_start_offset(cached_path, cache_key, start_s)
     job = LIVE_JOBS.get(cache_key)
     if job:
         return StreamingResponse(
@@ -1750,6 +1826,76 @@ async def tts_dialogue_stream_job_audio_endpoint(job_id: str, start_s: float = 0
             media_type="audio/wav",
             headers={"X-IndexTTS-Cache": "LIVE", "X-IndexTTS-Cache-Key": cache_key},
         )
+    return JSONResponse(status_code=404, content={"message": "job missing or expired", "cache_key": cache_key})
+
+
+@APP.get("/tts_dialogue_stream_job/{job_id}/pcm")
+async def tts_dialogue_stream_job_pcm_endpoint(
+    job_id: str,
+    offset: int = 0,
+    start_s: float = 0.0,
+    max_bytes: int = 262144,
+    wait_ms: int = 450,
+):
+    """Return same-key live PCM bytes before the final WAV is saved."""
+    cache_key = job_id
+    block_align = 2
+    max_bytes = _align_pcm_offset(max(4096, min(1048576, int(max_bytes or 262144))), block_align)
+
+    job = LIVE_JOBS.get(cache_key)
+    if job:
+        sample_rate = int(job.sample_rate or 22050)
+        start_offset = _align_pcm_offset(int(max(0.0, float(start_s or 0.0)) * sample_rate * block_align), block_align)
+        read_offset = _align_pcm_offset(offset if offset > 0 else start_offset, block_align)
+        deadline = time.perf_counter() + max(0.0, min(2.0, float(wait_ms or 0) / 1000.0))
+        while read_offset >= len(job.pcm) and not job.finished.is_set():
+            if time.perf_counter() >= deadline:
+                total = len(job.pcm)
+                return Response(
+                    status_code=204,
+                    headers=_live_pcm_headers(cache_key, sample_rate, read_offset, read_offset, total, False, "live"),
+                )
+            await asyncio.sleep(0.06)
+        total = len(job.pcm)
+        if read_offset < total:
+            end = _align_pcm_offset(min(total, read_offset + max_bytes), block_align)
+            if end <= read_offset:
+                end = min(total, read_offset + block_align)
+            return Response(
+                content=bytes(job.pcm[read_offset:end]),
+                media_type="application/octet-stream",
+                headers=_live_pcm_headers(cache_key, sample_rate, read_offset, end, total, job.finished.is_set(), "live"),
+            )
+        return Response(
+            status_code=204,
+            headers=_live_pcm_headers(cache_key, sample_rate, read_offset, read_offset, total, True, "done"),
+        )
+
+    cached_path = _get_cached_audio(cache_key)
+    if cached_path:
+        try:
+            with open(cached_path, "rb") as fp:
+                sample_rate, pcm = _wav_bytes_to_pcm_bytes(fp.read())
+            sample_rate = int(sample_rate or 22050)
+            start_offset = _align_pcm_offset(int(max(0.0, float(start_s or 0.0)) * sample_rate * block_align), block_align)
+            read_offset = _align_pcm_offset(offset if offset > 0 else start_offset, block_align)
+            total = len(pcm)
+            if read_offset >= total:
+                return Response(
+                    status_code=204,
+                    headers=_live_pcm_headers(cache_key, sample_rate, read_offset, read_offset, total, True, "done"),
+                )
+            end = _align_pcm_offset(min(total, read_offset + max_bytes), block_align)
+            if end <= read_offset:
+                end = min(total, read_offset + block_align)
+            return Response(
+                content=pcm[read_offset:end],
+                media_type="application/octet-stream",
+                headers=_live_pcm_headers(cache_key, sample_rate, read_offset, end, total, True, "done"),
+            )
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"message": "live pcm cache read failed", "Exception": str(e), "cache_key": cache_key})
+
     return JSONResponse(status_code=404, content={"message": "job missing or expired", "cache_key": cache_key})
 
 

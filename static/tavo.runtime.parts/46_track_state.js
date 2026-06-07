@@ -180,6 +180,10 @@
       startOffsetSec = Math.max(0, Number(startOffsetSec || 0) || 0);
       return startOffsetSec > 0.01 ? withQueryParam(url, "start_s", startOffsetSec.toFixed(3)) : url;
     }
+    function livePcmUrlForTrack(track) {
+      if (!(track && track.cacheKey && track.mode !== "single")) return "";
+      return cleanBase(cfg.apiBase) + "/tts_dialogue_stream_job/" + encodeURIComponent(track.cacheKey) + "/pcm";
+    }
     function isElementUsingTrackStream(track) {
       if (!track || !track.streamUrl) return false;
       try {
@@ -379,10 +383,12 @@
       if (!track || !track.cacheKey) return false;
       var resumeSec = trackResumeSec(track);
       try {
-        if (webAudioController && typeof webAudioController.stop === "function") webAudioController.stop(reason || "live resumable");
+        if (webAudioBelongsToTrack(track) && typeof webAudioController.stop === "function") webAudioController.stop(reason || "live resumable");
       } catch (_) {}
-      webAudioController = null;
-      webAudioActiveTrack = null;
+      if (webAudioActiveTrack === track) {
+        webAudioController = null;
+        webAudioActiveTrack = null;
+      }
       clearWebAudioProgressTimer();
       markWebAudioStopped(track);
       stopSubtitle();
@@ -400,11 +406,11 @@
       setTrackPlaybackState(track, "paused");
       setPlayState("idle");
       setStatus("实时音频已暂停");
-      if (!hasActiveSubtitleRows(track)) showTrackNotice(track, title || "还没收到实时音频", detail || "点播放会重试同一个实时流；后台仍会自动落盘");
+      if (!hasActiveSubtitleRows(track)) showTrackNotice(track, title || "实时音频已暂停", detail || "点播放会重试同一个实时流；后台仍会自动落盘");
       pollCacheUpgrade(track, reason || "live resumable");
       updateTrackButtons();
       if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-      debugLog("⏸ LIVE 连接转为可手动续播 reason=" + (reason || "") + " cacheKey=" + track.cacheKey + " resume=" + resumeSec.toFixed(2), "#fc9");
+      debugLog("⏸ LIVE 连接暂停，保留同 key 可重试 reason=" + (reason || "") + " cacheKey=" + track.cacheKey + " resume=" + resumeSec.toFixed(2), "#fc9");
       return true;
     }
     function shouldUseElementForSavedTrack(track) {
@@ -462,24 +468,41 @@
     function isNetworkStreamError(err) {
       var msg = String((err && err.message) || err || "");
       if (/\[step:fetch\]\s+HTTP\s+\d+/i.test(msg)) return false;
-      return /\[step:(fetch|reader\.read|reader\.read\.loop)\]|Load failed|Failed to fetch|NetworkError|network/i.test(msg);
+      return /\[step:(pcm\.fetch|fetch|reader\.read|reader\.read\.loop)\]|Load failed|Failed to fetch|NetworkError|network/i.test(msg);
+    }
+    function webAudioTrackKey(track) {
+      return String((track && (track.cacheKey || track.streamUrl || track.url)) || "").trim();
+    }
+    function webAudioControllerKey() {
+      try { return String((webAudioController && (webAudioController.cacheKey || webAudioController.streamUrl)) || "").trim(); }
+      catch (_) { return ""; }
+    }
+    function webAudioBelongsToTrack(track) {
+      if (!track || !webAudioController || webAudioActiveTrack !== track) return false;
+      var tk = webAudioTrackKey(track);
+      var ck = webAudioControllerKey();
+      return !!(tk && ck && tk === ck);
     }
     function markWebAudioStopped(track) {
       generatedTracks.forEach(function (t) {
         if (t) {
           t.webAudioPlaying = false;
           t.webAudioStable = false;
+          t.webAudioBufferStable = false;
+          t.webAudioCacheKey = "";
         }
       });
       if (track) {
         track.webAudioPlaying = false;
         track.webAudioStable = false;
+        track.webAudioBufferStable = false;
+        track.webAudioCacheKey = "";
       }
     }
     function webAudioPlaybackSecForTrack(track) {
       var sec = NaN;
       try {
-        if (track && webAudioController && webAudioActiveTrack === track && typeof webAudioController.getTimeSec === "function") {
+        if (webAudioBelongsToTrack(track) && typeof webAudioController.getTimeSec === "function") {
           sec = Number(webAudioController.getTimeSec());
         }
       } catch (_) { sec = NaN; }
@@ -491,7 +514,7 @@
     function stopWebAudioPlayback(reason) {
       webAudioPlayToken++;
       var activeTrack = webAudioActiveTrack || currentTrack();
-      if (activeTrack && webAudioController && typeof webAudioController.getTimeSec === "function") {
+      if (activeTrack && webAudioBelongsToTrack(activeTrack) && typeof webAudioController.getTimeSec === "function") {
         try {
           var sec = Math.max(0, Number(webAudioController.getTimeSec()) || 0);
           activeTrack.lastWebAudioSec = sec;
@@ -517,6 +540,7 @@
       clearWebAudioProgressTimer();
       webAudioProgressTimer = setInterval(function () {
         if (token !== webAudioPlayToken) { clearWebAudioProgressTimer(); return; }
+        if (!webAudioBelongsToTrack(track)) { clearWebAudioProgressTimer(); return; }
         var sec = 0;
         try {
           if (webAudioController && typeof webAudioController.getTimeSec === "function") sec = webAudioController.getTimeSec();
@@ -557,6 +581,7 @@
       var playbackRate = clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25);
       var startOffsetSec = Math.max(0, Number(opts.startOffsetSec || 0) || 0);
       var playbackUrl = liveStreamPlaybackUrlForTrack(track, startOffsetSec) || url;
+      var playCardKey = webAudioTrackKey(track) || playbackUrl;
       var recoveryAttempt = Math.max(0, Number(opts.recoveryAttempt || 0) || 0);
       var maxRecoveryAttempts = Math.max(0, Number(opts.maxRecoveryAttempts == null ? 3 : opts.maxRecoveryAttempts) || 0);
       var prebufferSec = Math.max(0.75, Math.min(4.0, Number(opts.prebufferSec || (recoveryAttempt ? (1.75 + recoveryAttempt * 0.75) : 1.25)) || 1.25));
@@ -566,23 +591,41 @@
       var firstAudioTimedOut = false;
       var streamTooSlowFallback = false;
       var sameJobRecoveryScheduled = false;
+      function sameWebAudioRun() {
+        return !!(
+          token === webAudioPlayToken
+          && currentTrack() === track
+          && track
+          && !track.deleted
+          && webAudioTrackKey(track) === playCardKey
+        );
+      }
       function waitForSameJobSavedFallback(reason, title, detail) {
         if (!track.cacheKey || streamTooSlowFallback) return false;
         streamTooSlowFallback = true;
-        debugLog("⚠️ Web Audio 同任务补偿暂停，等待用户手动续播 reason=" + reason + " cacheKey=" + track.cacheKey, "#fc9");
-        return markLiveStreamResumable(track, reason || "web audio recovery paused", title || "还没收到实时音频", detail || "点播放重试同一个实时流；后台仍会自动落盘");
+        track.playSavedWhenReady = true;
+        track.pausedByUser = false;
+        debugLog("⚠️ LIVE 同任务最终兜底：等待完整音频 reason=" + reason + " cacheKey=" + track.cacheKey, "#fc9");
+        return waitForSavedLiveTrack(track, reason || "web audio sound compensation", {
+          resumeSec: trackResumeSec(track),
+          autoplaySaved: true,
+          status: "等待完整音频…",
+          title: title || "等待完整音频…",
+          detail: detail || "流式多次恢复失败，完整音频保存后会自动播放"
+        });
       }
       function stopWaitTimer() {
         if (waitTimer) { try { clearInterval(waitTimer); } catch (_) {} waitTimer = null; }
       }
       function webAudioShouldYieldToTrackState() {
+        if (!sameWebAudioRun()) return true;
         var st = trackState(track);
         return !!(track.deleted || st === "failed" || st === "cancelled" || (st === "saved" && !track.webAudioPlaying));
       }
       function scheduleSameJobRecovery(reason) {
         if (!track.cacheKey || sameJobRecoveryScheduled || streamTooSlowFallback) return false;
         if (recoveryAttempt >= maxRecoveryAttempts) {
-          return waitForSameJobSavedFallback(reason, "还没收到实时音频", "点播放重试同一个实时流；后台仍会自动落盘");
+          return waitForSameJobSavedFallback(reason, "等待完整音频…", "流式多次恢复失败，完整音频保存后会自动播放");
         }
         sameJobRecoveryScheduled = true;
         stopWaitTimer();
@@ -600,11 +643,11 @@
         try { resumeSec = Math.max(0, trackResumeSec(track) - 0.25); } catch (_) { resumeSec = 0; }
         var nextPrebuffer = Math.min(4.0, Math.max(prebufferSec + 0.75, 2.0));
         debugLog("🔁 Web Audio 同任务补偿重连 attempt=" + (recoveryAttempt + 1) + "/" + maxRecoveryAttempts + " prebuffer=" + nextPrebuffer.toFixed(2) + "s reason=" + reason + " cacheKey=" + track.cacheKey, "#ffd479");
-        if (webAudioController && typeof webAudioController.stop === "function") {
+        if (webAudioBelongsToTrack(track) && typeof webAudioController.stop === "function") {
           try { webAudioController.stop("same job recovery"); } catch (_) {}
         }
         setTimeout(function () {
-          if (track.deleted || isTerminalTrack(track) || isSavedTrack(track)) return;
+          if (!sameWebAudioRun() || track.deleted || isTerminalTrack(track) || isSavedTrack(track)) return;
           var nextUrl = liveStreamUrlForTrack(track) || url;
           playTrackViaWebAudio(track, nextUrl, {
             noticeTitle: "实时音频重连中…",
@@ -622,6 +665,8 @@
       }
       track.webAudioPlaying = false;
       track.webAudioStable = false;
+      track.webAudioBufferStable = false;
+      track.webAudioCacheKey = playCardKey;
       track.webAudioStartedAtMs = 0;
       setTrackStreamHealth(track, "ok");
       if (!recoveryAttempt) track.stalledCount = 0;
@@ -635,40 +680,43 @@
       setPlayState("loading");
       setStatus(opts.connectingStatus || "正在连接音频…");
       showTrackNotice(track, opts.noticeTitle || "正在连接音频…", opts.noticeDetail || "等待后端返回声音");
-      debugLog("▶️ Web Audio 连接 cacheKey=" + (track.cacheKey || "") + " attempt=" + recoveryAttempt + " prebuffer=" + prebufferSec.toFixed(2) + "s start=" + startOffsetSec.toFixed(2) + "s", "#9ff");
+      debugLog("▶️ Web Audio 连接 cacheKey=" + (track.cacheKey || "") + " cardKey=" + playCardKey + " attempt=" + recoveryAttempt + " prebuffer=" + prebufferSec.toFixed(2) + "s start=" + startOffsetSec.toFixed(2) + "s", "#9ff");
       waitTimer = setInterval(function () {
-        if (token !== webAudioPlayToken) { stopWaitTimer(); return; }
+        if (!sameWebAudioRun()) { stopWaitTimer(); return; }
         if (webAudioShouldYieldToTrackState()) { stopWaitTimer(); return; }
         if (track.webAudioPlaying) return;
         var sec = Math.max(1, Math.floor((Date.now() - waitStartedAt) / 1000));
         if (sec >= 30) {
-          firstAudioTimedOut = true;
-          setTrackStreamHealth(track, "interrupted");
-          setTrackPlaybackState(track, "paused");
-          setPlayState("idle");
-          setStatus("还没收到实时音频");
-          if (!hasActiveSubtitleRows(track)) showTrackNotice(track, "还没收到实时音频", "点播放重试同一个实时流；后台任务继续生成");
-          if (webAudioController && typeof webAudioController.stop === "function") {
-            try { webAudioController.stop("first audio timeout"); } catch (_) {}
+          if (!firstAudioTimedOut) {
+            firstAudioTimedOut = true;
+            debugLog("⏳ LIVE 首段 PCM 等待超过 30s，继续等待 same-key live buffer cacheKey=" + (track.cacheKey || ""), "#fc9");
           }
-          stopWaitTimer();
-          waitForSameJobSavedFallback("first_audio_timeout", "还没收到实时音频", "点播放重试同一个实时流；后台任务继续生成");
-          return;
+          setTrackStreamHealth(track, "ok");
         }
-        setStatus("等待音频 " + sec + "s…");
-        if (!hasActiveSubtitleRows(track)) showTrackNotice(track, "等待音频 " + sec + "s…", opts.waitDetail || "后端合成中");
+        setStatus("等待首段音频 " + sec + "s…");
+        if (!hasActiveSubtitleRows(track)) showTrackNotice(track, "等待首段音频 " + sec + "s…", opts.waitDetail || "后端合成中");
       }, 1000);
       try {
-        await streamWavViaWebAudio(playbackUrl, {
+        var webAudioHooks = {
           playbackRate: playbackRate,
           onController: function (controller) {
-            if (token === webAudioPlayToken) {
+            if (controller) {
+              try {
+                controller.cacheKey = playCardKey;
+                controller.messageId = messageId;
+                controller.token = token;
+                controller.streamUrl = playbackUrl;
+              } catch (_) {}
+            }
+            if (sameWebAudioRun()) {
               webAudioController = controller;
               webAudioActiveTrack = track;
+            } else if (controller && typeof controller.stop === "function") {
+              try { controller.stop("stale card controller"); } catch (_) {}
             }
           },
           onStateChange: function (state) {
-            if (token !== webAudioPlayToken) return;
+            if (!sameWebAudioRun()) return;
             if (webAudioShouldYieldToTrackState()) {
               if (state !== "stopped") debugLog("↪️ 忽略 Web Audio 状态 " + state + "：任务状态已是 " + trackState(track), "#fc9");
               return;
@@ -702,6 +750,8 @@
               webAudioActiveTrack = track;
               track.webAudioPlaying = true;
               track.webAudioStable = false;
+              track.webAudioBufferStable = false;
+              track.webAudioCacheKey = playCardKey;
               setTrackPlaybackState(track, "playing");
               setPlayState("playing");
               setStatus(trackPlaybackLabel(track));
@@ -716,12 +766,13 @@
               });
             } else if (state === "stable_playing") {
               track.webAudioStable = true;
+              track.webAudioBufferStable = true;
               track.stalledCount = 0;
               setTrackStreamHealth(track, "ok");
               setTrackPlaybackState(track, "playing");
               setPlayState("playing");
               setStatus(trackPlaybackLabel(track));
-              debugLog("✅ Web Audio 播放稳定，继续 live buffer", "#9f9");
+              debugLog("✅ Web Audio live buffer 已排队 cacheKey=" + (track.cacheKey || ""), "#9f9");
             } else if (state === "buffering") {
               track.savePromptWanted = true;
               track.stalledCount = Number(track.stalledCount || 0) + 1;
@@ -784,13 +835,33 @@
           onError: function (e) { debugLog("❌ Web Audio 错误: " + (e && e.message ? e.message : e), "#f99"); },
           debug: function (text) { debugLog("[wa] " + text, "#9ff"); },
           startOffsetSec: startOffsetSec,
+          ownerMessageId: messageId,
+          ownerCacheKey: playCardKey,
           skipOffsetSec: 0,
           prebufferSec: prebufferSec
-        });
+        };
+        var pcmPollUrl = livePcmUrlForTrack(track);
+        var preferPcmPoll = !!(pcmPollUrl && typeof streamLivePcmViaWebAudio === "function" && !scriptFlagEnabled("chunkedLive"));
+        if (preferPcmPoll) {
+          try {
+            debugLog("▶️ LIVE WebAudio 使用 same-key PCM polling cacheKey=" + (track.cacheKey || ""), "#9ff");
+            await streamLivePcmViaWebAudio(pcmPollUrl, webAudioHooks);
+          } catch (pcmErr) {
+            var pcmMsg = String((pcmErr && pcmErr.message) || pcmErr || "");
+            if (/\[step:pcm\.fetch\]\s+HTTP\s+(404|405|501)\b/i.test(pcmMsg)) {
+              debugLog("⚠️ LIVE PCM polling 接口不可用，回退 chunked WAV: " + pcmMsg, "#fc9");
+              await streamWavViaWebAudio(playbackUrl, webAudioHooks);
+            } else {
+              throw pcmErr;
+            }
+          }
+        } else {
+          await streamWavViaWebAudio(playbackUrl, webAudioHooks);
+        }
         return true;
       } catch (e) {
         stopWaitTimer();
-        if (token !== webAudioPlayToken) return false;
+        if (!sameWebAudioRun()) return false;
         var msg = String((e && e.message) || e || "");
         markWebAudioStopped(track);
         webAudioController = null;
@@ -808,12 +879,12 @@
           return false;
         }
         if (streamTooSlowFallback) {
-          markLiveStreamResumable(track, firstAudioTimedOut ? "first_audio_timeout" : "slow stream", "还没收到实时音频", "点播放重试同一个实时流；后台仍会自动落盘");
           pollCacheUpgrade(track, "slow stream fallback");
           return false;
         }
         if (firstAudioTimedOut) {
-          waitForSameJobSavedFallback("first_audio_timeout", "还没收到实时音频", "点播放重试同一个实时流；后台任务继续生成");
+          setTrackPlaybackState(track, "buffering");
+          setPlayState("loading");
           return false;
         }
         if (sameJobRecoveryScheduled) {
@@ -828,12 +899,12 @@
         }
         if (isNetworkStreamError(e) && track.cacheKey) {
           if (scheduleSameJobRecovery("network_error")) return false;
-          waitForSameJobSavedFallback("network_error", "流式连接中断", "点播放重试同一个实时流");
+          waitForSameJobSavedFallback("network_error", "等待完整音频…", "流式连接中断，完整音频保存后会自动播放");
           return false;
         }
         if (track.cacheKey && (/\[step:fetch\]\s+HTTP\s+5\d\d/i.test(msg) || /decodeAudioData|WAV|wavHeader|data 段|不支持|not supported|noAudio/i.test(msg))) {
-          debugLog("⚠️ 实时流暂不可用，转为手动续播: " + msg, "#fc9");
-          markLiveStreamResumable(track, "web audio stream unavailable", "还没收到实时音频", "后台仍会自动落盘；点播放可再次请求同一个实时流");
+          debugLog("⚠️ 实时流暂不可用，保留同 key 可重试: " + msg, "#fc9");
+          markLiveStreamResumable(track, "web audio stream unavailable", "实时音频可重试", "后台仍会自动落盘；点播放可再次请求同一个实时流");
           return false;
         }
         var friendly = friendlyPlaybackError(e);

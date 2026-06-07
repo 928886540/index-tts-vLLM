@@ -144,7 +144,8 @@
       setTrackState(track, "saved");
       if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === track) {
         updateTrackButtons();
-        if (track.webAudioPlaying && !opts.forceElement) return true;
+        var liveWebAudioOwnsTrack = (typeof webAudioBelongsToTrack === "function" && webAudioBelongsToTrack(track));
+        if (liveWebAudioOwnsTrack && !opts.forceElement && !opts.autoplay) return true;
         if (opts.deferElement) {
           setStatus("完整音频已就绪，可重播");
           showTrackNotice(track, "完整音频已就绪", formatJobMetrics(track.metrics) || "点播放可重播");
@@ -432,7 +433,8 @@
                 var isCurrent = currentTrack() === trackEntry;
                 var preSavePlaybackState = String(trackEntry.playbackState || "");
                 var cacheFallbackNeeded = !!trackEntry.playSavedWhenReady;
-                var liveCacheHandoffNeeded = !!(
+                var liveWebAudioOwnsTrack = !!(typeof webAudioBelongsToTrack === "function" && webAudioBelongsToTrack(trackEntry));
+                var liveCurrentNeedsSoundHandoff = !!(
                   isCurrent
                   && !wasBackground
                   && normalizePlaybackMode(trackEntry.playbackMode) === "live"
@@ -442,16 +444,18 @@
                     || trackHasStreamIssue(trackEntry)
                     || preSavePlaybackState === "loading"
                     || preSavePlaybackState === "buffering"
-                    || (trackEntry.webAudioPlaying && !trackEntry.webAudioStable)
+                    || (liveWebAudioOwnsTrack && trackEntry.webAudioPlaying && !trackEntry.webAudioBufferStable)
+                    || (!liveWebAudioOwnsTrack && preSavePlaybackState !== "playing")
                   )
                 );
+                var liveCacheHandoffNeeded = liveCurrentNeedsSoundHandoff;
                 setTrackState(trackEntry, "saved");
                 var appendedDetached = wasDetached ? appendDetachedBackgroundTrackToHistory(trackEntry, label) : false;
                 var autoplaySaved = !!liveCacheHandoffNeeded;
                 if (wasBackground) autoplaySaved = false;
                 trackEntry.playSavedWhenReady = false;
                 trackEntry.streamTooSlowFallback = false;
-                attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: trackEntry.webAudioPlaying && !autoplaySaved && !trackHasStreamIssue(trackEntry), autoplay: autoplaySaved });
+                attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: liveWebAudioOwnsTrack && !autoplaySaved && !trackHasStreamIssue(trackEntry), autoplay: autoplaySaved });
                 scheduleOfflineAudioSave(trackEntry, label + " offline", 0);
                 knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
                 updateTrackButtons();

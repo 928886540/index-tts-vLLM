@@ -4,6 +4,8 @@ Codex handoff rules for `D:\apiWorkSpace\leon_api\dev_workspace`.
 
 ## Required Reading
 
+If the user only asks to read or summarize `README.md`, treat it as a lightweight context request: read `README.md` and answer what the project is for. Do not load the full docs set unless the user also asks to edit, debug, validate, commit, or plan repository work.
+
 Before doing repository work here, read these files in order:
 
 1. `..\AGENTS.md`
