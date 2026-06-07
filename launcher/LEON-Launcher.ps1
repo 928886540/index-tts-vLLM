@@ -105,6 +105,8 @@ $Script:NavButtons = @{}
 $Script:LogTabButtons = @{}
 $Script:LogTexts = @{}
 $Script:ActiveLogTab = "launcher"
+$Script:ServiceTransition = $false
+$Script:ServiceTransitionText = ""
 
 function Get-VllmGpuMemoryUtilizationText {
     return $Script:VllmGpuMemoryUtilization.ToString("0.###", $Script:InvariantCulture)
@@ -326,10 +328,29 @@ function Test-LogTextSelected {
     }
 }
 
+function Test-NoisyLauncherLogLine {
+    param([string]$Line)
+    if ([string]::IsNullOrWhiteSpace($Line)) { return $false }
+    if ($Line -match "�") { return $true }
+    if ($Line -match "space\.bilibili\.com|Integrated package Author|Redistribution and reselling|strictly prohibited|solely responsible|do not have any control|bilibili@") {
+        return $true
+    }
+    return $false
+}
+
+function Test-NoisyServerLogLine {
+    param([string]$Line)
+    if ([string]::IsNullOrWhiteSpace($Line)) { return $false }
+    return ($Line -match 'INFO:\s+.*"\s*(GET|HEAD)\s+/(health|server_log/tail)(\?|\s|/)')
+}
+
 function Normalize-LauncherLogText {
     param([string]$Text)
     if ($null -eq $Text) { return "" }
     $text = [string]$Text
+    $lines = $text -split "`r?`n"
+    $lines = @($lines | Where-Object { -not (Test-NoisyLauncherLogLine $_) })
+    $text = $lines -join "`n"
     $esc = [string][char]27
     $text = [regex]::Replace($text, [regex]::Escape($esc) + "\[[0-?]*[ -/]*[@-~]", "")
     $text = $text -replace "`0", ""
@@ -345,7 +366,14 @@ function Read-LauncherLogTail {
     param([string]$Path, [int]$Tail = 160)
     if (-not $Path -or -not (Test-Path $Path)) { return "" }
     try {
-        $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        try {
+            $raw = $utf8.GetString($bytes)
+        }
+        catch {
+            $raw = [System.Text.Encoding]::Default.GetString($bytes)
+        }
     }
     catch {
         try {
@@ -539,6 +567,8 @@ function Set-Progress {
 function Update-StartButtonState {
     param([bool]$Running)
     if (-not $Script:StartButton) { return }
+    if ($Script:ServiceTransition) { return }
+    $Script:StartButton.Enabled = $true
     if ($Running) {
         $Script:StartButton.Text = "停止 LEON 服务"
         $Script:StartButton.BackColor = [System.Drawing.Color]::FromArgb(86, 47, 50)
@@ -551,14 +581,39 @@ function Update-StartButtonState {
     }
 }
 
+function Set-ServiceButtonBusy {
+    param([string]$Text)
+    if (-not $Script:StartButton) { return }
+    $Script:StartButton.Text = $Text
+    $Script:StartButton.Enabled = $false
+    $Script:StartButton.BackColor = [System.Drawing.Color]::FromArgb(104, 83, 38)
+    $Script:StartButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(176, 140, 62)
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
 function Toggle-LeonService {
+    if ($Script:ServiceTransition) {
+        $msg = if ($Script:ServiceTransitionText) { $Script:ServiceTransitionText } else { "服务操作进行中..." }
+        Set-StatusText $msg "Khaki"
+        Add-Log "忽略重复点击：$msg" "WARN"
+        return
+    }
     if (Test-ApiHealth) {
-        Stop-LeonService
-        Start-Sleep -Milliseconds 300
-        $health = Test-ApiHealth
-        Update-StartButtonState ($null -ne $health)
-        if ($health) { Set-StatusText "服务仍在运行，请稍后再试。" "Khaki" }
-        else { Set-StatusText "服务已停止。" "Khaki" }
+        $Script:ServiceTransition = $true
+        $Script:ServiceTransitionText = "正在停止 LEON 服务..."
+        Set-ServiceButtonBusy "停止中..."
+        try {
+            Stop-LeonService
+            Start-Sleep -Milliseconds 300
+            $health = Test-ApiHealth
+            if ($health) { Set-StatusText "服务仍在运行，请稍后再试。" "Khaki" }
+            else { Set-StatusText "服务已停止。" "Khaki" }
+        }
+        finally {
+            $Script:ServiceTransition = $false
+            $Script:ServiceTransitionText = ""
+            Update-StartButtonState ($null -ne (Test-ApiHealth))
+        }
         return
     }
     Start-LeonService
@@ -1320,17 +1375,33 @@ function Repair-Environment {
 
 function Start-LeonService {
     Show-HomeLog
+    if ($Script:ServiceTransition) {
+        $msg = if ($Script:ServiceTransitionText) { $Script:ServiceTransitionText } else { "服务操作进行中..." }
+        Set-StatusText $msg "Khaki"
+        Add-Log "忽略重复点击：$msg" "WARN"
+        return
+    }
+    $Script:ServiceTransition = $true
+    $Script:ServiceTransitionText = "正在启动 LEON 服务..."
+    Set-ServiceButtonBusy "启动中..."
+    Set-StatusText "正在启动 LEON 服务..." "Khaki"
+    Add-Log "启动按钮已响应，正在启动 LEON 服务..."
     if ($Script:VllmGpuCombo -and -not [string]::IsNullOrWhiteSpace($Script:VllmGpuCombo.Text)) {
         Set-VllmGpuMemoryUtilization $Script:VllmGpuCombo.Text
     }
     if (-not (Test-Path $Script:StartupBat)) {
         Add-Log "缺少启动 BAT: $Script:StartupBat" "ERROR"
+        $Script:ServiceTransition = $false
+        $Script:ServiceTransitionText = ""
+        Update-StartButtonState $false
         return
     }
     $health = Test-ApiHealth
     if ($health) {
         Add-Log "LEON 服务已经在运行: $Script:ApiBase"
         Set-StatusText "LEON 服务已运行：$Script:ApiBase" "LightGreen"
+        $Script:ServiceTransition = $false
+        $Script:ServiceTransitionText = ""
         Update-StartButtonState $true
         return
     }
@@ -1369,6 +1440,9 @@ function Start-LeonService {
     }
     catch {
         Add-Log "启动失败: $($_.Exception.Message)" "ERROR"
+        $Script:ServiceTransition = $false
+        $Script:ServiceTransitionText = ""
+        Update-StartButtonState $false
     }
 }
 
@@ -1383,6 +1457,7 @@ function Wait-ApiReadyAsync {
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 3000
     $start = Get-Date
+    $lastWaitLog = -30
     $timer.Add_Tick({
         $health = Test-ApiHealth
         if ($health) {
@@ -1390,18 +1465,26 @@ function Wait-ApiReadyAsync {
             $timer.Dispose()
             Set-StatusText "LEON 服务已启动：$Script:ApiBase" "LightGreen"
             Add-Log "LEON 服务 ready: $Script:ApiBase"
+            $Script:ServiceTransition = $false
+            $Script:ServiceTransitionText = ""
             Update-StartButtonState $true
             Start-WarmupAsync
             return
         }
         $elapsed = [int]((Get-Date) - $start).TotalSeconds
         Set-StatusText "服务启动中... ${elapsed}s" "Khaki"
-        Add-Log "等待 LEON 服务 /health... ${elapsed}s"
+        if (($elapsed - $lastWaitLog) -ge 30) {
+            Add-Log "等待 LEON 服务 ready... ${elapsed}s"
+            $lastWaitLog = $elapsed
+        }
         if ($elapsed -gt 300) {
             $timer.Stop()
             $timer.Dispose()
             Set-StatusText "LEON 服务启动超时，请查看日志。" "LightCoral"
             Add-Log "LEON 服务启动等待超时。" "ERROR"
+            $Script:ServiceTransition = $false
+            $Script:ServiceTransitionText = ""
+            Update-StartButtonState $false
         }
     })
     $timer.Start()
@@ -1725,15 +1808,17 @@ function Refresh-BackendLogTail {
         $apiTail = Invoke-RestMethod -Uri "$Script:ApiBase/server_log/tail?n=220" -TimeoutSec 2
         if ($apiTail -and $apiTail.lines) {
             foreach ($line in @($apiTail.lines)) {
+                $lineText = [string]$line.line
+                if (Test-NoisyServerLogLine $lineText) { continue }
                 $ts = ""
                 try { $ts = ([DateTimeOffset]::FromUnixTimeSeconds([int64]$line.ts).ToLocalTime().ToString("HH:mm:ss")) } catch { $ts = "--:--:--" }
-                $apiText += "[$ts] [$($line.stream)] $($line.line)`r`n"
+                $apiText += "[$ts] [$($line.stream)] $lineText`r`n"
             }
         }
     }
     catch {}
     if ([string]::IsNullOrWhiteSpace($apiText)) {
-        $apiText = "服务日志暂不可用。服务未启动时这里会保持为空。"
+        $apiText = "服务日志暂无有效内容。已隐藏 /health 和 /server_log/tail 自检请求。"
     }
     $Script:LogTexts["api"] = Normalize-LauncherLogText $apiText
 

@@ -17,6 +17,29 @@ Use strict project terminology:
 
 When reporting bugs or fixes, name the boundary explicitly.
 
+## Latest Fix Snapshot: Launcher Start Button Debounce
+
+Updated: 2026-06-07
+
+Fix now in code:
+
+- `launcher/LEON-Launcher.ps1` now gives immediate feedback after the primary service button is clicked.
+- During startup/shutdown, the button changes to `启动中...` / `停止中...`, is disabled, and repeated clicks are ignored with a concise log/status message.
+- The normal start/stop state is restored only after `/health` confirms ready, startup fails/times out, or shutdown completes.
+- Startup readiness polling still checks `/health`, but the launcher only writes visible wait logs about every 30 seconds instead of every 3 seconds.
+- The launcher service log panel filters its own `/health` and `/server_log/tail` access lines, so self-check traffic does not flood the visible log.
+- Startup/diagnostic log display now uses strict UTF-8 with Windows default-codepage fallback and filters ANSI/mojibake/banner boilerplate from the UI.
+- Current running API backend was restarted through the launcher path and `/health` reported `version=vllm`, `engine=vllm`, and `vllm_gpu_memory_utilization=0.15`.
+- The old launcher instance that was still polling the API backend was stopped after confirmation: `LEON-Launcher` PID `9400` and launcher PowerShell PID `4828` were killed. API backend was left running on `9880`; latest confirmed listener PID was `26648`.
+
+Validation target:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '$errs=$null; $tokens=$null; [System.Management.Automation.Language.Parser]::ParseFile("D:\apiWorkSpace\leon_api\launcher\LEON-Launcher.ps1",[ref]$tokens,[ref]$errs) | Out-Null; if($errs){ $errs | Format-List *; exit 1 }'
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '$env:LEON_LAUNCHER_SCRIPT="D:\apiWorkSpace\leon_api\launcher\LEON-Launcher.ps1"; $p=$env:LEON_LAUNCHER_SCRIPT; $utf8=New-Object System.Text.UTF8Encoding($false); $code=[System.IO.File]::ReadAllText($p,$utf8); Set-Location "D:\apiWorkSpace\leon_api\launcher"; Invoke-Expression $code'
+curl.exe --noproxy "*" -s http://127.0.0.1:9880/health
+```
+
 ## Latest Fix Snapshot: Tavo Normal Mapping / Cleaner / LIVE Resume v13
 
 Updated: 2026-06-07

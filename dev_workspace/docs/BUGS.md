@@ -25,6 +25,42 @@ Notes:
 - When the bug is fixed, record the actual root cause, the code/files changed, and the regression guard.
 - If a fixed bug returns, update the same entry and add a stricter guard in `docs/REGRESSION.md`.
 
+## BUG-044: Launcher start button gives no immediate feedback and allows repeat clicks
+
+Status: fixed in code, needs visual launcher validation
+
+Reported: 2026-06-07
+
+Repro: Open `LEON-Launcher.exe` with the API backend stopped, then click `启动 LEON 服务`. The button can appear unchanged for a while during startup, so the click feels ignored and the user may click again.
+
+Evidence: User reported "启动器要防抖啊。我点了像没点一样". Code evidence: `Start-LeonService` did not change the start button state until `/health` returned ready. `Toggle-LeonService` had no in-flight operation guard, so repeated clicks during slow startup could call the startup path again or create confusing logs.
+
+Hypothesis: confirmed.
+
+Root cause: Launcher startup feedback was tied to final API readiness instead of the click event. There was no service-transition lock shared by start/stop actions.
+
+Fix: `launcher/LEON-Launcher.ps1` now tracks `$Script:ServiceTransition`, immediately changes the primary button to `启动中...` / `停止中...`, disables it, updates the status/log, and ignores repeat clicks until `/health` succeeds, startup times out, or stop completes. Once the operation finishes, `Update-StartButtonState` restores the normal start/stop button state.
+
+Guard: Clicking the primary service button must produce visible feedback within the same UI turn. While startup or shutdown is in progress, the button should be disabled and repeat clicks should be ignored with a concise log/status message. The button may only return to normal after ready, failed/timeout, or stopped state is confirmed.
+
+## BUG-045: Launcher health polling and startup logs are too noisy / garbled
+
+Status: fixed in code, needs visual launcher validation
+
+Reported: 2026-06-07
+
+Repro: Start the API backend through `LEON-Launcher.exe` and watch the home logs. Startup health checks can generate many `GET /health` lines, `server_log/tail` refreshes can appear as more backend traffic, and redirected startup logs can show mojibake from non-UTF8 process output.
+
+Evidence: User reported "你是不是在疯狂测活？？？ 一大堆日志！还乱码". Code evidence: `Wait-ApiReadyAsync` wrote a launcher log line every 3 seconds while polling `/health`. `Refresh-BackendLogTail` displayed raw API access logs including `/health` and `/server_log/tail`. `Read-LauncherLogTail` always tried UTF-8 first without strict validation, so GBK/ANSI output could be decoded as mojibake instead of falling back to the system code page.
+
+Hypothesis: confirmed.
+
+Root cause: Launcher liveness checks were useful operationally, but they were treated as user-facing logs. Startup log reading also had a weak encoding fallback and did not filter known noisy banner/legal boilerplate.
+
+Fix: `launcher/LEON-Launcher.ps1` now updates the status bar during startup polling but only writes a wait log at most every 30 seconds. The service log panel filters self-generated `GET/HEAD /health` and `/server_log/tail` access lines. Startup/diagnostic log reading now uses strict UTF-8 decoding and falls back to the Windows default code page; the display normalizer also drops ANSI control codes, replacement-character mojibake lines, and known bundled-package banner/legal boilerplate.
+
+Guard: Launcher startup may poll `/health`, but it must not spam the home log or service log. The visible service log should focus on meaningful API backend / TTS service messages, not launcher self-check traffic. Startup and diagnostic logs should not show ANSI escape codes or mojibake blocks.
+
 ## BUG-043: LIVE header progress text can fight the current voice label and subtitles can stay on the first generated segment
 
 Status: fixed in code, needs real Tavo validation

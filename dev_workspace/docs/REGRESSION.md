@@ -322,6 +322,9 @@ For `launcher/LEON-Launcher.ps1`:
 - `LEON_LAUNCHER_SMOKE_TEST=1` should build and dispose the launcher without starting the API service.
 - The WinForms form should load `leon-launcher.ico` as `Form.Icon` and set a LEON AppUserModelID so the taskbar does not fall back to the PowerShell identity where Windows supports it.
 - Opening the launcher must not run environment detection and must not call `Start-LeonService` automatically. LEON service startup should require clicking the large lower-left `启动 LEON 服务` button.
+- Clicking the primary start/stop button must immediately show `启动中...` or `停止中...`, disable the button, and ignore repeat clicks until `/health` confirms ready, startup times out/fails, or shutdown completes.
+- Launcher readiness polling may update the status bar frequently, but visible launcher logs should log wait progress at most about once every 30 seconds. Service logs shown in the launcher should hide self-generated `/health` and `/server_log/tail` access lines.
+- Launcher startup/diagnostic log display should strip ANSI escape codes, decode redirected logs with strict UTF-8 fallback to the Windows default code page, and avoid showing mojibake/banner boilerplate as user-facing diagnostics.
 - Opening the launcher must not run environment detection automatically and must not refresh voices/log pages automatically. It should only check cheap `/health` for the start/stop button state.
 - The launcher should not show both left navigation and a top tab strip. Keep a single clean surface: service start/stop, service version, editable vLLM ratio, environment detection, and one-click repair.
 - The sidebar should not contain a second small `启动服务` or `停止服务` button that competes with the primary service button. The primary button starts the service when stopped and stops it when running.
