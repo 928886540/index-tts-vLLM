@@ -578,22 +578,32 @@ function Add-Log {
 function Request-BackendLogRefreshAsync {
     param([int]$DelayMs = 120)
     if ($Script:BackendLogTimer) {
+        $oldTimer = $Script:BackendLogTimer
+        $Script:BackendLogTimer = $null
         try {
-            $Script:BackendLogTimer.Stop()
-            $Script:BackendLogTimer.Dispose()
+            $oldTimer.Stop()
+            $oldTimer.Dispose()
         }
         catch {
         }
-        $Script:BackendLogTimer = $null
     }
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = [Math]::Max(1, $DelayMs)
     $timer.Add_Tick({
-        $Script:BackendLogTimer.Stop()
-        $Script:BackendLogTimer.Dispose()
-        $Script:BackendLogTimer = $null
-        if (-not $Script:LogPanel -or $Script:LogPanel.Visible) {
-            Refresh-BackendLogTail
+        try {
+            if ($timer) {
+                $timer.Stop()
+                $timer.Dispose()
+            }
+            if ($Script:BackendLogTimer -eq $timer) {
+                $Script:BackendLogTimer = $null
+            }
+            if (-not $Script:LogPanel -or $Script:LogPanel.Visible) {
+                Refresh-BackendLogTail
+            }
+        }
+        catch {
+            Add-Log "刷新后端日志失败: $($_.Exception.Message)" "WARN"
         }
     }.GetNewClosure())
     $Script:BackendLogTimer = $timer
