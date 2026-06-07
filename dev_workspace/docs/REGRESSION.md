@@ -126,6 +126,11 @@ For `launcher/LEON-Launcher.ps1`:
 - Visible logs should hide launcher self-check `/health` and `/server_log/tail` spam.
 - Startup/diagnostic logs should strip ANSI/mojibake/banner noise.
 - Launcher startup should use root `LEON-Launcher.exe`, not ad-hoc backend BAT files, unless explicitly debugging low-level startup.
+- Environment detection must show and persist separate rows for `vllm` and `fast6g`: vLLM checks CUDA Toolkit / MSVC / SVML / vLLM plugin; fast6g checks 6G runtime packages and `DeepSpeed 6G 加速`.
+- Runtime package detection must parse the explicit `LEON_IMPORT_PROBE_JSON=` marker and tolerate colored stdout warnings from packages such as `modelscope` or `deepspeed`.
+- Starting the service must not require a completed environment check; environment detection is a manual diagnostic page, and startup/runtime errors should surface through launcher logs.
+- One-click repair lives inside the environment detection page and only repairs rows present for the currently selected version.
+- WinForms `Timer` callbacks that reference local variables such as `$timer`, `$start`, or `$lastWaitLog` must use `.GetNewClosure()`; otherwise async startup can throw `op_Subtraction` / null variable errors.
 
 ## Resource Guard
 

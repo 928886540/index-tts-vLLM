@@ -62,6 +62,7 @@ $Script:RuntimeScripts = $null
 $Script:LogDir = $null
 $Script:BannerPath = Join-Path $Script:LauncherDir "head.png"
 $Script:HeroPath = Join-Path $Script:LauncherDir "head.png"
+$Script:HomeImagePath = Join-Path $Script:LauncherDir "home.png"
 $Script:SideImagePath = Join-Path $Script:LauncherDir "left.png"
 $Script:AvatarPath = Join-Path $Script:LauncherDir "leon-avatar.jpeg"
 $Script:IconPath = Join-Path $Script:LauncherDir "leon-launcher.ico"
@@ -90,8 +91,10 @@ $Script:ApiReadyWaitActive = $false
 $Script:WebUiBrowser = $null
 $Script:WebUiStatusLabel = $null
 $Script:HomePanel = $null
+$Script:LogPanel = $null
 $Script:EnvPanel = $null
 $Script:RepairPanel = $null
+$Script:EnvVersionLabel = $null
 $Script:LauncherLogBox = $null
 $Script:ApiLogBox = $null
 $Script:StartupOutLogBox = $null
@@ -108,8 +111,12 @@ $Script:LogScrollDragScreenY = 0
 $Script:LogScrollDragOffset = 0
 $Script:EnvCheckRows = @{}
 $Script:EnvCheckResults = @{}
+$Script:EnvCheckStateByVersion = @{}
+$Script:EnvCheckVersion = ""
 $Script:EnvCheckCompleted = $false
 $Script:EnvCheckLastRun = $null
+$Script:EnvCheckFail = 0
+$Script:EnvCheckWarn = 0
 $Script:EnvCheckRecording = $false
 $Script:RepairStatusLabels = @{}
 $Script:RepairDetailLabels = @{}
@@ -122,6 +129,7 @@ $Script:LogTexts = @{}
 $Script:ActiveLogTab = "launcher"
 $Script:ServiceTransition = $false
 $Script:ServiceTransitionText = ""
+$Script:LauncherResizeActive = $false
 
 function Get-VllmGpuMemoryUtilizationText {
     return $Script:VllmGpuMemoryUtilization.ToString("0.###", $Script:InvariantCulture)
@@ -185,6 +193,24 @@ function Sync-VllmGpuControls {
     }
 }
 
+function Get-LeonVersionLabelText {
+    param([string]$VersionKey = $Script:VersionKey)
+    if ([string]$VersionKey -eq "fast6g") { return "fast6g 双加速 6G" }
+    return "vllm 质量版"
+}
+
+function Get-LeonRuntimePackageNames {
+    param([string]$VersionKey = $Script:VersionKey)
+    if ([string]$VersionKey -eq "vllm") {
+        return @("torch", "torchaudio", "vllm", "fastapi", "uvicorn", "ninja", "triton")
+    }
+    return @("torch", "torchaudio", "fastapi", "uvicorn", "modelscope", "transformers")
+}
+
+function Get-Fast6gDeepSpeedWheelPath {
+    return (Join-Path $Script:RepoRoot "deepspeed-0.17.1+unknown-cp312-cp312-win_amd64.whl")
+}
+
 function Set-LeonVersion {
     param([string]$VersionKey)
     $key = [string]$VersionKey
@@ -211,13 +237,18 @@ function Set-LeonVersion {
     }
     Sync-VllmGpuControls
     $Script:RuntimeImportProbe = $null
+    if ($Script:EnvVersionLabel) {
+        $Script:EnvVersionLabel.Text = "当前检测 / 修复：$(Get-LeonVersionLabelText $key)"
+    }
+    if ($Script:CheckList) {
+        Restore-EnvironmentCheckState -VersionKey $key
+    }
 }
 
 Set-LeonVersion $Script:VersionKey
 
 function Get-LeonVersionLabel {
-    if ($Script:VersionKey -eq "fast6g") { return "fast6g 双加速 6G" }
-    return "vllm 质量版"
+    return (Get-LeonVersionLabelText $Script:VersionKey)
 }
 
 function Get-VoiceAudioFiles {
@@ -389,6 +420,38 @@ function Get-CoverImageRectangle {
     return (New-Object System.Drawing.Rectangle -ArgumentList @($x, $y, $drawWidth, $drawHeight))
 }
 
+function Get-FitWidthImageRectangle {
+    param(
+        [System.Drawing.Image]$Image,
+        [System.Drawing.Rectangle]$Bounds,
+        [string]$VerticalAlign = "Center"
+    )
+    if (-not $Image -or $Bounds.Width -le 0 -or $Bounds.Height -le 0 -or $Image.Width -le 0 -or $Image.Height -le 0) {
+        return [System.Drawing.Rectangle]::Empty
+    }
+    $scale = $Bounds.Width / [double]$Image.Width
+    $drawWidth = $Bounds.Width
+    $drawHeight = [int][Math]::Ceiling($Image.Height * $scale)
+    $x = $Bounds.Left
+    switch ($VerticalAlign) {
+        "Top" { $y = $Bounds.Top }
+        "Bottom" { $y = $Bounds.Bottom - $drawHeight }
+        default { $y = $Bounds.Top + [int][Math]::Floor(($Bounds.Height - $drawHeight) / 2) }
+    }
+    return (New-Object System.Drawing.Rectangle -ArgumentList @($x, $y, $drawWidth, $drawHeight))
+}
+
+function Enable-DoubleBuffer {
+    param([System.Windows.Forms.Control]$Control)
+    if (-not $Control) { return }
+    try {
+        $prop = [System.Windows.Forms.Control].GetProperty("DoubleBuffered", [System.Reflection.BindingFlags] "NonPublic,Instance")
+        $prop.SetValue($Control, $true, $null)
+    }
+    catch {
+    }
+}
+
 function Add-CoverImageBackground {
     param(
         [System.Windows.Forms.Control]$Control,
@@ -396,45 +459,100 @@ function Add-CoverImageBackground {
         [string]$Description,
         [string]$HorizontalAlign = "Center",
         [string]$VerticalAlign = "Center",
-        [int]$OverlayAlpha = 0
+        [int]$OverlayAlpha = 0,
+        [string]$ScaleMode = "Cover"
     )
     if (-not (Test-Path -LiteralPath $ImagePath)) { return $null }
     try {
+        Enable-DoubleBuffer $Control
         $image = [System.Drawing.Image]::FromFile($ImagePath)
+        $cache = @{
+            Bitmap = $null
+            Width = 0
+            Height = 0
+            PendingWidth = 0
+            PendingHeight = 0
+        }
         $Control.Add_Paint({
             param($sender, $e)
             if (-not $image) { return }
-            $rect = Get-CoverImageRectangle -Image $image -Bounds $sender.ClientRectangle -HorizontalAlign $HorizontalAlign -VerticalAlign $VerticalAlign
-            if ($rect.IsEmpty) { return }
-            $oldInterpolation = $e.Graphics.InterpolationMode
-            $oldSmoothing = $e.Graphics.SmoothingMode
-            $oldPixelOffset = $e.Graphics.PixelOffsetMode
+            $bounds = $sender.ClientRectangle
+            if ($bounds.Width -le 0 -or $bounds.Height -le 0) { return }
             try {
-                $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-                $e.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-                $e.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-                $e.Graphics.DrawImage($image, $rect)
-                if ($OverlayAlpha -gt 0) {
-                    $alpha = [Math]::Max(0, [Math]::Min(255, $OverlayAlpha))
-                    $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb($alpha, 8, 11, 15))
+                if (-not $cache.Bitmap -or $cache.Width -ne $bounds.Width -or $cache.Height -ne $bounds.Height) {
+                    if ($Script:LauncherResizeActive -and $cache.Bitmap) {
+                        $cache.PendingWidth = $bounds.Width
+                        $cache.PendingHeight = $bounds.Height
+                        $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::Low
+                        $e.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+                        $e.Graphics.DrawImage($cache.Bitmap, $bounds)
+                        return
+                    }
+                    if ($cache.Bitmap) {
+                        $cache.Bitmap.Dispose()
+                        $cache.Bitmap = $null
+                    }
+                    $rendered = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+                    $graphics = [System.Drawing.Graphics]::FromImage($rendered)
                     try {
-                        $e.Graphics.FillRectangle($brush, $sender.ClientRectangle)
+                        $imageBounds = New-Object System.Drawing.Rectangle -ArgumentList @(0, 0, $bounds.Width, $bounds.Height)
+                        if ($ScaleMode -eq "FitWidth") {
+                            $rect = Get-FitWidthImageRectangle -Image $image -Bounds $imageBounds -VerticalAlign $VerticalAlign
+                        }
+                        else {
+                            $rect = Get-CoverImageRectangle -Image $image -Bounds $imageBounds -HorizontalAlign $HorizontalAlign -VerticalAlign $VerticalAlign
+                        }
+                        if ($rect.IsEmpty) { return }
+                        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+                        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighSpeed
+                        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+                        $graphics.DrawImage($image, $rect)
+                        if ($OverlayAlpha -gt 0) {
+                            $alpha = [Math]::Max(0, [Math]::Min(255, $OverlayAlpha))
+                            $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb($alpha, 8, 11, 15))
+                            try {
+                                $graphics.FillRectangle($brush, 0, 0, $bounds.Width, $bounds.Height)
+                            }
+                            finally {
+                                $brush.Dispose()
+                            }
+                        }
+                        $cache.Bitmap = $rendered
+                        $cache.Width = $bounds.Width
+                        $cache.Height = $bounds.Height
                     }
                     finally {
-                        $brush.Dispose()
+                        $graphics.Dispose()
                     }
                 }
+                if ($cache.Bitmap) {
+                    $e.Graphics.DrawImageUnscaled($cache.Bitmap, $bounds.Left, $bounds.Top)
+                }
             }
-            finally {
-                $e.Graphics.InterpolationMode = $oldInterpolation
-                $e.Graphics.SmoothingMode = $oldSmoothing
-                $e.Graphics.PixelOffsetMode = $oldPixelOffset
+            catch {
+                Add-Log "绘制$Description 失败: $($_.Exception.Message)" "WARN"
             }
         }.GetNewClosure())
         $Control.Add_Resize({
             param($sender, $e)
+            if ($Script:LauncherResizeActive -and $cache.Bitmap) {
+                $cache.PendingWidth = $sender.ClientSize.Width
+                $cache.PendingHeight = $sender.ClientSize.Height
+            }
+            elseif ($cache.Bitmap) {
+                $cache.Bitmap.Dispose()
+                $cache.Bitmap = $null
+                $cache.Width = 0
+                $cache.Height = 0
+            }
             $sender.Invalidate()
-        })
+        }.GetNewClosure())
+        $Control.Add_Disposed({
+            if ($cache.Bitmap) {
+                $cache.Bitmap.Dispose()
+                $cache.Bitmap = $null
+            }
+        }.GetNewClosure())
         return $image
     }
     catch {
@@ -457,26 +575,78 @@ function Add-Log {
     Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
 }
 
-function Show-HomeLog {
+function Request-BackendLogRefreshAsync {
+    param([int]$DelayMs = 120)
+    if ($Script:BackendLogTimer) {
+        try {
+            $Script:BackendLogTimer.Stop()
+            $Script:BackendLogTimer.Dispose()
+        }
+        catch {
+        }
+        $Script:BackendLogTimer = $null
+    }
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = [Math]::Max(1, $DelayMs)
+    $timer.Add_Tick({
+        $Script:BackendLogTimer.Stop()
+        $Script:BackendLogTimer.Dispose()
+        $Script:BackendLogTimer = $null
+        if (-not $Script:LogPanel -or $Script:LogPanel.Visible) {
+            Refresh-BackendLogTail
+        }
+    }.GetNewClosure())
+    $Script:BackendLogTimer = $timer
+    $timer.Start()
+}
+
+function Hide-LauncherContentPanels {
+    foreach ($panel in @($Script:HomePanel, $Script:LogPanel, $Script:EnvPanel)) {
+        if ($panel) { $panel.Visible = $false }
+    }
+}
+
+function Show-LauncherHome {
     if ($Script:HomePanel -and $Script:EnvPanel) {
         Set-LauncherNavActive "home"
-        $Script:EnvPanel.Visible = $false
+        Hide-LauncherContentPanels
         $Script:HomePanel.Visible = $true
         $Script:HomePanel.BringToFront()
-        Refresh-BackendLogTail
         return
     }
     if ($Script:Tabs) {
         $Script:Tabs.SelectedIndex = 0
     }
-    Refresh-BackendLogTail
+}
+
+function Show-HomeLog {
+    if ($Script:LogPanel -and $Script:EnvPanel) {
+        Set-LauncherNavActive "log"
+        Hide-LauncherContentPanels
+        $Script:LogPanel.Visible = $true
+        $Script:LogPanel.BringToFront()
+        Request-BackendLogRefreshAsync
+        return
+    }
+    if ($Script:HomePanel -and $Script:EnvPanel) {
+        Set-LauncherNavActive "home"
+        Hide-LauncherContentPanels
+        $Script:HomePanel.Visible = $true
+        $Script:HomePanel.BringToFront()
+        Request-BackendLogRefreshAsync
+        return
+    }
+    if ($Script:Tabs) {
+        $Script:Tabs.SelectedIndex = 0
+    }
+    Request-BackendLogRefreshAsync
 }
 
 function Show-EnvironmentPanel {
     param([string]$NavKey = "env")
     Set-LauncherNavActive $NavKey
     if ($Script:HomePanel -and $Script:EnvPanel) {
-        $Script:HomePanel.Visible = $false
+        Hide-LauncherContentPanels
         $Script:EnvPanel.Visible = $true
         $Script:EnvPanel.BringToFront()
     }
@@ -1111,12 +1281,7 @@ function Find-SvmlDll {
 
 function Get-RuntimeImportProbe {
     if ($Script:RuntimeImportProbe) { return $Script:RuntimeImportProbe }
-    $mods = if ($Script:VersionKey -eq "vllm") {
-        @("torch", "torchaudio", "vllm", "fastapi", "uvicorn", "ninja", "triton")
-    }
-    else {
-        @("torch", "torchaudio", "fastapi", "uvicorn", "modelscope", "transformers")
-    }
+    $mods = @(Get-LeonRuntimePackageNames -VersionKey $Script:VersionKey)
     $modsJson = ($mods | ConvertTo-Json -Compress)
     $pkgCode = @"
 import importlib, json
@@ -1135,18 +1300,37 @@ try:
     out["torch_gpu"] = torch.cuda.get_device_name(0) if torch.cuda.is_available() else ""
 except Exception as e:
     out["torch_cuda_available"] = "ERROR: " + str(e)
-print(json.dumps(out, ensure_ascii=False))
+print("LEON_IMPORT_PROBE_JSON=" + json.dumps(out, ensure_ascii=False))
 "@
     $pkg = Invoke-PythonSnippet -Code $pkgCode -TimeoutSeconds 60
     $info = $null
+    $jsonText = ""
     if ($pkg.ExitCode -eq 0) {
-        try { $info = $pkg.Stdout | ConvertFrom-Json } catch { $info = $null }
+        $probeMarker = "LEON_IMPORT_PROBE_JSON="
+        foreach ($line in @(([string]$pkg.Stdout) -split "`r?`n")) {
+            $trimmed = $line.Trim()
+            if ($trimmed.StartsWith($probeMarker)) {
+                $jsonText = $trimmed.Substring($probeMarker.Length)
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($jsonText)) {
+            foreach ($line in @(([string]$pkg.Stdout) -split "`r?`n")) {
+                $trimmed = $line.Trim()
+                if ($trimmed.StartsWith("{") -and $trimmed.EndsWith("}")) {
+                    $jsonText = $trimmed
+                }
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($jsonText)) {
+            try { $info = $jsonText | ConvertFrom-Json } catch { $info = $null }
+        }
     }
     $Script:RuntimeImportProbe = [pscustomobject]@{
         ExitCode = $pkg.ExitCode
         Stdout = $pkg.Stdout
         Stderr = $pkg.Stderr
         Text = (($pkg.Stdout + "`n" + $pkg.Stderr).Trim())
+        JsonText = $jsonText
         Info = $info
     }
     return $Script:RuntimeImportProbe
@@ -1248,6 +1432,75 @@ function Add-CheckResult {
     $Script:EnvCheckRows[$Name] = $item
 }
 
+function Get-EnvironmentCheckNames {
+    param([string]$VersionKey = $Script:VersionKey)
+    $names = @(
+        "启动版本",
+        "管理员权限",
+        "项目路径中文检查",
+        "项目 Python Runtime",
+        "NVIDIA 显卡/驱动",
+        "Python 包 / Torch CUDA"
+    )
+    if ($VersionKey -eq "vllm") {
+        $names += @(
+            "CUDA Toolkit / nvcc",
+            "MSVC C++ Build Tools",
+            "Intel SVML 兼容兜底",
+            "vLLM 插件 / GPT2TTSModel 注册"
+        )
+    }
+    elseif ($VersionKey -eq "fast6g") {
+        $names += @(
+            "DeepSpeed 6G 加速"
+        )
+    }
+    $names += @(
+        "IndexTTS2 模型文件",
+        "本地音色库",
+        "API 端口 $Script:ApiPort",
+        "启动入口 BAT"
+    )
+    return $names
+}
+
+function Save-EnvironmentCheckState {
+    param([string]$VersionKey = $Script:EnvCheckVersion)
+    if ([string]::IsNullOrWhiteSpace($VersionKey)) { return }
+    $Script:EnvCheckStateByVersion[$VersionKey] = [pscustomobject]@{
+        Results = $Script:EnvCheckResults
+        Completed = [bool]$Script:EnvCheckCompleted
+        LastRun = $Script:EnvCheckLastRun
+        Fail = [int]$Script:EnvCheckFail
+        Warn = [int]$Script:EnvCheckWarn
+    }
+}
+
+function Restore-EnvironmentCheckState {
+    param([string]$VersionKey = $Script:VersionKey)
+    if ([string]::IsNullOrWhiteSpace($VersionKey)) { $VersionKey = "vllm" }
+    $Script:EnvCheckVersion = $VersionKey
+    $state = $null
+    if ($Script:EnvCheckStateByVersion -and $Script:EnvCheckStateByVersion.ContainsKey($VersionKey)) {
+        $state = $Script:EnvCheckStateByVersion[$VersionKey]
+    }
+    if ($state) {
+        $Script:EnvCheckResults = if ($state.Results) { $state.Results } else { @{} }
+        $Script:EnvCheckCompleted = [bool]$state.Completed
+        $Script:EnvCheckLastRun = $state.LastRun
+        $Script:EnvCheckFail = [int]$state.Fail
+        $Script:EnvCheckWarn = [int]$state.Warn
+    }
+    else {
+        $Script:EnvCheckResults = @{}
+        $Script:EnvCheckCompleted = $false
+        $Script:EnvCheckLastRun = $null
+        $Script:EnvCheckFail = 0
+        $Script:EnvCheckWarn = 0
+    }
+    Initialize-EnvironmentCheckRows
+}
+
 function Initialize-EnvironmentCheckRows {
     param([string]$Status = "WAIT", [switch]$ResetResults)
     if (-not $Script:CheckList) { return }
@@ -1255,23 +1508,11 @@ function Initialize-EnvironmentCheckRows {
         $Script:EnvCheckResults = @{}
         $Script:EnvCheckCompleted = $false
         $Script:EnvCheckLastRun = $null
+        $Script:EnvCheckFail = 0
+        $Script:EnvCheckWarn = 0
     }
     $Script:EnvCheckRows = @{}
-    $names = @(
-        "管理员权限",
-        "项目路径中文检查",
-        "项目 Python Runtime",
-        "NVIDIA 显卡/驱动",
-        "CUDA Toolkit / nvcc",
-        "MSVC C++ Build Tools",
-        "Intel SVML 兼容兜底",
-        "Python 包 / Torch CUDA",
-        "vLLM 插件 / GPT2TTSModel 注册",
-        "IndexTTS2 模型文件",
-        "本地音色库",
-        "API 端口 $Script:ApiPort",
-        "启动入口 BAT"
-    )
+    $names = @(Get-EnvironmentCheckNames -VersionKey $Script:VersionKey)
     if ($Script:CheckList -is [System.Windows.Forms.DataGridView]) {
         $Script:CheckList.Rows.Clear()
     }
@@ -1279,7 +1520,16 @@ function Initialize-EnvironmentCheckRows {
         $Script:CheckList.Items.Clear()
     }
     foreach ($name in $names) {
-        Add-CheckResult $name $Status ""
+        $saved = $null
+        if (-not $ResetResults -and $Script:EnvCheckResults -and $Script:EnvCheckResults.ContainsKey($name)) {
+            $saved = $Script:EnvCheckResults[$name]
+        }
+        if ($saved) {
+            Add-CheckResult $name ([string]$saved.Status) ([string]$saved.Detail)
+        }
+        else {
+            Add-CheckResult $name $Status ""
+        }
     }
 }
 
@@ -1555,11 +1805,13 @@ function Run-EnvironmentCheck {
     param([switch]$Silent)
 
     Show-EnvironmentPanel
+    $checkVersion = [string]$Script:VersionKey
+    $Script:EnvCheckVersion = $checkVersion
     Initialize-EnvironmentCheckRows -ResetResults
     $Script:EnvCheckRecording = $true
     try {
-        Set-Progress 2 "正在检测环境..."
-        Add-Log "开始环境检测。项目目录: $Script:RepoRoot"
+        Set-Progress 2 "正在检测 $(Get-LeonVersionLabelText $checkVersion) 环境..."
+        Add-Log "开始环境检测：$(Get-LeonVersionLabelText $checkVersion)。项目目录: $Script:RepoRoot"
 
         $Script:EnvCheckFail = 0
         $Script:EnvCheckWarn = 0
@@ -1569,15 +1821,19 @@ function Run-EnvironmentCheck {
             elseif ($Status -eq "WARN") { $Script:EnvCheckWarn++ }
         }
 
+    Add-CheckResult "启动版本" "OK" "$(Get-LeonVersionLabelText $checkVersion)：$Script:RepoRoot"
+    Set-Progress 5
+
     $status = if (Test-IsAdmin) { "OK" } else { "WARN" }
     Count-Result $status
     Add-CheckResult "管理员权限" $status ($(if ($status -eq "OK") { "已用管理员权限运行，可安装系统组件。" } else { "不是管理员。检测可用，winget 安装或系统级修复可能需要提权。" }))
-    Set-Progress 8
+    Set-Progress 10
 
-    $status = if (Test-PathHasChinese $Script:RepoRoot) { "FAIL" } else { "OK" }
+    $pathHasChinese = Test-PathHasChinese $Script:RepoRoot
+    $status = if (-not $pathHasChinese) { "OK" } elseif ($checkVersion -eq "vllm") { "FAIL" } else { "WARN" }
     Count-Result $status
-    Add-CheckResult "项目路径中文检查" $status ($(if ($status -eq "OK") { "路径未包含中文，适合 vLLM / CUDA / ninja 编译。" } else { "当前路径包含中文，LLVM/ninja/CUDA 编译很容易失败。请移动到纯英文路径，例如 D:\LEON_IndexTTS2。" }))
-    Set-Progress 14
+    Add-CheckResult "项目路径中文检查" $status ($(if ($status -eq "OK") { "路径未包含中文，适合当前版本。" } elseif ($checkVersion -eq "vllm") { "当前 vLLM 路径包含中文，LLVM/ninja/CUDA 编译很容易失败。请移动到纯英文路径，例如 D:\LEON_IndexTTS2。" } else { "fast6g 通常不需要本地 CUDA 编译；路径含中文仍可能影响个别工具，建议后续移到纯英文路径。" }))
+    Set-Progress 16
 
     $runtimeOk = Test-Path $Script:RuntimePython
     $status = if ($runtimeOk) { "OK" } else { "FAIL" }
@@ -1589,7 +1845,7 @@ function Run-EnvironmentCheck {
         "缺少 indextts2runtime\python.exe。请使用完整包，或先解压随包 runtime。"
     }
     Add-CheckResult "项目 Python Runtime" $status $pyDetail
-    Set-Progress 20
+    Set-Progress 22
 
     $nvidiaPath = Get-CommandPath "nvidia-smi.exe"
     if ($nvidiaPath) {
@@ -1602,57 +1858,59 @@ function Run-EnvironmentCheck {
         $status = "FAIL"; Count-Result $status
         Add-CheckResult "NVIDIA 显卡/驱动" $status "找不到 nvidia-smi。需要 NVIDIA 显卡和正常驱动。"
     }
-    Set-Progress 28
+    Set-Progress 30
 
-    $cudaPath = Get-CudaToolkitPath
-    if ($cudaPath) {
-        $nvcc = Join-Path $cudaPath "bin\nvcc.exe"
-        $out = Invoke-Capture -FilePath $nvcc -Arguments @("-V") -TimeoutSeconds 10
-        $status = if ($out.ExitCode -eq 0) { "OK" } else { "WARN" }
-        Count-Result $status
-        Add-CheckResult "CUDA Toolkit / nvcc" $status ($(if ($out.ExitCode -eq 0) { (($out.Stdout + $out.Stderr) -split "`n" | Where-Object { $_ -match "release" } | Select-Object -First 1).Trim() } else { "找到 CUDA 目录但 nvcc 执行失败: $cudaPath" }))
-    }
-    else {
-        $status = "WARN"; Count-Result $status
-        Add-CheckResult "CUDA Toolkit / nvcc" $status "未找到 CUDA Toolkit。Torch 自带 CUDA 可运行，但 BigVGAN CUDA kernel 编译需要 nvcc，建议安装 CUDA 12.8。"
-    }
-    Set-Progress 36
-
-    $vsPath = Get-VsInstallPath
-    $clPath = Get-CommandPath "cl.exe"
-    if (-not $clPath -and $vsPath) {
-        $msvcRoot = Join-Path $vsPath "VC\Tools\MSVC"
-        $msvc = Get-ChildItem $msvcRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-        if ($msvc) {
-            $candidate = Join-Path $msvc.FullName "bin\Hostx64\x64\cl.exe"
-            if (Test-Path $candidate) { $clPath = $candidate }
+    if ($checkVersion -eq "vllm") {
+        $cudaPath = Get-CudaToolkitPath
+        if ($cudaPath) {
+            $nvcc = Join-Path $cudaPath "bin\nvcc.exe"
+            $out = Invoke-Capture -FilePath $nvcc -Arguments @("-V") -TimeoutSeconds 10
+            $status = if ($out.ExitCode -eq 0) { "OK" } else { "WARN" }
+            Count-Result $status
+            Add-CheckResult "CUDA Toolkit / nvcc" $status ($(if ($out.ExitCode -eq 0) { (($out.Stdout + $out.Stderr) -split "`n" | Where-Object { $_ -match "release" } | Select-Object -First 1).Trim() } else { "找到 CUDA 目录但 nvcc 执行失败: $cudaPath" }))
         }
-    }
-    $status = if ($clPath) { "OK" } else { "WARN" }
-    Count-Result $status
-    Add-CheckResult "MSVC C++ Build Tools" $status ($(if ($clPath) { "cl.exe: $clPath" } else { "未找到 cl.exe。BigVGAN CUDA kernel 编译会失败，可用一键修复安装 Build Tools。" }))
-    Set-Progress 44
+        else {
+            $status = "WARN"; Count-Result $status
+            Add-CheckResult "CUDA Toolkit / nvcc" $status "未找到 CUDA Toolkit。Torch 自带 CUDA 可运行，但 BigVGAN CUDA kernel 编译需要 nvcc，建议安装 CUDA 12.8。"
+        }
+        Set-Progress 38
 
-    $svmlPath = Find-SvmlDll
-    if ($svmlPath) {
-        $status = "OK"
-        $detail = "运行时可解析 svml_dispmd.dll: $svmlPath"
+        $vsPath = Get-VsInstallPath
+        $clPath = Get-CommandPath "cl.exe"
+        if (-not $clPath -and $vsPath) {
+            $msvcRoot = Join-Path $vsPath "VC\Tools\MSVC"
+            $msvc = Get-ChildItem $msvcRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+            if ($msvc) {
+                $candidate = Join-Path $msvc.FullName "bin\Hostx64\x64\cl.exe"
+                if (Test-Path $candidate) { $clPath = $candidate }
+            }
+        }
+        $status = if ($clPath) { "OK" } else { "WARN" }
+        Count-Result $status
+        Add-CheckResult "MSVC C++ Build Tools" $status ($(if ($clPath) { "cl.exe: $clPath" } else { "未找到 cl.exe。vLLM 的 BigVGAN CUDA kernel 编译会失败，可用一键修复安装 Build Tools。" }))
+        Set-Progress 46
+
+        $svmlPath = Find-SvmlDll
+        if ($svmlPath) {
+            $status = "OK"
+            $detail = "运行时可解析 svml_dispmd.dll: $svmlPath"
+        }
+        elseif ($runtimeOk -and (Test-RuntimeImportOk)) {
+            $status = "OK"
+            $detail = "未发现独立 svml_dispmd.dll，但当前 vLLM runtime 可 import 必需包；此机器无需修复该 DLL。"
+        }
+        elseif ($runtimeOk -and (Test-SvmlRepairNeeded)) {
+            $status = "FAIL"
+            $detail = "vLLM runtime import 失败且日志命中 SVML/LLVM/DLL 加载问题，可用一键修复复制随包 DLL 到项目 runtime。"
+        }
+        else {
+            $status = "WARN"
+            $detail = "未发现独立 svml_dispmd.dll，但当前未证明它是 vLLM 启动阻塞项；如果必需包 import 正常可忽略。"
+        }
+        Count-Result $status
+        Add-CheckResult "Intel SVML 兼容兜底" $status $detail
     }
-    elseif ($runtimeOk -and (Test-RuntimeImportOk)) {
-        $status = "OK"
-        $detail = "未发现独立 svml_dispmd.dll，但当前 runtime 可 import 必需包；此机器无需修复该 DLL。"
-    }
-    elseif ($runtimeOk -and (Test-SvmlRepairNeeded)) {
-        $status = "FAIL"
-        $detail = "runtime import 失败且日志命中 SVML/LLVM/DLL 加载问题，可用一键修复复制随包 DLL 到项目 runtime。"
-    }
-    else {
-        $status = "WARN"
-        $detail = "未发现独立 svml_dispmd.dll，但当前未证明它是启动阻塞项；如果必需包 import 正常可忽略。"
-    }
-    Count-Result $status
-    Add-CheckResult "Intel SVML 兼容兜底" $status $detail
-    Set-Progress 52
+    Set-Progress 54
 
     if ($runtimeOk) {
         $pkg = Get-RuntimeImportProbe
@@ -1660,11 +1918,11 @@ function Run-EnvironmentCheck {
             $info = $pkg.Info
             if ($info) {
                 $bad = @()
-                $requiredImportNames = if ($Script:VersionKey -eq "vllm") { @("torch", "torchaudio", "vllm", "fastapi", "uvicorn", "ninja") } else { @("torch", "torchaudio", "fastapi", "uvicorn", "modelscope", "transformers") }
+                $requiredImportNames = @(Get-LeonRuntimePackageNames -VersionKey $checkVersion)
                 foreach ($name in $requiredImportNames) {
                     if ([string]$info.$name -like "ERROR:*") { $bad += "$name=$($info.$name)" }
                 }
-                $status = if ($bad.Count -eq 0 -and $info.torch_cuda_available -eq $true) { "OK" } elseif ($bad.Count -eq 0) { "WARN" } else { "FAIL" }
+                $status = if ($bad.Count -gt 0) { "FAIL" } elseif ($info.torch_cuda_available -eq $true) { "OK" } else { "FAIL" }
                 Count-Result $status
                 $detailParts = @("torch=$($info.torch)", "cuda=$($info.torch_cuda_version)", "gpu=$($info.torch_gpu)")
                 foreach ($name in $requiredImportNames) {
@@ -1672,6 +1930,7 @@ function Run-EnvironmentCheck {
                 }
                 $detail = $detailParts -join "; "
                 if ($bad.Count -gt 0) { $detail = $bad -join "; " }
+                elseif ($info.torch_cuda_available -ne $true) { $detail = "$detail; torch.cuda.is_available=False" }
                 Add-CheckResult "Python 包 / Torch CUDA" $status $detail
             }
             else {
@@ -1684,17 +1943,40 @@ function Run-EnvironmentCheck {
             Add-CheckResult "Python 包 / Torch CUDA" $status $pkg.Stderr.Trim()
         }
     }
-    Set-Progress 62
+    Set-Progress 64
 
-    if ($runtimeOk -and $Script:VersionKey -eq "vllm") {
+    if ($checkVersion -eq "fast6g") {
+        $wheelPath = Get-Fast6gDeepSpeedWheelPath
+        if (-not $runtimeOk) {
+            $status = "WARN"
+            $detail = "缺少项目 Python Runtime，暂不能检测 DeepSpeed。"
+        }
+        else {
+            $ds = Invoke-PythonSnippet -Code "import deepspeed; print(getattr(deepspeed, '__version__', 'installed'))" -TimeoutSeconds 40
+            if ($ds.ExitCode -eq 0) {
+                $status = "OK"
+                $detail = "deepspeed=$($ds.Stdout.Trim())"
+            }
+            elseif (Test-Path -LiteralPath $wheelPath) {
+                $status = "WARN"
+                $detail = "DeepSpeed 未安装或不可导入，可用一键修复安装随包 wheel: $wheelPath"
+            }
+            else {
+                $status = "WARN"
+                $detail = "DeepSpeed 未安装或不可导入，且未找到随包 wheel: $wheelPath"
+            }
+        }
+        Count-Result $status
+        Add-CheckResult "DeepSpeed 6G 加速" $status $detail
+    }
+    Set-Progress 68
+
+    if ($runtimeOk -and $checkVersion -eq "vllm") {
         $patchCode = "import patch_vllm; print('patch_vllm OK')"
         $patch = Invoke-PythonSnippet -Code $patchCode -TimeoutSeconds 60
         $status = if ($patch.ExitCode -eq 0 -and ($patch.Stdout -match "OK")) { "OK" } else { "FAIL" }
         Count-Result $status
         Add-CheckResult "vLLM 插件 / GPT2TTSModel 注册" $status ($(if ($status -eq "OK") { ($patch.Stdout.Trim() -replace "`r?`n", " | ") } else { (($patch.Stdout + $patch.Stderr).Trim()) }))
-    }
-    else {
-        Add-CheckResult "vLLM 插件 / GPT2TTSModel 注册" "OK" "当前版本 $Script:VersionKey 不需要 vLLM 插件。"
     }
     Set-Progress 70
 
@@ -1719,8 +2001,10 @@ function Run-EnvironmentCheck {
     $portPids = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
     $health = Test-ApiHealth
     if ($health) {
-        $status = "OK"; Count-Result $status
-        Add-CheckResult "API 端口 $Script:ApiPort" $status "服务已运行: $($health.local_url)"
+        $runningVersion = [string]$health.version
+        $status = if ([string]::IsNullOrWhiteSpace($runningVersion) -or $runningVersion -eq $checkVersion) { "OK" } else { "WARN" }
+        Count-Result $status
+        Add-CheckResult "API 端口 $Script:ApiPort" $status ($(if ($status -eq "OK") { "服务已运行: $($health.local_url)" } else { "端口上运行的是 $runningVersion，不是当前选择的 $checkVersion；启动前请先停止现有服务。" }))
     }
     elseif ($portPids.Count -gt 0) {
         $status = "WARN"; Count-Result $status
@@ -1739,17 +2023,18 @@ function Run-EnvironmentCheck {
 
     Set-Progress 100
     if ($Script:EnvCheckFail -gt 0) {
-        Set-StatusText "环境检测完成：$Script:EnvCheckFail 个失败，$Script:EnvCheckWarn 个警告。" "LightCoral"
+        Set-StatusText "$(Get-LeonVersionLabelText $checkVersion) 环境检测完成：$Script:EnvCheckFail 个失败，$Script:EnvCheckWarn 个警告。" "LightCoral"
     }
     elseif ($Script:EnvCheckWarn -gt 0) {
-        Set-StatusText "环境检测完成：0 个失败，$Script:EnvCheckWarn 个警告。" "Khaki"
+        Set-StatusText "$(Get-LeonVersionLabelText $checkVersion) 环境检测完成：0 个失败，$Script:EnvCheckWarn 个警告。" "Khaki"
     }
     else {
-        Set-StatusText "环境检测通过，点击左下角“启动 LEON 服务”。" "LightGreen"
+        Set-StatusText "$(Get-LeonVersionLabelText $checkVersion) 环境检测通过，点击左下角“启动 LEON 服务”。" "LightGreen"
     }
         $Script:EnvCheckCompleted = $true
         $Script:EnvCheckLastRun = Get-Date
-        Add-Log "环境检测完成：FAIL=$Script:EnvCheckFail, WARN=$Script:EnvCheckWarn"
+        Save-EnvironmentCheckState -VersionKey $checkVersion
+        Add-Log "$(Get-LeonVersionLabelText $checkVersion) 环境检测完成：FAIL=$Script:EnvCheckFail, WARN=$Script:EnvCheckWarn"
     }
     finally {
         $Script:EnvCheckRecording = $false
@@ -1797,23 +2082,27 @@ function Test-EnvCheckResultNeedsRepair {
 
 function Repair-Environment {
     Show-EnvironmentPanel
-    Add-Log "用户触发一键修复。"
+    if ($Script:EnvCheckVersion -ne $Script:VersionKey) {
+        Restore-EnvironmentCheckState -VersionKey $Script:VersionKey
+    }
+    $repairVersion = [string]$Script:VersionKey
+    Add-Log "用户触发一键修复：$(Get-LeonVersionLabelText $repairVersion)。"
 
     if (-not $Script:EnvCheckCompleted -or -not $Script:EnvCheckResults -or $Script:EnvCheckResults.Count -eq 0) {
         Set-Progress 0
         if ($Script:CheckList) {
-            Add-CheckResult "管理员权限" "WAIT" "先点开始检测，再点一键修复。"
+            Add-CheckResult "启动版本" "WAIT" "先检测当前版本环境，再点一键修复。"
         }
-        Set-StatusText "先点开始检测，再点一键修复。" "Khaki"
-        Add-Log "一键修复已取消：尚未完成环境检测。"
+        Set-StatusText "先检测当前版本环境：$(Get-LeonVersionLabelText $repairVersion)。" "Khaki"
+        Add-Log "一键修复已取消：$(Get-LeonVersionLabelText $repairVersion) 尚未完成环境检测。"
         return
     }
 
-    Set-StatusText "正在执行可自动修复项..." "Khaki"
+    Set-StatusText "正在执行 $(Get-LeonVersionLabelText $repairVersion) 可自动修复项..." "Khaki"
     Set-Progress 5
     $actions = 0
 
-    if ((Test-Path $Script:SvmlSource) -and (Test-EnvCheckResultNeedsRepair "Intel SVML 兼容兜底" "(?i)svml|llvm|dll|模块|module" @("FAIL"))) {
+    if ((Get-EnvCheckResult "Intel SVML 兼容兜底") -and (Test-Path $Script:SvmlSource) -and (Test-EnvCheckResultNeedsRepair "Intel SVML 兼容兜底" "(?i)svml|llvm|dll|模块|module" @("FAIL"))) {
         Add-CheckResult "Intel SVML 兼容兜底" "WAIT" "正在复制随包 DLL 到项目 runtime。"
         try {
             $svmlTarget = Get-SvmlRepairTarget
@@ -1828,12 +2117,12 @@ function Repair-Environment {
             Add-Log "复制 svml_dispmd.dll 失败: $($_.Exception.Message)" "WARN"
         }
     }
-    else {
+    elseif (Get-EnvCheckResult "Intel SVML 兼容兜底") {
         Add-Log "SVML 当前不是明确阻塞项，跳过 svml_dispmd.dll 复制。"
     }
     Set-Progress 25
 
-    if (Test-EnvCheckResultNeedsRepair "MSVC C++ Build Tools" "未找到|缺少|cl\.exe") {
+    if ((Get-EnvCheckResult "MSVC C++ Build Tools") -and (Test-EnvCheckResultNeedsRepair "MSVC C++ Build Tools" "未找到|缺少|cl\.exe")) {
         Add-CheckResult "MSVC C++ Build Tools" "WAIT" "正在调用 winget，可能需要系统弹窗确认。"
         $actions++
         Install-WithWinget -Name "Visual Studio 2022 Build Tools" -Args @(
@@ -1843,62 +2132,116 @@ function Repair-Environment {
         )
         Add-CheckResult "MSVC C++ Build Tools" "WARN" "安装命令已触发，完成后重新检测。" -Record
     }
-    else {
+    elseif (Get-EnvCheckResult "MSVC C++ Build Tools") {
         Add-Log "MSVC Build Tools 已存在，跳过安装。"
     }
     Set-Progress 45
 
-    if (Test-EnvCheckResultNeedsRepair "CUDA Toolkit / nvcc" "未找到|nvcc 执行失败|CUDA Toolkit") {
+    if ((Get-EnvCheckResult "CUDA Toolkit / nvcc") -and (Test-EnvCheckResultNeedsRepair "CUDA Toolkit / nvcc" "未找到|nvcc 执行失败|CUDA Toolkit")) {
         Add-CheckResult "CUDA Toolkit / nvcc" "WAIT" "正在调用 winget，可能需要系统弹窗确认。"
         $actions++
         Install-WithWinget -Name "NVIDIA CUDA Toolkit" -Args @("install", "-e", "--id", "Nvidia.CUDA", "--accept-package-agreements", "--accept-source-agreements")
         Add-CheckResult "CUDA Toolkit / nvcc" "WARN" "安装命令已触发，完成后重新检测。" -Record
     }
-    else {
+    elseif (Get-EnvCheckResult "CUDA Toolkit / nvcc") {
         Add-Log "CUDA Toolkit 已存在，跳过安装。"
     }
     Set-Progress 65
 
-    if (Test-EnvCheckResultNeedsRepair "Python 包 / Torch CUDA" "(?i)ninja") {
-        if (Test-Path $Script:RuntimePython) {
-            Add-CheckResult "Python 包 / Torch CUDA" "WAIT" "检测结果显示 ninja 缺失，正在安装。"
-            Add-Log "根据最近一次检测结果安装 ninja。"
+    if ((Get-EnvCheckResult "DeepSpeed 6G 加速") -and (Test-EnvCheckResultNeedsRepair "DeepSpeed 6G 加速" "(?i)deepspeed|wheel|未安装|不可导入|缺少")) {
+        $wheelPath = Get-Fast6gDeepSpeedWheelPath
+        if (-not (Test-Path $Script:RuntimePython)) {
+            Add-CheckResult "项目 Python Runtime" "FAIL" "缺少项目 runtime，无法安装 DeepSpeed。" -Record
+        }
+        elseif (-not (Test-Path -LiteralPath $wheelPath)) {
+            Add-CheckResult "DeepSpeed 6G 加速" "FAIL" "未找到随包 wheel: $wheelPath" -Record
+            Add-Log "DeepSpeed 修复失败：未找到随包 wheel: $wheelPath" "WARN"
+        }
+        else {
+            Add-CheckResult "DeepSpeed 6G 加速" "WAIT" "正在安装随包 DeepSpeed wheel。"
+            Add-Log "根据最近一次 fast6g 检测结果安装 DeepSpeed: $wheelPath"
             $actions++
-            $pip = Invoke-Capture -FilePath $Script:RuntimePython -Arguments @("-m", "pip", "install", "ninja") -TimeoutSeconds 240 -Env @{ "PATH" = "$Script:RuntimeScripts;$env:PATH" }
-            Add-Log ("pip install ninja exit=" + $pip.ExitCode)
+            $pip = Invoke-Capture -FilePath $Script:RuntimePython -Arguments @("-m", "pip", "install", $wheelPath) -TimeoutSeconds 300 -Env @{ "PATH" = "$Script:RuntimeScripts;$env:PATH" }
+            Add-Log ("pip install deepspeed exit=" + $pip.ExitCode)
+            if ($pip.ExitCode -ne 0) {
+                Add-CheckResult "DeepSpeed 6G 加速" "FAIL" $pip.Stderr -Record
+                Add-Log $pip.Stderr "WARN"
+            }
+            else {
+                Add-CheckResult "DeepSpeed 6G 加速" "OK" "DeepSpeed 已安装，完成后可重新检测确认。" -Record
+            }
+        }
+    }
+    elseif (Get-EnvCheckResult "DeepSpeed 6G 加速") {
+        Add-Log "DeepSpeed 6G 加速当前不是可自动修复项，跳过安装。"
+    }
+    Set-Progress 74
+
+    $pythonResult = Get-EnvCheckResult "Python 包 / Torch CUDA"
+    $pythonRepairPackages = @()
+    if (Test-EnvCheckResultNeedsRepair "Python 包 / Torch CUDA" "(?i)ninja") {
+        $pythonRepairPackages += "ninja"
+    }
+    if ($repairVersion -eq "fast6g" -and $pythonResult) {
+        $pythonDetail = [string]$pythonResult.Detail
+        $fast6gRepairMap = @{
+            "modelscope" = "modelscope==1.27.0"
+            "transformers" = "transformers==4.52.1"
+            "fastapi" = "fastapi"
+            "uvicorn" = "uvicorn"
+        }
+        foreach ($pkgName in $fast6gRepairMap.Keys) {
+            if ($pythonDetail -match ("(?i)(^|[;,\s])" + [regex]::Escape($pkgName) + "\s*=\s*ERROR")) {
+                $pythonRepairPackages += $fast6gRepairMap[$pkgName]
+            }
+        }
+    }
+    $pythonRepairPackages = @($pythonRepairPackages | Select-Object -Unique)
+    if ($pythonRepairPackages.Count -gt 0) {
+        if (Test-Path $Script:RuntimePython) {
+            Add-CheckResult "Python 包 / Torch CUDA" "WAIT" "检测结果显示缺少可自动修复包，正在安装: $($pythonRepairPackages -join ', ')"
+            Add-Log "根据最近一次 $(Get-LeonVersionLabelText $repairVersion) 检测结果安装 Python 包: $($pythonRepairPackages -join ', ')"
+            $actions++
+            $pipArgs = @("-m", "pip", "install") + $pythonRepairPackages
+            $pip = Invoke-Capture -FilePath $Script:RuntimePython -Arguments $pipArgs -TimeoutSeconds 360 -Env @{ "PATH" = "$Script:RuntimeScripts;$env:PATH" }
+            Add-Log ("pip install runtime packages exit=" + $pip.ExitCode)
             if ($pip.ExitCode -ne 0) {
                 Add-CheckResult "Python 包 / Torch CUDA" "FAIL" $pip.Stderr -Record
                 Add-Log $pip.Stderr "WARN"
             }
             else {
-                Add-CheckResult "Python 包 / Torch CUDA" "OK" "ninja 已安装，完成后可重新检测确认。" -Record
+                Add-CheckResult "Python 包 / Torch CUDA" "OK" "Python 包安装完成，完成后可重新检测确认。" -Record
             }
         }
         else {
-            Add-CheckResult "项目 Python Runtime" "FAIL" "缺少项目 runtime，无法安装 ninja。" -Record
+            Add-CheckResult "项目 Python Runtime" "FAIL" "缺少项目 runtime，无法安装 Python 包。" -Record
         }
     }
     else {
-        Add-Log "Python 包检测结果未指向 ninja 缺失，跳过 pip 修复。"
+        Add-Log "Python 包检测结果未指向当前版本可自动修复项，跳过 pip 修复。"
     }
     Set-Progress 82
 
     $pathResult = Get-EnvCheckResult "项目路径中文检查"
-    if (Test-EnvCheckResultNeedsRepair "项目路径中文检查") {
+    if ($pathResult -and [string]$pathResult.Status -eq "FAIL" -and (Test-EnvCheckResultNeedsRepair "项目路径中文检查")) {
         $pathStatus = if ($pathResult) { [string]$pathResult.Status } else { "WARN" }
         Add-CheckResult "项目路径中文检查" $pathStatus "路径包含中文，无法自动安全搬迁。" -Record
         Add-Log "项目路径包含中文，无法自动安全搬迁。请把整个项目移动到纯英文路径后再运行。" "ERROR"
     }
+    elseif ($pathResult -and [string]$pathResult.Status -eq "WARN") {
+        Add-Log "当前版本路径中文只是警告项，无法自动搬迁，跳过路径修复。"
+    }
 
+    Save-EnvironmentCheckState -VersionKey $repairVersion
     if ($actions -gt 0) {
         Set-Progress 100
-        Set-StatusText "修复命令已触发，完成后点“开始检测”复查。" "Khaki"
-        Add-Log "一键修复已触发 $actions 个自动修复动作，完成后需要重新检测。"
+        Set-StatusText "$(Get-LeonVersionLabelText $repairVersion) 修复命令已触发，完成后点“开始检测”复查。" "Khaki"
+        Add-Log "$(Get-LeonVersionLabelText $repairVersion) 一键修复已触发 $actions 个自动修复动作，完成后需要重新检测。"
     }
     else {
         Set-Progress 100
-        Set-StatusText "最近一次检测里没有可自动修复项。" "Khaki"
-        Add-Log "一键修复完成：最近一次检测里没有可自动修复项。"
+        Set-StatusText "$(Get-LeonVersionLabelText $repairVersion) 最近一次检测里没有可自动修复项。" "Khaki"
+        Add-Log "$(Get-LeonVersionLabelText $repairVersion) 一键修复完成：最近一次检测里没有可自动修复项。"
     }
 }
 
@@ -2025,7 +2368,7 @@ function Wait-ApiReadyAsync {
             $Script:ServiceTransitionText = ""
             Update-StartButtonState $false
         }
-    })
+    }.GetNewClosure())
     $timer.Start()
 }
 
@@ -2077,7 +2420,7 @@ function Start-WarmupAsync {
             Add-Log "模型预热未完成: $($_.Exception.Message)。如果当前服务是旧进程，/warmup 会在下次重启后生效。" "WARN"
         }
         Refresh-BackendLogTail
-    })
+    }.GetNewClosure())
     $timer.Start()
 }
 
@@ -2263,7 +2606,7 @@ function Poll-TestJob {
                 Set-StatusText "多音色测试超时。" "LightCoral"
             }
         }
-    })
+    }.GetNewClosure())
     $timer.Start()
 }
 
@@ -2358,7 +2701,7 @@ function Wait-WebUiReadyAsync {
             Add-Log "WebUI 启动等待超时。" "WARN"
             Refresh-WebUiPanel | Out-Null
         }
-    })
+    }.GetNewClosure())
     $timer.Start()
 }
 
@@ -2455,6 +2798,7 @@ function Start-InitialLauncherRefreshAsync {
         $logTimer.Stop()
         $logTimer.Dispose()
         if ($Form -and $Form.IsDisposed) { return }
+        if ($Script:LogPanel -and -not $Script:LogPanel.Visible) { return }
         Refresh-BackendLogTail
     }.GetNewClosure())
     $logTimer.Start()
@@ -3312,7 +3656,7 @@ function Build-LauncherForm {
 
     $header = New-Object System.Windows.Forms.Panel
     $header.Dock = "Top"
-    $header.Height = 112
+    $header.Height = 156
     $header.Padding = New-Object System.Windows.Forms.Padding(28, 18, 28, 14)
     $header.BackColor = [System.Drawing.Color]::FromArgb(10, 14, 19)
     $root.Controls.Add($header)
@@ -3343,11 +3687,11 @@ function Build-LauncherForm {
     $side.Padding = New-Object System.Windows.Forms.Padding(18, 18, 18, 18)
     $side.BackColor = [System.Drawing.Color]::FromArgb(18, 24, 31)
     $body.Controls.Add($side)
-    $sideImage = Add-CoverImageBackground -Control $side -ImagePath $Script:SideImagePath -Description "启动器左侧背景" -HorizontalAlign "Center" -VerticalAlign "Center" -OverlayAlpha 178
+    $sideImage = $null
 
     $navBack = New-Object System.Windows.Forms.Panel
     $navBack.Location = New-Object System.Drawing.Point(18, 18)
-    $navBack.Size = New-Object System.Drawing.Size(208, 88)
+    $navBack.Size = New-Object System.Drawing.Size(208, 134)
     $navBack.BackColor = [System.Drawing.Color]::FromArgb(13, 18, 24)
     $side.Controls.Add($navBack)
 
@@ -3386,24 +3730,43 @@ function Build-LauncherForm {
 
     $Script:NavButtons = @{}
 
-    $homeNav = Add-SideButton "首页" 20 { Show-HomeLog } ([System.Drawing.Color]::FromArgb(30, 39, 49))
+    $homeNav = Add-SideButton "首页" 20 { Show-LauncherHome } ([System.Drawing.Color]::FromArgb(30, 39, 49))
     $Script:NavButtons["home"] = $homeNav
-    $envNav = Add-SideButton "环境检测" 66 { Show-EnvironmentPanel; if (-not $Script:EnvCheckRows -or $Script:EnvCheckRows.Count -eq 0) { Initialize-EnvironmentCheckRows }; Set-Progress 0 } ([System.Drawing.Color]::FromArgb(30, 39, 49))
+    $logNavButton = Add-SideButton "日志" 66 { Show-HomeLog } ([System.Drawing.Color]::FromArgb(30, 39, 49))
+    $Script:NavButtons["log"] = $logNavButton
+    $envNav = Add-SideButton "环境检测" 112 { Show-EnvironmentPanel; if (-not $Script:EnvCheckRows -or $Script:EnvCheckRows.Count -eq 0) { Initialize-EnvironmentCheckRows }; Set-Progress 0 } ([System.Drawing.Color]::FromArgb(30, 39, 49))
     $Script:NavButtons["env"] = $envNav
     $navBack.SendToBack()
     $homeNav.BringToFront()
+    $logNavButton.BringToFront()
     $envNav.BringToFront()
 
     $bottomPanel = New-Object System.Windows.Forms.Panel
     $bottomPanel.Dock = "Bottom"
     $bottomPanel.Height = 132
-    $bottomPanel.BackColor = [System.Drawing.Color]::FromArgb(13, 18, 24)
+    $bottomPanel.BackColor = $side.BackColor
     $side.Controls.Add($bottomPanel)
+
+    $sidePosterImage = $null
+    $sidePosterBox = New-Object System.Windows.Forms.Panel
+    $sidePosterBox.BackColor = [System.Drawing.Color]::Transparent
+    $side.Controls.Add($sidePosterBox)
+    $sidePosterImage = Add-CoverImageBackground -Control $sidePosterBox -ImagePath $Script:SideImagePath -Description "左侧预览图" -HorizontalAlign "Center" -VerticalAlign "Center" -ScaleMode "FitWidth"
+    $resizeSidePoster = {
+        if (-not $sidePosterBox) { return }
+        $posterTop = 166
+        $posterBottomGap = $bottomPanel.Height + 18
+        $posterHeight = [Math]::Max(120, $side.ClientSize.Height - $posterTop - $posterBottomGap)
+        $sidePosterBox.Location = New-Object System.Drawing.Point(18, $posterTop)
+        $sidePosterBox.Size = New-Object System.Drawing.Size([Math]::Max(120, $side.ClientSize.Width - 36), $posterHeight)
+    }.GetNewClosure()
+    & $resizeSidePoster
+    $side.Add_Resize($resizeSidePoster)
 
     $configRow = New-Object System.Windows.Forms.Panel
     $configRow.Size = New-Object System.Drawing.Size(204, 32)
     $configRow.Location = New-Object System.Drawing.Point(0, 0)
-    $configRow.BackColor = [System.Drawing.Color]::FromArgb(13, 18, 24)
+    $configRow.BackColor = $side.BackColor
     $bottomPanel.Controls.Add($configRow)
 
     $Script:VersionCombo = New-Object System.Windows.Forms.Panel
@@ -3428,8 +3791,7 @@ function Build-LauncherForm {
         $btn.FlatAppearance.BorderSize = 1
         $btn.Add_Click({
             Set-LeonVersion ([string]$this.Tag)
-            Initialize-EnvironmentCheckRows -ResetResults
-            Set-StatusText "$(Get-LeonVersionLabel)" "Khaki"
+            Set-StatusText "已切换到 $(Get-LeonVersionLabel)。" "Khaki"
         })
         $Script:VersionCombo.Controls.Add($btn)
     }
@@ -3483,8 +3845,23 @@ function Build-LauncherForm {
     $Script:HomePanel = New-Object System.Windows.Forms.Panel
     $Script:HomePanel.Dock = "Fill"
     $Script:HomePanel.Padding = New-Object System.Windows.Forms.Padding(0)
-    $Script:HomePanel.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $Script:HomePanel.BackColor = [System.Drawing.Color]::FromArgb(5, 7, 11)
     $content.Controls.Add($Script:HomePanel)
+
+    $homeImagePath = if (Test-Path -LiteralPath $Script:HomeImagePath) { $Script:HomeImagePath } else { $Script:HeroPath }
+    $homePosterImage = $null
+    $homePosterBox = New-Object System.Windows.Forms.Panel
+    $homePosterBox.Dock = "Fill"
+    $homePosterBox.BackColor = [System.Drawing.Color]::FromArgb(5, 7, 11)
+    $Script:HomePanel.Controls.Add($homePosterBox)
+    $homePosterImage = Add-CoverImageBackground -Control $homePosterBox -ImagePath $homeImagePath -Description "首页主视觉" -HorizontalAlign "Center" -VerticalAlign "Center" -ScaleMode "Cover"
+
+    $Script:LogPanel = New-Object System.Windows.Forms.Panel
+    $Script:LogPanel.Dock = "Fill"
+    $Script:LogPanel.Padding = New-Object System.Windows.Forms.Padding(0)
+    $Script:LogPanel.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
+    $Script:LogPanel.Visible = $false
+    $content.Controls.Add($Script:LogPanel)
 
     $logNav = New-Object System.Windows.Forms.FlowLayoutPanel
     $logNav.Dock = "None"
@@ -3494,7 +3871,7 @@ function Build-LauncherForm {
     $logNav.Padding = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
     $logNav.BackColor = [System.Drawing.Color]::FromArgb(12, 16, 21)
     $logNav.WrapContents = $false
-    $Script:HomePanel.Controls.Add($logNav)
+    $Script:LogPanel.Controls.Add($logNav)
 
     function Add-LogButton {
         param([string]$Key, [string]$Text)
@@ -3531,19 +3908,19 @@ function Build-LauncherForm {
     $Script:LogBox.Size = New-Object System.Drawing.Size(820, 520)
     $Script:LogBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
     $Script:LogBox.BackColor = [System.Drawing.Color]::FromArgb(9, 13, 18)
-    $Script:HomePanel.Controls.Add($Script:LogBox)
+    $Script:LogPanel.Controls.Add($Script:LogBox)
     $Script:LogBox.BringToFront()
     $logNav.BringToFront()
     $Script:LauncherLogBox = $Script:LogBox
     Set-LogTabActive "launcher"
-    $Script:HomePanel.Add_Resize({
+    $Script:LogPanel.Add_Resize({
         if ($logNav) {
-            $logNav.Size = New-Object System.Drawing.Size($Script:HomePanel.ClientSize.Width, 42)
+            $logNav.Size = New-Object System.Drawing.Size($Script:LogPanel.ClientSize.Width, 42)
         }
         if ($Script:LogBox) {
-            $height = [Math]::Max(80, $Script:HomePanel.ClientSize.Height - 42)
+            $height = [Math]::Max(80, $Script:LogPanel.ClientSize.Height - 42)
             $Script:LogBox.Location = New-Object System.Drawing.Point(0, 42)
-            $Script:LogBox.Size = New-Object System.Drawing.Size($Script:HomePanel.ClientSize.Width, $height)
+            $Script:LogBox.Size = New-Object System.Drawing.Size($Script:LogPanel.ClientSize.Width, $height)
         }
     })
 
@@ -3582,6 +3959,16 @@ function Build-LauncherForm {
     $repairButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(102, 110, 132)
     $repairButton.Add_Click({ Repair-Environment })
     $envActions.Controls.Add($repairButton)
+
+    $Script:EnvVersionLabel = New-Object System.Windows.Forms.Label
+    $Script:EnvVersionLabel.Text = "当前检测 / 修复：$(Get-LeonVersionLabel)"
+    $Script:EnvVersionLabel.Location = New-Object System.Drawing.Point(262, 7)
+    $Script:EnvVersionLabel.Size = New-Object System.Drawing.Size(520, 22)
+    $Script:EnvVersionLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $Script:EnvVersionLabel.ForeColor = [System.Drawing.Color]::FromArgb(206, 216, 226)
+    $Script:EnvVersionLabel.BackColor = [System.Drawing.Color]::Transparent
+    $Script:EnvVersionLabel.Font = New-Font 9 ([System.Drawing.FontStyle]::Bold)
+    $envActions.Controls.Add($Script:EnvVersionLabel)
 
     $Script:ProgressBar = New-Object System.Windows.Forms.ProgressBar
     $Script:ProgressBar.Dock = "Top"
@@ -3625,6 +4012,7 @@ function Build-LauncherForm {
     $form.Add_Shown({
         Set-StatusText "就绪，正在检查服务状态..." "Khaki"
         Sync-VllmGpuControls
+        Show-LauncherHome
         Set-LogTabActive "launcher"
         Start-InitialLauncherRefreshAsync -Form $form
     })
@@ -3632,6 +4020,17 @@ function Build-LauncherForm {
         if ($Script:StatusLabel) {
             $Script:StatusLabel.Location = New-Object System.Drawing.Point([Math]::Max(520, $form.ClientSize.Width - 500), 42)
             $Script:StatusLabel.Size = New-Object System.Drawing.Size(460, 24)
+        }
+    })
+    $form.Add_ResizeBegin({
+        $Script:LauncherResizeActive = $true
+    })
+    $form.Add_ResizeEnd({
+        $Script:LauncherResizeActive = $false
+        foreach ($panel in @($header, $sidePosterBox, $homePosterBox)) {
+            if ($panel -and -not $panel.IsDisposed) {
+                $panel.Invalidate()
+            }
         }
     })
     $form.Add_FormClosing({
@@ -3643,6 +4042,12 @@ function Build-LauncherForm {
         }
         if ($sideImage) {
             $sideImage.Dispose()
+        }
+        if ($sidePosterImage) {
+            $sidePosterImage.Dispose()
+        }
+        if ($homePosterImage) {
+            $homePosterImage.Dispose()
         }
         if ($Script:LauncherIcon) {
             $Script:LauncherIcon.Dispose()
