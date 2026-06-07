@@ -1,7 +1,9 @@
 // IndexTTS Tavo runtime part: 44_element_audio.js // Role: native element audio controls // This fragment is concatenated by static/tavo.runtime.js; it is not a standalone script.
-    function startElementAudioFrom(track, startSec) {
+    function startElementAudioFrom(track, startSec, opts) {
+      opts = opts || {};
       if (!track || !trackPlayableUrl(track)) return false;
-      if (!isSavedTrack(track) && isLiveTrack(track) && liveStreamUrlForTrack(track) && !shouldUseElementForLiveTrack(track, startSec)) {
+      var forceLiveElement = !!opts.forceLiveElement;
+      if (!isSavedTrack(track) && isLiveTrack(track) && liveStreamUrlForTrack(track) && !forceLiveElement && !shouldUseElementForLiveTrack(track, startSec)) {
         return waitForSavedLiveTrack(track, "element live cache fallback", {
           resumeSec: startSec,
           title: "等待完整音频…",
@@ -17,8 +19,11 @@
         url = liveStreamPlaybackUrlForTrack(track, liveOffsetSec);
         sourceKind = "stream";
         track.liveElementOffsetSec = liveOffsetSec;
+        track.preferNativeLive = true;
+        try { audio.preload = "auto"; } catch (_) {}
       } else {
         track.liveElementOffsetSec = 0;
+        try { audio.preload = isSavedTrack(track) ? "metadata" : "none"; } catch (_) {}
       }
       if ((audio.currentSrc || audio.src || "") !== url) {
         audio.src = url;
@@ -48,11 +53,11 @@
           if (total) total.textContent = hint > 0 ? formatTime(hint) : "--:--";
         }
       }
-      setStatus("正在加载音频…");
-      showTrackNotice(track, "正在加载音频…", shouldUseElementForSavedTrack(track) ? "已加载音频，支持拖动" : "马上开始播放");
+      setStatus(opts.status || "正在加载音频…");
+      showTrackNotice(track, opts.title || "正在加载音频…", opts.detail || (shouldUseElementForSavedTrack(track) ? "已加载音频，支持拖动" : "马上开始播放"));
       setTrackPlaybackState(track, "loading");
       setPlayState("loading");
-      audio.play().catch(function (err) { handleAudioPlayReject("element", err, "请点播放继续"); });
+      audio.play().catch(function (err) { handleAudioPlayReject(opts.label || "element", err, opts.rejectStatus || "请点播放继续"); });
       return true;
     }
     function isUnsupportedPlayError(err) {

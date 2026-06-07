@@ -15,7 +15,7 @@ It is not a backend version. Runtime code belongs in:
 - `docs/AGENT_STATE.md`: current progress, runtime notes, and handoff context.
 - `docs/ARCHITECTURE.md`: current layout and runtime boundaries.
 - `docs/DECISIONS.md`: accepted product and engineering decisions.
-- `docs/BUGS.md`: bug ledger; record user-reported bugs here before code changes.
+- `docs/BUGS.md`: concise bug ledger; diagnose and fix code first, then update this file only when it helps handoff/regression tracking.
 - `docs/TODO.md`: prioritized next work.
 - `docs/REGRESSION.md`: validation checklist.
 
@@ -36,7 +36,7 @@ The launcher selects `vllm` or `fast6g`, then starts the selected backend throug
 The app does not require a public domain. Same-LAN testing can use:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-live-audio-v15"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v19"></script>
 ```
 
 For public tunnel usage, configure the tunnel/reverse proxy outside this repository and replace only the script host. The program should not detect, store, or require a public domain.

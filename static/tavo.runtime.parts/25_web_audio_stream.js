@@ -503,6 +503,7 @@
     var nextOffset = -1;
     var reportedFirstPcmStats = false;
     var pollCount = 0;
+    var queuedPlayer = null;
 
     function recalcBufferSizes() {
       bytesPerSec = sampleRate * channels * 2;
@@ -515,7 +516,189 @@
       if (startBufferBytes < flushBytes) startBufferBytes = flushBytes;
     }
     recalcBufferSizes();
+    function canUseScriptFlag(name) {
+      try { return typeof scriptFlagEnabled === "function" && scriptFlagEnabled(name); }
+      catch (_) { return false; }
+    }
+    function pcmStats(bytes, label) {
+      if (reportedFirstPcmStats || !bytes || bytes.length < blockAlign) return;
+      var samples = Math.floor(bytes.length / blockAlign);
+      var view = new DataView(bytes.buffer, bytes.byteOffset, samples * blockAlign);
+      var maxAbs = 0;
+      var sumSq = 0;
+      var statCount = 0;
+      for (var c = 0; c < channels; c++) {
+        for (var i = 0; i < samples; i++) {
+          var sample = view.getInt16((i * channels + c) * 2, true) / 32768;
+          var abs = Math.abs(sample);
+          if (abs > maxAbs) maxAbs = abs;
+          sumSq += sample * sample;
+          statCount += 1;
+        }
+      }
+      reportedFirstPcmStats = true;
+      var rms = statCount ? Math.sqrt(sumSq / statCount) : 0;
+      hooks.debug && hooks.debug((label || "poll first PCM stats") + " peak=" + maxAbs.toFixed(4) + " rms=" + rms.toFixed(4) + " bytes=" + bytes.length);
+    }
+    function pcmBytesToOutputFloat32(bytes, outRate) {
+      outRate = Math.max(8000, Math.round(outRate || (ctx.sampleRate || sampleRate || 44100)));
+      var inputSamples = Math.floor((bytes && bytes.length ? bytes.length : 0) / blockAlign);
+      if (inputSamples <= 0) return new Float32Array(0);
+      var outputSamples = Math.max(1, Math.floor(inputSamples * outRate / Math.max(1, sampleRate * playbackRate)));
+      var view = new DataView(bytes.buffer, bytes.byteOffset, inputSamples * blockAlign);
+      var out = new Float32Array(outputSamples);
+      for (var i = 0; i < outputSamples; i++) {
+        var srcPos = i * sampleRate * playbackRate / outRate;
+        var idx = Math.floor(srcPos);
+        var frac = srcPos - idx;
+        if (idx >= inputSamples - 1) idx = inputSamples - 1;
+        var off0 = idx * blockAlign;
+        var s0 = view.getInt16(off0, true) / 32768;
+        var s1 = s0;
+        if (idx + 1 < inputSamples) s1 = view.getInt16((idx + 1) * blockAlign, true) / 32768;
+        out[i] = s0 + (s1 - s0) * frac;
+      }
+      return out;
+    }
+    async function createQueuedPcmPlayer() {
+      var outRate = Math.max(8000, Math.round(ctx.sampleRate || sampleRate || 44100));
+      var useWorklet = !!(ctx.audioWorklet && window.Blob && window.URL && !canUseScriptFlag("scriptProcessorPcm"));
+      if (useWorklet) {
+        try {
+          var processorName = "idx-live-pcm-player-" + Math.random().toString(36).slice(2);
+          var code = [
+            "class P extends AudioWorkletProcessor{",
+            "constructor(){super();this.q=[];this.cur=null;this.off=0;this.played=0;this.total=0;this.stopped=false;this.started=false;this.under=false;this.tick=0;this.port.onmessage=e=>{const d=e.data||{};if(d.type==='push'&&d.samples){this.q.push(d.samples);this.total+=d.samples.length;}else if(d.type==='stop'){this.stopped=true;}}}",
+            "process(i,o){const outs=o[0]||[];const n=outs[0]?outs[0].length:128;let had=false,under=false;for(let x=0;x<n;x++){let s=0;if(!this.cur&&this.q.length){this.cur=this.q.shift();this.off=0;}if(this.cur){s=this.cur[this.off++]||0;had=true;this.played++;if(this.off>=this.cur.length){this.cur=null;this.off=0;}}else{under=true;}for(let c=0;c<outs.length;c++)outs[c][x]=s;}if(had&&!this.started){this.started=true;this.port.postMessage({type:'started'});}if(under&&!this.under){this.under=true;this.port.postMessage({type:'underrun',played:this.played,total:this.total});}if(!under&&this.under){this.under=false;this.port.postMessage({type:'recovered',played:this.played,total:this.total});}this.tick+=n;if(this.tick>=sampleRate/4){this.tick=0;this.port.postMessage({type:'progress',played:this.played,total:this.total});}return !this.stopped;}",
+            "}",
+            "registerProcessor('" + processorName + "',P);"
+          ].join("");
+          var url = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+          try { await ctx.audioWorklet.addModule(url); } finally { try { URL.revokeObjectURL(url); } catch (_) {} }
+          var node = new AudioWorkletNode(ctx, processorName, { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
+          var player = {
+            kind: "audioWorklet",
+            sampleRate: outRate,
+            node: node,
+            connected: false,
+            queuedSamples: 0,
+            playedSamples: 0,
+            push: function (samples) {
+              if (!samples || !samples.length) return;
+              this.queuedSamples += samples.length;
+              node.port.postMessage({ type: "push", samples: samples }, [samples.buffer]);
+            },
+            start: function () {
+              if (this.connected) return;
+              connectNode(node);
+              this.connected = true;
+            },
+            stop: function () {
+              try { node.port.postMessage({ type: "stop" }); } catch (_) {}
+              try { node.disconnect(); } catch (_) {}
+              this.connected = false;
+            },
+            playedSec: function () { return Math.max(0, this.playedSamples / Math.max(1, this.sampleRate)); },
+            bufferedSec: function () { return Math.max(0, (this.queuedSamples - this.playedSamples) / Math.max(1, this.sampleRate)); }
+          };
+          node.port.onmessage = function (ev) {
+            var d = (ev && ev.data) || {};
+            if (isFinite(Number(d.played))) player.playedSamples = Math.max(player.playedSamples, Number(d.played) || 0);
+            if (d.type === "started") hooks.onStateChange && hooks.onStateChange("playing");
+            else if (d.type === "underrun" && started && !readEnded) hooks.onStateChange && hooks.onStateChange("buffering");
+            else if (d.type === "recovered") hooks.onStateChange && hooks.onStateChange("resumed");
+          };
+          hooks.debug && hooks.debug("PCM queued output=AudioWorklet sr=" + outRate);
+          return player;
+        } catch (e) {
+          hooks.debug && hooks.debug("AudioWorklet PCM 不可用，尝试 ScriptProcessor: " + (e && e.message ? e.message : e));
+        }
+      }
+      if (ctx.createScriptProcessor && !canUseScriptFlag("noScriptProcessorPcm")) {
+        try {
+          var node2 = ctx.createScriptProcessor(4096, 0, 1);
+          var player2 = {
+            kind: "scriptProcessor",
+            sampleRate: outRate,
+            node: node2,
+            connected: false,
+            queue: [],
+            current: null,
+            offset: 0,
+            queuedSamples: 0,
+            playedSamples: 0,
+            underrun: false,
+            push: function (samples) {
+              if (!samples || !samples.length) return;
+              this.queue.push(samples);
+              this.queuedSamples += samples.length;
+            },
+            start: function () {
+              if (this.connected) return;
+              connectNode(node2);
+              this.connected = true;
+            },
+            stop: function () {
+              try { node2.disconnect(); } catch (_) {}
+              this.connected = false;
+              this.queue = [];
+              this.current = null;
+              this.offset = 0;
+            },
+            playedSec: function () { return Math.max(0, this.playedSamples / Math.max(1, this.sampleRate)); },
+            bufferedSec: function () { return Math.max(0, (this.queuedSamples - this.playedSamples) / Math.max(1, this.sampleRate)); }
+          };
+          node2.onaudioprocess = function (ev) {
+            var out = ev.outputBuffer.getChannelData(0);
+            var had = false;
+            var under = false;
+            for (var i = 0; i < out.length; i++) {
+              var sample = 0;
+              if (!player2.current && player2.queue.length) {
+                player2.current = player2.queue.shift();
+                player2.offset = 0;
+              }
+              if (player2.current) {
+                sample = player2.current[player2.offset++] || 0;
+                had = true;
+                player2.playedSamples += 1;
+                if (player2.offset >= player2.current.length) {
+                  player2.current = null;
+                  player2.offset = 0;
+                }
+              } else {
+                under = true;
+              }
+              out[i] = sample;
+            }
+            if (had && !player2.startedNotified) {
+              player2.startedNotified = true;
+              hooks.onStateChange && hooks.onStateChange("playing");
+            }
+            if (under && !player2.underrun && started && !readEnded) {
+              player2.underrun = true;
+              hooks.onStateChange && hooks.onStateChange("buffering");
+            } else if (!under && player2.underrun) {
+              player2.underrun = false;
+              hooks.onStateChange && hooks.onStateChange("resumed");
+            }
+          };
+          hooks.debug && hooks.debug("PCM queued output=ScriptProcessor sr=" + outRate);
+          return player2;
+        } catch (e2) {
+          hooks.debug && hooks.debug("ScriptProcessor PCM 不可用，退回 BufferSource: " + (e2 && e2.message ? e2.message : e2));
+        }
+      }
+      return null;
+    }
+    try {
+      if (!canUseScriptFlag("bufferSourcePcm")) queuedPlayer = await createQueuedPcmPlayer();
+    } catch (e) {
+      queuedPlayer = null;
+      hooks.debug && hooks.debug("PCM queued output 初始化失败，退回 BufferSource: " + (e && e.message ? e.message : e));
+    }
     function getPlaybackTimeSec() {
+      if (queuedPlayer && started) return startOffsetSec + (queuedPlayer.playedSec() * playbackRate);
       if (!started || !scheduledSpans.length) return 0;
       var now = 0;
       try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
@@ -537,11 +720,14 @@
         }
         var now = 0;
         try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
-        if (nextAt && now + 0.03 >= nextAt) {
-          try { clearInterval(endTimer); } catch (_) {}
-          endTimer = null;
-          hooks.onStateChange && hooks.onStateChange("ended");
+        if (queuedPlayer && started) {
+          if (!(readEnded && queuedPlayer.bufferedSec() <= 0.05)) return;
+        } else if (!(nextAt && now + 0.03 >= nextAt)) {
+          return;
         }
+        try { clearInterval(endTimer); } catch (_) {}
+        endTimer = null;
+        hooks.onStateChange && hooks.onStateChange("ended");
       }, 120);
     }
     function armBufferWatcher() {
@@ -550,7 +736,7 @@
         if (stopped || readEnded || !started) return;
         var now = 0;
         try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
-        var ahead = nextAt - now;
+        var ahead = queuedPlayer ? queuedPlayer.bufferedSec() : (nextAt - now);
         if (ahead <= 0.12 && !bufferingState) {
           bufferingState = true;
           hooks.onStateChange && hooks.onStateChange("buffering");
@@ -561,6 +747,7 @@
       }, 120);
     }
     function bufferedAheadSec() {
+      if (queuedPlayer && started) return queuedPlayer.bufferedSec();
       var now = 0;
       try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
       return Math.max(0, nextAt - now);
@@ -587,6 +774,7 @@
       if (bufferTimer) { try { clearInterval(bufferTimer); } catch (_) {} bufferTimer = null; }
       if (playNotifyTimer) { try { clearTimeout(playNotifyTimer); } catch (_) {} playNotifyTimer = null; }
       if (stableNotifyTimer) { try { clearTimeout(stableNotifyTimer); } catch (_) {} stableNotifyTimer = null; }
+      if (queuedPlayer) { try { queuedPlayer.stop(); } catch (_) {} }
       activeSources.slice().forEach(function (node) { try { node.stop(0); } catch (_) {} });
       hooks.onStateChange && hooks.onStateChange("stopped");
     }
@@ -638,6 +826,10 @@
     }
     async function schedulePcm(bytes) {
       if (!bytes || bytes.length < blockAlign) return;
+      if (queuedPlayer) {
+        await scheduleQueuedPcm(bytes);
+        return;
+      }
       try {
         if (stopped) throw new Error(stopReason || "播放已停止");
         await ensureAudioContextRunning("pcm.schedulePcm");
@@ -706,6 +898,41 @@
         }
       } catch (e) {
         throw new Error("[step:pcm.schedulePcm] " + (e && e.message ? e.message : e));
+      }
+    }
+    async function scheduleQueuedPcm(bytes) {
+      try {
+        if (stopped) throw new Error(stopReason || "播放已停止");
+        await ensureAudioContextRunning("pcm.queue");
+        pcmStats(bytes, "poll first PCM stats");
+        var inputSamples = Math.floor(bytes.length / blockAlign);
+        var inputDur = inputSamples / Math.max(1, sampleRate);
+        var out = pcmBytesToOutputFloat32(bytes, queuedPlayer.sampleRate);
+        if (!out.length) return;
+        queuedPlayer.push(out);
+        scheduledAudioSec += inputDur;
+        nextAt = (ctx.currentTime || 0) + queuedPlayer.bufferedSec();
+        if (!started) {
+          try {
+            if (typeof wakeRuntimeAudioOutput === "function") wakeRuntimeAudioOutput(ctx, output || ctx.destination, "pcm-queue-first");
+          } catch (_) {}
+          queuedPlayer.start();
+          playbackStartCtxTime = ctx.currentTime || 0;
+          started = true;
+          hooks.onStateChange && hooks.onStateChange("scheduled");
+          playNotifyTimer = setTimeout(function () {
+            playNotifyTimer = null;
+            if (!stopped && String(ctx.state || "running") === "running") hooks.onStateChange && hooks.onStateChange("playing");
+            else if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
+          }, 80);
+          notifyStableWhenBuffered(Math.max(900, prebufferSec * 700), 0.65);
+          armBufferWatcher();
+        } else if (bufferingState && queuedPlayer.bufferedSec() >= 0.65) {
+          bufferingState = false;
+          hooks.onStateChange && hooks.onStateChange("resumed");
+        }
+      } catch (e) {
+        throw new Error("[step:pcm.queuePcm] " + (e && e.message ? e.message : e));
       }
     }
     async function scheduleStartIfReady(force) {

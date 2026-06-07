@@ -341,6 +341,7 @@
     }
     function shouldUseWebAudioForLiveTrack(track) {
       if (!(track && track.mode !== "single" && isLiveTrack(track) && track.streamUrl)) return false;
+      if (track.preferNativeLive || track.webAudioDeviceFailed) return false;
       if (scriptFlagEnabled("noWebAudioLive")) return false;
       if (scriptFlagEnabled("nativeLive") || scriptFlagEnabled("elementLive")) return false;
       return true;
@@ -348,8 +349,39 @@
     function shouldUseElementForLiveTrack(track, startOffsetSec) {
       if (!(track && isLiveTrack(track) && liveStreamUrlForTrack(track))) return false;
       startOffsetSec = Math.max(0, Number(startOffsetSec || 0) || 0);
-      if (startOffsetSec > 0.01) return false;
-      return scriptFlagEnabled("nativeLive") || scriptFlagEnabled("elementLive");
+      var forced = !!(track.preferNativeLive || track.webAudioDeviceFailed);
+      if (startOffsetSec > 0.01 && !forced) return false;
+      return !!(forced || scriptFlagEnabled("nativeLive") || scriptFlagEnabled("elementLive"));
+    }
+    function isWebAudioDeviceFailureMessage(msg) {
+      msg = String(msg || "");
+      return /Failed to start the audio device|audio device|AudioContext.*interrupted|interrupted.*AudioContext|\[step:(pcm\.)?schedulePcm\.resume\]/i.test(msg);
+    }
+    function startNativeLiveElementFallback(track, reason, opts) {
+      opts = opts || {};
+      if (!track || !isLiveTrack(track) || !liveStreamUrlForTrack(track)) return false;
+      var resumeSec = opts.resumeSec;
+      if (!isFinite(Number(resumeSec))) resumeSec = trackResumeSec(track);
+      resumeSec = Math.max(0, Number(resumeSec) || 0);
+      track.preferNativeLive = true;
+      track.webAudioDeviceFailed = true;
+      track.streaming = true;
+      track.allowStreamPlay = false;
+      track.pausedByUser = false;
+      setTrackStreamHealth(track, "ok");
+      setTrackPlaybackState(track, "loading");
+      setPlayState("loading");
+      stopWebAudioPlayback("switch");
+      clearElementAudioSrc();
+      debugLog("↪️ WebAudio 输出链路不可用，切同 key native live audio reason=" + (reason || "") + " cacheKey=" + (track.cacheKey || "") + " start=" + resumeSec.toFixed(2), "#ffd479");
+      return startElementAudioFrom(track, resumeSec, {
+        forceLiveElement: true,
+        label: "native-live",
+        status: opts.status || "切换实时音频通道…",
+        title: opts.title || "切换实时音频通道…",
+        detail: opts.detail || "继续播放同一个实时流，不重新生成",
+        rejectStatus: opts.rejectStatus || "点播放继续实时音频"
+      });
     }
     function waitForSavedLiveTrack(track, label, opts) {
       opts = opts || {};
@@ -738,13 +770,13 @@
               setStatus("收到音频，准备播放…");
               if (!hasActiveSubtitleRows(track)) showTrackNotice(track, "收到音频", "准备播放");
             } else if (state === "audio_suspended") {
+              stopWaitTimer();
+              if (startNativeLiveElementFallback(track, "audio_suspended", {
+                resumeSec: trackResumeSec(track),
+                title: "切换实时音频通道…",
+                detail: "WebAudio 被系统暂停，改用同一个实时流"
+              })) return;
               if (scheduleSameJobRecovery("audio_suspended")) return;
-              track.pausedByUser = true;
-              track.lastWebAudioSec = trackResumeSec(track);
-              setTrackPlaybackState(track, "paused");
-              setPlayState("idle");
-              setStatus("音频通道未放行，点播放继续");
-              if (!hasActiveSubtitleRows(track)) showTrackNotice(track, "音频通道未放行", "点播放继续，不会从头开始");
             } else if (state === "playing") {
               stopWaitTimer();
               webAudioActiveTrack = track;
@@ -798,6 +830,11 @@
               setStatus(trackPlaybackLabel(track));
             } else if (state === "interrupted") {
               stopWaitTimer();
+              if (startNativeLiveElementFallback(track, "stream_interrupted", {
+                resumeSec: trackResumeSec(track),
+                title: "切换实时音频通道…",
+                detail: "WebAudio 中断，改用同一个实时流"
+              })) return;
               if (scheduleSameJobRecovery("stream_interrupted")) return;
               setTrackStreamHealth(track, "interrupted");
               markWebAudioStopped(track);
@@ -895,6 +932,14 @@
         if ((e && e.name === "AbortError") || /播放已停止|停止播放/i.test(msg)) {
           setTrackPlaybackState(track, "idle");
           setPlayState("idle");
+          return false;
+        }
+        if (track.cacheKey && isWebAudioDeviceFailureMessage(msg)) {
+          startNativeLiveElementFallback(track, "web_audio_device_failed", {
+            resumeSec: trackResumeSec(track),
+            title: "切换实时音频通道…",
+            detail: "WebAudio 设备没有放行，改用同一个实时流"
+          });
           return false;
         }
         if (isNetworkStreamError(e) && track.cacheKey) {

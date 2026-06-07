@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260607-ai-live-v18";
+  var LOADER_VERSION = "20260607-ai-live-v19";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
@@ -288,8 +288,68 @@
     } catch (_) {}
   }
 
+  function nativeUnlockWavUrl() {
+    try {
+      if (window.__indextts_tavo_native_unlock_url) return window.__indextts_tavo_native_unlock_url;
+      var rate = 8000;
+      var frames = Math.max(1, Math.floor(rate * 0.08));
+      var bytes = new Uint8Array(44 + frames * 2);
+      function putText(off, text) {
+        for (var i = 0; i < text.length; i++) bytes[off + i] = text.charCodeAt(i);
+      }
+      function put16(off, value) {
+        bytes[off] = value & 255; bytes[off + 1] = (value >> 8) & 255;
+      }
+      function put32(off, value) {
+        bytes[off] = value & 255; bytes[off + 1] = (value >> 8) & 255; bytes[off + 2] = (value >> 16) & 255; bytes[off + 3] = (value >> 24) & 255;
+      }
+      putText(0, "RIFF"); put32(4, 36 + frames * 2); putText(8, "WAVE");
+      putText(12, "fmt "); put32(16, 16); put16(20, 1); put16(22, 1);
+      put32(24, rate); put32(28, rate * 2); put16(32, 2); put16(34, 16);
+      putText(36, "data"); put32(40, frames * 2);
+      for (var j = 0; j < frames; j++) {
+        var edge = Math.min(1, j / Math.max(1, Math.floor(rate * 0.012)), (frames - j) / Math.max(1, Math.floor(rate * 0.012)));
+        var sample = Math.round(Math.sin(2 * Math.PI * 440 * j / rate) * 56 * Math.max(0, edge));
+        put16(44 + j * 2, sample < 0 ? sample + 65536 : sample);
+      }
+      var blob = new Blob([bytes], { type: "audio/wav" });
+      window.__indextts_tavo_native_unlock_url = URL.createObjectURL(blob);
+      return window.__indextts_tavo_native_unlock_url;
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function primeNativeAudioElementForGesture() {
+    try {
+      var el = window.__indextts_tavo_native_unlock_audio;
+      if (!el) {
+        el = new Audio();
+        el.preload = "auto";
+        el.volume = 1;
+        try { el.setAttribute("playsinline", ""); el.setAttribute("webkit-playsinline", ""); } catch (_) {}
+        window.__indextts_tavo_native_unlock_audio = el;
+      }
+      var url = nativeUnlockWavUrl();
+      if (url && el.src !== url) {
+        el.src = url;
+        try { el.load(); } catch (_) {}
+      }
+      var p = el.play();
+      if (p && typeof p.then === "function") {
+        p.then(function () {
+          setTimeout(function () { try { el.pause(); el.currentTime = 0; } catch (_) {} }, 90);
+        }).catch(function () {});
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function primeRuntimeAudioContext(ownerMessageId) {
     try {
+      primeNativeAudioElementForGesture();
       ownerMessageId = String(ownerMessageId || "").trim();
       var ctx = window.__indextts_tavo_preprimed_audio_context;
       var owner = String(window.__indextts_tavo_preprimed_audio_owner || "").trim();

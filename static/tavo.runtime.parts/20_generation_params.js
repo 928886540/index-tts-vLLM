@@ -365,6 +365,66 @@
       window.__indextts_tavo_preprimed_audio_owner_at = Date.now();
     } catch (_) {}
   }
+  function nativeUnlockWavUrl() {
+    try {
+      if (window.__indextts_tavo_native_unlock_url) return window.__indextts_tavo_native_unlock_url;
+      var rate = 8000;
+      var frames = Math.max(1, Math.floor(rate * 0.08));
+      var bytes = new Uint8Array(44 + frames * 2);
+      function putText(off, text) {
+        for (var i = 0; i < text.length; i++) bytes[off + i] = text.charCodeAt(i);
+      }
+      function put16(off, value) {
+        bytes[off] = value & 255; bytes[off + 1] = (value >> 8) & 255;
+      }
+      function put32(off, value) {
+        bytes[off] = value & 255; bytes[off + 1] = (value >> 8) & 255; bytes[off + 2] = (value >> 16) & 255; bytes[off + 3] = (value >> 24) & 255;
+      }
+      putText(0, "RIFF"); put32(4, 36 + frames * 2); putText(8, "WAVE");
+      putText(12, "fmt "); put32(16, 16); put16(20, 1); put16(22, 1);
+      put32(24, rate); put32(28, rate * 2); put16(32, 2); put16(34, 16);
+      putText(36, "data"); put32(40, frames * 2);
+      for (var j = 0; j < frames; j++) {
+        var edge = Math.min(1, j / Math.max(1, Math.floor(rate * 0.012)), (frames - j) / Math.max(1, Math.floor(rate * 0.012)));
+        var sample = Math.round(Math.sin(2 * Math.PI * 440 * j / rate) * 56 * Math.max(0, edge));
+        put16(44 + j * 2, sample < 0 ? sample + 65536 : sample);
+      }
+      var blob = new Blob([bytes], { type: "audio/wav" });
+      window.__indextts_tavo_native_unlock_url = URL.createObjectURL(blob);
+      return window.__indextts_tavo_native_unlock_url;
+    } catch (_) {
+      return "";
+    }
+  }
+  function primeNativeAudioElementForGesture(label) {
+    try {
+      var el = window.__indextts_tavo_native_unlock_audio;
+      if (!el) {
+        el = new Audio();
+        el.preload = "auto";
+        el.volume = 1;
+        try { el.setAttribute("playsinline", ""); el.setAttribute("webkit-playsinline", ""); } catch (_) {}
+        window.__indextts_tavo_native_unlock_audio = el;
+      }
+      var url = nativeUnlockWavUrl();
+      if (url && el.src !== url) {
+        el.src = url;
+        try { el.load(); } catch (_) {}
+      }
+      var p = el.play();
+      if (p && typeof p.then === "function") {
+        p.then(function () {
+          setTimeout(function () { try { el.pause(); el.currentTime = 0; } catch (_) {} }, 90);
+        }).catch(function (e) {
+          debugLog("⚠️ native audio unlock 被拒绝 " + (label || "") + ": " + (e && e.message ? e.message : e), "#fc9");
+        });
+      }
+      return true;
+    } catch (e) {
+      debugLog("⚠️ native audio unlock 失败 " + (label || "") + ": " + (e && e.message ? e.message : e), "#fc9");
+      return false;
+    }
+  }
   function startRuntimeAudioKeepalive(ctx) {
     if (!ctx) return;
     if (PRIMED_KEEPALIVE_SOURCE && PRIMED_KEEPALIVE_CTX === ctx) return;
@@ -496,6 +556,7 @@
   function primeAudioContext(ownerMessageId, opts) {
     opts = opts || {};
     ownerMessageId = normalizeAudioOwner(ownerMessageId);
+    primeNativeAudioElementForGesture(opts.reason || "audio-context");
     if (opts.forceNew) resetPreprimedAudioContext(opts.reason || "forceNew");
     var existing = takePreprimedAudioContext(ownerMessageId);
     if (existing) return existing;

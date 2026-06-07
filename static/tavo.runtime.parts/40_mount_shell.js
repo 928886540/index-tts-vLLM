@@ -75,7 +75,7 @@
           + '<div class="idx-picker-grid" data-role="picker-grid"></div>'
           + '<div class="idx-picker-pager"><button type="button" data-role="picker-prev">‹</button><span data-role="picker-page">1 / 1</span><button type="button" data-role="picker-next">›</button></div>'
         + '</dialog>',
-      '  <audio data-role="audio" preload="none"></audio><div class="idx-error idx-hidden" data-role="error"></div>',
+      '  <audio data-role="audio" preload="none" playsinline webkit-playsinline></audio><div class="idx-error idx-hidden" data-role="error"></div>',
       '</div>'
     ].join("");
 
