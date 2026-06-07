@@ -132,6 +132,7 @@ For `launcher/LEON-Launcher.ps1`:
 - One-click repair lives inside the environment detection page and only repairs rows present for the currently selected version.
 - WinForms `Timer` callbacks that reference local variables such as `$timer`, `$start`, or `$lastWaitLog` must use `.GetNewClosure()`; otherwise async startup can throw `op_Subtraction` / null variable errors.
 - Backend log refresh debounce must stop/dispose the captured timer instance, not call methods on `$Script:BackendLogTimer` from inside the callback, because later refresh requests can clear the global reference before an old tick fires.
+- API calls should go through the launcher URL helpers so `/warmup`, `warmup`, or an accidentally empty `$Script:ApiBase` cannot reach `WebRequest.Create()` as an invalid URI.
 
 ## Resource Guard
 

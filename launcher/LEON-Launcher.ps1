@@ -39,9 +39,9 @@ $Script:LauncherWindowTitle = "LEON 启动器 - IndexTTS2"
 $Script:SingleInstanceMutexName = "Local\LEON.IndexTTS2.Launcher"
 $Script:SingleInstanceMutex = $null
 $Script:ApiPort = 9880
-$Script:ApiBase = "http://127.0.0.1:$Script:ApiPort"
+$Script:ApiBase = "http://127.0.0.1:{0}" -f $Script:ApiPort
 $Script:WebUiPort = 7860
-$Script:WebUiBase = "http://127.0.0.1:$Script:WebUiPort"
+$Script:WebUiBase = "http://127.0.0.1:{0}" -f $Script:WebUiPort
 $Script:LanHost = if ($env:LEON_LAN_HOST) { $env:LEON_LAN_HOST } else { Get-PreferredLanHost }
 $Script:TavoCacheBust = "20260606-live-audio-v7"
 $Script:VersionKey = if ($env:LEON_LAUNCHER_VERSION) { $env:LEON_LAUNCHER_VERSION } else { "vllm" }
@@ -666,6 +666,42 @@ function Show-RepairPanel {
     Show-EnvironmentPanel
 }
 
+function Get-LeonApiBase {
+    $fallback = "http://127.0.0.1:{0}" -f $Script:ApiPort
+    $candidate = if ([string]::IsNullOrWhiteSpace($Script:ApiBase)) { $fallback } else { [string]$Script:ApiBase }
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($candidate, [System.UriKind]::Absolute, [ref]$uri)) {
+        $candidate = $fallback
+    }
+    $Script:ApiBase = $candidate.TrimEnd([char[]]@('/'))
+    return $Script:ApiBase
+}
+
+function Get-LeonApiUrl {
+    param([string]$Path = "")
+    $base = Get-LeonApiBase
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $base }
+    $text = [string]$Path
+    $absolute = $null
+    if ([System.Uri]::TryCreate($text, [System.UriKind]::Absolute, [ref]$absolute)) {
+        return $text
+    }
+    if ($text.StartsWith("?")) { return ($base + $text) }
+    return ($base + "/" + $text.TrimStart([char[]]@('/')))
+}
+
+function Resolve-LeonRequestUri {
+    param([string]$Uri)
+    if ([string]::IsNullOrWhiteSpace($Uri)) {
+        throw "请求 URL 为空"
+    }
+    $absolute = $null
+    if ([System.Uri]::TryCreate($Uri, [System.UriKind]::Absolute, [ref]$absolute)) {
+        return [string]$Uri
+    }
+    return (Get-LeonApiUrl $Uri)
+}
+
 function Test-LogTextSelected {
     if (-not $Script:LogBox) { return $false }
     try {
@@ -684,7 +720,8 @@ function Invoke-LeonJson {
         [string]$ContentType = "application/json; charset=utf-8",
         [int]$TimeoutSec = 30
     )
-    $request = [System.Net.HttpWebRequest][System.Net.WebRequest]::Create($Uri)
+    $resolvedUri = Resolve-LeonRequestUri $Uri
+    $request = [System.Net.HttpWebRequest][System.Net.WebRequest]::Create($resolvedUri)
     $request.Method = $Method
     $request.Accept = "application/json"
     $request.Timeout = [Math]::Max(1, $TimeoutSec) * 1000
@@ -2385,6 +2422,7 @@ function Wait-ApiReadyAsync {
 function Start-WarmupAsync {
     if ($Script:WarmupStarted) { return }
     $Script:WarmupStarted = $true
+    $warmupUrl = Get-LeonApiUrl "warmup"
     Add-Log "检查 LEON 服务模型预热状态..."
     Set-StatusText "LEON 服务已启动，正在检查预热状态..." "Khaki"
 
@@ -2396,7 +2434,7 @@ function Start-WarmupAsync {
         try {
             $state = $null
             try {
-                $state = Invoke-LeonJson -Uri "$Script:ApiBase/warmup" -TimeoutSec 5
+                $state = Invoke-LeonJson -Uri $warmupUrl -TimeoutSec 5
             }
             catch {
                 $state = $null
@@ -2415,7 +2453,7 @@ function Start-WarmupAsync {
             }
             Add-Log "开始请求 LEON 服务模型预热..."
             Set-StatusText "LEON 服务已启动，正在预热模型..." "Khaki"
-            $resp = Invoke-LeonJson -Uri "$Script:ApiBase/warmup" -Method Post -TimeoutSec 180
+            $resp = Invoke-LeonJson -Uri $warmupUrl -Method Post -TimeoutSec 180
             if ($resp.status -eq "ok" -or $resp.status -eq "already_warmed") {
                 Set-StatusText "模型预热完成，服务地址：$Script:ApiBase" "LightGreen"
                 Add-Log "模型预热完成: status=$($resp.status), elapsed=$($resp.elapsed_s)s, voice=$($resp.voice)"
@@ -2427,7 +2465,7 @@ function Start-WarmupAsync {
         }
         catch {
             Set-StatusText "服务已启动，预热未完成，可稍后重试或直接使用。" "Khaki"
-            Add-Log "模型预热未完成: $($_.Exception.Message)。如果当前服务是旧进程，/warmup 会在下次重启后生效。" "WARN"
+            Add-Log "模型预热未完成: $($_.Exception.Message)。warmup=$warmupUrl。如果当前服务是旧进程，/warmup 会在下次重启后生效。" "WARN"
         }
         Refresh-BackendLogTail
     }.GetNewClosure())
