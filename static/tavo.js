@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260607-ai-live-v27";
+  var LOADER_VERSION = "20260607-ai-live-v28";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
@@ -189,6 +189,18 @@
     return arr.length ? arr[arr.length - 1] : null;
   }
 
+  function historySnapshotForMessage(messageId) {
+    var tracks = persistableHistoryTracks(localTracksForMessage(messageId));
+    var latest = tracks.length ? tracks[tracks.length - 1] : null;
+    var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
+    return {
+      latest: latest,
+      historyCount: tracks.length,
+      resumeSec: resumeSec,
+      title: shortName(latest && latest.voice)
+    };
+  }
+
   function shortName(v) {
     v = String(v || "").trim();
     if (!v) return "语音";
@@ -208,7 +220,7 @@
       ".idx-card[data-loader-shell='1']{position:relative;overflow:hidden;height:450px;min-height:450px;border-radius:18px;background:radial-gradient(circle at 88% 8%,rgba(216,167,255,.22),transparent 40%),linear-gradient(160deg,rgba(27,21,34,.55) 0%,rgba(18,14,24,.48) 54%,rgba(12,9,16,.55) 100%);border:1px solid rgba(206,170,230,.22);padding:16px;display:flex;flex-direction:column;backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%)}",
       ".idx-card[data-loader-shell='1'] .idx-gear,.idx-card[data-loader-shell='1'] .idx-playback-toggle{position:absolute;top:26px;height:36px;border-radius:999px;border:1px solid rgba(206,170,230,.24);background:rgba(20,14,28,.46);color:rgba(238,231,244,.86);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2}.idx-card[data-loader-shell='1'] .idx-gear{right:14px;width:42px}.idx-card[data-loader-shell='1'] .idx-gear svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}.idx-card[data-loader-shell='1'] .idx-playback-toggle{right:60px;width:38px;min-width:38px;font-size:11px;font-weight:900;font-family:inherit;color:rgba(216,241,255,.88)}",
       ".idx-card[data-loader-shell='1'] .idx-top{display:flex;align-items:center;gap:12px;min-width:0;padding-right:94px;min-height:56px}.idx-card[data-loader-shell='1'] .idx-cover{width:56px;height:56px;flex:0 0 56px;border-radius:14px;background:#241a2c;display:flex;align-items:center;justify-content:center;color:#e9c8ff;font-size:18px;font-weight:800;background-size:cover;background-position:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 10px 24px rgba(0,0,0,.34)}.idx-card[data-loader-shell='1'] .idx-cover[data-has-image='1']{font-size:0;color:transparent}.idx-card[data-loader-shell='1'] .idx-info{flex:1;min-width:0}.idx-card[data-loader-shell='1'] .idx-name{font-size:18px;font-weight:800;color:#e9c8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.idx-card[data-loader-shell='1'] .idx-status{margin-top:4px;font-size:12px;color:rgba(238,231,244,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
-      ".idx-card[data-loader-shell='1'] .idx-loader-gap{height:64px;flex:0 0 64px}",
+      ".idx-card[data-loader-shell='1'] .idx-loader-gap{height:64px;flex:0 0 64px;display:flex;align-items:center;justify-content:center;padding:0 24px}.idx-card[data-loader-shell='1'] .idx-loader-progress{position:relative;width:min(260px,72%);height:6px;border-radius:999px;overflow:hidden;background:rgba(206,170,230,.13);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}.idx-card[data-loader-shell='1'] .idx-loader-progress span{position:absolute;left:-42%;top:0;width:42%;height:100%;border-radius:inherit;background:linear-gradient(90deg,rgba(200,144,232,.10),rgba(216,167,255,.95),rgba(142,203,255,.75));animation:idx-loader-bar 1.05s ease-in-out infinite}@keyframes idx-loader-bar{0%{transform:translateX(0)}100%{transform:translateX(340%)}}",
       ".idx-card[data-loader-shell='1'] .idx-subtitle{position:relative;display:flex;flex-direction:column;justify-content:center;margin:12px 0 0;padding:28px 10px 9px;background:linear-gradient(180deg,rgba(60,36,84,.30) 0%,rgba(40,24,56,.48) 50%,rgba(60,36,84,.30) 100%);border:1px solid rgba(206,170,230,.18);border-radius:14px;height:172px;min-height:172px;max-height:172px;overflow:hidden}.idx-card[data-loader-shell='1'] .idx-sub-notice{margin:auto;text-align:center;color:rgba(244,231,255,.78);font-size:13px;line-height:1.45;max-width:92%;padding:10px 8px}.idx-card[data-loader-shell='1'] .idx-sub-notice strong{display:block;color:#fff;font-size:15px;margin-bottom:4px}.idx-card[data-loader-shell='1'] .idx-sub-notice span{display:block;color:rgba(244,231,255,.56);font-size:12px}",
       ".idx-card[data-loader-shell='1'] .idx-card-counter{position:absolute;right:10px;top:8px;min-width:48px;height:24px;padding:0 9px;border:1px solid rgba(206,170,230,.20);border-radius:999px;background:rgba(20,14,28,.58);color:rgba(238,231,244,.78);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none}.idx-card[data-loader-shell='1'] .idx-sub-delete{position:absolute;left:10px;top:8px;width:26px;height:24px;border:1px solid rgba(255,120,145,.26);border-radius:999px;background:rgba(120,38,52,.30);color:#ffd5dd;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:2}.idx-card[data-loader-shell='1'] .idx-sub-delete svg{width:14px;height:14px;fill:currentColor;stroke:none}",
       ".idx-card[data-loader-shell='1'] .idx-controls{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:18px;margin-bottom:6px;min-height:74px;flex:0 0 74px;flex-wrap:nowrap}.idx-card[data-loader-shell='1'] .idx-ctrl{border:1px solid rgba(206,170,230,.16);border-radius:50%;background:rgba(206,170,230,.08);color:#eee7f4;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}.idx-card[data-loader-shell='1'] .idx-ctrl svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round;transform-origin:center;transform-box:fill-box}.idx-card[data-loader-shell='1'] .idx-ctrl-sm{width:42px;height:42px}.idx-card[data-loader-shell='1'] .idx-ctrl-main,.idx-card[data-loader-shell='1'] .idx-ctrl-add{width:66px;height:66px}.idx-card[data-loader-shell='1'] .idx-ctrl-main{background:#c890e8;color:#170e20;border-color:rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(200,144,232,.25)}.idx-card[data-loader-shell='1'] .idx-ctrl-main svg,.idx-card[data-loader-shell='1'] .idx-ctrl-add svg{width:28px;height:28px;fill:currentColor;stroke:none}.idx-card[data-loader-shell='1'] .idx-ctrl-main[data-state='loading'] svg{animation:idx-loader-spin .9s linear infinite;will-change:transform}.idx-card[data-loader-shell='1'] .idx-ctrl-add{margin-left:22px;background:rgba(154,94,182,.42);color:#f4e7ff;box-shadow:0 10px 24px rgba(154,94,182,.18)}.idx-card[data-loader-shell='1'] .idx-live-exit,.idx-card[data-loader-shell='1'] .idx-hidden{display:none!important}@keyframes idx-loader-spin{to{transform:rotate(360deg)}}",
@@ -411,15 +423,29 @@
 
   function updateLazyHistory(root, messageId) {
     if (!root || !messageId) return;
-    var latest = latestTrack(messageId);
-    var historyCount = persistableHistoryTracks(localTracksForMessage(messageId)).length;
+    var snapshot = historySnapshotForMessage(messageId);
+    var latest = snapshot.latest;
+    var historyCount = snapshot.historyCount;
     var status = $(root, '[data-role="lazy-status"]');
     var progress = $(root, ".idx-lazy-progress span");
     var title = $(root, ".idx-lazy-title");
-    var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
+    var resumeSec = snapshot.resumeSec;
     if (title && latest && latest.voice) title.textContent = shortName(latest.voice);
     if (status) status.textContent = latest ? ("历史音频 " + historyCount + " 条 · " + formatTime(resumeSec)) : "历史音频 0 条 · 点开播放器";
     if (progress) progress.style.width = (latest && latest.duration_s ? Math.max(2, Math.min(100, resumeSec / Number(latest.duration_s || 1) * 100)) : 0) + "%";
+    updateLoaderShellHistory(root, snapshot);
+  }
+
+  function updateLoaderShellHistory(root, snapshot) {
+    if (!root || !snapshot) return;
+    var shell = $(root, '[data-role="loader-shell"]');
+    if (!shell) return;
+    var counter = $(shell, '[data-role="counter"]');
+    var title = $(shell, '[data-role="title"]');
+    var cover = $(shell, '[data-role="cover"]');
+    if (counter) counter.textContent = snapshot.historyCount ? ("1/" + snapshot.historyCount) : "0/0";
+    if (title && snapshot.latest && snapshot.latest.voice) title.textContent = snapshot.title;
+    if (cover && snapshot.latest && snapshot.latest.voice && !cover.getAttribute("data-has-image")) cover.textContent = snapshot.title.slice(0, 1) || "语";
   }
 
   function setLoaderShellStatus(root, title, detail, loading) {
@@ -452,16 +478,16 @@
   function renderLoaderShell(root, messageId, action) {
     if (!root) return;
     var shell = $(root, '[data-role="loader-shell"]');
-    var latest = latestTrack(messageId);
-    var historyCount = persistableHistoryTracks(localTracksForMessage(messageId)).length;
-    var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
-    var title = shortName(latest && latest.voice);
+    var snapshot = historySnapshotForMessage(messageId);
+    var historyCount = snapshot.historyCount;
+    var title = snapshot.title;
     var statusText = action === "play" ? "准备播放…" : "播放器打开中…";
     var detail = action === "gear" ? "设置面板会在加载完成后自动打开" : "组件加载在后台继续，不会创建新的语音任务";
     var narratorAvatar = assetUrl("tavo.assets/narrator.png");
     var coverStyle = narratorAvatar ? ' style="background-image:url(&quot;' + escapeHtml(narratorAvatar).replace(/"/g, "%22") + '&quot;)" data-has-image="1"' : "";
     if (shell) {
       setLoaderShellStatus(root, statusText, detail, action === "play");
+      updateLoaderShellHistory(root, snapshot);
       return;
     }
     root.removeAttribute("data-lazy-placeholder");
@@ -471,11 +497,12 @@
       '  <button class="idx-gear" type="button" data-role="gear" data-loader-action="gear" aria-label="设置" title="设置">' + gearIcon() + '</button>',
       '  <button class="idx-playback-toggle" type="button" data-role="playback-mode-toggle" data-loader-action="playback" aria-label="播放模式" title="播放模式">L</button>',
       '  <div class="idx-top"><div class="idx-cover" data-role="cover"' + coverStyle + '>' + escapeHtml(title.slice(0, 1) || "旁") + '</div><div class="idx-info"><div class="idx-name" data-role="title">' + escapeHtml(title) + '</div><div class="idx-status" data-role="status">' + escapeHtml(statusText) + '</div></div></div>',
-      '  <div class="idx-loader-gap" aria-hidden="true"></div>',
+      '  <div class="idx-loader-gap" aria-hidden="true"><div class="idx-loader-progress" data-role="loader-progress"><span></span></div></div>',
       '  <div class="idx-subtitle" data-role="subtitle"><button class="idx-sub-delete" type="button" data-role="delete" data-loader-action="delete" aria-label="删除当前音频" title="删除当前音频">' + deleteIcon() + '</button><div class="idx-card-counter" data-role="counter">' + (historyCount ? "1/" + historyCount : "0/0") + '</div><div class="idx-sub-notice"><strong>' + escapeHtml(statusText) + '</strong><span>' + escapeHtml(detail) + '</span></div></div>',
       '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" data-loader-action="prev" aria-label="上一首" title="上一首">' + prevIcon() + '</button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-loader-action="play" data-state="' + (action === "play" ? "loading" : "idle") + '" aria-label="播放">' + playIcon() + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式"></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" data-loader-action="next" aria-label="下一首" title="下一首">' + nextIcon() + '</button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" data-loader-action="add" aria-label="生成音频" title="生成音频">' + musicIcon() + '</button></div>',
       '</div>'
     ].join("");
+    try { setTimeout(function () { refreshLazyHistoryAsync(root, messageId); }, 0); } catch (_) {}
   }
 
   function findRuntimeTarget(scope, selector, shellRoot) {
@@ -667,11 +694,11 @@
 
     on($(root, '[data-role="lazy-play"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
     on($(root, '[data-role="lazy-play"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
-    on($(root, '[data-role="lazy-open"]'), "pointerdown", function () { armTapGuard(1600); });
-    on($(root, '[data-role="lazy-open"]'), "touchstart", function () { armTapGuard(1600); });
+    on($(root, '[data-role="lazy-open"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
+    on($(root, '[data-role="lazy-open"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(messageId); });
     on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(messageId); route('[data-role="play"]'); });
-    on($(root, '[data-role="lazy-open"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); mountRuntime(""); });
-    on($(root, '[data-role="lazy-open"]'), "keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); mountRuntime(""); } });
+    on($(root, '[data-role="lazy-open"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(messageId); mountRuntime(""); });
+    on($(root, '[data-role="lazy-open"]'), "keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); primeRuntimeAudioContext(messageId); mountRuntime(""); } });
   } catch (e) {
     try { console.error("[IndexTTS TAVO loader]", e && e.stack ? e.stack : e); } catch (_) {}
   }

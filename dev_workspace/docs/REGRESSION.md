@@ -61,6 +61,9 @@ Current smoke must prove:
 - transient generation/playback progress appears in a one-line transparent hint floating above the lyric panel near the seek/time area, not in the avatar-side status or lyric toolbar;
 - floating progress can combine synthesis progress with current playback segment, such as `AI 合成 13/36 · 播第 3/36 段`, and must not rapidly cycle through connection/buffer micro-states;
 - LIVE controls keep play/pause at the saved-audio play button position and put live-exit at the music-note position;
+- LIVE page counter remains on the right side of the subtitle toolbar when delete is hidden;
+- lazy snapshot open/play gestures pre-prime WebAudio/native audio before runtime loading;
+- loader shell shows a loading bar and refreshes the history counter from Tavo/local saved tracks;
 - lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
 - the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps delete/page counter in place.
 - loading spinner keeps a stable center/size and must not visibly wobble.

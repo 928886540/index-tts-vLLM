@@ -1505,6 +1505,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
         notice: (document.querySelector(".idx-sub-notice") || {}).textContent || "",
         loaderSeek: !!(shell && shell.querySelector(".idx-seek")),
         loaderGap: !!(shell && shell.querySelector(".idx-loader-gap")),
+        loaderProgress: !!(shell && shell.querySelector(".idx-loader-progress")),
         coverBg: shell ? getComputedStyle(shell.querySelector('[data-role="cover"]') || shell).backgroundImage : "",
         coverText: (shell && shell.querySelector('[data-role="cover"]') ? shell.querySelector('[data-role="cover"]').textContent : "") || "",
         voices: fetches.filter((r) => /\/voices(?:[?#]|$)/.test(r.url)).length,
@@ -1520,8 +1521,8 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     if (!/播放器打开中/.test(immediateShell.status + immediateShell.notice)) {
       throw new Error("loader shell should show visible loading status: " + JSON.stringify(immediateShell));
     }
-    if (immediateShell.loaderSeek || !immediateShell.loaderGap) {
-      throw new Error("loader shell must not expose a fake seek/progress bar: " + JSON.stringify(immediateShell));
+    if (immediateShell.loaderSeek || !immediateShell.loaderGap || !immediateShell.loaderProgress) {
+      throw new Error("loader shell should show a loading bar without exposing a fake seek control: " + JSON.stringify(immediateShell));
     }
     if (!/narrator\.png/.test(immediateShell.coverBg || "")) {
       throw new Error("loader shell should use narrator avatar as default cover: " + JSON.stringify(immediateShell));
