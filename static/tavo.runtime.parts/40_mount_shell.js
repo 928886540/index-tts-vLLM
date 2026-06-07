@@ -16,8 +16,7 @@
       '  <button class="idx-playback-toggle" type="button" data-role="playback-mode-toggle" aria-label="播放模式" title="播放模式">L</button>',
       '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点音符生成</div></div></div>',
       '  <div class="idx-seek-wrap"><input class="idx-seek" data-role="seek" type="range" min="0" max="1000" value="0" disabled><div class="idx-time"><span data-role="current">00:00</span><span data-role="total">--:--</span></div></div>',
-      '  <div class="idx-progress-line" data-role="progress"></div>',
-      '  <div class="idx-subtitle" data-role="subtitle"><button class="idx-sub-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button><div class="idx-card-counter" data-role="counter">0/0</div><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点音符生成音频</span></div></div>',
+      '  <div class="idx-subtitle" data-role="subtitle"><div class="idx-sub-toolbar" data-role="subtitle-toolbar"><button class="idx-sub-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button><div class="idx-progress-line idx-progress-empty" data-role="progress"></div><div class="idx-card-counter" data-role="counter">0/0</div></div><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点音符生成音频</span></div></div>',
       '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式" title="退出流式"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/><path d="M7 21h10"/></svg></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
@@ -99,6 +98,7 @@
     var cur = first(root, '[data-role="current"]', '.idx-time span:first-child');
     var total = first(root, '[data-role="total"]', '.idx-time span:last-child');
     var progressLine = first(root, '[data-role="progress"]', '.idx-progress-line');
+    var subtitleToolbar = first(root, '[data-role="subtitle-toolbar"]', '.idx-sub-toolbar');
     var panel = first(root, '[data-role="panel"]', '.idx-panel');
     var gear = first(root, '[data-role="gear"]', '.idx-gear');
     var close = first(root, '[data-role="close"]', '.idx-close');
@@ -207,6 +207,52 @@
       progressLine.textContent = text;
       progressLine.classList.toggle("idx-progress-empty", !text);
       try { progressLine.title = text || ""; } catch (_) {}
+      try { setupOneLineScroll(progressLine, !!text); } catch (_) {}
+    }
+    function setupOneLineScroll(el, autoScroll) {
+      if (!el) return;
+      if (el.__idxScrollTimer) { clearInterval(el.__idxScrollTimer); el.__idxScrollTimer = null; }
+      if (el.__idxScrollDelay) { clearTimeout(el.__idxScrollDelay); el.__idxScrollDelay = null; }
+      try {
+        el.scrollLeft = 0;
+        el.style.overflowX = "hidden";
+        el.style.whiteSpace = "nowrap";
+        el.style.textOverflow = autoScroll ? "clip" : "ellipsis";
+      } catch (_) {}
+      if (!autoScroll) return;
+      el.__idxScrollDelay = setTimeout(function () {
+        var max = 0;
+        try { max = Number(el.scrollWidth || 0) - Number(el.clientWidth || 0); } catch (_) { max = 0; }
+        if (!(max > 2)) {
+          try { el.style.textOverflow = "ellipsis"; } catch (_) {}
+          return;
+        }
+        var pos = 0;
+        var dir = 1;
+        var hold = 14;
+        el.__idxScrollTimer = setInterval(function () {
+          try {
+            if (el.isConnected === false) {
+              clearInterval(el.__idxScrollTimer);
+              el.__idxScrollTimer = null;
+              return;
+            }
+            max = Number(el.scrollWidth || 0) - Number(el.clientWidth || 0);
+            if (!(max > 2)) {
+              clearInterval(el.__idxScrollTimer);
+              el.__idxScrollTimer = null;
+              el.scrollLeft = 0;
+              el.style.textOverflow = "ellipsis";
+              return;
+            }
+            if (hold > 0) { hold -= 1; return; }
+            pos += dir;
+            if (pos >= max) { pos = max; dir = -1; hold = 18; }
+            else if (pos <= 0) { pos = 0; dir = 1; hold = 12; }
+            el.scrollLeft = pos;
+          } catch (_) {}
+        }, 36);
+      }, 80);
     }
     function setStatus(v) {
       if (!status) return;
@@ -216,11 +262,7 @@
       status.textContent = text;
       try { status.title = status.textContent || ""; } catch (_) {}
       try {
-        if (status.__idxScrollTimer) { clearInterval(status.__idxScrollTimer); status.__idxScrollTimer = null; }
-        status.scrollLeft = 0;
-        status.style.overflowX = "hidden";
-        status.style.whiteSpace = "nowrap";
-        status.style.textOverflow = "ellipsis";
+        setupOneLineScroll(status, false);
       } catch (_) {}
     }
     function historyStatusText() {

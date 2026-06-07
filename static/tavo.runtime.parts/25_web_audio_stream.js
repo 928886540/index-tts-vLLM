@@ -997,6 +997,8 @@
       }
       var done = false;
       try { done = String(res.headers.get("X-IndexTTS-Live-Done") || "") === "1"; } catch (_) {}
+      var headerTotal = NaN;
+      try { headerTotal = Number(res.headers.get("X-IndexTTS-PCM-Total")); } catch (_) { headerTotal = NaN; }
       if (chunk.length) {
         if (pollCount <= 3 || !reportedFirstPcmStats) hooks.debug && hooks.debug("PCM poll chunk bytes=" + chunk.length + " next=" + nextOffset + " done=" + (done ? "1" : "0"));
         appendPending(chunk);
@@ -1009,6 +1011,10 @@
         }
       } else if (!started) {
         hooks.onStateChange && hooks.onStateChange("waiting_pcm");
+      }
+      if (done && isFinite(headerTotal) && nextOffset < headerTotal) {
+        hooks.debug && hooks.debug("PCM done header arrived before tail was drained; continue next=" + nextOffset + " total=" + headerTotal);
+        done = false;
       }
       if (done) { readEnded = true; break; }
     }

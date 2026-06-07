@@ -1864,7 +1864,7 @@ async def tts_dialogue_stream_job_pcm_endpoint(
             return Response(
                 content=bytes(job.pcm[read_offset:end]),
                 media_type="application/octet-stream",
-                headers=_live_pcm_headers(cache_key, sample_rate, read_offset, end, total, job.finished.is_set(), "live"),
+                headers=_live_pcm_headers(cache_key, sample_rate, read_offset, end, total, job.finished.is_set() and end >= total, "live"),
             )
         return Response(
             status_code=204,
@@ -1891,7 +1891,7 @@ async def tts_dialogue_stream_job_pcm_endpoint(
             return Response(
                 content=pcm[read_offset:end],
                 media_type="application/octet-stream",
-                headers=_live_pcm_headers(cache_key, sample_rate, read_offset, end, total, True, "done"),
+                headers=_live_pcm_headers(cache_key, sample_rate, read_offset, end, total, end >= total, "done"),
             )
         except Exception as e:
             return JSONResponse(status_code=400, content={"message": "live pcm cache read failed", "Exception": str(e), "cache_key": cache_key})

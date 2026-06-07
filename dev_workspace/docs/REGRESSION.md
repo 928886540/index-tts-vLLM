@@ -58,8 +58,9 @@ Current smoke must prove:
 - same-key LIVE recovery never POSTs another job or DELETEs the job;
 - restored LIVE pending jobs from `tavo.get` reconnect same key with `start_s`;
 - avatar-side header status keeps only stable voice labels or "音色未设置";
-- transient generation/playback progress appears in the separate fixed-height progress line, not in the avatar-side status;
-- lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete.
+- transient generation/playback progress appears in the one-line sticky lyric toolbar beside delete/page counter, not in the avatar-side status;
+- lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
+- the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and long progress text does not wrap.
 - loading spinner keeps a stable center/size and must not visibly wobble.
 
 ## Tavo Storage Guard
@@ -84,6 +85,7 @@ Current smoke must prove:
 
 - LIVE and saved playback are separate states.
 - LIVE WebAudio must prefer same-key `/tts_dialogue_stream_job/{cache_key}/pcm` polling before the final WAV cache is saved; chunked WAV is compatibility fallback only.
+- `/pcm` chunk headers must only send `X-IndexTTS-Live-Done=1` when `X-IndexTTS-PCM-Next-Offset >= X-IndexTTS-PCM-Total`; frontend should keep polling if a stale/old backend sends premature done.
 - PCM playback should prefer AudioWorklet queued output, then ScriptProcessor, then BufferSource scheduling. Real Tavo logs should show which output path is active.
 - User play/generate gestures should prime both WebAudio and native `<audio>` output, so a later same-key native live fallback can start without waiting for final cache.
 - LIVE pending/restored tracks keep `playbackMode=live`, `state=live`, and last resume seconds.

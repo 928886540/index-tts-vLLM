@@ -26,12 +26,12 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v19"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v21"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v19`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v21`.
 - Tavo settings/config read `tavo.get` first; `localStorage` is fallback only.
 - `tavo.set` failures surface as "设置保存失败".
 - Saved tracks and pending jobs prefer `tavo.get`; deletion writes through `tavo.set`.
@@ -39,7 +39,7 @@ Current code state:
 - Empty player disables play and keeps music-note enabled.
 - AI mode does not submit `voices.default`; explicit role mappings are required.
 - AI mode with no explicit mapping shows "音色未设置" / mapping error instead of falling back to a default voice.
-- Avatar-side status is only the configured/current voice label; LLM/TTS/LIVE progress uses the separate progress line.
+- Avatar-side status is only the configured/current voice label; LLM/TTS/LIVE progress uses a one-line sticky toolbar inside the lyric panel, beside delete and page counter.
 - Restored LIVE pending tracks keep resume seconds and reconnect the same key with `start_s`, without a new POST.
 - LIVE uses same-key live PCM polling before cache落盘. Frontend PCM output now prefers an AudioWorklet queue, then ScriptProcessor, then BufferSource scheduling; user gesture also primes native audio. If WebAudio device startup fails, the same LIVE key can switch to native live `<audio>` before cache落盘 instead of waiting for saved audio.
 - If LIVE WebAudio is unstable when the cache file lands, the frontend can stop WebAudio and force native saved `<audio>` playback as a final fallback, not the primary LIVE path.
@@ -54,6 +54,7 @@ node --check static\tavo.js
 node --check static\tavo.runtime.js
 node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
 $manifest = Get-Content -Raw static\tavo.runtime.manifest.json | ConvertFrom-Json; $code = "(async function(){`n"; foreach ($m in $manifest.modules) { $code += (Get-Content -Raw (Join-Path static $m.file)) + "`n" }; $code += "`n})();"; $code | node --check -
+python -m py_compile vllm\indextts2_api.py fast6g\indextts2_api.py
 node dev_workspace\dev_tools\test_tavo_widget_playwright.js
 git diff --check
 ```
@@ -64,6 +65,9 @@ Additional evidence for the latest no-sound reports:
 
 - Cache WAV `vllm/outputs/cache/a161f65daed31387d94bb5f5a0772b238830598c.wav` is non-silent: about `170.837s`, `22050 Hz`, mono 16-bit, RMS around `-14.08 dB`.
 - User console showed `/pcm` chunks with non-zero `peak/rms`, so PCM was arriving and not silent. A later `Failed to start the audio device` happened after switching chat/app and should be treated as an output-session interruption, not proof that PCM data is bad.
+- Local `/pcm` smoke confirmed non-silent PCM on vLLM: first PCM around 3.7s, `sample_rate=22050`, `peak=0.928`, `rms=0.292`. It also exposed a header bug where `X-IndexTTS-Live-Done=1` could be returned before the client drained `X-IndexTTS-PCM-Total`; current code fixes backend done semantics and frontend keeps pulling if `next < total`.
+- After v21 changes, vLLM was restarted from old PID `29652` to new PID `10792`; `/health` is OK with `vllm_gpu_memory_utilization=0.15`. Fresh `/pcm` smoke key `7297fa757ba5ec1a21e137408937ceebddd51719` was deleted after test; first PCM arrived around `1.927s`, chunk `75264 bytes`, `peak=0.928436`, `rms=0.351856`, and `done=1` had `next=total=75264`.
+- Playwright smoke confirms progress now lives in `.idx-subtitle .idx-sub-toolbar` with delete and page counter, `position: sticky`, `white-space: nowrap`, and card height `450px`.
 - Boundary conclusion: the TTS service/API backend generated audible audio; the failing path is frontend/mobile LIVE playback/output. Current code polls same-key PCM, sends it through queued WebAudio output, primes the native audio session on gesture, and can fall back to same-key native live `<audio>` before final cache落盘.
 
 Still needs real Tavo/mobile validation:
@@ -85,7 +89,7 @@ Current high-priority validation:
 - BUG-046: play button semantics, delete cleanup, restored LIVE same-key resume.
 - BUG-047: AI role mapping without default fallback.
 - BUG-048: LIVE/WebAudio audible playback and native cache handoff.
-- BUG-049: avatar-side voice label, progress line, and spinner stability.
+- BUG-049: avatar-side voice label, subtitle-toolbar progress line, and spinner stability.
 - BUG-044 / BUG-045: launcher visual/log validation.
 
 ## Active Direction

@@ -872,13 +872,18 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       const play = document.querySelector('[data-role="play"]');
       const status = (document.querySelector('[data-role="status"]') || {}).textContent || "";
       const notice = (document.querySelector(".idx-subtitle") || {}).textContent || "";
+      const progress = document.querySelector('[data-role="progress"]');
       const curText = (document.querySelector('[data-role="current"]') || {}).textContent || "";
       const totalText = (document.querySelector('[data-role="total"]') || {}).textContent || "";
       const seek = document.querySelector('[data-role="seek"]');
+      const progressStyle = progress ? getComputedStyle(progress) : null;
       return {
         playState: play ? play.dataset.state : "",
         status,
         notice,
+        progressText: progress ? progress.textContent || "" : "",
+        progressParentClass: progress && progress.parentElement ? progress.parentElement.className : "",
+        progressWhiteSpace: progressStyle ? progressStyle.whiteSpace : "",
         curText,
         totalText,
         seekValue: seek ? seek.value : "",
@@ -906,10 +911,14 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (!result.liveExitVisible) {
       throw new Error("LIVE exit button should stay visible on a waiting live card: " + JSON.stringify(result));
     }
-    if (/等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频/.test(result.notice)) {
-      throw new Error("transient LIVE progress must stay out of the lyric panel: " + JSON.stringify(result));
+    const transientProgressPattern = /等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频|合成第\s*\d+\/\d+\s*段/;
+    if (transientProgressPattern.test(result.notice) && !transientProgressPattern.test(result.progressText)) {
+      throw new Error("transient LIVE progress should live in the subtitle toolbar: " + JSON.stringify(result));
     }
-    if (/等待音频|后端处理中|后端正在(?:调用\s*)?LLM|后端正在合成|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲中|实时音频重连中|正在加载音频/.test(result.status)) {
+    if (!/idx-sub-toolbar/.test(result.progressParentClass) || result.progressWhiteSpace !== "nowrap") {
+      throw new Error("subtitle progress should stay one-line inside the sticky toolbar: " + JSON.stringify(result));
+    }
+    if (transientProgressPattern.test(result.status)) {
       throw new Error("transient LIVE progress must stay out of the avatar-side status: " + JSON.stringify(result));
     }
     if (!/第二段计划歌词/.test(result.notice) || !/第三段计划歌词/.test(result.notice)) {
@@ -1405,6 +1414,8 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       const playbackToggle = document.querySelector('[data-role="playback-mode-toggle"]');
       const headerCounter = document.querySelector('[data-role="counter"]');
       const subtitleDelete = document.querySelector('.idx-subtitle [data-role="delete"]');
+      const subtitleToolbar = document.querySelector('.idx-subtitle [data-role="subtitle-toolbar"]');
+      const subtitleProgress = document.querySelector('.idx-subtitle [data-role="progress"]');
       const playBtn = document.querySelector('[data-role="play"]');
       const addBtn = document.querySelector('[data-role="add"]');
       const rewind10 = document.querySelector('[data-role="rewind10"]');
@@ -1483,6 +1494,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
             height: subtitleDelete.getBoundingClientRect().height
           } : null,
           deleteParentClass: subtitleDelete && subtitleDelete.parentElement ? subtitleDelete.parentElement.className : "",
+          deleteInSubtitle: !!(subtitleDelete && subtitleDelete.closest(".idx-subtitle")),
           counterRect: headerCounter ? {
             left: headerCounter.getBoundingClientRect().left,
             top: headerCounter.getBoundingClientRect().top,
@@ -1500,6 +1512,26 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
             height: sub.getBoundingClientRect().height
           } : null,
           counterParentClass: headerCounter && headerCounter.parentElement ? headerCounter.parentElement.className : "",
+          counterInSubtitle: !!(headerCounter && headerCounter.closest(".idx-subtitle")),
+          toolbarRect: subtitleToolbar ? {
+            left: subtitleToolbar.getBoundingClientRect().left,
+            top: subtitleToolbar.getBoundingClientRect().top,
+            right: subtitleToolbar.getBoundingClientRect().right,
+            bottom: subtitleToolbar.getBoundingClientRect().bottom,
+            width: subtitleToolbar.getBoundingClientRect().width,
+            height: subtitleToolbar.getBoundingClientRect().height
+          } : null,
+          toolbarPosition: subtitleToolbar ? getComputedStyle(subtitleToolbar).position : "",
+          progressRect: subtitleProgress ? {
+            left: subtitleProgress.getBoundingClientRect().left,
+            top: subtitleProgress.getBoundingClientRect().top,
+            right: subtitleProgress.getBoundingClientRect().right,
+            bottom: subtitleProgress.getBoundingClientRect().bottom,
+            width: subtitleProgress.getBoundingClientRect().width,
+            height: subtitleProgress.getBoundingClientRect().height
+          } : null,
+          progressParentClass: subtitleProgress && subtitleProgress.parentElement ? subtitleProgress.parentElement.className : "",
+          progressWhiteSpace: subtitleProgress ? getComputedStyle(subtitleProgress).whiteSpace : "",
           counterPointerEvents: headerCounter ? getComputedStyle(headerCounter).pointerEvents : "",
           subtitleMaskImage: sub ? (getComputedStyle(sub).maskImage || getComputedStyle(sub).webkitMaskImage || "") : "",
           statusWhiteSpace: status ? getComputedStyle(status).whiteSpace : "",
@@ -1570,14 +1602,20 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     if (!home.liveExitRect || Math.abs(home.playRect.width - home.liveExitRect.width) > 2 || Math.abs(home.playRect.height - home.liveExitRect.height) > 2) {
       throw new Error("live exit button should be circular and match the main play button size: " + JSON.stringify(home));
     }
-    if (!home.deleteRect || !/idx-subtitle/.test(home.deleteParentClass)) {
-      throw new Error("delete button should live inside the subtitle area: " + JSON.stringify(home));
+    if (!home.deleteRect || !home.deleteInSubtitle || !/idx-sub-toolbar/.test(home.deleteParentClass)) {
+      throw new Error("delete button should live inside the subtitle toolbar: " + JSON.stringify(home));
     }
-    if (!home.counterRect || !home.subtitleRect || !/idx-subtitle/.test(home.counterParentClass)) {
-      throw new Error("history page counter should live inside the subtitle area: " + JSON.stringify(home));
+    if (!home.counterRect || !home.subtitleRect || !home.counterInSubtitle || !/idx-sub-toolbar/.test(home.counterParentClass)) {
+      throw new Error("history page counter should live inside the subtitle toolbar: " + JSON.stringify(home));
     }
-    if (home.counterRect.top < home.subtitleRect.top || home.counterRect.right > home.subtitleRect.right + 1 || home.counterRect.bottom > home.subtitleRect.top + 36) {
-      throw new Error("history page counter should float at the subtitle top-right without covering the lyric body: " + JSON.stringify(home));
+    if (!home.toolbarRect || home.toolbarPosition !== "sticky") {
+      throw new Error("subtitle toolbar should stay sticky while lyrics scroll: " + JSON.stringify(home));
+    }
+    if (!home.progressRect || !/idx-sub-toolbar/.test(home.progressParentClass) || home.progressWhiteSpace !== "nowrap" || home.progressRect.height > 28) {
+      throw new Error("generation progress should be one line inside the subtitle toolbar: " + JSON.stringify(home));
+    }
+    if (home.counterRect.top < home.subtitleRect.top || home.counterRect.right > home.subtitleRect.right + 1 || home.counterRect.bottom > home.subtitleRect.top + 42) {
+      throw new Error("history page counter should stay at the subtitle toolbar right without covering the lyric body: " + JSON.stringify(home));
     }
     if (home.counterPointerEvents !== "none") {
       throw new Error("floating subtitle counter should not intercept subtitle/settings/picker taps: " + JSON.stringify(home));

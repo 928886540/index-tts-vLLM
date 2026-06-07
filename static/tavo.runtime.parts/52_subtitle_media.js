@@ -14,7 +14,17 @@
     var subtitleNoticeState = { key: "", at: 0 };
     function keepSubtitleChrome() {
       if (!subBox) return;
+      try {
+        if (subtitleToolbar) {
+          if (subtitleToolbar.parentNode !== subBox) subBox.insertBefore(subtitleToolbar, subBox.firstChild || null);
+          if (del && del.parentNode !== subtitleToolbar) subtitleToolbar.insertBefore(del, subtitleToolbar.firstChild || null);
+          if (progressLine && progressLine.parentNode !== subtitleToolbar) subtitleToolbar.insertBefore(progressLine, counter && counter.parentNode === subtitleToolbar ? counter : null);
+          if (counter && counter.parentNode !== subtitleToolbar) subtitleToolbar.appendChild(counter);
+          return;
+        }
+      } catch (_) {}
       try { if (del && del.parentNode !== subBox) subBox.appendChild(del); } catch (_) {}
+      try { if (progressLine && progressLine.parentNode !== subBox) subBox.appendChild(progressLine); } catch (_) {}
       try { if (counter && counter.parentNode !== subBox) subBox.appendChild(counter); } catch (_) {}
     }
     function isTransientProgressNotice(titleText) {
@@ -36,7 +46,7 @@
       subBox.classList.remove('idx-hidden');
       var detailHtml = detailText ? escapeHtml(detailText).replace(/\n/g, "<br>") : "";
       Array.prototype.slice.call(subBox.children).forEach(function (node) {
-        if (node === del || node === counter) return;
+        if (node === subtitleToolbar || node === del || node === counter || node === progressLine) return;
         try { node.remove(); } catch (_) {}
       });
       keepSubtitleChrome();
@@ -99,7 +109,7 @@
     function clearSubtitleDom() {
       if (!subBox) return;
       Array.prototype.slice.call(subBox.children).forEach(function (node) {
-        if (node === del || node === counter) return;
+        if (node === subtitleToolbar || node === del || node === counter || node === progressLine) return;
         try { node.remove(); } catch (_) {}
       });
       keepSubtitleChrome();
