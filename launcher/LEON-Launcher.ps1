@@ -88,6 +88,7 @@ $Script:Tabs = $null
 $Script:BackendLogTimer = $null
 $Script:WarmupStarted = $false
 $Script:ApiReadyWaitActive = $false
+$Script:ApiReadyWaitTimer = $null
 $Script:WebUiBrowser = $null
 $Script:WebUiStatusLabel = $null
 $Script:HomePanel = $null
@@ -129,6 +130,11 @@ $Script:LogTexts = @{}
 $Script:ActiveLogTab = "launcher"
 $Script:ServiceTransition = $false
 $Script:ServiceTransitionText = ""
+$Script:ServiceTransitionStartedAt = $null
+$Script:ApiReadyWaitStartedAt = $null
+$Script:WarmupVoice = "400个火爆音色/短剧解说"
+$Script:WarmupText = "短剧解说启动测试。"
+$Script:StartupSuccessBannerShown = $false
 $Script:LauncherResizeActive = $false
 
 function Get-VllmGpuMemoryUtilizationText {
@@ -1177,6 +1183,74 @@ function Set-ServiceButtonBusy {
     [System.Windows.Forms.Application]::DoEvents()
 }
 
+function Begin-ServiceTransition {
+    param([string]$ButtonText, [string]$Message)
+    $Script:ServiceTransition = $true
+    $Script:ServiceTransitionText = $Message
+    $Script:ServiceTransitionStartedAt = Get-Date
+    Set-ServiceButtonBusy $ButtonText
+    if ($Message) {
+        Set-StatusText $Message "Khaki"
+    }
+}
+
+function Complete-ServiceTransition {
+    param([bool]$Running, [string]$Message = "", [string]$ColorName = "LightGreen")
+    $Script:ServiceTransition = $false
+    $Script:ServiceTransitionText = ""
+    $Script:ServiceTransitionStartedAt = $null
+    if ($Message) {
+        Set-StatusText $Message $ColorName
+    }
+    Update-StartButtonState $Running
+}
+
+function Stop-ApiReadyWaitTimer {
+    param($Timer)
+    try {
+        if ($Timer) {
+            $Timer.Stop()
+            $Timer.Dispose()
+        }
+    }
+    catch {
+    }
+    if ($Script:ApiReadyWaitTimer -eq $Timer) {
+        $Script:ApiReadyWaitTimer = $null
+    }
+    $Script:ApiReadyWaitActive = $false
+    $Script:ApiReadyWaitStartedAt = $null
+}
+
+function Test-WarmupVoiceMatchesPreferred {
+    param([string]$Voice)
+    if ([string]::IsNullOrWhiteSpace($Voice)) { return $false }
+    $preferred = ([string]$Script:WarmupVoice).Replace("\", "/")
+    $preferredName = ($preferred -split "/")[-1]
+    $preferredName = [System.IO.Path]::GetFileNameWithoutExtension($preferredName)
+    if ([string]::IsNullOrWhiteSpace($preferredName)) { return $true }
+    return (([string]$Voice).Replace("\", "/") -match [regex]::Escape($preferredName))
+}
+
+function Show-LeonStartupSuccessBanner {
+    if ($Script:StartupSuccessBannerShown) { return }
+    $Script:StartupSuccessBannerShown = $true
+    $tavoScript = "http://$Script:LanHost`:$Script:ApiPort/static/tavo.js?v=$Script:TavoCacheBust"
+    $banner = @"
+ _      _____  ___  _   _
+| |    | ____|/ _ \| \ | |
+| |    |  _| | | | |  \| |
+| |___ | |___| |_| | |\  |
+|_____||_____|\___/|_| \_|
+
+LEON 启动成功，可以用了。
+API: $($Script:ApiBase)
+LAN: http://$($Script:LanHost):$($Script:ApiPort)
+Tavo: $tavoScript
+"@
+    Add-Log $banner
+}
+
 function Toggle-LeonService {
     if ($Script:ServiceTransition) {
         $msg = if ($Script:ServiceTransitionText) { $Script:ServiceTransitionText } else { "服务操作进行中..." }
@@ -1185,9 +1259,7 @@ function Toggle-LeonService {
         return
     }
     if (Test-ApiHealth) {
-        $Script:ServiceTransition = $true
-        $Script:ServiceTransitionText = "正在停止 LEON 服务..."
-        Set-ServiceButtonBusy "停止中..."
+        Begin-ServiceTransition "停止中..." "正在停止 LEON 服务..."
         try {
             Stop-LeonService
             Start-Sleep -Milliseconds 300
@@ -1196,9 +1268,7 @@ function Toggle-LeonService {
             else { Set-StatusText "服务已停止。" "Khaki" }
         }
         finally {
-            $Script:ServiceTransition = $false
-            $Script:ServiceTransitionText = ""
-            Update-StartButtonState ($null -ne (Test-ApiHealth))
+            Complete-ServiceTransition ($null -ne (Test-ApiHealth))
         }
         return
     }
@@ -1802,7 +1872,9 @@ function Stop-LeonServiceForLauncherExit {
             Start-Sleep -Milliseconds 500
         }
         [void](Stop-LeonPythonProcesses -Reason "关闭启动器")
+        Stop-ApiReadyWaitTimer $Script:ApiReadyWaitTimer
         $Script:WarmupStarted = $false
+        $Script:StartupSuccessBannerShown = $false
         $Script:ServiceTransition = $false
         $Script:ServiceTransitionText = ""
     }
@@ -2300,28 +2372,22 @@ function Start-LeonService {
         Add-Log "忽略重复点击：$msg" "WARN"
         return
     }
-    $Script:ServiceTransition = $true
-    $Script:ServiceTransitionText = "正在启动 LEON 服务..."
-    Set-ServiceButtonBusy "启动中..."
-    Set-StatusText "正在启动 LEON 服务..." "Khaki"
+    $Script:StartupSuccessBannerShown = $false
+    Begin-ServiceTransition "启动中..." "正在启动 LEON 服务..."
     Add-Log "启动按钮已响应，正在启动 LEON 服务..."
     if ($Script:VllmGpuCombo -and -not [string]::IsNullOrWhiteSpace($Script:VllmGpuCombo.Text)) {
         Set-VllmGpuMemoryUtilization $Script:VllmGpuCombo.Text
     }
     if (-not (Test-Path $Script:StartupBat)) {
         Add-Log "缺少启动 BAT: $Script:StartupBat" "ERROR"
-        $Script:ServiceTransition = $false
-        $Script:ServiceTransitionText = ""
-        Update-StartButtonState $false
+        Complete-ServiceTransition $false "缺少启动 BAT，请检查项目文件。" "LightCoral"
         return
     }
     $health = Test-ApiHealth
     if ($health) {
         Add-Log "LEON 服务已经在运行: $Script:ApiBase"
-        Set-StatusText "LEON 服务已运行：$Script:ApiBase" "LightGreen"
-        $Script:ServiceTransition = $false
-        $Script:ServiceTransitionText = ""
-        Update-StartButtonState $true
+        Complete-ServiceTransition $true "LEON 服务已运行：$Script:ApiBase" "LightGreen"
+        Start-WarmupAsync
         return
     }
     Add-Log "调用启动入口: $Script:StartupBat"
@@ -2365,9 +2431,7 @@ function Start-LeonService {
     }
     catch {
         Add-Log "启动失败: $($_.Exception.Message)" "ERROR"
-        $Script:ServiceTransition = $false
-        $Script:ServiceTransitionText = ""
-        Update-StartButtonState $false
+        Complete-ServiceTransition $false "启动失败，请查看日志。" "LightCoral"
     }
 }
 
@@ -2379,41 +2443,62 @@ function Refresh-StartupLogPaths {
 }
 
 function Wait-ApiReadyAsync {
-    if ($Script:ApiReadyWaitActive) { return }
-    $Script:ApiReadyWaitActive = $true
-    $timer = New-Object System.Windows.Forms.Timer
-    $timer.Interval = 3000
-    $start = Get-Date
-    $lastWaitLog = -30
-    $timer.Add_Tick({
+    if ($Script:ApiReadyWaitActive) {
         $health = Test-ApiHealth
         if ($health) {
-            $timer.Stop()
-            $timer.Dispose()
-            $Script:ApiReadyWaitActive = $false
+            Stop-ApiReadyWaitTimer $Script:ApiReadyWaitTimer
             Set-StatusText "LEON 服务已启动：$Script:ApiBase" "LightGreen"
             Add-Log "LEON 服务 ready: $Script:ApiBase"
-            $Script:ServiceTransition = $false
-            $Script:ServiceTransitionText = ""
-            Update-StartButtonState $true
+            Complete-ServiceTransition $true "LEON 服务已启动：$Script:ApiBase" "LightGreen"
             Start-WarmupAsync
             return
         }
-        $elapsed = [int]((Get-Date) - $start).TotalSeconds
-        Set-StatusText "服务启动中... ${elapsed}s" "Khaki"
-        if (($elapsed - $lastWaitLog) -ge 30) {
-            Add-Log "等待 LEON 服务 ready... ${elapsed}s"
-            $lastWaitLog = $elapsed
+        if ($Script:ApiReadyWaitTimer) {
+            return
         }
-        if ($elapsed -gt 300) {
-            $timer.Stop()
-            $timer.Dispose()
-            $Script:ApiReadyWaitActive = $false
-            Set-StatusText "LEON 服务启动超时，请查看日志。" "LightCoral"
-            Add-Log "LEON 服务启动等待超时。" "ERROR"
-            $Script:ServiceTransition = $false
-            $Script:ServiceTransitionText = ""
-            Update-StartButtonState $false
+        Add-Log "LEON 服务 ready 等待标志残留，重新建立等待定时器。" "WARN"
+    }
+    $Script:ApiReadyWaitActive = $true
+    $Script:ApiReadyWaitStartedAt = Get-Date
+    $timer = New-Object System.Windows.Forms.Timer
+    $Script:ApiReadyWaitTimer = $timer
+    $timer.Interval = 3000
+    $start = $Script:ApiReadyWaitStartedAt
+    $lastWaitLog = -30
+    $timer.Add_Tick({
+        try {
+            $health = Test-ApiHealth
+            if ($health) {
+                Stop-ApiReadyWaitTimer $timer
+                Add-Log "LEON 服务 ready: $Script:ApiBase"
+                Complete-ServiceTransition $true "LEON 服务已启动：$Script:ApiBase" "LightGreen"
+                Start-WarmupAsync
+                return
+            }
+            $elapsed = [int]((Get-Date) - $start).TotalSeconds
+            Set-StatusText "服务启动中... ${elapsed}s" "Khaki"
+            if (($elapsed - $lastWaitLog) -ge 30) {
+                Add-Log "等待 LEON 服务 ready... ${elapsed}s"
+                $lastWaitLog = $elapsed
+            }
+            if ($elapsed -gt 300) {
+                Stop-ApiReadyWaitTimer $timer
+                Add-Log "LEON 服务启动等待超时。" "ERROR"
+                Complete-ServiceTransition $false "LEON 服务启动超时，请查看日志。" "LightCoral"
+            }
+        }
+        catch {
+            Stop-ApiReadyWaitTimer $timer
+            Add-Log "LEON 服务 ready 检查异常: $($_.Exception.Message)" "ERROR"
+            $healthAfterError = Test-ApiHealth
+            if ($healthAfterError) {
+                Add-Log "LEON 服务 ready: $Script:ApiBase"
+                Complete-ServiceTransition $true "LEON 服务已启动：$Script:ApiBase" "LightGreen"
+                Start-WarmupAsync
+            }
+            else {
+                Complete-ServiceTransition $false "服务启动状态检查失败，请查看日志。" "LightCoral"
+            }
         }
     }.GetNewClosure())
     $timer.Start()
@@ -2440,31 +2525,47 @@ function Start-WarmupAsync {
                 $state = $null
             }
             if ($state -and ($state.status -eq "ok" -or $state.status -eq "already_warmed")) {
-                Set-StatusText "模型已预热，服务地址：$Script:ApiBase" "LightGreen"
-                Add-Log "模型已预热: status=$($state.status), elapsed=$($state.elapsed_s)s, voice=$($state.voice)"
-                Refresh-BackendLogTail
-                return
+                if (Test-WarmupVoiceMatchesPreferred $state.voice) {
+                    Complete-ServiceTransition $true "模型已预热，服务地址：$Script:ApiBase" "LightGreen"
+                    Add-Log "模型已预热: status=$($state.status), elapsed=$($state.elapsed_s)s, voice=$($state.voice)"
+                    Show-LeonStartupSuccessBanner
+                    Refresh-BackendLogTail
+                    return
+                }
+                Add-Log "模型已预热但不是短剧解说音色，重新预热一次: voice=$($state.voice)" "WARN"
             }
-            if ($state -and $state.status -eq "running") {
-                Set-StatusText "模型预热正在进行中..." "Khaki"
+            elseif ($state -and $state.status -eq "running") {
+                Complete-ServiceTransition $true "模型预热正在进行中..." "Khaki"
                 Add-Log "模型预热正在进行中。"
                 Refresh-BackendLogTail
                 return
             }
-            Add-Log "开始请求 LEON 服务模型预热..."
-            Set-StatusText "LEON 服务已启动，正在预热模型..." "Khaki"
-            $resp = Invoke-LeonJson -Uri $warmupUrl -Method Post -TimeoutSec 180
+            $forceWarmup = ($state -and ($state.status -eq "ok" -or $state.status -eq "already_warmed"))
+            Add-Log "开始请求 LEON 服务模型预热: voice=$Script:WarmupVoice, force=$forceWarmup"
+            Complete-ServiceTransition $true "LEON 服务已启动，正在预热模型..." "Khaki"
+            $warmupBody = @{
+                voice = $Script:WarmupVoice
+                text = $Script:WarmupText
+                force = $forceWarmup
+            } | ConvertTo-Json -Depth 4
+            $resp = Invoke-LeonJson -Uri $warmupUrl -Method Post -ContentType "application/json; charset=utf-8" -Body $warmupBody -TimeoutSec 180
             if ($resp.status -eq "ok" -or $resp.status -eq "already_warmed") {
-                Set-StatusText "模型预热完成，服务地址：$Script:ApiBase" "LightGreen"
+                Complete-ServiceTransition $true "模型预热完成，服务地址：$Script:ApiBase" "LightGreen"
                 Add-Log "模型预热完成: status=$($resp.status), elapsed=$($resp.elapsed_s)s, voice=$($resp.voice)"
+                if (Test-WarmupVoiceMatchesPreferred $resp.voice) {
+                    Show-LeonStartupSuccessBanner
+                }
+                else {
+                    Add-Log "模型预热完成，但返回音色不是短剧解说: voice=$($resp.voice)" "WARN"
+                }
             }
             else {
-                Set-StatusText "预热返回: $($resp.status)" "Khaki"
+                Complete-ServiceTransition $true "预热返回: $($resp.status)" "Khaki"
                 Add-Log "模型预热返回: $($resp | ConvertTo-Json -Depth 4)" "WARN"
             }
         }
         catch {
-            Set-StatusText "服务已启动，预热未完成，可稍后重试或直接使用。" "Khaki"
+            Complete-ServiceTransition ($null -ne (Test-ApiHealth)) "服务已启动，预热未完成，可稍后重试或直接使用。" "Khaki"
             Add-Log "模型预热未完成: $($_.Exception.Message)。warmup=$warmupUrl。如果当前服务是旧进程，/warmup 会在下次重启后生效。" "WARN"
         }
         Refresh-BackendLogTail
@@ -2508,19 +2609,17 @@ function Stop-LeonService {
     $remainingPython = @($remainingPython + @(Get-LeonPythonPids) | Sort-Object -Unique)
     if ($remaining.Count -eq 0 -and $remainingPython.Count -eq 0) {
         Add-Log "LEON 服务已停止。"
-        Set-StatusText "服务已停止。" "Khaki"
-        Update-StartButtonState $false
+        Stop-ApiReadyWaitTimer $Script:ApiReadyWaitTimer
         $Script:WarmupStarted = $false
-        $Script:ServiceTransition = $false
-        $Script:ServiceTransitionText = ""
+        $Script:StartupSuccessBannerShown = $false
+        Complete-ServiceTransition $false "服务已停止。" "Khaki"
     }
     else {
         $leftText = @()
         if ($remaining.Count -gt 0) { $leftText += "端口 PID: $($remaining -join ', ')" }
         if ($remainingPython.Count -gt 0) { $leftText += "Python PID: $($remainingPython -join ', ')" }
         Add-Log "LEON 服务仍有残留，$($leftText -join '; ')" "WARN"
-        Set-StatusText "服务仍在运行，请查看剩余 PID。" "Khaki"
-        Update-StartButtonState $true
+        Complete-ServiceTransition $true "服务仍在运行，请查看剩余 PID。" "Khaki"
     }
 }
 
