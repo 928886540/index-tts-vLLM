@@ -131,6 +131,7 @@
         getFetchLog: function () { return fetchLog.slice(); },
         clearFetchLog: function () { fetchLog.length = 0; renderRequestLog(); },
         storageBucket: storageBucket,
+        groupCharacters: null,
         lastSelect: null
       };
       function loadJson(key, fallback) {
@@ -182,10 +183,13 @@
         },
         chat: {
           current: async function () {
+            var groupCharacters = Array.isArray(window.__idxTest.groupCharacters) && window.__idxTest.groupCharacters.length
+              ? window.__idxTest.groupCharacters
+              : [{ id: 34, name: els.characterName.value || "测试角色", avatar: els.characterAvatar.value || "" }];
             return {
               id: 1,
               name: "IndexTTS Test Chat",
-              characters: [{ id: 34, name: els.characterName.value || "测试角色", avatar: els.characterAvatar.value || "" }],
+              characters: groupCharacters,
               persona: { id: 5, name: els.personaName.value || "用户", avatar: els.personaAvatar.value || "" }
             };
           }

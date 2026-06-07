@@ -57,15 +57,19 @@ Current smoke must prove:
 - LIVE starts one generation POST then same-key stream GET;
 - same-key LIVE recovery never POSTs another job or DELETEs the job;
 - restored LIVE pending jobs from `tavo.get` reconnect same key with `start_s`;
+- non-cached LIVE jobs write a chat-scoped pending card immediately after `cacheKey`; remounting the message restores that same key without a new POST, and explicit LIVE exit/delete clears pending and sends DELETE;
+- offline saved audio should first use Tavo chat file storage; if the `tavo.file.url()` path fails as an `<audio>` source, retry `tavo.file.load(..., { encoding: "dataUrl" })` as a local `blob:` before falling back to online `/cache_audio`;
 - avatar-side header status keeps only stable voice labels or "音色未设置";
 - transient generation/playback progress appears in a one-line transparent hint floating above the lyric panel near the seek/time area, not in the avatar-side status or lyric toolbar;
 - floating progress can combine synthesis progress with current playback segment, such as `AI 合成 13/36 · 播第 3/36 段`, and must not rapidly cycle through connection/buffer micro-states;
 - LIVE controls keep play/pause at the saved-audio play button position and put live-exit at the music-note position;
-- LIVE page counter remains on the right side of the subtitle toolbar when delete is hidden;
+- top controls read left-to-right as `LIVE`/`DISK`, page counter, settings; the page counter stays outside `.idx-subtitle`;
+- toggling `LIVE`/`DISK` during LIVE playback must not reset the active speaker title/avatar/voice label;
+- group chat speaker avatars use the matching `chat.characters` role avatar, while unmapped group roles are not auto-added to `voices` or AI `roles_hint`;
 - lazy snapshot open/play gestures pre-prime WebAudio/native audio before runtime loading, and the resolved `tavo.message.current().id` is synced back to the loader click closure/pre-primed owner;
 - loader shell shows a loading bar and refreshes the history counter from Tavo/local saved tracks;
 - lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
-- the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps delete/page counter in place.
+- the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps the delete control in place.
 - loading spinner keeps a stable center/size and must not visibly wobble.
 
 ## Tavo Storage Guard
@@ -74,6 +78,10 @@ Current smoke must prove:
 - Writes use `tavo.set`; `localStorage` is compatibility fallback only.
 - A failed `tavo.set` must surface as "设置保存失败" and must not show a false success.
 - Deleting the final audio must clear `currentCacheKey`, element audio source/dataset, WebAudio state, pending storage, and persisted history.
+- LIVE generation must create durable pending storage as soon as the API backend returns `cacheKey`; WebView death/lock-screen remount must restore a visible same-key card that keeps cache polling.
+- Explicit LIVE exit/delete is the only normal cleanup path for an unfinished LIVE pending card; passive page unload, app backgrounding, or playback interruption must not remove it.
+- `tavo.file.exists()` plus `tavo.file.url()` is not enough proof that an audio element can play the file path. On local file-path playback error, the frontend should use `tavo.file.load` to read the bytes and play a `blob:` URL before marking offline failed.
+- Deleting a saved/cache card must synchronously check and delete the matching Tavo chat file (`indextts-<cacheKey>.wav`) before removing persisted history. If `tavo.file.delete` fails, keep the card so the user can retry instead of leaking an offline file.
 - Live/pending/failed tracks are not saved history. Saved history count changes only after a cache-ready/saved track exists.
 
 ## Role / Voice Guard
@@ -85,6 +93,7 @@ Current smoke must prove:
 - AI mode must not submit `voices.default` or display `cfg.defaultVoice` as the current role voice.
 - AI mode with no explicit mapping must show a clear mapping error before creating a job, and the player header should show "音色未设置" rather than any default voice.
 - Frontend must not force unquoted LLM segments back to `旁白`; role ownership belongs to the LLM/backend parse result.
+- Current Tavo `chat.characters` may be used for display-only avatar lookup by exact role name. It must not auto-expand voice mappings, AI `roles_hint`, or required voice rows.
 
 ## LIVE Playback Guard
 
@@ -95,6 +104,7 @@ Current smoke must prove:
 - User play/generate gestures should prime both WebAudio and native `<audio>` output, so a later same-key native live fallback can start without waiting for final cache.
 - The music-note generate gesture must not force-close a recently pre-primed AudioContext unless it is explicitly retrying a stuck live/pending track.
 - LIVE pending/restored tracks keep `playbackMode=live`, `state=live`, and last resume seconds.
+- A fresh LIVE job must also be persisted to pending storage immediately after `cacheKey`, not only after user pauses or after DISK/background mode; this is the lock-screen/WebView-death recovery anchor.
 - LIVE pause/resume keeps the local WebAudio/PCM queue alive when the controller is still valid; if local resume fails, fallback may reconnect `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>`, but must not create a new POST.
 - Repeated WebAudio underrun returns to idle/resumable state and keeps cache polling alive; it must not force saved-cache autoplay or leave a permanent spinner.
 - If WebAudio output/device startup fails while LIVE is active, switch to same-key native live `<audio>` with `start_s` before waiting for saved `/cache_audio`.
@@ -112,6 +122,7 @@ Current smoke must prove:
 - Frontend submits one `/tts_dialogue_stream_job` body containing text, parse mode, voices, LLM config, Tavo user/character context, role hints, and generation parameters.
 - Backend-owned status/error should surface through `/tts_dialogue_job_status/{cache_key}`.
 - UI should translate raw backend phases into clear text, such as LLM call, role/emotion analysis, waiting first audio, or synthesizing segment x/y.
+- When a live job is waiting on the single TTS lock, `/tts_dialogue_job_status/{cache_key}` should include queue metrics and the Tavo progress hint should say `前面还有 X 个 TTS 任务` or `下一个开始`.
 - LIVE synthesis status should include current playback segment when known, and should be throttled enough that users can read it.
 - Do not expose raw internal copy like "文本已拆分" as the main user-facing status.
 - Native `<audio>` `seeking` / `seeked` logs should be hidden unless the script URL explicitly enables `debugSeek=1`.
@@ -144,7 +155,7 @@ nvidia-smi
 ```
 
 - Avoid running ComfyUI/SD at the same time as long TTS.
-- Keep one heavy TTS inference at a time.
+- Keep one heavy TTS inference at a time, and keep all heavy TTS paths on the shared queue wrapper so queue-ahead status remains accurate.
 - For current RTX 3060 12 GB vLLM setup: `0.11` is safer; `0.15` is the speed preset when other GPU workloads are off; avoid `0.20+` unless revalidated.
 
 ## Secret Scan

@@ -1217,6 +1217,144 @@ APP.add_middleware(
 
 tts_lock = asyncio.Lock()
 LIVE_JOBS: Dict[str, _LiveJob] = {}
+TTS_QUEUE_WAITING = deque()
+TTS_QUEUE_ACTIVE = None
+TTS_QUEUE_SEQ = 0
+
+
+def _next_tts_queue_id() -> int:
+    global TTS_QUEUE_SEQ
+    TTS_QUEUE_SEQ += 1
+    return TTS_QUEUE_SEQ
+
+
+def _tts_queue_item(kind: str, cache_key: str = "") -> dict:
+    return {
+        "id": _next_tts_queue_id(),
+        "kind": str(kind or "tts"),
+        "cache_key": str(cache_key or ""),
+        "queued_at": time.time(),
+        "perf_queued_at": time.perf_counter(),
+    }
+
+
+def _remove_tts_queue_waiter(item: dict) -> None:
+    try:
+        TTS_QUEUE_WAITING.remove(item)
+    except ValueError:
+        pass
+
+
+def _tts_queue_snapshot(cache_key: str = "", item: Optional[dict] = None) -> dict:
+    target_id = item.get("id") if item else None
+    target_key = str(cache_key or (item.get("cache_key") if item else "") or "")
+    active = TTS_QUEUE_ACTIVE
+    waiting = list(TTS_QUEUE_WAITING)
+    active_count = 1 if active else 0
+    matched = None
+    is_active = False
+    is_waiting = False
+    ahead_waiting = 0
+
+    def _matches(cur: Optional[dict]) -> bool:
+        if not cur:
+            return False
+        if target_id is not None and cur.get("id") == target_id:
+            return True
+        return bool(target_key and cur.get("cache_key") == target_key)
+
+    if _matches(active):
+        matched = active
+        is_active = True
+    else:
+        for cur in waiting:
+            if _matches(cur):
+                matched = cur
+                is_waiting = True
+                break
+            ahead_waiting += 1
+
+    if is_active:
+        ahead = 0
+        position = 1
+    elif is_waiting:
+        ahead = ahead_waiting + active_count
+        position = ahead + 1
+    else:
+        ahead = None
+        position = None
+
+    wait_s = None
+    if matched and matched.get("perf_queued_at") is not None:
+        wait_s = round(max(0.0, time.perf_counter() - float(matched["perf_queued_at"])), 3)
+    return {
+        "queue_ahead": ahead,
+        "queue_position": position,
+        "queue_size": active_count + len(waiting),
+        "queue_waiting": len(waiting),
+        "queue_active": bool(active),
+        "queue_active_kind": active.get("kind") if active else "",
+        "queue_wait_s": wait_s,
+    }
+
+
+def _write_tts_queue_metrics(metrics: Optional[dict], snapshot: dict) -> None:
+    if not isinstance(metrics, dict):
+        return
+    if snapshot.get("queue_ahead") is None:
+        return
+    for key in ("queue_ahead", "queue_position", "queue_size", "queue_waiting", "queue_active", "queue_active_kind", "queue_wait_s"):
+        metrics[key] = snapshot.get(key)
+
+
+def _refresh_live_job_queue_metrics(job: "_LiveJob") -> None:
+    if not job:
+        return
+    _write_tts_queue_metrics(job.metrics, _tts_queue_snapshot(cache_key=job.cache_key))
+
+
+class _TTSInferenceSlot:
+    def __init__(self, kind: str = "tts", cache_key: str = "", metrics: Optional[dict] = None):
+        self.item = _tts_queue_item(kind, cache_key)
+        self.metrics = metrics
+        self.acquired = False
+
+    async def __aenter__(self):
+        global TTS_QUEUE_ACTIVE
+        TTS_QUEUE_WAITING.append(self.item)
+        _write_tts_queue_metrics(self.metrics, _tts_queue_snapshot(item=self.item))
+        try:
+            await tts_lock.acquire()
+        except BaseException:
+            _remove_tts_queue_waiter(self.item)
+            _write_tts_queue_metrics(self.metrics, _tts_queue_snapshot(item=self.item))
+            raise
+        self.acquired = True
+        _remove_tts_queue_waiter(self.item)
+        self.item["acquired_at"] = time.time()
+        self.item["perf_acquired_at"] = time.perf_counter()
+        TTS_QUEUE_ACTIVE = self.item
+        _write_tts_queue_metrics(self.metrics, _tts_queue_snapshot(item=self.item))
+        if isinstance(self.metrics, dict):
+            self.metrics["lock_wait_s"] = round(
+                max(0.0, float(self.item["perf_acquired_at"]) - float(self.item["perf_queued_at"])),
+                3,
+            )
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        global TTS_QUEUE_ACTIVE
+        if self.acquired:
+            if TTS_QUEUE_ACTIVE and TTS_QUEUE_ACTIVE.get("id") == self.item.get("id"):
+                TTS_QUEUE_ACTIVE = None
+            tts_lock.release()
+        else:
+            _remove_tts_queue_waiter(self.item)
+        return False
+
+
+def _tts_inference_slot(kind: str = "tts", cache_key: str = "", metrics: Optional[dict] = None) -> "_TTSInferenceSlot":
+    return _TTSInferenceSlot(kind=kind, cache_key=cache_key, metrics=metrics)
 
 
 class TTS_Request(BaseModel):
@@ -1358,24 +1496,25 @@ async def tts_handle(req: dict):
         return check_res
     try:
         sampling_kwargs = _dialogue_infer_kwargs(req)
-        sampling_rate, wav_data = tts_pipeline.infer(
-            spk_audio_prompt=req["ref_audio_path"],
-            emo_audio_prompt=req["emo_ref_audio_path"] if req["emo_ref_audio_path"] else None,
-            text=req["text"],
-            emo_text=None,
-            use_emo_text=False,
-            emo_alpha=req["emo_alpha"],
-            top_p=req["top_p"],
-            top_k=req["top_k"],
-            temperature=req["temperature"],
-            repetition_penalty=req["repetition_penalty"],
-            max_text_tokens_per_segment=sampling_kwargs["max_text_tokens_per_segment"],
-            diffusion_steps=sampling_kwargs["diffusion_steps"],
-            max_prompt_audio_seconds=sampling_kwargs["max_prompt_audio_seconds"],
-            max_emo_audio_seconds=sampling_kwargs["max_emo_audio_seconds"],
-            s2mel_cfg_rate=sampling_kwargs["s2mel_cfg_rate"],
-            output_path=None,
-        )
+        async with _tts_inference_slot("single_tts"):
+            sampling_rate, wav_data = tts_pipeline.infer(
+                spk_audio_prompt=req["ref_audio_path"],
+                emo_audio_prompt=req["emo_ref_audio_path"] if req["emo_ref_audio_path"] else None,
+                text=req["text"],
+                emo_text=None,
+                use_emo_text=False,
+                emo_alpha=req["emo_alpha"],
+                top_p=req["top_p"],
+                top_k=req["top_k"],
+                temperature=req["temperature"],
+                repetition_penalty=req["repetition_penalty"],
+                max_text_tokens_per_segment=sampling_kwargs["max_text_tokens_per_segment"],
+                diffusion_steps=sampling_kwargs["diffusion_steps"],
+                max_prompt_audio_seconds=sampling_kwargs["max_prompt_audio_seconds"],
+                max_emo_audio_seconds=sampling_kwargs["max_emo_audio_seconds"],
+                s2mel_cfg_rate=sampling_kwargs["s2mel_cfg_rate"],
+                output_path=None,
+            )
         return Response(pack_wav(BytesIO(),wav_data,sampling_rate).getvalue(), media_type=f"audio/wav")
     except Exception as e:
         print("Error:",e)
@@ -1505,7 +1644,7 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
         job.metrics["state"] = "queued"
         job.metrics["phase"] = "tts_queue"
         job.metrics["message"] = "等待 TTS 合成"
-        async with tts_lock:
+        async with _tts_inference_slot("dialogue_live", cache_key=job.cache_key, metrics=job.metrics):
             if job.cancelled:
                 _mark_job_cancelled(job)
                 return
@@ -1918,6 +2057,7 @@ async def tts_dialogue_stream_job_delete_endpoint(job_id: str):
 async def tts_dialogue_job_status_endpoint(cache_key: str):
     job = LIVE_JOBS.get(cache_key)
     if job:
+        _refresh_live_job_queue_metrics(job)
         if job.cancelled or job.metrics.get("state") == "cancelled":
             state = "cancelled"
         else:

@@ -30,7 +30,7 @@ D:\apiWorkSpace\leon_api\LEON-Launcher.exe
 共享的 Tavo 前端由 `static/` 提供。同一局域网内测试 Tavo 时可加载：
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-tavo-file-v31"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-tavo-file-v38"></script>
 ```
 
 如需公网访问，请在仓库外自行配置隧道或反向代理，只替换脚本地址中的主机部分。
@@ -42,5 +42,5 @@ D:\apiWorkSpace\leon_api\LEON-Launcher.exe
 - `fast6g/`：适合 6 GB 显存的 API 后端。
 - `launcher/`：Windows 启动器源码和素材。
 - `scripts/`：共享启动脚本。
-- `dev_workspace/`：Codex 交接文档、回归记录和 smoke 测试。
+- `dev_workspace/`：交接文档、回归记录和 smoke 测试。
 - `assets/readme/`：README 图片素材。

@@ -132,7 +132,7 @@
         cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode) === "generate" ? "live" : "generate";
         syncUI();
         await saveConfig(cfg, characterId);
-        setStatus(cfg.playbackMode === "generate" ? "D：后台落盘" : "L：边生成边播放");
+        setStatus(cfg.playbackMode === "generate" ? "DISK：后台落盘" : "LIVE：边生成边播放");
       } catch (e) {
         setError("设置保存失败: " + (e && e.message ? e.message : String(e)));
       }

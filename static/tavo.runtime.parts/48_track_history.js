@@ -89,7 +89,7 @@
           return;
         }
         audio.src = srcUrl;
-        markElementAudioTrack(track, isSavedTrack(track) ? "saved" : (srcUrl === track.streamUrl ? "stream" : "audio"));
+        markElementAudioTrack(track, isSavedTrack(track) ? (sameAudioUrl(srcUrl, track.offlineUrl) ? "offline" : "saved") : (srcUrl === track.streamUrl ? "stream" : "audio"));
         if (isLiveTrack(track)) track.allowStreamPlay = false;
         setAudioPlaybackRate();
         // 强制重新加载 metadata,避免浏览器复用上次缓存的 duration/seekable
@@ -428,13 +428,27 @@
         function withPlayingSegment(text) {
           return playingSeg ? (text + " · " + playingSeg) : text;
         }
+        function queueWaitSuffix() {
+          var waitS = Number(metrics && metrics.queue_wait_s);
+          if (!isFinite(waitS) || waitS < 5) return "";
+          return " · 已等 " + Math.floor(waitS) + "s";
+        }
+        function queueStatusText() {
+          var rawAhead = Number(metrics && metrics.queue_ahead);
+          if (isFinite(rawAhead)) {
+            var ahead = Math.max(0, Math.floor(rawAhead));
+            if (ahead > 0) return flow + " 排队中 · 前面还有 " + ahead + " 个 TTS 任务" + queueWaitSuffix();
+            return flow + " 排队中 · 下一个开始" + queueWaitSuffix();
+          }
+          return flow + " 等" + (live ? "首音" : "合成");
+        }
         if (phase === "created") return flow + " 等待后端";
         if (phase === "llm_parse_cache") return flow + " 复用分段，等" + (live ? "首音" : "合成");
         if (phase === "llm_parse") {
           if (/检查|复用/i.test(msg)) return flow + " 分段检查中";
           return flow + " LLM 分段中";
         }
-        if (phase === "tts_queue") return flow + " 等" + (live ? "首音" : "合成");
+        if (phase === "tts_queue") return queueStatusText();
         if (phase === "tts") {
           if (total) return withPlayingSegment(flow + " 合成 " + nextSeg + "/" + total);
           return withPlayingSegment(flow + " 合成中");
@@ -798,6 +812,17 @@
         return;
       }
       if (!await confirmDeleteTrack(target)) return;
+      setStatus("正在删除音频…");
+      showTrackNotice(target, "正在删除音频…", "正在检查并删除 Tavo 离线音频");
+      var offlineDeleted = await deleteOfflineAudioForTrack(target);
+      if (!offlineDeleted) {
+        setTrackPlaybackState(target, "idle");
+        setPlayState("idle");
+        setStatus("删除失败");
+        showTrackNotice(target, "删除失败", "Tavo 离线音频删除失败，当前卡片已保留，可稍后重试");
+        updateTrackButtons();
+        return;
+      }
       var removed = generatedTracks.splice(currentTrackIndex, 1)[0];
       if (removed) removed.deleted = true;
       try { audio.pause(); } catch (_) {}
@@ -805,7 +830,6 @@
       if (removed && removed.url && /^blob:/i.test(removed.url)) {
         try { URL.revokeObjectURL(removed.url); } catch (_) {}
       }
-      deleteOfflineAudioForTrack(removed).catch(function () {});
       deleteRemoteTrack(removed).catch(function () {});
       removePendingJobForTrack(removed).catch(function () {});
       knownHistoryCount = persistableHistoryTracks(generatedTracks).length;

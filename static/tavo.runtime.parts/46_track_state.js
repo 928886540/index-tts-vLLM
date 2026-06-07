@@ -167,6 +167,14 @@
       if (!track || isSavedTrack(track) || track.deleted || track.cancelled) return false;
       return !!(track.streamPlaybackFinished || track.playbackState === "ended");
     }
+    function sameAudioUrl(a, b) {
+      if (!a || !b) return false;
+      a = String(a);
+      b = String(b);
+      if (a === b) return true;
+      try { return new URL(a, location.href).href === new URL(b, location.href).href; } catch (_) {}
+      return false;
+    }
     function trackPlayableUrl(track) {
       if (!track) return "";
       var state = trackState(track);
@@ -222,6 +230,52 @@
         track.offlineObjectUrl = "";
         if (track.offlineUrl && /^blob:/i.test(track.offlineUrl)) track.offlineUrl = "";
       }
+    }
+    function dataUrlToObjectUrl(dataUrl, fallbackType) {
+      dataUrl = String(dataUrl || "");
+      if (!/^data:/i.test(dataUrl)) return "";
+      try {
+        var comma = dataUrl.indexOf(",");
+        if (comma < 0) return "";
+        var head = dataUrl.slice(0, comma);
+        var body = dataUrl.slice(comma + 1);
+        var mimeMatch = /^data:([^;,]+)/i.exec(head);
+        var mime = (mimeMatch && mimeMatch[1]) || fallbackType || "audio/wav";
+        var bytes;
+        if (/;base64/i.test(head)) {
+          var bin = atob(body);
+          bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+        } else if (typeof TextEncoder === "function") {
+          bytes = new TextEncoder().encode(decodeURIComponent(body));
+        } else {
+          var text = decodeURIComponent(body);
+          bytes = new Uint8Array(text.length);
+          for (var j = 0; j < text.length; j += 1) bytes[j] = text.charCodeAt(j) & 255;
+        }
+        return URL.createObjectURL(new Blob([bytes], { type: mime }));
+      } catch (_) {
+        return "";
+      }
+    }
+    async function loadOfflineAudioForPlayback(track, label) {
+      if (!cfg.offlineAudioEnabled || !track || !track.cacheKey) return "";
+      var key = ensureTrackOfflineKey(track);
+      if (!key) return "";
+      var api = offlineFileApi();
+      if (typeof api.load !== "function") throw new Error("当前 Tavo 文件存储不支持读取离线音频");
+      var dataUrl = await api.load(key, { scope: OFFLINE_FILE_SCOPE, encoding: "dataUrl" });
+      if (!dataUrl) throw new Error("Tavo 离线文件为空或不存在");
+      revokeOfflineObjectUrl(track);
+      var objectUrl = dataUrlToObjectUrl(dataUrl, "audio/wav");
+      track.offlineObjectUrl = objectUrl || "";
+      track.offlineUrl = objectUrl || String(dataUrl);
+      track.offlineReady = true;
+      track.offlineWanted = false;
+      track.offlineSavedAt = Date.now();
+      setTrackOfflineState(track, "ready");
+      debugLog("📦 " + (label || "offline") + " 已用 tavo.file.load 读取离线音频: " + key, "#9f9");
+      return track.offlineUrl;
     }
     function ensureTrackOfflineKey(track) {
       if (!track) return "";
@@ -330,16 +384,19 @@
       if (!track) return false;
       var key = ensureTrackOfflineKey(track);
       revokeOfflineObjectUrl(track);
-      if (!key) return false;
-      var ok = await deleteOfflineAudioRecord(key);
-      if (ok) {
+      if (!key) return true;
+      var result = await deleteOfflineAudioRecord(key);
+      if (result && result.ok) {
         track.offlineUrl = "";
         track.offlineReady = false;
         track.offlineWanted = false;
         setTrackOfflineState(track, cfg.offlineAudioEnabled ? "missing" : "disabled");
-        debugLog("🗑 已删除离线音频: " + key, "#fc9");
+        if (result.existed) debugLog("🗑 已删除 Tavo 离线音频: " + key, "#fc9");
+        else debugLog("🗑 Tavo 离线音频不存在，已确认无需删除: " + key, "#fc9");
+        return true;
       }
-      return ok;
+      debugLog("⚠️ 删除 Tavo 离线音频失败: " + key + (result && result.error ? "（" + result.error + "）" : ""), "#fc9");
+      return false;
     }
     function scriptFlagEnabled(name) {
       try {

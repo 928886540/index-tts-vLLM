@@ -5,9 +5,12 @@
       character:'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a2240"/><stop offset="1" stop-color="#33152a"/></linearGradient></defs><rect width="512" height="512" fill="url(#g)"/><text x="256" y="330" font-family="Microsoft YaHei,sans-serif" font-size="180" fill="#ffd4e8" text-anchor="middle" font-weight="bold">人</text></svg>')
     };
     function avatarForRole(role) {
+      role = String(role || "").trim();
       if (role === "旁白") return DEFAULT_AVATARS.narrator;
-      if (role === "用户") return userAvatarUrl || DEFAULT_AVATARS.user;
-      // 角色/人物头像优先用当前 TAVO 角色头像
+      if (role === "用户" || (context && context.userName && role === context.userName)) return userAvatarUrl || DEFAULT_AVATARS.user;
+      var map = (context && context.roleAvatars) || {};
+      var matched = role ? (map[role] || map[role.toLowerCase()]) : "";
+      if (matched) return matched;
       return avatarUrl || DEFAULT_AVATARS.character;
     }
     var subBox = first(root, '[data-role="subtitle"]');
@@ -18,18 +21,16 @@
         if (subtitleToolbar) {
           if (subtitleToolbar.parentNode !== subBox) subBox.insertBefore(subtitleToolbar, subBox.firstChild || null);
           if (del && del.parentNode !== subtitleToolbar) subtitleToolbar.insertBefore(del, subtitleToolbar.firstChild || null);
-          if (counter && counter.parentNode !== subtitleToolbar) subtitleToolbar.appendChild(counter);
           return;
         }
       } catch (_) {}
       try { if (del && del.parentNode !== subBox) subBox.appendChild(del); } catch (_) {}
-      try { if (counter && counter.parentNode !== subBox) subBox.appendChild(counter); } catch (_) {}
     }
     function isTransientProgressNotice(titleText) {
       var title = String(titleText || "");
       if (!title) return false;
       if (/失败|错误|不可用|取消|删除|退出/.test(title)) return false;
-      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|播第)\s*\d+|音频合成中|等待首段音频|等待\s*TTS\s*合成|TTS\s*合成|分段完成|任务已创建|音频已合成|正在保存|保存中|正在.*LLM|LLM\s*分段|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
+      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|排队中|前面还有\s*\d+\s*个\s*TTS\s*任务|下一个开始|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|播第)\s*\d+|音频合成中|等待首段音频|等待\s*TTS\s*合成|TTS\s*合成|分段完成|任务已创建|音频已合成|正在保存|保存中|正在.*LLM|LLM\s*分段|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
     }
     function normalizedNoticeKey(titleText, detailText) {
       return String(titleText || "").replace(/\d+\s*s/g, "Ns") + "\n" + String(detailText || "");

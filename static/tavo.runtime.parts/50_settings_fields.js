@@ -182,16 +182,21 @@
         playbackToggle.setAttribute("aria-label", "播放模式：" + playbackModeName());
       }
       updateNormalVoiceButtons();
-      if (title) title.textContent = (context && context.characterName ? context.characterName : shortName(cfg.defaultVoice));
-      if (cover) {
-        if (avatarUrl) {
-          cover.textContent = "";
-          cover.style.backgroundImage = "url(\"" + String(avatarUrl).replace(/"/g, "%22") + "\")";
-          cover.style.backgroundSize = "cover";
-          cover.style.backgroundPosition = "center";
-        } else {
-          cover.style.backgroundImage = "";
-          cover.textContent = (context && context.characterName ? context.characterName : shortName(cfg.defaultVoice)).slice(0, 1) || "";
+      var activeTrack = null;
+      try { activeTrack = currentTrack(); } catch (_) { activeTrack = null; }
+      var headerOwnedBySpeaker = !!(activeTrack && lastSpeakerRole);
+      if (!headerOwnedBySpeaker) {
+        if (title) title.textContent = (context && context.characterName ? context.characterName : shortName(cfg.defaultVoice));
+        if (cover) {
+          if (avatarUrl) {
+            cover.textContent = "";
+            cover.style.backgroundImage = "url(\"" + String(avatarUrl).replace(/"/g, "%22") + "\")";
+            cover.style.backgroundSize = "cover";
+            cover.style.backgroundPosition = "center";
+          } else {
+            cover.style.backgroundImage = "";
+            cover.textContent = (context && context.characterName ? context.characterName : shortName(cfg.defaultVoice)).slice(0, 1) || "";
+          }
         }
       }
       $all(panel, '.idx-mode').forEach(function (b) { b.classList.toggle('is-active', b.dataset.mode === cfg.mode); });

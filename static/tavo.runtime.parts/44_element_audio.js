@@ -12,7 +12,7 @@
       }
       stopWebAudioPlayback("switch");
       var url = trackPlayableUrl(track);
-      var sourceKind = isSavedTrack(track) ? (url === track.offlineUrl ? "offline" : "saved") : (url === track.streamUrl ? "stream" : "audio");
+      var sourceKind = isSavedTrack(track) ? (sameAudioUrl(url, track.offlineUrl) ? "offline" : "saved") : (url === track.streamUrl ? "stream" : "audio");
       var liveOffsetSec = 0;
       if (!isSavedTrack(track) && isLiveTrack(track) && liveStreamUrlForTrack(track)) {
         liveOffsetSec = Math.max(0, Number(startSec || 0) || 0);
@@ -81,7 +81,39 @@
       var resumeSec = trackResumeSec(track);
       var sourceKind = "";
       try { sourceKind = audio.dataset.idxSourceKind || ""; } catch (_) {}
-      if ((sourceKind === "offline" || (track.offlineUrl && src === track.offlineUrl)) && track.cacheUrl) {
+      if ((sourceKind === "offline" || sourceKind === "offline-blob" || (track.offlineUrl && sameAudioUrl(src, track.offlineUrl))) && track.cacheUrl) {
+        if (!track.offlineBlobRetryDone && typeof loadOfflineAudioForPlayback === "function") {
+          track.offlineBlobRetryDone = true;
+          setStatus("读取本地离线音频…");
+          showTrackNotice(track, "读取本地离线音频…", "当前 WebView 不能直连本地文件路径，改用 Tavo 文件字节播放");
+          debugLog("⚠️ 本地离线路径直连失败，尝试 tavo.file.load 离线播放。" + detail, "#fc9");
+          (async function () {
+            try {
+              var offlinePlayable = await loadOfflineAudioForPlayback(track, "offline playback fallback");
+              if (!offlinePlayable) throw new Error("离线音频读取为空");
+              audio.src = offlinePlayable;
+              markElementAudioTrack(track, "offline-blob");
+              try { audio.load(); } catch (_) {}
+              if (seek) seek.disabled = false;
+              setAudioPlaybackRate();
+              setTrackPlaybackState(track, "loading");
+              setPlayState("loading");
+              var p = audio.play();
+              if (p && typeof p.then === "function") p.catch(function (err) { handleAudioPlayReject("offline-blob", err, "请点播放继续"); });
+            } catch (e) {
+              revokeOfflineObjectUrl(track);
+              track.offlineUrl = "";
+              track.offlineReady = false;
+              track.offlineWanted = true;
+              setTrackOfflineState(track, "failed");
+              setStatus("本地离线音频不可用，改播在线音频");
+              showTrackNotice(track, "本地离线音频不可用", "正在切换到在线历史音频");
+              debugLog("⚠️ tavo.file.load 离线播放失败，改播在线 cache_audio。" + (e && e.message ? "（" + e.message + "）" : ""), "#fc9");
+              startElementAudioFrom(track, resumeSec);
+            }
+          })();
+          return true;
+        }
         revokeOfflineObjectUrl(track);
         track.offlineUrl = "";
         track.offlineReady = false;
