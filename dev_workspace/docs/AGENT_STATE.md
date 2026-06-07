@@ -26,12 +26,12 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v29"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v30"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v29`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, and `README.md` use `20260607-ai-live-v30`.
 - Tavo settings/config read `tavo.get` first; `localStorage` is fallback only.
 - `tavo.set` failures surface as "设置保存失败".
 - Saved tracks and pending jobs prefer `tavo.get`; deletion writes through `tavo.set`.
@@ -40,11 +40,12 @@ Current code state:
 - AI mode does not submit `voices.default`; explicit role mappings are required.
 - AI mode with no explicit mapping shows "音色未设置" / mapping error instead of falling back to a default voice.
 - Avatar-side status is only the configured/current voice label; LLM/TTS/LIVE progress uses a transparent one-line hint floating near the seek/time area. During LIVE playback, synthesis progress can include compact "播第 x/y 段" text; noisy connection/buffer micro-states are filtered/throttled. Delete and page counter stay in the lyric panel toolbar.
-- LIVE controls keep the main play/pause button at the same position as saved-history playback; the live-exit button occupies the music-note position while previous/next only reserve invisible layout space.
+- LIVE controls keep the main play/pause button at the same position as saved-history playback; the live-exit button occupies the music-note position while previous/next only reserve invisible layout space. This remains true when cache落盘 but WebAudio still owns the audible LIVE output.
 - Lazy snapshot open/play gestures now pre-prime WebAudio and native audio before the runtime script loads. The loader syncs the resolved `tavo.message.current().id` back to the click closure and pre-primed owner, and the runtime no longer lets the music-note generate gesture destroy that pre-unlocked AudioContext.
 - The loader shell shows a small loading bar while the runtime opens, and its history counter is refreshed from the same Tavo/local track snapshot as the lazy card.
 - The subtitle toolbar counter keeps `margin-left:auto`, so during LIVE playback it stays at the right edge even when the delete button is hidden.
-- LIVE WebAudio now starts with a slightly larger PCM prebuffer, especially for AI mode, to reduce short stalls at segment boundaries when the next synthesized segment arrives late.
+- LIVE WebAudio starts with a slightly larger PCM prebuffer, pulls larger PCM chunks, lowers the poll wait, and flushes small pending PCM tails sooner to reduce short stalls at segment boundaries.
+- LIVE WebAudio pause now keeps the local AudioContext/PCM controller alive and keeps polling the same cache key in the background; play resumes that local queue first instead of reconnecting or creating a new backend job. If local resume fails, it falls back to same-key `start_s` recovery.
 - Restored LIVE pending tracks keep resume seconds and reconnect the same key with `start_s`, without a new POST.
 - LIVE uses same-key live PCM polling before cache落盘. Frontend PCM output now prefers an AudioWorklet queue, then ScriptProcessor, then BufferSource scheduling; user gesture also primes native audio. If WebAudio device startup fails, the same LIVE key can switch to native live `<audio>` before cache落盘 instead of waiting for saved audio.
 - If LIVE is already audible when the cache file lands, the frontend keeps the current LIVE output and does not steal playback into saved `<audio>`; native saved `<audio>` handoff is reserved for explicit saved fallback or interrupted/not-yet-audible streams.

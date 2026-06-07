@@ -95,14 +95,14 @@ Current smoke must prove:
 - User play/generate gestures should prime both WebAudio and native `<audio>` output, so a later same-key native live fallback can start without waiting for final cache.
 - The music-note generate gesture must not force-close a recently pre-primed AudioContext unless it is explicitly retrying a stuck live/pending track.
 - LIVE pending/restored tracks keep `playbackMode=live`, `state=live`, and last resume seconds.
-- LIVE pause/resume reconnects `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>` without a new POST.
+- LIVE pause/resume keeps the local WebAudio/PCM queue alive when the controller is still valid; if local resume fails, fallback may reconnect `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>`, but must not create a new POST.
 - Repeated WebAudio underrun returns to idle/resumable state and keeps cache polling alive; it must not force saved-cache autoplay or leave a permanent spinner.
 - If WebAudio output/device startup fails while LIVE is active, switch to same-key native live `<audio>` with `start_s` before waiting for saved `/cache_audio`.
 - User-facing copy must not say "实时生成跟不上" or "手动续播".
 - Completed cache handoff must stop WebAudio before mounting native saved `<audio>` only when LIVE never became audible, was interrupted, or entered explicit saved-cache fallback; stable/audible LIVE should not be stolen just because cache landed.
 - Cache落盘 must not steal an already audible LIVE stream into saved `<audio>` or show a fresh loading handoff just because a transient stalled/buffering flag was recorded.
 - Short buffering after LIVE playback starts must not immediately reset the main button to idle or show "还没收到实时音频".
-- LIVE PCM playback should keep enough prebuffer to reduce audible 0.xs stalls when the next segment is still being synthesized.
+- LIVE PCM playback should keep enough prebuffer, pull sufficiently large chunks, and flush small pending PCM tails before the queue runs dry to reduce audible 0.xs stalls at segment boundaries.
 - If cache audio becomes ready while LIVE never became audible, was interrupted, or entered explicit saved-cache fallback, the frontend may force native saved `<audio>` handoff so the user gets audible playback.
 - Saved/cache audio uses native `<audio>` with `/cache_audio/<cache_key>` or offline blob.
 

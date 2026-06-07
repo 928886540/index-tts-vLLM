@@ -145,6 +145,15 @@
       if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === track) {
         updateTrackButtons();
         var liveWebAudioOwnsTrack = (typeof webAudioBelongsToTrack === "function" && webAudioBelongsToTrack(track));
+        if (liveWebAudioOwnsTrack && track.webAudioPausedLocal && !opts.forceElement && !opts.autoplay) {
+          handoffSec = webAudioPlaybackSecForTrack(track);
+          stopWebAudioPlayback("handoff");
+          if (handoffSec > 0) {
+            track.lastWebAudioSec = handoffSec;
+            track.lastElementSec = handoffSec;
+          }
+          liveWebAudioOwnsTrack = false;
+        }
         if (liveWebAudioOwnsTrack && !opts.forceElement && !opts.autoplay) return true;
         if (opts.deferElement) {
           setStatus("完整音频已就绪，可重播");

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "runtimeVersion": "20260607-ai-live-v29",
+  "runtimeVersion": "20260607-ai-live-v30",
   "mode": "ordered-fragments",
   "skin": {
     "default": "tavo.ui.skin.default.css"

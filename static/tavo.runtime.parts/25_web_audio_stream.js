@@ -47,6 +47,7 @@
     var scheduledSpans = [];
     var scheduledAudioSec = 0;
     var reportedFirstPcmStats = false;
+    var userPaused = false;
     function getPlaybackTimeSec() {
       if (!started || !scheduledSpans.length) return 0;
       var now = 0;
@@ -104,6 +105,10 @@
       minAheadSec = Math.max(0.25, Number(minAheadSec || 0.65) || 0.65);
       stableNotifyTimer = setTimeout(function () {
         stableNotifyTimer = null;
+        if (userPaused) {
+          if (!readEnded && !stopped) notifyStableWhenBuffered(500, minAheadSec);
+          return;
+        }
         if (stopped || String(ctx.state || "running") !== "running") return;
         var ahead = bufferedAheadSec();
         if (!bufferingState && ahead >= minAheadSec) {
@@ -285,6 +290,10 @@
 
     async function ensureAudioContextRunning(step) {
       try {
+        if (userPaused) {
+          if (ctx.state === "closed") throw new Error("AudioContext closed");
+          return;
+        }
         if (ctx.state === "suspended" || ctx.state === "interrupted") {
           await ctx.resume();
           hooks.debug && hooks.debug(step + " resume AudioContext -> " + ctx.state);
@@ -465,10 +474,13 @@
     var ctx = (typeof takePreprimedAudioContext === "function" ? takePreprimedAudioContext(ownerMessageId) : null) || new AC();
     try { if (ctx.state === "suspended") await ctx.resume(); }
     catch (e) { throw new Error("[step:pcm.resume] " + (e && e.message ? e.message : e)); }
+    var userPaused = false;
+    var userPausedAt = 0;
     try {
       ctx.onstatechange = function () {
         hooks.debug && hooks.debug("PCM AudioContext statechange -> " + ctx.state);
         if (ctx.state === "suspended" || ctx.state === "interrupted") {
+          if (userPaused) return;
           hooks.onStateChange && hooks.onStateChange("audio_suspended");
         }
       };
@@ -604,9 +616,9 @@
           node.port.onmessage = function (ev) {
             var d = (ev && ev.data) || {};
             if (isFinite(Number(d.played))) player.playedSamples = Math.max(player.playedSamples, Number(d.played) || 0);
-            if (d.type === "started") hooks.onStateChange && hooks.onStateChange("playing");
-            else if (d.type === "underrun" && started && !readEnded) hooks.onStateChange && hooks.onStateChange("buffering");
-            else if (d.type === "recovered") hooks.onStateChange && hooks.onStateChange("resumed");
+            if (d.type === "started" && !userPaused) hooks.onStateChange && hooks.onStateChange("playing");
+            else if (d.type === "underrun" && started && !readEnded && !userPaused) hooks.onStateChange && hooks.onStateChange("buffering");
+            else if (d.type === "recovered" && !userPaused) hooks.onStateChange && hooks.onStateChange("resumed");
           };
           hooks.debug && hooks.debug("PCM queued output=AudioWorklet sr=" + outRate);
           return player;
@@ -675,10 +687,10 @@
               player2.startedNotified = true;
               hooks.onStateChange && hooks.onStateChange("playing");
             }
-            if (under && !player2.underrun && started && !readEnded) {
+            if (under && !player2.underrun && started && !readEnded && !userPaused) {
               player2.underrun = true;
               hooks.onStateChange && hooks.onStateChange("buffering");
-            } else if (!under && player2.underrun) {
+            } else if (!under && player2.underrun && !userPaused) {
               player2.underrun = false;
               hooks.onStateChange && hooks.onStateChange("resumed");
             }
@@ -718,6 +730,7 @@
           endTimer = null;
           return;
         }
+        if (userPaused) return;
         var now = 0;
         try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
         if (queuedPlayer && started) {
@@ -733,7 +746,7 @@
     function armBufferWatcher() {
       if (bufferTimer) return;
       bufferTimer = setInterval(function () {
-        if (stopped || readEnded || !started) return;
+        if (stopped || readEnded || !started || userPaused) return;
         var now = 0;
         try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
         var ahead = queuedPlayer ? queuedPlayer.bufferedSec() : (nextAt - now);
@@ -758,6 +771,10 @@
       minAheadSec = Math.max(0.25, Number(minAheadSec || 0.65) || 0.65);
       stableNotifyTimer = setTimeout(function () {
         stableNotifyTimer = null;
+        if (userPaused) {
+          if (!readEnded && !stopped) notifyStableWhenBuffered(500, minAheadSec);
+          return;
+        }
         if (stopped || String(ctx.state || "running") !== "running") return;
         var ahead = bufferedAheadSec();
         if (!bufferingState && ahead >= minAheadSec) {
@@ -778,8 +795,49 @@
       activeSources.slice().forEach(function (node) { try { node.stop(0); } catch (_) {} });
       hooks.onStateChange && hooks.onStateChange("stopped");
     }
+    async function pauseWebAudio(reason) {
+      if (stopped) return false;
+      userPaused = true;
+      userPausedAt = Date.now();
+      if (playNotifyTimer) { try { clearTimeout(playNotifyTimer); } catch (_) {} playNotifyTimer = null; }
+      if (stableNotifyTimer) { try { clearTimeout(stableNotifyTimer); } catch (_) {} stableNotifyTimer = null; }
+      hooks.debug && hooks.debug("PCM local pause " + (reason || "") + " buffered=" + bufferedAheadSec().toFixed(2) + "s");
+      try {
+        if (ctx && ctx.state === "running" && typeof ctx.suspend === "function") await ctx.suspend();
+      } catch (e) {
+        hooks.debug && hooks.debug("PCM local pause suspend failed: " + (e && e.message ? e.message : e));
+      }
+      return true;
+    }
+    async function resumeWebAudio(reason) {
+      if (stopped) return false;
+      userPaused = false;
+      try {
+        if (ctx.state === "suspended" || ctx.state === "interrupted") await ctx.resume();
+        if (ctx.state === "suspended" || ctx.state === "interrupted") {
+          await new Promise(function (r) { setTimeout(r, 60); });
+          await ctx.resume();
+        }
+      } catch (e) {
+        userPaused = true;
+        throw new Error("[step:pcm.localResume] " + (e && e.message ? e.message : e));
+      }
+      try { if (typeof startRuntimeAudioKeepalive === "function") startRuntimeAudioKeepalive(ctx); } catch (_) {}
+      try { if (typeof wakeRuntimeAudioOutput === "function") wakeRuntimeAudioOutput(ctx, output || ctx.destination, "pcm-local-resume"); } catch (_) {}
+      hooks.debug && hooks.debug("PCM local resume " + (reason || "") + " pausedMs=" + (userPausedAt ? String(Date.now() - userPausedAt) : "0") + " buffered=" + bufferedAheadSec().toFixed(2) + "s");
+      if (started) {
+        hooks.onStateChange && hooks.onStateChange("playing");
+        notifyStableWhenBuffered(250, 0.65);
+        armBufferWatcher();
+      }
+      return true;
+    }
     if (hooks.onController) hooks.onController({
       stop: stopWebAudio,
+      pause: pauseWebAudio,
+      resume: resumeWebAudio,
+      isPaused: function () { return !!userPaused; },
+      bufferedSec: bufferedAheadSec,
       getTimeSec: getPlaybackTimeSec,
       ctx: ctx,
       outputNode: output,
@@ -799,6 +857,10 @@
     }
     async function ensureAudioContextRunning(step) {
       try {
+        if (userPaused) {
+          if (ctx.state === "closed") throw new Error("AudioContext closed");
+          return;
+        }
         if (ctx.state === "suspended" || ctx.state === "interrupted") {
           await ctx.resume();
           hooks.debug && hooks.debug(step + " resume AudioContext -> " + ctx.state);
@@ -882,6 +944,7 @@
           playNotifyTimer = setTimeout(function () {
             playNotifyTimer = null;
             if (stopped) return;
+            if (userPaused) return;
             ensureAudioContextRunning("pcm.playNotify").then(function () {
               if (!stopped && String(ctx.state || "running") === "running") hooks.onStateChange && hooks.onStateChange("playing");
               else if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
@@ -892,7 +955,7 @@
           }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 40));
           notifyStableWhenBuffered(Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + Math.max(1400, prebufferSec * 900)), 0.65);
           armBufferWatcher();
-        } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.65) {
+        } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.65 && !userPaused) {
           bufferingState = false;
           hooks.onStateChange && hooks.onStateChange("resumed");
         }
@@ -922,12 +985,13 @@
           hooks.onStateChange && hooks.onStateChange("scheduled");
           playNotifyTimer = setTimeout(function () {
             playNotifyTimer = null;
+            if (userPaused) return;
             if (!stopped && String(ctx.state || "running") === "running") hooks.onStateChange && hooks.onStateChange("playing");
             else if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
           }, 80);
           notifyStableWhenBuffered(Math.max(900, prebufferSec * 700), 0.65);
           armBufferWatcher();
-        } else if (bufferingState && queuedPlayer.bufferedSec() >= 0.65) {
+        } else if (bufferingState && queuedPlayer.bufferedSec() >= 0.65 && !userPaused) {
           bufferingState = false;
           hooks.onStateChange && hooks.onStateChange("resumed");
         }
@@ -947,12 +1011,34 @@
       await schedulePcm(firstSlice);
       return true;
     }
+    async function flushPendingForPlayback(force) {
+      if (!started || !pending) return;
+      while (started && pending.length >= flushBytes) {
+        var len = alignedLength(flushBytes);
+        if (len <= 0) break;
+        var slice = pending.slice(0, len);
+        pending = pending.slice(len);
+        await schedulePcm(slice);
+      }
+      if (!pending || pending.length < blockAlign) return;
+      var tailMinBytes = alignedLength(Math.max(blockAlign, Math.floor(bytesPerSec * (queuedPlayer ? 0.04 : 0.08))));
+      var ahead = bufferedAheadSec();
+      var lowAhead = ahead <= Math.max(1.15, flushSec + 0.45);
+      if (force || (pending.length >= tailMinBytes && lowAhead)) {
+        var tailLen = alignedLength(pending.length);
+        if (tailLen > 0) {
+          var tail = pending.slice(0, tailLen);
+          pending = pending.slice(tailLen);
+          await schedulePcm(tail);
+        }
+      }
+    }
     function pollUrl() {
       var u = new URL(pcmUrl, location.href);
       if (nextOffset >= 0) u.searchParams.set("offset", String(nextOffset));
       else u.searchParams.set("start_s", startOffsetSec.toFixed(3));
-      u.searchParams.set("max_bytes", String(Math.max(startBufferBytes, flushBytes * 2)));
-      u.searchParams.set("wait_ms", "450");
+      u.searchParams.set("max_bytes", String(Math.max(startBufferBytes, flushBytes * 5, Math.floor(bytesPerSec * 4.0))));
+      u.searchParams.set("wait_ms", "320");
       u.searchParams.set("_", String(Date.now()));
       return u.href;
     }
@@ -972,6 +1058,7 @@
           if (isFinite(noDataNext) && noDataNext >= 0) nextOffset = noDataNext;
         } catch (_) {}
         if (!started) hooks.onStateChange && hooks.onStateChange("waiting_pcm");
+        else await flushPendingForPlayback(false);
         if (done204) { readEnded = true; break; }
         await new Promise(function (r) { setTimeout(r, 120); });
         continue;
@@ -1003,12 +1090,7 @@
         if (pollCount <= 3 || !reportedFirstPcmStats) hooks.debug && hooks.debug("PCM poll chunk bytes=" + chunk.length + " next=" + nextOffset + " done=" + (done ? "1" : "0"));
         appendPending(chunk);
         await scheduleStartIfReady(false);
-        while (started && pending.length >= flushBytes) {
-          var len = alignedLength(flushBytes);
-          var slice = pending.slice(0, len);
-          pending = pending.slice(len);
-          await schedulePcm(slice);
-        }
+        await flushPendingForPlayback(false);
       } else if (!started) {
         hooks.onStateChange && hooks.onStateChange("waiting_pcm");
       }
@@ -1020,8 +1102,7 @@
     }
     if (!started) await scheduleStartIfReady(true);
     if (pending && pending.length >= blockAlign) {
-      var remainLen = alignedLength(pending.length);
-      if (remainLen > 0) await schedulePcm(pending.slice(0, remainLen));
+      await flushPendingForPlayback(true);
     }
     pending = null;
     if (!started) throw new Error("[step:pcm.noAudio] 后端没有返回可播放 PCM");

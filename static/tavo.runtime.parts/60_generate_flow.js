@@ -13,11 +13,11 @@
         if (isFinite(Number(audio.currentTime))) track.lastElementSec = Math.max(0, elementPlaybackTimeSec(track));
       } catch (_) {}
       try { audio.pause(); } catch (_) {}
-      stopWebAudioPlayback("pause");
+      if (!pauseWebAudioTrackLocally(track)) stopWebAudioPlayback("pause");
       track.playSavedWhenReady = false;
       setPlayState("idle");
       setStatus("已暂停");
-      showTrackNotice(track, "已暂停", track.cacheKey ? "点播放从当前位置继续实时流；后台仍会自动落盘" : "已停止等待");
+      showTrackNotice(track, "已暂停", track.webAudioPausedLocal ? "继续缓冲中，点播放直接接着播" : (track.cacheKey ? "点播放从当前位置继续实时流；后台仍会自动落盘" : "已停止等待"));
     }
 
     async function playOrPauseCurrentTrack() {
@@ -49,7 +49,9 @@
       var existingIsPlaying = String(existingTrack.playbackState || "") === "playing"
         && (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (elementAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended));
       if (existingIsPlaying) {
-        if (isSavedTrack(existingTrack)) {
+        if (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (typeof trackHasActiveLiveOutput === "function" && trackHasActiveLiveOutput(existingTrack))) {
+          pauseLiveTrack(existingTrack);
+        } else if (isSavedTrack(existingTrack)) {
           try {
             existingTrack.lastElementSec = Math.max(0, Number(audio.currentTime || 0) || 0);
             audio.pause();
@@ -58,8 +60,6 @@
             setStatus("已暂停");
             showTrackNotice(existingTrack, "已暂停", "点播放从当前位置继续");
           } catch (_) {}
-        } else {
-          pauseLiveTrack(existingTrack);
         }
         updateTrackButtons();
         return true;
@@ -71,6 +71,10 @@
         showTrackNotice(existingTrack, "还没有可播放音频", "新音频必须点音符生成");
         updateTrackButtons();
         return false;
+      }
+      if (resumePausedWebAudioTrack(existingTrack)) {
+        updateTrackButtons();
+        return true;
       }
       if (shouldUseElementForSavedTrack(existingTrack)) {
         await prepareOfflineAudio(existingTrack, "play", { saveMissing: true });

@@ -1060,8 +1060,59 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (!normalControlLayout.playRect || !normalControlLayout.addRect || !result.playRect || !result.liveExitRect || Math.abs(result.playRect.left - normalControlLayout.playRect.left) > 2 || Math.abs(result.liveExitRect.left - normalControlLayout.addRect.left) > 2 || result.prevVisibility !== "hidden" || result.nextVisibility !== "hidden" || result.addDisplay !== "none") {
       throw new Error("LIVE controls should keep play at the saved-audio position and put exit where the music-note button was: " + JSON.stringify({ normalControlLayout, result }));
     }
+    await page.click('[data-role="play"]');
+    await page.waitForFunction(() => {
+      const play = document.querySelector('[data-role="play"]');
+      return play && play.dataset.state === "idle";
+    }, { timeout: 5000 });
+    const paused = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const play = document.querySelector('[data-role="play"]');
+      const add = document.querySelector('[data-role="add"]');
+      const liveExit = document.querySelector('[data-role="live-exit"]');
+      const audio = document.querySelector('[data-role="audio"]');
+      return {
+        playState: play ? play.dataset.state : "",
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        addDisplay: add ? getComputedStyle(add).display : "",
+        liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        cachePlays: (window.__cachePlayCalls || []).filter((x) => x && x.kind === "saved").length
+      };
+    });
+    await page.click('[data-role="play"]');
+    await page.waitForFunction(() => {
+      const play = document.querySelector('[data-role="play"]');
+      return play && play.dataset.state === "playing";
+    }, { timeout: 5000 });
+    const resumed = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const play = document.querySelector('[data-role="play"]');
+      const add = document.querySelector('[data-role="add"]');
+      const liveExit = document.querySelector('[data-role="live-exit"]');
+      const audio = document.querySelector('[data-role="audio"]');
+      return {
+        playState: play ? play.dataset.state : "",
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        addDisplay: add ? getComputedStyle(add).display : "",
+        liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        cachePlays: (window.__cachePlayCalls || []).filter((x) => x && x.kind === "saved").length
+      };
+    });
+    if (paused.jobs !== 1 || resumed.jobs !== 1) {
+      throw new Error("LIVE pause/resume must not submit a new dialogue job: " + JSON.stringify({ paused, resumed, jobBodies }));
+    }
+    if (paused.playState !== "idle" || resumed.playState !== "playing" || !paused.liveExitVisible || !resumed.liveExitVisible || paused.addDisplay !== "none" || resumed.addDisplay !== "none") {
+      throw new Error("LIVE local pause/resume should keep live controls and restore playback: " + JSON.stringify({ paused, resumed }));
+    }
+    if (paused.cachePlays || resumed.cachePlays || paused.audioKind === "saved" || resumed.audioKind === "saved") {
+      throw new Error("LIVE local pause/resume should not switch to saved audio while WebAudio still owns playback: " + JSON.stringify({ paused, resumed }));
+    }
     if (pageErrors.length) throw new Error("LIVE play-click smoke page error: " + pageErrors.join(" | "));
-    return { jobCount, headCount, statusCount, streamGetCount, streamUrls, result, body: jobBodies[0] };
+    return { jobCount, headCount, statusCount, streamGetCount, streamUrls, result, paused, resumed, body: jobBodies[0] };
   } finally {
     await context.close();
   }

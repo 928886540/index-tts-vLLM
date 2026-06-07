@@ -31,8 +31,11 @@
           clearElementAudioSrc();
           return false;
         }
-        if (t && isCancelableLiveTrack(t)) {
+        if (t && (isCancelableLiveTrack(t) || (typeof trackHasActiveLiveOutput === "function" && trackHasActiveLiveOutput(t)))) {
           var ps = String(t.playbackState || "");
+          if (ps === "paused" && typeof resumePausedWebAudioTrack === "function" && resumePausedWebAudioTrack(t)) {
+            return true;
+          }
           if (ps === "playing" && (t.webAudioPlaying || isElementPlayingTrackStream(t))) {
             pauseLiveTrack(t);
             return true;
@@ -62,7 +65,10 @@
         var t = currentTrack();
         // "add" 是新生成入口，但不能默认销毁快照点击时刚预解锁的 AudioContext。
         // 真正需要重建只发生在正在重试一个已有 live/pending 轨道时。
-        if (action === "play") forceNew = !!(t && (isLiveTrack(t) || trackState(t) === "pending") && !t.webAudioPlaying);
+        if (action === "play") {
+          var localPaused = !!(t && (t.webAudioPausedLocal || (typeof canResumePausedWebAudioTrack === "function" && canResumePausedWebAudioTrack(t))));
+          forceNew = !!(t && (isLiveTrack(t) || trackState(t) === "pending") && !t.webAudioPlaying && !localPaused);
+        }
       } catch (_) {}
       var now = Date.now();
       if (forceNew && now - lastFreshAudioPrimeAt < 700) forceNew = false;
