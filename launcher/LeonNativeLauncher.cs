@@ -59,12 +59,16 @@ internal sealed class LauncherForm : Form
 
     private const int ApiPort = 9880;
     private const string ApiBase = "http://127.0.0.1:9880";
+    private const string TavoCacheBust = "20260607-tavo-file-v31";
+    private const string WarmupVoice = "400个火爆音色/短剧解说";
+    private const string WarmupText = "短剧解说启动测试。";
 
     private readonly string workspaceRoot;
     private readonly string launcherDir;
     private readonly string scriptsDir;
     private readonly string staticDir;
     private readonly string iconPath;
+    private readonly string lanHost;
     private readonly object logLock = new object();
     private readonly Dictionary<string, string> logTexts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     private readonly JavaScriptSerializer json = new JavaScriptSerializer();
@@ -83,6 +87,7 @@ internal sealed class LauncherForm : Form
     private bool healthRefreshRunning;
     private bool closeStopStarted;
     private bool forceClose;
+    private bool startupSuccessBannerShown;
 
     private Icon launcherIcon;
     private Panel homePanel;
@@ -114,6 +119,9 @@ internal sealed class LauncherForm : Form
         scriptsDir = Path.Combine(workspaceRoot, "scripts");
         staticDir = Path.Combine(workspaceRoot, "static");
         iconPath = Path.Combine(launcherDir, "leon-launcher.ico");
+        lanHost = string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEON_LAN_HOST"))
+            ? GetPreferredLanHost()
+            : Environment.GetEnvironmentVariable("LEON_LAN_HOST");
 
         logTexts["launcher"] = string.Empty;
         logTexts["api"] = string.Empty;
@@ -137,7 +145,7 @@ internal sealed class LauncherForm : Form
 
         SetVersion(versionKey, false);
         BuildUi();
-        AddLauncherLog("LEON 真 EXE 启动器已打开。");
+        AddLauncherLog("LEON 启动器已打开。");
     }
 
     protected override void Dispose(bool disposing)
@@ -519,6 +527,7 @@ internal sealed class LauncherForm : Form
         {
             AddLauncherLog("LEON 服务已经在运行: " + ApiBase);
             CompleteTransition(true, "LEON 服务已运行：" + ApiBase, Color.LightGreen);
+            RunWarmupWorker();
             return;
         }
 
@@ -578,6 +587,7 @@ internal sealed class LauncherForm : Form
             {
                 AddLauncherLog("LEON 服务 ready: " + ApiBase);
                 CompleteTransition(true, "LEON 服务已启动：" + ApiBase, Color.LightGreen);
+                RunWarmupWorker();
                 return;
             }
 
@@ -638,6 +648,7 @@ internal sealed class LauncherForm : Form
         if (stopped)
         {
             AddLauncherLog(reason + "：LEON 服务已停止。");
+            startupSuccessBannerShown = false;
             CompleteTransition(false, "服务已停止。", Color.Khaki);
         }
         else
@@ -817,6 +828,122 @@ internal sealed class LauncherForm : Form
         result["stderr"] = string.IsNullOrWhiteSpace(stderrText) ? "未发现当前诊断日志。" : stderrText;
 
         return result;
+    }
+
+    private void RunWarmupWorker()
+    {
+        if (!string.Equals(versionKey, "vllm", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowStartupSuccessBanner();
+            return;
+        }
+
+        AddLauncherLog("检查 LEON 服务模型预热状态...");
+        SetStatus("LEON 服务已启动，正在检查预热状态...", Color.Khaki);
+
+        Dictionary<string, object> state = null;
+        try
+        {
+            state = ParseJsonObject(HttpGet(ApiBase + "/warmup", 5000));
+        }
+        catch
+        {
+            state = null;
+        }
+
+        string stateStatus = GetDictString(state, "status");
+        string stateVoice = GetDictString(state, "voice");
+        bool alreadyWarm = stateStatus == "ok" || stateStatus == "already_warmed";
+        if (alreadyWarm && WarmupVoiceMatchesPreferred(stateVoice))
+        {
+            CompleteTransition(true, "模型已预热，服务地址：" + ApiBase, Color.LightGreen);
+            AddLauncherLog("模型已预热: status=" + stateStatus + ", voice=" + stateVoice);
+            ShowStartupSuccessBanner();
+            RequestLogRefresh();
+            return;
+        }
+
+        if (stateStatus == "running")
+        {
+            CompleteTransition(true, "模型预热正在进行中...", Color.Khaki);
+            AddLauncherLog("模型预热正在进行中。");
+            RequestLogRefresh();
+            return;
+        }
+
+        bool forceWarmup = alreadyWarm;
+        if (forceWarmup)
+        {
+            AddLauncherLog("模型已预热但不是短剧解说音色，重新预热一次: voice=" + stateVoice, "WARN");
+        }
+
+        AddLauncherLog("开始请求 LEON 服务模型预热: voice=" + WarmupVoice + ", force=" + forceWarmup);
+        CompleteTransition(true, "LEON 服务已启动，正在预热模型...", Color.Khaki);
+
+        Dictionary<string, object> body = new Dictionary<string, object>();
+        body["voice"] = WarmupVoice;
+        body["text"] = WarmupText;
+        body["force"] = forceWarmup;
+
+        try
+        {
+            Dictionary<string, object> resp = ParseJsonObject(HttpPost(ApiBase + "/warmup", json.Serialize(body), 180000));
+            string respStatus = GetDictString(resp, "status");
+            string respVoice = GetDictString(resp, "voice");
+            if (respStatus == "ok" || respStatus == "already_warmed")
+            {
+                CompleteTransition(true, "模型预热完成，服务地址：" + ApiBase, Color.LightGreen);
+                AddLauncherLog("模型预热完成: status=" + respStatus + ", voice=" + respVoice);
+                if (WarmupVoiceMatchesPreferred(respVoice))
+                {
+                    ShowStartupSuccessBanner();
+                }
+                else
+                {
+                    AddLauncherLog("模型预热完成，但返回音色不是短剧解说: voice=" + respVoice, "WARN");
+                }
+            }
+            else
+            {
+                CompleteTransition(true, "预热返回: " + respStatus, Color.Khaki);
+                AddLauncherLog("模型预热返回: " + json.Serialize(resp), "WARN");
+            }
+        }
+        catch (Exception ex)
+        {
+            CompleteTransition(TestApiHealth(1200), "服务已启动，预热未完成，可稍后重试或直接使用。", Color.Khaki);
+            AddLauncherLog("模型预热未完成: " + ex.Message + "。warmup=" + ApiBase + "/warmup", "WARN");
+        }
+
+        RequestLogRefresh();
+    }
+
+    private bool WarmupVoiceMatchesPreferred(string voice)
+    {
+        if (string.IsNullOrWhiteSpace(voice)) return false;
+        string preferred = WarmupVoice.Replace('\\', '/');
+        int slash = preferred.LastIndexOf('/');
+        string preferredName = slash >= 0 ? preferred.Substring(slash + 1) : preferred;
+        preferredName = Path.GetFileNameWithoutExtension(preferredName);
+        if (string.IsNullOrWhiteSpace(preferredName)) return true;
+        return voice.Replace('\\', '/').IndexOf(preferredName, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private void ShowStartupSuccessBanner()
+    {
+        if (startupSuccessBannerShown) return;
+        startupSuccessBannerShown = true;
+        string tavoScript = "http://" + lanHost + ":" + ApiPort + "/static/tavo.js?v=" + TavoCacheBust;
+        AddLauncherLog(
+            " _      _____  ___  _   _\r\n" +
+            "| |    | ____|/ _ \\| \\ | |\r\n" +
+            "| |    |  _| | | | |  \\| |\r\n" +
+            "| |___ | |___| |_| | |\\  |\r\n" +
+            "|_____||_____|\\___/|_| \\_|\r\n\r\n" +
+            "LEON 启动成功，可以用了。\r\n" +
+            "API: " + ApiBase + "\r\n" +
+            "LAN: http://" + lanHost + ":" + ApiPort + "\r\n" +
+            "Tavo: " + tavoScript);
     }
 
     private void RunEnvironmentCheckAsync()
@@ -1089,6 +1216,37 @@ internal sealed class LauncherForm : Form
             if (stream != null) stream.CopyTo(memory);
             return Encoding.UTF8.GetString(memory.ToArray());
         }
+    }
+
+    private string HttpPost(string url, string body, int timeoutMs)
+    {
+        byte[] bodyBytes = new UTF8Encoding(false).GetBytes(body ?? string.Empty);
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = "POST";
+        request.Accept = "application/json";
+        request.ContentType = "application/json; charset=utf-8";
+        request.ContentLength = bodyBytes.Length;
+        request.Timeout = Math.Max(500, timeoutMs);
+        request.ReadWriteTimeout = Math.Max(500, timeoutMs);
+        request.Proxy = null;
+        using (Stream requestStream = request.GetRequestStream())
+        {
+            requestStream.Write(bodyBytes, 0, bodyBytes.Length);
+        }
+        using (WebResponse response = request.GetResponse())
+        using (Stream stream = response.GetResponseStream())
+        using (MemoryStream memory = new MemoryStream())
+        {
+            if (stream != null) stream.CopyTo(memory);
+            return Encoding.UTF8.GetString(memory.ToArray());
+        }
+    }
+
+    private Dictionary<string, object> ParseJsonObject(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return new Dictionary<string, object>();
+        Dictionary<string, object> dict = json.DeserializeObject(text) as Dictionary<string, object>;
+        return dict ?? new Dictionary<string, object>();
     }
 
     private string ParseServerLogTail(string jsonText)
@@ -1624,9 +1782,43 @@ internal sealed class LauncherForm : Form
 
     private static string GetDictString(Dictionary<string, object> dict, string key)
     {
+        if (dict == null) return string.Empty;
         object value;
         if (!dict.TryGetValue(key, out value) || value == null) return string.Empty;
         return Convert.ToString(value);
+    }
+
+    private static string GetPreferredLanHost()
+    {
+        List<string> addresses = new List<string>();
+        try
+        {
+            foreach (NetworkInterface item in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (item.OperationalStatus != OperationalStatus.Up || item.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                foreach (UnicastIPAddressInformation address in item.GetIPProperties().UnicastAddresses)
+                {
+                    if (address.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                    string value = address.Address.ToString();
+                    if (value.StartsWith("169.254.", StringComparison.Ordinal) || value == "127.0.0.1") continue;
+                    addresses.Add(value);
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        foreach (string address in addresses)
+        {
+            if (address.StartsWith("192.168.", StringComparison.Ordinal) ||
+                address.StartsWith("10.", StringComparison.Ordinal) ||
+                Regex.IsMatch(address, "^172\\.(1[6-9]|2[0-9]|3[0-1])\\."))
+            {
+                return address;
+            }
+        }
+        return addresses.Count > 0 ? addresses[0] : "127.0.0.1";
     }
 
     private static int ToInt(object value)
