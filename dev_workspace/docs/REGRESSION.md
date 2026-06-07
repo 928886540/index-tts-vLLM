@@ -119,7 +119,7 @@ Current smoke must prove:
 
 ## Launcher Guard
 
-For `launcher/LEON-Launcher.ps1`:
+For root `LEON-Launcher.exe` and `launcher/LeonNativeLauncher.cs`:
 
 - Opening launcher must not start the API backend.
 - Primary start/stop button must show immediate `启动中...` / `停止中...` feedback and ignore repeat clicks.
@@ -130,9 +130,9 @@ For `launcher/LEON-Launcher.ps1`:
 - Runtime package detection must parse the explicit `LEON_IMPORT_PROBE_JSON=` marker and tolerate colored stdout warnings from packages such as `modelscope` or `deepspeed`.
 - Starting the service must not require a completed environment check; environment detection is a manual diagnostic page, and startup/runtime errors should surface through launcher logs.
 - One-click repair lives inside the environment detection page and only repairs rows present for the currently selected version.
-- WinForms `Timer` callbacks that reference local variables such as `$timer`, `$start`, or `$lastWaitLog` must use `.GetNewClosure()`; otherwise async startup can throw `op_Subtraction` / null variable errors.
-- Backend log refresh debounce must stop/dispose the captured timer instance, not call methods on `$Script:BackendLogTimer` from inside the callback, because later refresh requests can clear the global reference before an old tick fires.
-- API calls should go through the launcher URL helpers so `/warmup`, `warmup`, or an accidentally empty `$Script:ApiBase` cannot reach `WebRequest.Create()` as an invalid URI.
+- Health checks, backend log refresh, startup waiting, warmup, and process scans must stay off the UI thread.
+- Closing the launcher or pressing stop must request `/control?command=exit`, then clean port `9880`, launcher wrapper processes, and LEON runtime Python parent/child processes.
+- API calls should use absolute `http://127.0.0.1:9880/...` URLs and short timeouts where appropriate, so local polling cannot freeze the UI.
 
 ## Resource Guard
 
