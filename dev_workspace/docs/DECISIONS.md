@@ -142,3 +142,18 @@ Evidence from the 2026-06-06 fixed long multi-role benchmark:
 
 Decision: keep `0.11` as the safer long-session default and use `0.15` as the performance preset when other GPU workloads are off. Avoid `0.20+` unless a later architecture change reduces S2Mel/BigVGAN memory pressure. Do not treat 100% GPU/VRAM usage as a success metric for this pipeline.
 
+## DEC-016: Use strict project terminology for frontend, API backend, TTS service, and launcher
+
+Status: accepted
+
+The project uses these terms:
+
+- `后端` / backend means the API backend only: HTTP routes, request/response models, job/cache/status handling, and API-side helpers in `vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, and related API modules.
+- `前端` / frontend means Tavo-side injected UI/scripts: `static/tavo.js`, `static/tavo.runtime.js`, runtime parts, Tavo storage, WebAudio/native audio playback, and settings UI.
+- `TTS服务` / TTS service means the IndexTTS / IndexTTS2 inference and synthesis pipeline. Do not call this "backend" in this project.
+- `启动器` / launcher means `LEON-Launcher.exe`, `launcher/`, and startup scripts.
+
+Reason: the user relies on precise boundary language when reporting bugs. Mixing the IndexTTS inference layer into "backend" creates confusion about whether a regression is in the API contract, the Tavo frontend, the TTS service, or the launcher.
+
+Guard: bug notes, handoffs, and final replies should name the boundary explicitly, for example "frontend role mapping", "API backend status endpoint", "TTS service synthesis timing", or "launcher startup flow".
+

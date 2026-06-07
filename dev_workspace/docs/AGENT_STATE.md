@@ -6,6 +6,17 @@ Updated: 2026-06-07
 
 Finish the root workspace migration and keep IndexTTS2 as the Tavo mainline without copying GPT-SoVITS engine behavior into this project.
 
+## Terminology Boundary
+
+Use strict project terminology:
+
+- `后端` = API backend only (`vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, API routes, job/cache/status, API-side LLM helpers).
+- `前端` = Tavo frontend scripts/UI (`static/tavo.js`, runtime parts, Tavo storage, WebAudio/native playback UI).
+- `TTS服务` = IndexTTS / IndexTTS2 inference and synthesis pipeline. Do not call this "backend".
+- `启动器` = `LEON-Launcher.exe`, `launcher/`, and startup scripts.
+
+When reporting bugs or fixes, name the boundary explicitly.
+
 ## Latest Fix Snapshot: Tavo Normal Mapping / Cleaner / LIVE Resume v13
 
 Updated: 2026-06-07

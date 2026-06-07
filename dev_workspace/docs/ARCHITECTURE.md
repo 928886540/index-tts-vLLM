@@ -8,15 +8,26 @@ Primary goal: a user runs the model service on their own Windows machine, inject
 
 ## Runtime Components
 
-- `vllm/`: vLLM quality backend version.
-- `fast6g/`: double-accelerated 6 GB friendly backend version.
-- `static/tavo.js`: shared single Tavo injected script and player UI.
+- `vllm/`: vLLM quality API backend version directory.
+- `fast6g/`: double-accelerated 6 GB friendly API backend version directory.
+- `static/tavo.js`: shared single Tavo frontend injected script and player UI.
 - `launcher/` and `scripts/`: shared startup tooling and version selection.
 - `prompts/library/` under each backend version: voice/reference audio library.
 - `outputs/cache/` under the selected backend version: generated WAV and metadata snapshots.
 - `dev_workspace/dev_tools/`: local smoke tests, payloads, Playwright runner script, audio analysis utilities.
 - `dev_workspace/docs/`: active collaboration state.
 - `dev_workspace/handoff_docs/`: historical handoff material.
+
+## Terminology Boundary
+
+Use these terms consistently in code review, bug notes, and user-facing explanations:
+
+- Backend / API backend / `后端`: the HTTP API layer, including `vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, request models, job status, cache endpoints, and API-side LLM parse helpers.
+- Frontend / `前端`: Tavo-side injected scripts and UI, including `static/tavo.js`, runtime parts, Tavo storage, WebAudio/native audio lifecycle, and role/voice settings UI.
+- TTS service / `TTS服务`: IndexTTS / IndexTTS2 inference and model synthesis pipeline. This is not called "backend" in this project terminology.
+- Launcher / `启动器`: `LEON-Launcher.exe`, `launcher/`, and startup scripts.
+
+When describing a flow, separate the boundaries: frontend submits a job, API backend owns job/cache/status and validation, TTS service performs synthesis, then frontend plays live or saved audio.
 
 ## Tavo Flow
 
@@ -25,9 +36,10 @@ Tavo rendered message
   -> regex injects static/tavo.js
   -> player reads current message/chat context
   -> user selects normal or intelligent generation
-  -> frontend sends one TTS job request to indextts2_api.py
-  -> backend owns optional LLM parse, parse reuse, segment validation, and status
-  -> backend queues / runs IndexTTS2 inference
+  -> frontend sends one TTS job request to the API backend
+  -> API backend owns optional LLM parse, parse reuse, segment validation, and status
+  -> API backend queues work and calls the TTS service
+  -> TTS service runs IndexTTS2 inference
   -> live stream or cache snapshot becomes playable
   -> frontend persists track metadata with tavo.set
   -> saved audio can be replayed from /cache_audio/{cache_key}
@@ -43,9 +55,9 @@ The project already moved toward an async job and cache-key model:
 - `GET /cache_audio/{cache_key}`: serve completed WAV snapshots.
 - `GET /server_log/tail`: inspect recent server logs.
 
-Important invariant: TTS generation should not be tightly coupled to a single frontend HTTP connection. If Tavo disconnects, the backend should be able to finish and save the cache when possible.
+Important invariant: TTS generation should not be tightly coupled to a single frontend HTTP connection. If Tavo disconnects, the API backend should be able to keep the job alive, let the TTS service finish when possible, and save the cache.
 
-For normal Tavo intelligent mode, the frontend must not call `/parse_text` before job creation. It submits raw `text`, `voices`, LLM endpoint/model/key, Tavo user/character context, role hints, and generation parameters to `/tts_dialogue_stream_job`. The backend creates the job/cache id immediately, performs LLM parsing in the background before entering the TTS lock, and reports parse/TTS phases through `/tts_dialogue_job_status/{cache_key}`. Legacy `segments` input is still accepted for compatibility, and `/parse_text` remains as a manual/compatibility proxy endpoint.
+For normal Tavo intelligent mode, the frontend must not call `/parse_text` before job creation. It submits raw `text`, `voices`, LLM endpoint/model/key, Tavo user/character context, role hints, and generation parameters to `/tts_dialogue_stream_job`. The API backend creates the job/cache id immediately, performs LLM parsing in the background before entering the TTS lock, calls the TTS service for synthesis, and reports parse/TTS phases through `/tts_dialogue_job_status/{cache_key}`. Legacy `segments` input is still accepted for compatibility, and `/parse_text` remains as a manual/compatibility proxy endpoint.
 
 ## Resource Boundary
 
@@ -75,7 +87,7 @@ Track history should persist only stable saved/cacheable entries. Live/pending/f
 
 Saved/cache audio should prefer the native `<audio>` element when possible, because it has the best chance of integrating with system background playback and MediaSession.
 
-Live streaming may need Web Audio or backend buffering depending on Tavo/WebView behavior. Treat mobile playback as a real Tavo regression problem, not a normal browser-only problem.
+Live streaming may need Web Audio or API backend buffering depending on Tavo/WebView behavior. Treat mobile playback as a real Tavo regression problem, not a normal browser-only problem.
 
 ## Snapshot Metadata
 

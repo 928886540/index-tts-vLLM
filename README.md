@@ -21,6 +21,13 @@ This is the root workspace for the LEON IndexTTS2 Tavo integration.
 
 The launcher selects one backend version at startup. `static/`, `launcher/`, and `scripts/` are shared by both versions.
 
+## Terminology
+
+- `后端` / backend: the API backend layer (`vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, HTTP routes, job/cache/status).
+- `前端` / frontend: Tavo injected scripts and UI (`static/tavo.js`, runtime parts, Tavo storage/playback behavior).
+- `TTS服务`: the IndexTTS / IndexTTS2 inference and synthesis pipeline. This is not called "backend" in this project.
+- `启动器`: `LEON-Launcher.exe`, `launcher/`, and startup scripts.
+
 ## Tavo Script
 
 The app does not require a public domain. For same-LAN phone testing, use:
