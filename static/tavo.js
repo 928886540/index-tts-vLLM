@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260607-tavo-file-v38";
+  var LOADER_VERSION = "20260608-tavo-bg-v39";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
@@ -299,15 +299,13 @@
       var frames = Math.max(1, Math.floor(rate * 0.5));
       var buf = ctx.createBuffer(1, frames, rate);
       var data = buf.getChannelData(0);
-      for (var i = 0; i < data.length; i++) {
-        data[i] = Math.sin(2 * Math.PI * 80 * i / rate) * 0.0006;
-      }
+      for (var i = 0; i < data.length; i++) data[i] = 0;
       var gain = ctx.createGain ? ctx.createGain() : null;
       var src = ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;
       if (gain) {
-        gain.gain.value = 0.35;
+        gain.gain.value = 0;
         src.connect(gain);
         gain.connect(ctx.destination);
       } else {
@@ -339,8 +337,7 @@
       put32(24, rate); put32(28, rate * 2); put16(32, 2); put16(34, 16);
       putText(36, "data"); put32(40, frames * 2);
       for (var j = 0; j < frames; j++) {
-        var edge = Math.min(1, j / Math.max(1, Math.floor(rate * 0.012)), (frames - j) / Math.max(1, Math.floor(rate * 0.012)));
-        var sample = Math.round(Math.sin(2 * Math.PI * 440 * j / rate) * 56 * Math.max(0, edge));
+        var sample = 0;
         put16(44 + j * 2, sample < 0 ? sample + 65536 : sample);
       }
       var blob = new Blob([bytes], { type: "audio/wav" });
@@ -357,7 +354,8 @@
       if (!el) {
         el = new Audio();
         el.preload = "auto";
-        el.volume = 1;
+        el.volume = 0;
+        el.muted = true;
         try { el.setAttribute("playsinline", ""); el.setAttribute("webkit-playsinline", ""); } catch (_) {}
         window.__indextts_tavo_native_unlock_audio = el;
       }
@@ -380,6 +378,7 @@
 
   function primeRuntimeAudioContext(ownerMessageId) {
     try {
+      try { window.__indextts_tavo_last_audio_gesture_at = Date.now(); } catch (_) {}
       primeNativeAudioElementForGesture();
       ownerMessageId = String(ownerMessageId || "").trim();
       var ctx = window.__indextts_tavo_preprimed_audio_context;
@@ -403,10 +402,7 @@
         var rate = ctx.sampleRate || 44100;
         var buf = ctx.createBuffer(1, Math.max(1, Math.floor(rate * 0.025)), rate);
         var data = buf.getChannelData(0);
-        for (var i = 0; data && i < data.length; i++) {
-          var edge = Math.min(1, i / Math.max(1, Math.floor(rate * 0.006)), (data.length - i) / Math.max(1, Math.floor(rate * 0.006)));
-          data[i] = Math.sin(2 * Math.PI * 220 * i / rate) * 0.0012 * Math.max(0, edge);
-        }
+        for (var i = 0; data && i < data.length; i++) data[i] = 0;
         var src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(ctx.destination);

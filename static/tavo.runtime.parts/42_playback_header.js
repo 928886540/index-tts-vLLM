@@ -92,6 +92,9 @@
     function trackResumeSec(track) {
       if (!track) return 0;
       if (isSavedTrack(track) && String(track.playbackState || "") === "ended") return 0;
+      if ((track.livePageSuspended || track.pausedByUser || String(track.playbackState || "") === "paused") && isFinite(Number(track.liveResumeSec))) {
+        return Math.max(0, Number(track.liveResumeSec) || 0);
+      }
       if (typeof webAudioPlaybackSecForTrack === "function" && webAudioActiveTrack === track) {
         var webSec = webAudioPlaybackSecForTrack(track);
         if (isFinite(Number(webSec)) && Number(webSec) > 0) return Math.max(0, Number(webSec));
@@ -100,6 +103,8 @@
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       var playable = trackPlayableUrl(track);
       if ((elementAudioBelongsToTrack(track) || (playable && src === playable)) && isFinite(Number(audio.currentTime))) return Math.max(0, elementPlaybackTimeSec(track));
+      if (isFinite(Number(track.liveResumeSec))) return Math.max(0, Number(track.liveResumeSec) || 0);
+      if (isFinite(Number(track.lastLiveProgressSec))) return Math.max(0, Number(track.lastLiveProgressSec) || 0);
       if ((track.state === "live" || track.state === "pending") && (track.streamHealth === "stalled" || track.streamHealth === "interrupted" || track.streamStalled) && isFinite(Number(track.lastStalledSec))) {
         return Math.max(0, (Number(track.lastStalledSec) || 0) - 0.5);
       }

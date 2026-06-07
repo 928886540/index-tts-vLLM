@@ -423,12 +423,165 @@
       msg = String(msg || "");
       return /Failed to start the audio device|audio device|AudioContext.*interrupted|interrupted.*AudioContext|\[step:(pcm\.)?schedulePcm\.resume\]/i.test(msg);
     }
+    var lastRuntimePageHiddenAt = 0;
+    function isRuntimePageHidden() {
+      try {
+        if (document.hidden) return true;
+        var state = String(document.visibilityState || "").toLowerCase();
+        return state === "hidden" || state === "prerender";
+      } catch (_) {
+        return false;
+      }
+    }
+    function noteRuntimePageVisibility(reason) {
+      var hidden = isRuntimePageHidden();
+      if (hidden) {
+        lastRuntimePageHiddenAt = Date.now();
+        try { window.__indextts_tavo_last_page_hidden_at = lastRuntimePageHiddenAt; } catch (_) {}
+        if (reason) debugLog("⏸ 页面进入后台，暂挂实时音频 reason=" + reason, "#fc9");
+      }
+      return hidden;
+    }
+    function recentlyRuntimePageHidden(ms) {
+      ms = Math.max(300, Number(ms || 1500) || 1500);
+      if (isRuntimePageHidden()) return true;
+      var t = lastRuntimePageHiddenAt;
+      try { t = Math.max(Number(t || 0) || 0, Number(window.__indextts_tavo_last_page_hidden_at || 0) || 0); } catch (_) {}
+      return !!(t && Date.now() - t <= ms);
+    }
+    function recentAudioGesture(ms) {
+      ms = Math.max(300, Number(ms || 1400) || 1400);
+      try {
+        var t = Number(window.__indextts_tavo_last_audio_gesture_at || 0) || 0;
+        return !!(t && Date.now() - t <= ms);
+      } catch (_) {
+        return false;
+      }
+    }
+    function shouldDeferLiveAutoRecovery(reason) {
+      reason = String(reason || "");
+      if (isRuntimePageHidden()) return true;
+      if (recentlyRuntimePageHidden(1800) && !recentAudioGesture(1500)) return true;
+      return /audio_suspended|stream_interrupted|interrupted/i.test(reason) && !recentAudioGesture(1500);
+    }
+    function parseDisplayedTimeSec(text) {
+      text = String(text || "").trim();
+      var m = text.match(/^(\d+):([0-5]\d)$/);
+      if (!m) return NaN;
+      return Math.max(0, Number(m[1] || 0) * 60 + Number(m[2] || 0));
+    }
+    function rememberLiveResumeSec(track, sec, reason) {
+      if (!track || !isFinite(Number(sec))) return 0;
+      sec = clampPlaybackTimeSec(track, Math.max(0, Number(sec) || 0));
+      var prev = Math.max(
+        0,
+        isFinite(Number(track.liveResumeSec)) ? Number(track.liveResumeSec) : 0,
+        isFinite(Number(track.lastLiveProgressSec)) ? Number(track.lastLiveProgressSec) : 0,
+        isFinite(Number(track.lastWebAudioSec)) ? Number(track.lastWebAudioSec) : 0
+      );
+      if (prev > 0 && sec + 1.5 < prev) {
+        debugLog("↪️ 忽略回退的 LIVE 断点 " + sec.toFixed(2) + "s，保留 " + prev.toFixed(2) + "s reason=" + (reason || ""), "#fc9");
+        sec = prev;
+      }
+      track.liveResumeSec = sec;
+      track.lastLiveProgressSec = sec;
+      track.lastWebAudioSec = sec;
+      track.lastElementSec = sec;
+      return sec;
+    }
+    function lastKnownLiveResumeSec(track) {
+      if (!track) return 0;
+      var best = 0;
+      function take(v) {
+        v = Number(v);
+        if (isFinite(v) && v > best) best = v;
+      }
+      take(track.liveResumeSec);
+      take(track.lastLiveProgressSec);
+      take(track.lastWebAudioSec);
+      take(track.lastElementSec);
+      try { if (currentTrack() === track && cur) take(parseDisplayedTimeSec(cur.textContent)); } catch (_) {}
+      return clampPlaybackTimeSec(track, best);
+    }
+    function liveResumeDebugSnapshot(track) {
+      track = track || currentTrack();
+      if (!track) return null;
+      return {
+        cacheKey: track.cacheKey || "",
+        state: trackState(track),
+        playbackState: String(track.playbackState || ""),
+        streamHealth: String(track.streamHealth || ""),
+        livePageSuspended: !!track.livePageSuspended,
+        pausedByUser: !!track.pausedByUser,
+        liveResumeSec: Number(track.liveResumeSec || 0) || 0,
+        lastLiveProgressSec: Number(track.lastLiveProgressSec || 0) || 0,
+        lastWebAudioSec: Number(track.lastWebAudioSec || 0) || 0,
+        lastElementSec: Number(track.lastElementSec || 0) || 0,
+        lastStalledSec: Number(track.lastStalledSec || 0) || 0,
+        lastKnownLiveResumeSec: lastKnownLiveResumeSec(track),
+        trackResumeSec: trackResumeSec(track),
+        currentText: cur ? String(cur.textContent || "") : ""
+      };
+    }
+    if (DEBUG_MODE) {
+      try {
+        window.__indextts_tavo_debug_playback = {
+          currentTrack: function () { return liveResumeDebugSnapshot(currentTrack()); },
+          patchCurrentTrack: function (patch) {
+            var track = currentTrack();
+            if (!track) return null;
+            patch = patch || {};
+            [
+              "state", "playbackState", "streamHealth", "streamStalled",
+              "livePageSuspended", "pausedByUser", "webAudioPlaying",
+              "liveResumeSec", "lastLiveProgressSec", "lastWebAudioSec",
+              "lastElementSec", "lastStalledSec"
+            ].forEach(function (key) {
+              if (Object.prototype.hasOwnProperty.call(patch, key)) track[key] = patch[key];
+            });
+            if (isFinite(Number(patch.displaySec)) && cur) cur.textContent = formatTime(Math.max(0, Number(patch.displaySec) || 0));
+            return liveResumeDebugSnapshot(track);
+          }
+        };
+      } catch (_) {}
+    }
+    function suspendLiveForPageHidden(track, reason, title, detail) {
+      if (!track || !isLiveTrack(track) || !track.cacheKey) return false;
+      var now = Date.now();
+      if (track.livePageSuspendedAt && now - Number(track.livePageSuspendedAt || 0) < 700) return true;
+      noteRuntimePageVisibility(reason || "audio session hidden");
+      var resumeSec = lastKnownLiveResumeSec(track);
+      if (!(resumeSec > 0)) resumeSec = trackResumeSec(track);
+      resumeSec = rememberLiveResumeSec(track, resumeSec, reason || "page hidden");
+      track.livePageSuspendedAt = now;
+      track.livePageSuspended = true;
+      track.preferNativeLive = false;
+      track.webAudioDeviceFailed = false;
+      return markLiveStreamResumable(
+        track,
+        reason || "page hidden audio suspended",
+        title || "实时音频已暂挂",
+        detail || "切回页面后点播放继续同一个实时流；后端仍会自动落盘"
+      );
+    }
+    function handleRuntimePageVisibilityChange(reason) {
+      if (!noteRuntimePageVisibility(reason || "visibilitychange")) return false;
+      var t = currentTrack();
+      if (!t || !isLiveTrack(t)) return false;
+      if (t.webAudioPlaying || webAudioBelongsToTrack(t) || isElementPlayingTrackStream(t) || trackState(t) === "live" || trackState(t) === "pending") {
+        return suspendLiveForPageHidden(t, reason || "visibilitychange");
+      }
+      return false;
+    }
     function startNativeLiveElementFallback(track, reason, opts) {
       opts = opts || {};
       if (!track || !isLiveTrack(track) || !liveStreamUrlForTrack(track)) return false;
+      if (shouldDeferLiveAutoRecovery("native_fallback_" + (reason || ""))) {
+        return suspendLiveForPageHidden(track, "defer_native_" + (reason || "audio_suspended"));
+      }
       var resumeSec = opts.resumeSec;
       if (!isFinite(Number(resumeSec))) resumeSec = trackResumeSec(track);
-      resumeSec = Math.max(0, Number(resumeSec) || 0);
+      resumeSec = rememberLiveResumeSec(track, Math.max(0, Number(resumeSec) || 0), reason || "native live fallback");
       track.preferNativeLive = true;
       track.webAudioDeviceFailed = true;
       track.streaming = true;
@@ -479,9 +632,11 @@
     }
     function markLiveStreamResumable(track, reason, title, detail) {
       if (!track || !track.cacheKey) return false;
-      var resumeSec = trackResumeSec(track);
+      var resumeSec = track.livePageSuspended ? lastKnownLiveResumeSec(track) : trackResumeSec(track);
+      resumeSec = rememberLiveResumeSec(track, resumeSec, reason || "live resumable");
+      webAudioPlayToken++;
       try {
-        if (webAudioBelongsToTrack(track) && typeof webAudioController.stop === "function") webAudioController.stop(reason || "live resumable");
+        if (webAudioBelongsToTrack(track) && typeof webAudioController.stop === "function") webAudioController.stop("播放已停止: " + (reason || "live resumable"));
       } catch (_) {}
       if (webAudioActiveTrack === track) {
         webAudioController = null;
@@ -491,10 +646,6 @@
       markWebAudioStopped(track);
       stopSubtitle();
       clearElementAudioSrc();
-      if (resumeSec > 0) {
-        track.lastWebAudioSec = resumeSec;
-        track.lastElementSec = resumeSec;
-      }
       track.streaming = true;
       track.allowStreamPlay = false;
       track.playSavedWhenReady = false;
@@ -606,10 +757,19 @@
           sec = Number(webAudioController.getTimeSec());
         }
       } catch (_) { sec = NaN; }
-      if (!isFinite(sec) && track && isFinite(Number(track.lastWebAudioSec))) sec = Number(track.lastWebAudioSec);
-      if (!isFinite(sec) && track && isFinite(Number(track.lastStalledSec))) sec = Number(track.lastStalledSec);
-      if (!isFinite(sec) && track && isFinite(Number(track.lastElementSec))) sec = Number(track.lastElementSec);
-      return Math.max(0, isFinite(sec) ? sec : 0);
+      var best = isFinite(sec) ? Math.max(0, sec) : 0;
+      function take(v) {
+        v = Number(v);
+        if (isFinite(v) && v > best) best = v;
+      }
+      if (track) {
+        take(track.liveResumeSec);
+        take(track.lastLiveProgressSec);
+        take(track.lastWebAudioSec);
+        take(track.lastElementSec);
+        if (!(best > 0)) take(track.lastStalledSec);
+      }
+      return Math.max(0, isFinite(best) ? best : 0);
     }
     function canResumePausedWebAudioTrack(track) {
       return !!(
@@ -623,8 +783,7 @@
     function pauseWebAudioTrackLocally(track) {
       if (!track || !webAudioBelongsToTrack(track) || !(webAudioController && typeof webAudioController.pause === "function")) return false;
       var sec = webAudioPlaybackSecForTrack(track);
-      track.lastWebAudioSec = sec;
-      track.lastElementSec = sec;
+      sec = rememberLiveResumeSec(track, sec, "user pause");
       track.pausedByUser = true;
       track.webAudioPausedLocal = true;
       track.webAudioPlaying = false;
@@ -688,8 +847,7 @@
       if (activeTrack && webAudioBelongsToTrack(activeTrack) && typeof webAudioController.getTimeSec === "function") {
         try {
           var sec = Math.max(0, Number(webAudioController.getTimeSec()) || 0);
-          activeTrack.lastWebAudioSec = sec;
-          activeTrack.lastElementSec = sec;
+          rememberLiveResumeSec(activeTrack, sec, reason || "stop webaudio");
         } catch (_) {}
       }
       if (webAudioController && typeof webAudioController.stop === "function") {
@@ -741,6 +899,7 @@
           }
         } catch (_) {}
         if (track) track.lastWebAudioSec = sec;
+        if (track) rememberLiveResumeSec(track, sec, "progress");
         try {
           if (track && track.latestSynthesisStatusText && Date.now() - Number(track.lastPlaybackSegmentStatusAt || 0) > 1000) {
             var base = String(track.latestSynthesisStatusText || "");
@@ -809,6 +968,9 @@
       }
       function scheduleSameJobRecovery(reason) {
         if (!track.cacheKey || sameJobRecoveryScheduled || streamTooSlowFallback) return false;
+        if (shouldDeferLiveAutoRecovery(reason)) {
+          return suspendLiveForPageHidden(track, reason || "defer same job recovery", "实时音频已暂挂", "切回页面后点播放继续同一个实时流；后端仍会自动落盘");
+        }
         if (recoveryAttempt >= maxRecoveryAttempts) {
           return waitForSameJobSavedFallback(reason, "等待完整音频…", "流式多次恢复失败，完整音频保存后会自动播放");
         }
@@ -925,15 +1087,15 @@
               if (!hasActiveSubtitleRows(track)) showTrackNotice(track, "收到音频", "准备播放");
             } else if (state === "audio_suspended") {
               stopWaitTimer();
-              if (startNativeLiveElementFallback(track, "audio_suspended", {
-                resumeSec: trackResumeSec(track),
-                title: "切换实时音频通道…",
-                detail: "WebAudio 被系统暂停，改用同一个实时流"
-              })) return;
+              if (shouldDeferLiveAutoRecovery("audio_suspended")) {
+                suspendLiveForPageHidden(track, "audio_suspended", "实时音频已暂挂", "切回页面后点播放继续同一个实时流；后端仍会自动落盘");
+                return;
+              }
               if (scheduleSameJobRecovery("audio_suspended")) return;
             } else if (state === "playing") {
               stopWaitTimer();
               webAudioActiveTrack = track;
+              track.livePageSuspended = false;
               track.webAudioPlaying = true;
               track.webAudioStable = false;
               track.webAudioBufferStable = false;
@@ -975,6 +1137,10 @@
               track.lastStalledSec = trackResumeSec(track);
               setTrackStreamHealth(track, "stalled");
               debugLog("⚠️ Web Audio buffering count=" + track.stalledCount, "#fc9");
+              if (recentlyRuntimePageHidden(1800)) {
+                suspendLiveForPageHidden(track, "background_buffering", "实时音频已暂挂", "切回页面后点播放继续同一个实时流；后端仍会自动落盘");
+                return;
+              }
               var earlyMs = startedAt ? (((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt) || 0) : 0;
               if (track.webAudioPlaying) {
                 setTrackPlaybackState(track, "playing");
@@ -993,11 +1159,10 @@
               setStatus(trackPlaybackLabel(track));
             } else if (state === "interrupted") {
               stopWaitTimer();
-              if (startNativeLiveElementFallback(track, "stream_interrupted", {
-                resumeSec: trackResumeSec(track),
-                title: "切换实时音频通道…",
-                detail: "WebAudio 中断，改用同一个实时流"
-              })) return;
+              if (shouldDeferLiveAutoRecovery("stream_interrupted")) {
+                suspendLiveForPageHidden(track, "stream_interrupted", "实时音频已暂挂", "切回页面后点播放继续同一个实时流；后端仍会自动落盘");
+                return;
+              }
               if (scheduleSameJobRecovery("stream_interrupted")) return;
               setTrackStreamHealth(track, "interrupted");
               markWebAudioStopped(track);
@@ -1099,6 +1264,10 @@
           return false;
         }
         if (track.cacheKey && isWebAudioDeviceFailureMessage(msg)) {
+          if (shouldDeferLiveAutoRecovery("web_audio_device_failed")) {
+            suspendLiveForPageHidden(track, "web_audio_device_failed", "实时音频已暂挂", "切回页面后点播放继续同一个实时流；后端仍会自动落盘");
+            return false;
+          }
           startNativeLiveElementFallback(track, "web_audio_device_failed", {
             resumeSec: trackResumeSec(track),
             title: "切换实时音频通道…",
@@ -1130,6 +1299,10 @@
       opts = opts || {};
       if (!track || !url) return Promise.resolve(false);
       var startOffsetSec = Math.max(0, Number(opts.startOffsetSec || 0) || 0);
+      if (isRuntimePageHidden()) {
+        return Promise.resolve(suspendLiveForPageHidden(track, "hidden_play_live", "实时音频已暂挂", "切回页面后点播放继续同一个实时流；后端仍会自动落盘"));
+      }
+      track.livePageSuspended = false;
       if (isSavedTrack(track) && trackPlayableUrl(track)) {
         setPlayState("loading");
         return Promise.resolve(startElementAudioFrom(track, startOffsetSec));

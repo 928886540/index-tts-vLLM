@@ -391,8 +391,7 @@
       put32(24, rate); put32(28, rate * 2); put16(32, 2); put16(34, 16);
       putText(36, "data"); put32(40, frames * 2);
       for (var j = 0; j < frames; j++) {
-        var edge = Math.min(1, j / Math.max(1, Math.floor(rate * 0.012)), (frames - j) / Math.max(1, Math.floor(rate * 0.012)));
-        var sample = Math.round(Math.sin(2 * Math.PI * 440 * j / rate) * 56 * Math.max(0, edge));
+        var sample = 0;
         put16(44 + j * 2, sample < 0 ? sample + 65536 : sample);
       }
       var blob = new Blob([bytes], { type: "audio/wav" });
@@ -408,7 +407,8 @@
       if (!el) {
         el = new Audio();
         el.preload = "auto";
-        el.volume = 1;
+        el.volume = 0;
+        el.muted = true;
         try { el.setAttribute("playsinline", ""); el.setAttribute("webkit-playsinline", ""); } catch (_) {}
         window.__indextts_tavo_native_unlock_audio = el;
       }
@@ -458,15 +458,13 @@
       var frames = Math.max(1, Math.floor(rate * 0.5));
       var b = ctx.createBuffer(1, frames, rate);
       var ch = b.getChannelData(0);
-      for (var i = 0; i < ch.length; i++) {
-        ch[i] = Math.sin(2 * Math.PI * 80 * i / rate) * 0.0006;
-      }
+      for (var i = 0; i < ch.length; i++) ch[i] = 0;
       var gain = ctx.createGain ? ctx.createGain() : null;
       var src = ctx.createBufferSource();
       src.buffer = b;
       src.loop = true;
       if (gain) {
-        gain.gain.value = 0.35;
+        gain.gain.value = 0;
         src.connect(gain);
         gain.connect(ctx.destination);
       } else {
@@ -489,15 +487,12 @@
       var frames = Math.max(1, Math.floor(rate * 0.08));
       var b = ctx.createBuffer(1, frames, rate);
       var ch = b.getChannelData(0);
-      for (var i = 0; i < ch.length; i++) {
-        var edge = Math.min(1, i / Math.max(1, Math.floor(rate * 0.012)), (ch.length - i) / Math.max(1, Math.floor(rate * 0.012)));
-        ch[i] = Math.sin(2 * Math.PI * 220 * i / rate) * 0.0016 * Math.max(0, edge);
-      }
+      for (var i = 0; i < ch.length; i++) ch[i] = 0;
       var gain = ctx.createGain ? ctx.createGain() : null;
       var src = ctx.createBufferSource();
       src.buffer = b;
       if (gain) {
-        gain.gain.value = 1;
+        gain.gain.value = 0;
         src.connect(gain);
         gain.connect(destination || ctx.destination);
       } else {
@@ -578,6 +573,7 @@
   function primeAudioContext(ownerMessageId, opts) {
     opts = opts || {};
     ownerMessageId = normalizeAudioOwner(ownerMessageId);
+    try { window.__indextts_tavo_last_audio_gesture_at = Date.now(); } catch (_) {}
     primeNativeAudioElementForGesture(opts.reason || "audio-context");
     if (opts.forceNew) resetPreprimedAudioContext(opts.reason || "forceNew");
     var existing = takePreprimedAudioContext(ownerMessageId);
@@ -597,10 +593,7 @@
         var unlockRate = ctx.sampleRate || 44100;
         var b = ctx.createBuffer(1, Math.max(1, Math.floor(unlockRate * 0.03)), unlockRate);
         var ch = b.getChannelData(0);
-        for (var i = 0; ch && i < ch.length; i++) {
-          var edge = Math.min(1, i / Math.max(1, Math.floor(unlockRate * 0.006)), (ch.length - i) / Math.max(1, Math.floor(unlockRate * 0.006)));
-          ch[i] = Math.sin(2 * Math.PI * 220 * i / unlockRate) * 0.0012 * Math.max(0, edge);
-        }
+        for (var i = 0; ch && i < ch.length; i++) ch[i] = 0;
         var s = ctx.createBufferSource();
         s.buffer = b; s.connect(ctx.destination); s.start(0);
         PRIMED_UNLOCK_SOURCE = s;

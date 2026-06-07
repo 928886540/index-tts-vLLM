@@ -60,6 +60,7 @@
     }
     var lastFreshAudioPrimeAt = 0;
     function primeAudioForGesture(action) {
+      try { window.__indextts_tavo_last_audio_gesture_at = Date.now(); } catch (_) {}
       var forceNew = false;
       try {
         var t = currentTrack();
@@ -75,6 +76,15 @@
       if (forceNew) lastFreshAudioPrimeAt = now;
       primeAudioContext(messageId, forceNew ? { forceNew: true, reason: action + " live retry" } : { reason: action + " gesture" });
     }
+    function handlePageAudioSuspend(reason) {
+      try {
+        if (typeof handleRuntimePageVisibilityChange === "function") handleRuntimePageVisibilityChange(reason);
+      } catch (e) {
+        debugLog("⚠️ 页面后台暂挂处理失败: " + (e && e.message ? e.message : e), "#fc9");
+      }
+    }
+    on(document, "visibilitychange", function () { handlePageAudioSuspend("visibilitychange"); });
+    on(window, "pagehide", function () { handlePageAudioSuspend("pagehide"); });
     on(play, 'pointerdown', function () { primeAudioForGesture("play"); });
     on(add, 'pointerdown', function () { primeAudioForGesture("add"); });
     on(rewind10, 'pointerdown', function () { primeAudioForGesture("seek"); });

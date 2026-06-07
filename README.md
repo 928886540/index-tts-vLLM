@@ -30,7 +30,7 @@ D:\apiWorkSpace\leon_api\LEON-Launcher.exe
 共享的 Tavo 前端由 `static/` 提供。同一局域网内测试 Tavo 时可加载：
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-tavo-file-v38"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-tavo-bg-v39"></script>
 ```
 
 如需公网访问，请在仓库外自行配置隧道或反向代理，只替换脚本地址中的主机部分。

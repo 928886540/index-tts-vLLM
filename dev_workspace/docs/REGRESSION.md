@@ -56,6 +56,8 @@ Current smoke must prove:
 - AI role mapping does not include normal dialogue rows and does not submit `voices.default`;
 - LIVE starts one generation POST then same-key stream GET;
 - same-key LIVE recovery never POSTs another job or DELETEs the job;
+- page-hide/background WebAudio suspend keeps the same LIVE card/key, does not switch to native live `<audio>`, does not DELETE the backend job, and waits for a user play gesture before reconnecting;
+- foreground play after page-hide/background suspend must reconnect the same LIVE key from the latest visible/WebAudio progress, not from an older `lastStalledSec` buffering point;
 - restored LIVE pending jobs from `tavo.get` reconnect same key with `start_s`;
 - non-cached LIVE jobs write a chat-scoped pending card immediately after `cacheKey`; remounting the message restores that same key without a new POST, and explicit LIVE exit/delete clears pending and sends DELETE;
 - offline saved audio should first use Tavo chat file storage; if the `tavo.file.url()` path fails as an `<audio>` source, retry `tavo.file.load(..., { encoding: "dataUrl" })` as a local `blob:` before falling back to online `/cache_audio`;
@@ -106,6 +108,8 @@ Current smoke must prove:
 - LIVE pending/restored tracks keep `playbackMode=live`, `state=live`, and last resume seconds.
 - A fresh LIVE job must also be persisted to pending storage immediately after `cacheKey`, not only after user pauses or after DISK/background mode; this is the lock-screen/WebView-death recovery anchor.
 - LIVE pause/resume keeps the local WebAudio/PCM queue alive when the controller is still valid; if local resume fails, fallback may reconnect `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>`, but must not create a new POST.
+- App background/page-hide WebAudio `suspended` / `interrupted` is a temporary suspend, not a device failure. It must record the resume second, stop automatic WebAudio rebuild/native live `<audio>` fallback loops, keep the pending card/job, and wait for a foreground user gesture.
+- The recorded LIVE resume second must be monotonic across suspend/reconnect. If stale buffering state says `lastStalledSec=7` but the latest LIVE progress is `17s`, foreground resume must request `start_s=17`, not jump back to 7.
 - Repeated WebAudio underrun returns to idle/resumable state and keeps cache polling alive; it must not force saved-cache autoplay or leave a permanent spinner.
 - If WebAudio output/device startup fails while LIVE is active, switch to same-key native live `<audio>` with `start_s` before waiting for saved `/cache_audio`.
 - User-facing copy must not say "实时生成跟不上" or "手动续播".
