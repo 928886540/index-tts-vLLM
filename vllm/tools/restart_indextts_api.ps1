@@ -9,6 +9,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+try {
+    [Console]::OutputEncoding = $Utf8NoBomEncoding
+    [Console]::InputEncoding = $Utf8NoBomEncoding
+    $OutputEncoding = $Utf8NoBomEncoding
+}
+catch {
+}
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $WorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($LeonRoot)) {
     (Resolve-Path $LeonRoot).Path

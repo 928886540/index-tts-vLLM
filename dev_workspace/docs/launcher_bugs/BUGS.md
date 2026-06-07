@@ -2,6 +2,22 @@
 
 This folder tracks launcher-only issues separately from Tavo/player work.
 
+## BUG-LAUNCHER-038: Home logs show mojibake and do not default to the newest line
+
+Status: fixed in script, needs visual confirmation in real launcher window
+
+Reported: 2026-06-07
+
+Repro: Open the launcher home log view after starting the service. Some Chinese log text renders as mojibake, and the visible log area often stops slightly above the newest line so the user has to scroll down manually.
+
+Evidence: User report: "启动器现在显示的日志有乱码" and "日志列应该默认焦点是最后一行，现在老是要下滑一下才看到最后一行". Code evidence: the launcher started `cmd.exe /c <bat>` without forcing UTF-8, startup scripts did not set `chcp 65001` / Python UTF-8 mode, `Read-LauncherLogTail()` only tried strict UTF-8 then the process default ANSI encoding, and log tab refresh depended on `ScrollToCaret()` immediately after text assignment.
+
+Root cause: Startup stdout/stderr could be produced under the console default code page while the launcher decoded it as UTF-8 or system ANSI only. Existing logs written in GBK/GB18030 were not reliably decoded on every Windows locale. The log text box also did not schedule a post-layout scroll, so WinForms could leave the scrollbar slightly above the end after refresh or resize.
+
+Fix: `launcher/LEON-Launcher.ps1` now sets the launcher console/output encoding to UTF-8, starts service BAT files through `cmd /d /s /c chcp 65001`, passes `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` during startup, reads log files with shared access, and scores UTF-8 / GB18030 / GBK / system-default decodes before normalizing. The home log RichTextBox now uses a shared scroll helper that moves the caret to `TextLength` immediately and again after layout via `BeginInvoke`.
+
+Guard: Starting from the launcher should generate UTF-8 Python logs. Old GBK/GB18030 logs should still display readable Chinese where possible. Switching log tabs, refreshing logs, opening home, and resizing the launcher should leave the active log view at the newest line unless the user is actively selecting text in the same tab.
+
 ## BUG-LAUNCHER-031: Launcher UI is overbuilt, noisy, and auto-checks environment on open
 
 Status: fixed in script, needs visual confirmation in real launcher window

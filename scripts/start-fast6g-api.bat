@@ -1,9 +1,12 @@
 @echo off
+chcp 65001 >nul
 setlocal
 set "LEON_ROOT=%~dp0.."
 for %%I in ("%LEON_ROOT%") do set "LEON_ROOT=%%~fI"
 set "LEON_VERSION_ROOT=%LEON_ROOT%\fast6g"
 set "LEON_STATIC_DIR=%LEON_ROOT%\static"
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 set "HF_HOME=%LEON_VERSION_ROOT%\checkpoints"
 set "PATH=%LEON_VERSION_ROOT%\indextts2runtime\Scripts;%PATH%"
 cd /d "%LEON_VERSION_ROOT%"

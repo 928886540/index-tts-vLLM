@@ -5,6 +5,15 @@ Add-Type -AssemblyName System.Drawing
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+$Script:Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+try {
+    [Console]::OutputEncoding = $Script:Utf8NoBomEncoding
+    [Console]::InputEncoding = $Script:Utf8NoBomEncoding
+    $OutputEncoding = $Script:Utf8NoBomEncoding
+}
+catch {
+}
+
 function Get-PreferredLanHost {
     try {
         $addresses = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
@@ -328,6 +337,35 @@ function Test-LogTextSelected {
     }
 }
 
+function Scroll-LogBoxToEnd {
+    param([bool]$Defer = $true)
+    if (-not $Script:LogBox) { return }
+    try {
+        if ($Script:LogBox.PSObject.Properties.Name -contains "SelectionStart") {
+            $Script:LogBox.SelectionStart = $Script:LogBox.TextLength
+            if ($Script:LogBox.PSObject.Properties.Name -contains "SelectionLength") {
+                $Script:LogBox.SelectionLength = 0
+            }
+            $Script:LogBox.ScrollToCaret()
+        }
+        if ($Defer -and $Script:LogBox.IsHandleCreated -and -not $Script:LogBox.IsDisposed) {
+            [void]$Script:LogBox.BeginInvoke([System.Windows.Forms.MethodInvoker]{
+                if ($Script:LogBox -and -not $Script:LogBox.IsDisposed -and -not (Test-LogTextSelected)) {
+                    try {
+                        $Script:LogBox.SelectionStart = $Script:LogBox.TextLength
+                        $Script:LogBox.SelectionLength = 0
+                        $Script:LogBox.ScrollToCaret()
+                    }
+                    catch {
+                    }
+                }
+            })
+        }
+    }
+    catch {
+    }
+}
+
 function Test-NoisyLauncherLogLine {
     param([string]$Line)
     if ([string]::IsNullOrWhiteSpace($Line)) { return $false }
@@ -362,18 +400,104 @@ function Normalize-LauncherLogText {
     return ($text -replace "`n", "`r`n").TrimEnd()
 }
 
+function Get-LogDecodeScore {
+    param([string]$Text)
+    if ($null -eq $Text) { return -1000000 }
+
+    $score = 0
+    $replacementCount = ([regex]::Matches($Text, [string][char]0xFFFD)).Count
+    $nulCount = ([regex]::Matches($Text, "`0")).Count
+    $score -= ($replacementCount * 1000)
+    $score -= ($nulCount * 500)
+
+    $cjkCount = ([regex]::Matches($Text, '[\u4e00-\u9fff]')).Count
+    $score += [Math]::Min(300, $cjkCount * 2)
+
+    $commonChineseCount = ([regex]::Matches($Text, '启动|服务|日志|检测|环境|错误|等待|加载|模型|音色|完成|失败|成功|端口|路径')).Count
+    $score += ($commonChineseCount * 60)
+
+    $mojibakeCount = ([regex]::Matches($Text, '锟斤拷|Ã|Â|鍚|榯|浣|妗|鐧|涓|鏃|璇|鎴|绋|杩|鍔|姝|澶|犳|栨|锛')).Count
+    $score -= ($mojibakeCount * 180)
+
+    $controlCount = ([regex]::Matches($Text, '[\x00-\x08\x0B\x0C\x0E-\x1F]')).Count
+    $score -= ($controlCount * 120)
+
+    return $score
+}
+
+function Read-SharedFileBytes {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path $Path)) { return $null }
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+        $buffer = New-Object byte[] $stream.Length
+        $offset = 0
+        while ($offset -lt $buffer.Length) {
+            $read = $stream.Read($buffer, $offset, ($buffer.Length - $offset))
+            if ($read -le 0) { break }
+            $offset += $read
+        }
+        if ($offset -lt $buffer.Length) {
+            $trimmed = New-Object byte[] $offset
+            [Array]::Copy($buffer, $trimmed, $offset)
+            return $trimmed
+        }
+        return $buffer
+    }
+    finally {
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
+function Add-LogDecodeCandidate {
+    param(
+        [System.Collections.ArrayList]$Candidates,
+        [string]$Name,
+        [System.Text.Encoding]$Encoding,
+        [byte[]]$Bytes
+    )
+    if ($null -eq $Candidates -or $null -eq $Encoding -or $null -eq $Bytes) { return }
+    try {
+        $text = $Encoding.GetString($Bytes)
+        [void]$Candidates.Add([pscustomobject]@{
+            Name = $Name
+            Text = $text
+            Score = Get-LogDecodeScore $text
+        })
+    }
+    catch {
+    }
+}
+
+function Convert-LogBytesToText {
+    param([byte[]]$Bytes)
+    if (-not $Bytes -or $Bytes.Length -eq 0) { return "" }
+
+    $candidates = New-Object System.Collections.ArrayList
+    Add-LogDecodeCandidate $candidates "utf-8" (New-Object System.Text.UTF8Encoding($false, $false)) $Bytes
+    try { Add-LogDecodeCandidate $candidates "gb18030" ([System.Text.Encoding]::GetEncoding("gb18030")) $Bytes } catch {}
+    try { Add-LogDecodeCandidate $candidates "gbk" ([System.Text.Encoding]::GetEncoding(936)) $Bytes } catch {}
+    try { Add-LogDecodeCandidate $candidates "default" ([System.Text.Encoding]::Default) $Bytes } catch {}
+    try {
+        $oemCodePage = [System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage
+        if ($oemCodePage -gt 0) {
+            Add-LogDecodeCandidate $candidates "oem-$oemCodePage" ([System.Text.Encoding]::GetEncoding($oemCodePage)) $Bytes
+        }
+    }
+    catch {}
+
+    $best = $candidates | Sort-Object Score -Descending | Select-Object -First 1
+    if ($best) { return [string]$best.Text }
+    return [System.Text.Encoding]::Default.GetString($Bytes)
+}
+
 function Read-LauncherLogTail {
     param([string]$Path, [int]$Tail = 160)
     if (-not $Path -or -not (Test-Path $Path)) { return "" }
     try {
-        $bytes = [System.IO.File]::ReadAllBytes($Path)
-        $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
-        try {
-            $raw = $utf8.GetString($bytes)
-        }
-        catch {
-            $raw = [System.Text.Encoding]::Default.GetString($bytes)
-        }
+        $bytes = Read-SharedFileBytes $Path
+        $raw = Convert-LogBytesToText $bytes
     }
     catch {
         try {
@@ -537,7 +661,8 @@ function Set-LogTabActive {
             $text = "暂无日志。"
         }
         $hadSelection = ($Script:LogBox.PSObject.Properties.Name -contains "SelectionLength" -and $Script:LogBox.SelectionLength -gt 0)
-        if ($hadSelection -and -not $tabChanged) {
+        $preserveSelection = ($hadSelection -and -not $tabChanged)
+        if ($preserveSelection) {
             return
         }
         $sameText = ($Script:LogBox.Text -eq $text)
@@ -545,9 +670,8 @@ function Set-LogTabActive {
             $Script:LogBox.Text = $text
         }
         if ($Script:LogBox.PSObject.Properties.Name -contains "SelectionStart") {
-            if (-not $hadSelection) {
-                $Script:LogBox.SelectionStart = $Script:LogBox.TextLength
-                $Script:LogBox.ScrollToCaret()
+            if (-not $preserveSelection) {
+                Scroll-LogBoxToEnd
             }
         }
     }
@@ -1413,14 +1537,18 @@ function Start-LeonService {
         $oldVersion = $env:LEON_LAUNCHER_VERSION
         $oldQwen = $env:LEON_ENABLE_QWEN_EMO
         $oldVllmGpu = $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION
+        $oldPythonUtf8 = $env:PYTHONUTF8
+        $oldPythonIoEncoding = $env:PYTHONIOENCODING
         $env:LEON_LAUNCHER_NO_PAUSE = "1"
         $env:LEON_LAUNCHER_VERSION = $Script:VersionKey
         $env:LEON_ENABLE_QWEN_EMO = "0"
+        $env:PYTHONUTF8 = "1"
+        $env:PYTHONIOENCODING = "utf-8"
         if ($Script:VersionKey -eq "vllm") {
             $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION = Get-VllmGpuMemoryUtilizationText
         }
         try {
-            Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "`"$Script:StartupBat`"") -WorkingDirectory $Script:RepoRoot -WindowStyle Hidden | Out-Null
+            Start-Process -FilePath "cmd.exe" -ArgumentList @("/d", "/s", "/c", "chcp 65001 >nul & `"$Script:StartupBat`"") -WorkingDirectory $Script:RepoRoot -WindowStyle Hidden | Out-Null
         }
         finally {
             if ($null -eq $oldNoPause) {
@@ -1432,6 +1560,8 @@ function Start-LeonService {
             if ($null -eq $oldVersion) { Remove-Item Env:\LEON_LAUNCHER_VERSION -ErrorAction SilentlyContinue } else { $env:LEON_LAUNCHER_VERSION = $oldVersion }
             if ($null -eq $oldQwen) { Remove-Item Env:\LEON_ENABLE_QWEN_EMO -ErrorAction SilentlyContinue } else { $env:LEON_ENABLE_QWEN_EMO = $oldQwen }
             if ($null -eq $oldVllmGpu) { Remove-Item Env:\INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION -ErrorAction SilentlyContinue } else { $env:INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION = $oldVllmGpu }
+            if ($null -eq $oldPythonUtf8) { Remove-Item Env:\PYTHONUTF8 -ErrorAction SilentlyContinue } else { $env:PYTHONUTF8 = $oldPythonUtf8 }
+            if ($null -eq $oldPythonIoEncoding) { Remove-Item Env:\PYTHONIOENCODING -ErrorAction SilentlyContinue } else { $env:PYTHONIOENCODING = $oldPythonIoEncoding }
         }
         Set-StatusText "$(Get-LeonVersionLabel) 启动中，首次加载模型可能需要几分钟..." "Khaki"
         Start-Sleep -Milliseconds 600
