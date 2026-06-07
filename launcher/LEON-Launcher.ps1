@@ -1419,6 +1419,101 @@ function Get-LauncherBackendWrapperPids {
     return $matches
 }
 
+function Get-LeonPythonPids {
+    $runtimeNeedles = @(
+        $Script:RuntimePython,
+        (Join-Path $Script:WorkspaceRoot "vllm\indextts2runtime\python.exe"),
+        (Join-Path $Script:WorkspaceRoot "fast6g\indextts2runtime\python.exe")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+    $matches = @()
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $name = [string]$_.Name
+            if ($_.ProcessId -eq $PID -or $name -notmatch '^python(\.exe)?$') { return $false }
+            $cmd = [string]$_.CommandLine
+            $exe = [string]$_.ExecutablePath
+            if ([string]::IsNullOrWhiteSpace($cmd) -and [string]::IsNullOrWhiteSpace($exe)) { return $false }
+
+            $usesLeonRuntime = $false
+            foreach ($needle in $runtimeNeedles) {
+                if ($cmd.IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+                    $exe.IndexOf($needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                    $usesLeonRuntime = $true
+                    break
+                }
+            }
+            if (-not $usesLeonRuntime) { return $false }
+
+            # 覆盖主 API 进程，以及 multiprocessing 拉起的子 Python。
+            return (
+                $cmd.IndexOf("indextts2_api.py", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+                $cmd.IndexOf("--multiprocessing-fork", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+                $cmd.IndexOf("spawn_main(parent_pid=", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+                $cmd.IndexOf("-p $Script:ApiPort", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+            )
+        })
+        $matches = @($processes | ForEach-Object { [int]$_.ProcessId } | Where-Object { $_ -ne $PID } | Sort-Object -Unique)
+    }
+    catch {
+        $matches = @()
+    }
+    return $matches
+}
+
+function Stop-LeonPythonProcesses {
+    param([string]$Reason = "停止服务")
+
+    $pids = @()
+    $pids += @(Get-ListeningPidsForPort -Port $Script:ApiPort)
+    $pids += @(Get-LauncherBackendWrapperPids)
+    $pids += @(Get-LeonPythonPids)
+    $pids = @($pids | Where-Object { $_ -gt 0 -and $_ -ne $PID } | Sort-Object -Unique)
+
+    if ($pids.Count -eq 0) {
+        Add-Log "$Reason：未发现需要清理的 LEON 后端进程。"
+        return @()
+    }
+
+    Add-Log "$Reason：清理 LEON 后端进程 PID: $($pids -join ', ')"
+    foreach ($pidToStop in $pids) {
+        Stop-ProcessTreeById -RootPid ([int]$pidToStop)
+    }
+
+    Start-Sleep -Milliseconds 500
+    $remaining = @(Get-LeonPythonPids)
+    if ($remaining.Count -gt 0) {
+        Add-Log "$Reason：继续清理残留 LEON Python PID: $($remaining -join ', ')" "WARN"
+        foreach ($pidToStop in $remaining) {
+            Stop-ProcessTreeById -RootPid ([int]$pidToStop)
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    return @(Get-LeonPythonPids)
+}
+
+function Stop-LeonServiceForLauncherExit {
+    if ($env:LEON_LAUNCHER_SMOKE_TEST -eq "1") { return }
+    try {
+        if (@(Get-ListeningPidsForPort -Port $Script:ApiPort).Count -gt 0) {
+            try {
+                Add-Log "关闭启动器：向 LEON 服务发送退出请求..."
+                Invoke-LeonJson -Uri "$Script:ApiBase/control?command=exit" -TimeoutSec 1 | Out-Null
+            }
+            catch {
+                Add-Log "关闭启动器：退出请求未返回，继续清理进程。" "WARN"
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        [void](Stop-LeonPythonProcesses -Reason "关闭启动器")
+        $Script:WarmupStarted = $false
+        $Script:ServiceTransition = $false
+        $Script:ServiceTransitionText = ""
+    }
+    catch {
+        Add-Log "关闭启动器时清理 LEON 后端失败: $($_.Exception.Message)" "WARN"
+    }
+}
+
 function Get-VsInstallPath {
     $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vswhere) {
@@ -2002,42 +2097,37 @@ function Stop-LeonService {
             Start-Sleep -Milliseconds 500
             $pidsAfterExit = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
             if ($pidsAfterExit.Count -eq 0) {
-                Add-Log "LEON 服务已停止。"
-                Set-StatusText "服务已停止。" "Khaki"
-                Update-StartButtonState $false
-                $Script:WarmupStarted = $false
-                return
+                Add-Log "LEON 服务端口已释放，继续检查残留 Python 进程。"
+                break
             }
         } while ((Get-Date) -lt $deadline)
     }
 
     $pids = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
     if ($pids.Count -eq 0) {
-        Add-Log "端口 $Script:ApiPort 没有监听进程。"
-        Set-StatusText "服务已停止。" "Khaki"
-        Update-StartButtonState $false
-        $Script:WarmupStarted = $false
-        return
+        Add-Log "端口 $Script:ApiPort 没有监听进程，继续检查 LEON Python 残留。"
+    }
+    else {
+        Add-Log "强制停止监听端口 $Script:ApiPort 的进程: $($pids -join ', ')"
     }
 
-    Add-Log "强制停止监听端口 $Script:ApiPort 的进程: $($pids -join ', ')"
-    foreach ($pid in $pids) {
-        Stop-ProcessTreeById -RootPid ([int]$pid)
-    }
-    foreach ($wrapperPid in @(Get-LauncherBackendWrapperPids)) {
-        Stop-ProcessTreeById -RootPid ([int]$wrapperPid)
-    }
-
+    $remainingPython = @(Stop-LeonPythonProcesses -Reason "停止服务")
     Start-Sleep -Milliseconds 700
     $remaining = @(Get-ListeningPidsForPort -Port $Script:ApiPort)
-    if ($remaining.Count -eq 0) {
+    $remainingPython = @($remainingPython + @(Get-LeonPythonPids) | Sort-Object -Unique)
+    if ($remaining.Count -eq 0 -and $remainingPython.Count -eq 0) {
         Add-Log "LEON 服务已停止。"
         Set-StatusText "服务已停止。" "Khaki"
         Update-StartButtonState $false
         $Script:WarmupStarted = $false
+        $Script:ServiceTransition = $false
+        $Script:ServiceTransitionText = ""
     }
     else {
-        Add-Log "端口 $Script:ApiPort 仍被占用，剩余 PID: $($remaining -join ', ')" "WARN"
+        $leftText = @()
+        if ($remaining.Count -gt 0) { $leftText += "端口 PID: $($remaining -join ', ')" }
+        if ($remainingPython.Count -gt 0) { $leftText += "Python PID: $($remainingPython -join ', ')" }
+        Add-Log "LEON 服务仍有残留，$($leftText -join '; ')" "WARN"
         Set-StatusText "服务仍在运行，请查看剩余 PID。" "Khaki"
         Update-StartButtonState $true
     }
@@ -2334,6 +2424,40 @@ function Refresh-BackendLogTail {
     if (-not (Test-LogTextSelected)) {
         Set-LogTabActive $Script:ActiveLogTab
     }
+}
+
+function Start-InitialLauncherRefreshAsync {
+    param([System.Windows.Forms.Form]$Form)
+
+    $healthTimer = New-Object System.Windows.Forms.Timer
+    $healthTimer.Interval = 250
+    $healthTimer.Add_Tick({
+        $healthTimer.Stop()
+        $healthTimer.Dispose()
+        if ($Form -and $Form.IsDisposed) { return }
+
+        $health = Test-ApiHealth
+        Update-StartButtonState ($null -ne $health)
+        if ($health) {
+            Set-StatusText "LEON 服务已运行：$Script:ApiBase" "LightGreen"
+        }
+        else {
+            Set-StatusText "就绪。需要时点环境检测。" "Khaki"
+        }
+        Sync-VllmGpuControls
+    }.GetNewClosure())
+    $healthTimer.Start()
+
+    # 日志尾部拉取会访问本地文件和 API，延后到首屏绘制后再做。
+    $logTimer = New-Object System.Windows.Forms.Timer
+    $logTimer.Interval = 900
+    $logTimer.Add_Tick({
+        $logTimer.Stop()
+        $logTimer.Dispose()
+        if ($Form -and $Form.IsDisposed) { return }
+        Refresh-BackendLogTail
+    }.GetNewClosure())
+    $logTimer.Start()
 }
 
 function Build-LauncherForm {
@@ -3499,22 +3623,19 @@ function Build-LauncherForm {
     Initialize-EnvironmentCheckRows
 
     $form.Add_Shown({
-        $health = Test-ApiHealth
-        Update-StartButtonState ($null -ne $health)
-        if ($health) {
-            Set-StatusText "LEON 服务已运行：$Script:ApiBase" "LightGreen"
-        }
-        else {
-            Set-StatusText "就绪。需要时点环境检测。" "Khaki"
-        }
+        Set-StatusText "就绪，正在检查服务状态..." "Khaki"
         Sync-VllmGpuControls
-        Show-HomeLog
+        Set-LogTabActive "launcher"
+        Start-InitialLauncherRefreshAsync -Form $form
     })
     $form.Add_Resize({
         if ($Script:StatusLabel) {
             $Script:StatusLabel.Location = New-Object System.Drawing.Point([Math]::Max(520, $form.ClientSize.Width - 500), 42)
             $Script:StatusLabel.Size = New-Object System.Drawing.Size(460, 24)
         }
+    })
+    $form.Add_FormClosing({
+        Stop-LeonServiceForLauncherExit
     })
     $form.Add_FormClosed({
         if ($heroImage) {

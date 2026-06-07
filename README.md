@@ -1,60 +1,46 @@
-# LEON IndexTTS2 Tavo Voice Player
+# LEON IndexTTS2 Tavo 语音播放器
 
-LEON is a local IndexTTS2 integration for Tavo. It turns a Tavo chat message into a multi-role voice player: AI can split narration, user lines, and character dialogue, map each role to a configured voice, stream audio while synthesis is still running, and keep saved audio history for replay.
+LEON 是面向 Tavo 的本地 IndexTTS2 集成。它可以把 Tavo 聊天消息变成多角色语音播放器：AI 负责拆分旁白、用户台词和角色对白，并把每个角色映射到配置好的音色；音频合成过程中可先进行 LIVE 流式播放，完成后保留历史音频，方便重播。
 
 <p align="center">
-  <img src="assets/readme/leon-hero.png" alt="LEON multi-voice Tavo player" width="100%">
+  <img src="assets/readme/leon-hero.png" alt="LEON 多角色 Tavo 语音播放器" width="100%">
 </p>
 
-## What It Does
+## 功能
 
-- Multi-role TTS for Tavo messages, including narrator, user, current character, and custom roles.
-- AI-assisted role and style parsing for dialogue-heavy text.
-- LIVE streaming playback before the final cache audio is saved.
-- Saved/cache audio playback with native browser audio for replay, seek, and mobile background behavior.
-- Local launcher flow for choosing the `vllm` or `fast6g` backend.
+- 为 Tavo 消息生成多角色 TTS，支持旁白、用户、当前角色和自定义角色。
+- 使用 AI 辅助解析对话文本中的角色和风格。
+- 最终缓存音频保存前，支持 LIVE 流式播放。
+- 已保存/缓存音频使用原生浏览器音频播放，便于重播、拖动进度和移动端后台播放。
+- 通过本地启动器选择 `vllm` 或 `fast6g` 后端。
 
-## How It Runs
+## 运行方式
 
-Start from the root launcher:
+从根目录启动器运行：
 
 ```text
 D:\apiWorkSpace\leon_api\LEON-Launcher.exe
 ```
 
-The launcher selects one API backend:
+启动器会选择一个 API 后端：
 
-- `vllm/`: quality-oriented backend.
-- `fast6g/`: lower-VRAM friendly backend.
+- `vllm/`：质量优先后端。
+- `fast6g/`：更适合低显存环境的后端。
 
-The shared Tavo frontend is served from `static/`. Same-LAN Tavo testing can load:
+共享的 Tavo 前端由 `static/` 提供。同一局域网内测试 Tavo 时可加载：
 
 ```html
 <script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-tavo-file-v31"></script>
 ```
 
-For public access, configure your own tunnel or reverse proxy outside this repository and replace only the script host.
+如需公网访问，请在仓库外自行配置隧道或反向代理，只替换脚本地址中的主机部分。
 
-## Workspace Layout
+## 工作区结构
 
-- `static/`: Tavo injected frontend, runtime parts, CSS, and test page.
-- `vllm/`: vLLM API backend.
-- `fast6g/`: 6 GB friendly API backend.
-- `launcher/`: Windows launcher source and assets.
-- `scripts/`: shared startup scripts.
-- `dev_workspace/`: Codex handoff docs, regression notes, and smoke tests.
-- `assets/readme/`: README visuals.
-
-## Codex Work Notes
-
-This root README is the project introduction. For repository work, debugging, handoff, or future Codex sessions, use:
-
-```text
-dev_workspace\README.md
-```
-
-That file is the active working README and links to the current state, bug ledger, and regression checklist.
-
-<p align="center">
-  <img src="assets/readme/leon-main-poster.png" alt="LEON main poster" width="420">
-</p>
+- `static/`：Tavo 注入前端、runtime 分片、CSS 和测试页面。
+- `vllm/`：vLLM API 后端。
+- `fast6g/`：适合 6 GB 显存的 API 后端。
+- `launcher/`：Windows 启动器源码和素材。
+- `scripts/`：共享启动脚本。
+- `dev_workspace/`：Codex 交接文档、回归记录和 smoke 测试。
+- `assets/readme/`：README 图片素材。
