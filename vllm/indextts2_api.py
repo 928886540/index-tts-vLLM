@@ -521,6 +521,11 @@ WARMUP_STATE = {
     "updated_at": None,
     "error": None,
 }
+WARMUP_PREFERRED_VOICES = (
+    "400个火爆音色/短剧解说",
+    "短剧解说",
+    "prompts/library/400个火爆音色/短剧解说.mp3",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1801,6 +1806,10 @@ def _pick_warmup_voice(name_or_path: Optional[str] = None) -> Optional[str]:
     resolved = _resolve_voice(name_or_path or "") if name_or_path else None
     if resolved:
         return resolved
+    for preferred in WARMUP_PREFERRED_VOICES:
+        resolved = _resolve_voice(preferred)
+        if resolved:
+            return resolved
     try:
         from indextts import voice_library
         for item in voice_library.list_voices():

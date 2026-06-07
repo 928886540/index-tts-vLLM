@@ -201,6 +201,7 @@ internal sealed class LauncherForm : Form
         statusLabel.Font = NewFont(9.0f, FontStyle.Bold);
         statusLabel.TextAlign = ContentAlignment.MiddleRight;
         statusLabel.Text = "就绪";
+        statusLabel.Visible = false;
         statusLabel.Location = new Point(header.Width - 500, 40);
         statusLabel.Size = new Size(470, 26);
         header.Controls.Add(statusLabel);
@@ -286,13 +287,29 @@ internal sealed class LauncherForm : Form
 
         EventHandler resizeSidePoster = delegate
         {
+            int contentWidth = Math.Min(208, Math.Max(120, side.ClientSize.Width - 36));
+            int left = Math.Max(0, (side.ClientSize.Width - contentWidth) / 2);
+
+            navHomeButton.Location = new Point(left, 18);
+            navHomeButton.Size = new Size(contentWidth, 38);
+            navLogButton.Location = new Point(left, 64);
+            navLogButton.Size = new Size(contentWidth, 38);
+            navEnvButton.Location = new Point(left, 110);
+            navEnvButton.Size = new Size(contentWidth, 38);
+
+            configRow.Location = new Point(Math.Max(0, (bottomPanel.ClientSize.Width - contentWidth) / 2), 0);
+            configRow.Size = new Size(contentWidth, 34);
+            startButton.Location = new Point(Math.Max(0, (bottomPanel.ClientSize.Width - contentWidth) / 2), 44);
+            startButton.Size = new Size(contentWidth, 68);
+
             int top = 164;
             int bottomGap = bottomPanel.Height + 18;
             int height = Math.Max(120, side.ClientSize.Height - top - bottomGap);
-            sidePoster.Location = new Point(18, top);
-            sidePoster.Size = new Size(Math.Max(120, side.ClientSize.Width - 36), height);
+            sidePoster.Location = new Point(left, top);
+            sidePoster.Size = new Size(contentWidth, height);
         };
         side.Resize += resizeSidePoster;
+        bottomPanel.Resize += resizeSidePoster;
         resizeSidePoster(side, EventArgs.Empty);
 
         Panel content = new Panel();
