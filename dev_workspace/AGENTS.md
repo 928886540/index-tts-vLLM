@@ -9,11 +9,15 @@ Before doing repository work here, read these files in order:
 1. `..\AGENTS.md`
 2. `README.md`
 3. `docs/AGENT_STATE.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/DECISIONS.md`
-6. `docs/BUGS.md`
-7. `docs/TODO.md`
-8. `docs/REGRESSION.md`
+4. `docs/BUGS.md`
+
+Read the other active docs only when relevant:
+
+- `docs/ARCHITECTURE.md`: component boundaries, APIs, cache/job model, launcher layout, or shared file placement.
+- `docs/DECISIONS.md`: accepted/deprecated project decisions.
+- `docs/TODO.md`: planning or reprioritization.
+- `docs/REGRESSION.md`: before handing off code changes that need validation.
+- `docs/archive/*`: older fixed bugs, old snapshots, benchmark history, or historical handoff only.
 
 Also read the machine-level rules:
 
@@ -32,15 +36,16 @@ Do not treat the injected Tavo surface as a normal web app until the AR lifecycl
 
 ## Documentation Workflow
 
-`dev_workspace/docs/` is the active handoff workspace. `dev_workspace/handoff_docs/` remains historical context and should only be read when the active docs are not enough or when tracing older decisions.
+`dev_workspace/docs/` is the active handoff workspace. Active docs should stay concise. `dev_workspace/docs/archive/` and `dev_workspace/handoff_docs/` are historical context and should only be read when the active docs are not enough or when tracing older decisions.
 
 When the user reports a new bug:
 
-1. Add or update an entry in `docs/BUGS.md` before changing code.
-2. Separate confirmed evidence from hypotheses.
-3. Check existing bug entries to avoid duplicate fixes.
-4. After fixing, record root cause, fix, and guard.
-5. Add or tighten regression steps in `docs/REGRESSION.md`.
+1. Treat it as an implementation/debugging task first, not as a documentation task.
+2. Check existing bug entries only to avoid duplicate or stale fixes.
+3. Diagnose and change the relevant code path before spending time on documentation.
+4. Update `docs/BUGS.md` only when a concise active ledger entry or post-fix handoff note is useful.
+5. After fixing, record root cause, fix, and guard without pasting raw user reports.
+6. Add or tighten regression steps in `docs/REGRESSION.md` when the behavior needs future protection.
 
 For long tasks, update `docs/AGENT_STATE.md` after each stable milestone. If context is low or the user asks to record context, stop feature work and update `docs/AGENT_STATE.md`, `docs/TODO.md`, `docs/BUGS.md`, and `docs/REGRESSION.md` as needed.
 

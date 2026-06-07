@@ -14,9 +14,10 @@
       '<div class="idx-card">',
       '  <button class="idx-gear" type="button" data-role="gear" aria-label="设置">' + gearIcon() + '</button>',
       '  <button class="idx-playback-toggle" type="button" data-role="playback-mode-toggle" aria-label="播放模式" title="播放模式">L</button>',
-      '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点播放</div></div></div>',
+      '  <div class="idx-top"><div class="idx-cover" data-role="cover"></div><div class="idx-info"><div class="idx-title-row"><div class="idx-name" data-role="title"></div></div><div class="idx-status" data-role="status">选择音色后点音符生成</div></div></div>',
       '  <div class="idx-seek-wrap"><input class="idx-seek" data-role="seek" type="range" min="0" max="1000" value="0" disabled><div class="idx-time"><span data-role="current">00:00</span><span data-role="total">--:--</span></div></div>',
-      '  <div class="idx-subtitle" data-role="subtitle"><button class="idx-sub-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button><div class="idx-card-counter" data-role="counter">0/0</div><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点播放开始生成音频</span></div></div>',
+      '  <div class="idx-progress-line" data-role="progress"></div>',
+      '  <div class="idx-subtitle" data-role="subtitle"><button class="idx-sub-delete" type="button" data-role="delete" aria-label="删除当前音频" title="删除当前音频"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 11c-1.1 0-2-.9-2-2V8h12v10c0 1.1-.9 2-2 2H8z"/></svg></button><div class="idx-card-counter" data-role="counter">0/0</div><div class="idx-sub-notice"><strong>历史音频 0 条</strong><span>点音符生成音频</span></div></div>',
       '  <div class="idx-controls"><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="prev" aria-label="上一首" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button><button class="idx-ctrl idx-ctrl-main" type="button" data-role="play" data-state="idle" aria-label="播放">' + playIcon("idle") + '</button><button class="idx-ctrl idx-live-exit idx-hidden" type="button" data-role="live-exit" aria-label="退出流式" title="退出流式"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/><path d="M7 21h10"/></svg></button><button class="idx-ctrl idx-ctrl-sm" type="button" data-role="next" aria-label="下一首" title="下一首"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10.5 0v12l8.5-6z"/></svg></button><button class="idx-ctrl idx-ctrl-add" type="button" data-role="add" aria-label="生成音频" title="生成音频"><svg viewBox="0 0 24 24"><path d="M12 3v9.55A4 4 0 1 0 14 16V7h4V3z"/></svg></button></div>',
       '  <dialog class="idx-panel" data-role="panel">'
         + '<div class="idx-panel-head"><div class="idx-panel-title">语音设置</div><button class="idx-close" type="button" data-role="close">×</button></div>'
@@ -97,6 +98,7 @@
     var seek = first(root, '[data-role="seek"]', '.idx-seek');
     var cur = first(root, '[data-role="current"]', '.idx-time span:first-child');
     var total = first(root, '[data-role="total"]', '.idx-time span:last-child');
+    var progressLine = first(root, '[data-role="progress"]', '.idx-progress-line');
     var panel = first(root, '[data-role="panel"]', '.idx-panel');
     var gear = first(root, '[data-role="gear"]', '.idx-gear');
     var close = first(root, '[data-role="close"]', '.idx-close');
@@ -176,6 +178,16 @@
       } catch (_) {}
       return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|正在.*LLM|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(text);
     }
+    function configuredVoiceLabelText() {
+      try {
+        var mode = normalizeModeName(cfg.mode);
+        var voices = mode === "normal" ? normalModeVoicesMap(cfg) : rolesListToVoicesMap(cfg.roleVoiceList, "", cfg.currentCharacterName);
+        var voice = representativeVoiceForMode(mode, voices, mode === "normal" ? cfg.defaultVoice : "");
+        return voice ? shortName(voice) : "音色未设置";
+      } catch (_) {
+        return "音色未设置";
+      }
+    }
     function stableHeaderStatusText() {
       try {
         var t = currentTrack();
@@ -184,19 +196,23 @@
           if (label) return label;
         }
       } catch (_) {}
-      try {
-        if (typeof historyStatusText === "function") return historyStatusText();
-      } catch (_) {}
-      return "";
+      return configuredVoiceLabelText();
+    }
+    function setProgressStatus(v) {
+      if (!progressLine) return;
+      var text = v == null ? "" : String(v);
+      var stable = "";
+      try { stable = stableHeaderStatusText(); } catch (_) {}
+      if (stable && text === stable) text = "";
+      progressLine.textContent = text;
+      progressLine.classList.toggle("idx-progress-empty", !text);
+      try { progressLine.title = text || ""; } catch (_) {}
     }
     function setStatus(v) {
       if (!status) return;
       var text = v == null ? "" : String(v);
-      if (isHeaderProgressStatus(text)) {
-        var stableText = stableHeaderStatusText();
-        if (stableText) text = stableText;
-        else if (status.textContent) return;
-      }
+      setProgressStatus(text);
+      text = stableHeaderStatusText() || "音色未设置";
       status.textContent = text;
       try { status.title = status.textContent || ""; } catch (_) {}
       try {

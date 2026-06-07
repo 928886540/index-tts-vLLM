@@ -102,16 +102,20 @@
       if (cfg.mode === "normal") {
         return cfg.defaultVoice ? "" : "请先在“普通模式音色”里选择旁白音色。";
       }
-      if (cfg.defaultVoice) return "";
       var missing = [];
+      function addMissing(name) {
+        name = String(name || "").trim();
+        if (name && missing.indexOf(name) < 0) missing.push(name);
+      }
       var list = normalizeAiRoleVoiceList(cfg.roleVoiceList || [], cfg.currentCharacterName);
       ["旁白", "用户"].forEach(function (name) {
-        if (!roleVoice(name)) missing.push(name);
+        if (!roleVoice(name)) addMissing(name);
       });
+      if (cfg.currentCharacterName && !roleVoice(cfg.currentCharacterName)) addMissing(cfg.currentCharacterName);
       list.forEach(function (r) {
         var role = String((r && r.role) || "").trim();
         if (!role || role === "旁白" || role === "用户") return;
-        if (!String(r.voice || "").trim()) missing.push(role);
+        if (!String(r.voice || "").trim()) addMissing(role);
       });
       if (missing.length) return "请先在“角色音色映射”里给这些角色选择音色：" + missing.join("、") + "。";
       return "";
@@ -192,6 +196,7 @@
       }
       $all(panel, '.idx-mode').forEach(function (b) { b.classList.toggle('is-active', b.dataset.mode === cfg.mode); });
       $all(panel, '.idx-voice').forEach(function (b) { b.classList.toggle('is-active', b.dataset.voice === cfg.defaultVoice); });
+      try { setStatus(""); } catch (_) {}
     }
     var availableVoices = [];
     var voicesLoaded = false;
@@ -225,7 +230,7 @@
       updateNormalVoiceButtons();
       syncUI();
       setStatus(historyStatusText());
-      if (!generatedTracks.length) showTrackNotice(null, historyStatusText(), voices.length ? "点播放开始生成音频" : "没有找到可用音色");
+      if (!generatedTracks.length) showTrackNotice(null, historyStatusText(), voices.length ? "点音符生成音频" : "没有找到可用音色");
       return availableVoices;
     }
     async function ensureVoicesLoaded() {

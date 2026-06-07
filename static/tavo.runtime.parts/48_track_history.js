@@ -28,7 +28,7 @@
         setTrackPlaybackState(track, state === "cancelled" ? "cancelled" : "error");
         setPlayState("idle");
         setStatus(state === "cancelled" ? "任务已取消" : "生成失败");
-        showTrackNotice(track, state === "cancelled" ? "任务已取消" : "生成失败", track.error || "点 + 重新生成");
+        showTrackNotice(track, state === "cancelled" ? "任务已取消" : "生成失败", track.error || "点音符重新生成");
         updateTrackButtons();
         return;
       }
@@ -117,7 +117,7 @@
       } else if (state === "cancelled") {
         setTrackPlaybackState(track, "cancelled");
         setPlayState("idle");
-        showTrackNotice(track, "任务已取消", track.error || "点 + 重新生成");
+        showTrackNotice(track, "任务已取消", track.error || "点音符重新生成");
         setStatus("任务已取消");
       } else if (state === "live") {
         showTrackNotice(track, "流式生成中", "等待音频保存或继续播放");
@@ -219,16 +219,16 @@
       var key = pendingJobsStorageKey();
       if (!key) return [];
       try {
+        if (window.tavo && typeof tavo.get === "function") {
+          var cv = await tavo.get(key, "chat");
+          if (Array.isArray(cv)) return cv.filter(pendingJobLooksActive);
+        }
+      } catch (_) {}
+      try {
         var raw = localStorage.getItem(key);
         if (raw) {
           var arr = JSON.parse(raw);
           if (Array.isArray(arr)) return arr.filter(pendingJobLooksActive);
-        }
-      } catch (_) {}
-      try {
-        if (window.tavo && typeof tavo.get === "function") {
-          var cv = await tavo.get(key, "chat");
-          if (Array.isArray(cv)) return cv.filter(pendingJobLooksActive);
         }
       } catch (_) {}
       return [];
@@ -287,7 +287,7 @@
         cacheUrl: t.cacheUrl || (base + "/cache_audio/" + encodeURIComponent(t.cacheKey)),
         cacheKey: t.cacheKey,
         createdAt: t.createdAt || Date.now(),
-        voice: t.voice || cfg.defaultVoice,
+        voice: representativeVoiceForMode(mode, t.voicesMap || null, t.voice || cfg.defaultVoice),
         mode: mode,
         parseMode: mode,
         playbackMode: playbackMode,
@@ -349,13 +349,32 @@
       trackEntry.cachePollStarted = true;
       setTrackCacheState(trackEntry, "pending");
       label = label || "snapshot";
-      function jobStatusMessage(metrics) {
+      function jobStatusMessage(metrics, trackEntry, payload) {
         var phase = String((metrics && metrics.phase) || "");
         var msg = String((metrics && metrics.message) || "");
-        if (phase === "llm_parse_cache") return "已复用 LLM 拆段";
-        if (phase === "llm_parse" && cfg.reuseLlmParse !== false && /调用|分析|LLM/i.test(msg)) return "检查 LLM 拆段复用";
-        if (msg) return msg;
-        return phase === "llm_parse" ? "后端正在拆分文本…" : (phase === "llm_parse_cache" ? "已复用 LLM 拆段" : "后端正在合成…");
+        var mode = normalizeModeName((trackEntry && (trackEntry.mode || trackEntry.parseMode)) || (metrics && metrics.parse_mode) || cfg.mode);
+        var playback = normalizePlaybackMode((trackEntry && trackEntry.playbackMode) || cfg.playbackMode);
+        var live = playback === "live";
+        var flow = (mode === "ai" ? "AI" : "普通") + "+" + (live ? "LIVE" : "落盘");
+        var total = Number((metrics && metrics.segments_total) || 0) || 0;
+        if (!total && metrics && Array.isArray(metrics.segments_plan)) total = metrics.segments_plan.length;
+        var doneSegs = payload && Array.isArray(payload.segments_meta) ? payload.segments_meta.length : 0;
+        var nextSeg = total ? Math.max(1, Math.min(total, doneSegs + 1)) : 0;
+        if (phase === "created") return flow + " 任务已创建，等待后端接手";
+        if (phase === "llm_parse_cache") return flow + " 已复用上次 AI 分段，等待" + (live ? "首段音频" : "合成");
+        if (phase === "llm_parse") {
+          if (/检查|复用/i.test(msg)) return flow + " AI 分段复用检查中";
+          return flow + " LLM 调用中，分析角色和情绪";
+        }
+        if (phase === "tts_queue") return flow + " 分段完成，等待" + (live ? "首段音频" : "TTS 合成");
+        if (phase === "tts") {
+          if (total) return flow + " 合成第 " + nextSeg + "/" + total + " 段中";
+          return flow + " 音频合成中";
+        }
+        if (phase === "saving") return flow + " 音频已合成，正在保存完整音频";
+        if (phase === "done") return flow + " 音频已保存";
+        if (/文本已拆分|等待 TTS 合成|拆分文本|拆段/.test(msg)) return flow + " 分段完成，等待" + (live ? "首段音频" : "TTS 合成");
+        return msg || (flow + " 正在处理");
       }
       (async function () {
         var done = false;
@@ -377,8 +396,8 @@
                 trackEntry.metrics = j.metrics;
                 if (currentTrack() === trackEntry && !isSavedTrack(trackEntry)) {
                   var phase = String(j.metrics.phase || "");
-                  if (phase === "llm_parse" || phase === "llm_parse_cache" || phase === "created" || phase === "tts_queue" || phase === "tts") {
-                    var uiMsg = jobStatusMessage(j.metrics);
+                  if (phase === "llm_parse" || phase === "llm_parse_cache" || phase === "created" || phase === "tts_queue" || phase === "tts" || phase === "saving") {
+                    var uiMsg = jobStatusMessage(j.metrics, trackEntry, j);
                     setStatus(uiMsg);
                     if (!isTransientProgressNotice(uiMsg)) showTrackNotice(trackEntry, uiMsg || "正在生成…", formatJobMetrics(j.metrics) || "请稍等");
                   }
@@ -413,13 +432,26 @@
                 var isCurrent = currentTrack() === trackEntry;
                 var preSavePlaybackState = String(trackEntry.playbackState || "");
                 var cacheFallbackNeeded = !!trackEntry.playSavedWhenReady;
+                var liveCacheHandoffNeeded = !!(
+                  isCurrent
+                  && !wasBackground
+                  && normalizePlaybackMode(trackEntry.playbackMode) === "live"
+                  && !trackEntry.pausedByUser
+                  && (
+                    cacheFallbackNeeded
+                    || trackHasStreamIssue(trackEntry)
+                    || preSavePlaybackState === "loading"
+                    || preSavePlaybackState === "buffering"
+                    || (trackEntry.webAudioPlaying && !trackEntry.webAudioStable)
+                  )
+                );
                 setTrackState(trackEntry, "saved");
                 var appendedDetached = wasDetached ? appendDetachedBackgroundTrackToHistory(trackEntry, label) : false;
-                var autoplaySaved = !!(isCurrent && cacheFallbackNeeded);
+                var autoplaySaved = !!liveCacheHandoffNeeded;
                 if (wasBackground) autoplaySaved = false;
                 trackEntry.playSavedWhenReady = false;
                 trackEntry.streamTooSlowFallback = false;
-                attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: trackEntry.webAudioPlaying && !autoplaySaved, autoplay: autoplaySaved });
+                attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: trackEntry.webAudioPlaying && !autoplaySaved && !trackHasStreamIssue(trackEntry), autoplay: autoplaySaved });
                 scheduleOfflineAudioSave(trackEntry, label + " offline", 0);
                 knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
                 updateTrackButtons();
@@ -514,7 +546,7 @@
         cacheUrl: base + "/cache_audio/" + encodeURIComponent(t.cacheKey),
         streamUrl: restoredMode === "single" ? "" : base + "/tts_dialogue_stream_job/" + encodeURIComponent(t.cacheKey),
         createdAt: t.createdAt || Date.now(),
-        voice: t.voice || cfg.defaultVoice,
+        voice: representativeVoiceForMode(restoredMode, t.voicesMap || null, t.voice || cfg.defaultVoice),
         mode: restoredMode,
         parseMode: restoredMode === "single" ? "normal" : restoredMode,
         playbackMode: normalizePlaybackMode(t.playbackMode || "live"),
@@ -582,7 +614,7 @@
             showTrackNotice(null, "后台生成中", "完成后会加入普通历史音频");
           } else {
             setStatus(historyStatusText());
-            showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+            showTrackNotice(null, "历史音频 0 条", "点音符生成音频");
           }
           return generatedTracks;
         }
@@ -605,7 +637,7 @@
       knownHistoryCount = localHistoryCountForMessage(messageId);
       updateTrackButtons();
       setStatus(historyStatusText());
-      showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
+      showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点开播放器后可播放历史音频" : "点音符生成音频");
       // 兜底：若本版 tavo.get 是异步实现，上面的同步读会落空，这里异步从 tavo 持久层
       // 再确认一次条数（只读变量，不请求 /voices、不生成）。
       try {
@@ -616,7 +648,7 @@
           knownHistoryCount = n;
           updateTrackButtons();
           setStatus(historyStatusText());
-          showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
+          showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点开播放器后可播放历史音频" : "点音符生成音频");
         }
       } catch (_) {}
     }
@@ -625,7 +657,7 @@
       var visibleList = visibleTrackCards();
       if (!visibleList.length) {
         setStatus("历史音频 0 条");
-        showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+        showTrackNotice(null, "历史音频 0 条", "点音符生成音频");
         updateTrackButtons();
         return false;
       }
@@ -695,6 +727,7 @@
       deleteOfflineAudioForTrack(removed).catch(function () {});
       deleteRemoteTrack(removed).catch(function () {});
       removePendingJobForTrack(removed).catch(function () {});
+      knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
       // 删除后同步把变更写回 tavo.set，下次进页面就不会再看到这张卡片
       if (messageId) {
         saveTracksForMessage(messageId, generatedTracks).catch(function(){});
@@ -704,15 +737,14 @@
       if (currentTrackIndex >= 0) {
         await selectTrack(currentTrackIndex, false);
       } else {
-        audio.removeAttribute("src");
-        audio.load();
+        clearElementAudioSrc();
         currentCacheKey = "";
         if (seek) { seek.disabled = true; seek.value = "0"; }
         if (cur) cur.textContent = "00:00";
         if (total) total.textContent = "--:--";
         setPlayState("idle");
         setStatus("历史音频 0 条");
-        showTrackNotice(null, "历史音频 0 条", "点播放开始生成音频");
+        showTrackNotice(null, "历史音频 0 条", "点音符生成音频");
         updateTrackButtons();
       }
     }
@@ -761,13 +793,14 @@
       return true;
     }
     function showEmptyAfterLiveCancel(reason) {
+      clearElementAudioSrc();
       currentCacheKey = "";
       if (seek) { seek.disabled = true; seek.value = "0"; }
       if (cur) cur.textContent = "00:00";
       if (total) total.textContent = "--:--";
       setPlayState("idle");
       setStatus(historyStatusText());
-      showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
+      showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点开播放器后可播放历史音频" : "点音符生成音频");
       updateTrackButtons();
       if (reason) debugLog("🛑 live 流式已中止: " + reason, "#fc9");
     }

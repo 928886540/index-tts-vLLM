@@ -81,6 +81,26 @@
         }
       }, 120);
     }
+    function bufferedAheadSec() {
+      var now = 0;
+      try { now = ctx.currentTime || 0; } catch (_) { now = 0; }
+      return Math.max(0, nextAt - now);
+    }
+    function notifyStableWhenBuffered(delayMs, minAheadSec) {
+      if (stableNotifyTimer) { try { clearTimeout(stableNotifyTimer); } catch (_) {} stableNotifyTimer = null; }
+      delayMs = Math.max(0, Number(delayMs || 0) || 0);
+      minAheadSec = Math.max(0.25, Number(minAheadSec || 0.65) || 0.65);
+      stableNotifyTimer = setTimeout(function () {
+        stableNotifyTimer = null;
+        if (stopped || String(ctx.state || "running") !== "running") return;
+        var ahead = bufferedAheadSec();
+        if (!bufferingState && ahead >= minAheadSec) {
+          hooks.onStateChange && hooks.onStateChange("stable_playing");
+          return;
+        }
+        if (!readEnded && !stopped) notifyStableWhenBuffered(500, minAheadSec);
+      }, delayMs);
+    }
     function makeAbortError(reason) {
       var e = new Error(reason || "播放已停止");
       e.name = "AbortError";
@@ -165,10 +185,7 @@
           if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
         });
       }, Math.max(0, (fallbackStartAt - (ctx.currentTime || 0)) * 1000 + 40));
-      stableNotifyTimer = setTimeout(function () {
-        stableNotifyTimer = null;
-        if (!stopped && String(ctx.state || "running") === "running") hooks.onStateChange && hooks.onStateChange("stable_playing");
-      }, Math.max(0, (fallbackStartAt - (ctx.currentTime || 0)) * 1000 + 850));
+      notifyStableWhenBuffered(Math.max(0, (fallbackStartAt - (ctx.currentTime || 0)) * 1000 + 1200), 0.65);
       armEndedWatcher();
       return { ctx: ctx, duration: dur, mode: "buffered" };
     }
@@ -290,10 +307,7 @@
               if (!stopped) hooks.onStateChange && hooks.onStateChange("audio_suspended");
             });
           }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 40));
-          stableNotifyTimer = setTimeout(function () {
-            stableNotifyTimer = null;
-            if (!stopped && String(ctx.state || "running") === "running" && !bufferingState) hooks.onStateChange && hooks.onStateChange("stable_playing");
-          }, Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + 850));
+          notifyStableWhenBuffered(Math.max(0, (t - (ctx.currentTime || 0)) * 1000 + Math.max(1400, prebufferSec * 900)), 0.65);
           armBufferWatcher();
         } else if (bufferingState && nextAt - (ctx.currentTime || 0) >= 0.65) {
           bufferingState = false;

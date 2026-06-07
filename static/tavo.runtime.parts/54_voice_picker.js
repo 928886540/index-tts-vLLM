@@ -9,6 +9,9 @@
     var pickerNextEl   = first(pickerEl, '[data-role="picker-next"]');
     var pickerState = { rowIdx: -1, tab: "", search: "", page: 1, pageSize: 12 };
     var reopenPanelAfterPicker = false;
+    function reportSaveConfigError(e) {
+      setError("设置保存失败: " + (e && e.message ? e.message : String(e)));
+    }
 
     function renderRoleList() {
       if (!rolesListEl) return;
@@ -52,7 +55,7 @@
           if (!cfg.roleVoiceList[idx]) cfg.roleVoiceList[idx] = { role: "", voice: "" };
           cfg.roleVoiceList[idx].role = String(nameEl.value || "").trim();
         });
-        on(nameEl, 'change', function () { saveConfig(cfg, characterId).catch(function(){}); });
+        on(nameEl, 'change', function () { saveConfig(cfg, characterId).catch(reportSaveConfigError); });
         on(voiceBtn, 'click', function (e) { e.preventDefault(); e.stopPropagation(); openVoicePicker(idx).catch(function (err) { setError(err && err.message ? err.message : String(err)); }); });
         on(delBtn, 'click', function (e) {
           e.preventDefault(); e.stopPropagation();
@@ -233,14 +236,14 @@
             cfg.defaultVoice = voiceName;
             updateNormalVoiceButtons();
             syncUI();
-            saveConfig(cfg, characterId).catch(function(){});
+            saveConfig(cfg, characterId).catch(reportSaveConfigError);
           } else if (pickerState.rowIdx === -4) {
             cfg.roleVoiceList = setVoiceForRoleInList(cfg.roleVoiceList, "对白", voiceName, cfg.currentCharacterName);
             updateNormalVoiceButtons();
-            saveConfig(cfg, characterId).catch(function(){});
+            saveConfig(cfg, characterId).catch(reportSaveConfigError);
           } else if (pickerState.rowIdx >= 0) {
             setRowVoice(pickerState.rowIdx, voiceName);
-            saveConfig(cfg, characterId).catch(function(){});
+            saveConfig(cfg, characterId).catch(reportSaveConfigError);
           }
           closeVoicePicker();
         }
@@ -275,7 +278,7 @@
           return !(item && isNormalDialogueRole(item.role));
         });
         updateNormalVoiceButtons();
-        saveConfig(cfg, characterId).catch(function(){});
+        saveConfig(cfg, characterId).catch(reportSaveConfigError);
         return;
       }
       var roleRow = t.closest('.idx-role-row');

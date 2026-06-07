@@ -33,7 +33,7 @@ The launcher selects one backend version at startup. `static/`, `launcher/`, and
 The app does not require a public domain. For same-LAN phone testing, use:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-live-audio-v15"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260607-ai-live-v17"></script>
 ```
 
 For a public tunnel, configure the tunnel/reverse proxy outside this repository and replace only the script host.
@@ -50,5 +50,7 @@ The only runtime code that should depend on the script host is `static/tavo.js`,
 
 - Active collaboration state lives in `dev_workspace/docs/`.
 - Tavo frontend changes must follow the local `tavo` Codex skill.
+- A user-reported bug is an action item, not just a ledger entry. Diagnose and fix the relevant code path first; update `dev_workspace/docs/BUGS.md` only as a concise tracking/fix note when it helps handoff.
+- Do not stop after only writing a bug entry. Do not paste raw user reports into docs; summarize boundary, evidence, fix, and regression guard.
 - Do not commit model weights, runtime folders, generated audio cache, logs, package archives, or local Git backups.
 - Startup options are selected in the launcher: backend version (`vllm` / `fast6g`) and vLLM GPU memory ratio (`0.15` default or `0.11` conservative). Qwen emotion is deprecated for the launcher path; AI mode should use LLM-selected style/emotion parameters instead.

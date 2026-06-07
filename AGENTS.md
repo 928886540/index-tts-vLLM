@@ -4,7 +4,7 @@ Codex rules for `D:\apiWorkSpace\leon_api`.
 
 ## Required Reading
 
-Before repository work here, read:
+Before repository work here, read the short active context:
 
 1. `C:\Users\Administrator\.codex\AGENTS.md`
 2. `C:\Users\Administrator\.codex\instruction.md`
@@ -12,11 +12,16 @@ Before repository work here, read:
 4. `README.md`
 5. `dev_workspace\AGENTS.md`
 6. `dev_workspace\docs\AGENT_STATE.md`
-7. `dev_workspace\docs\ARCHITECTURE.md`
-8. `dev_workspace\docs\DECISIONS.md`
-9. `dev_workspace\docs\BUGS.md`
-10. `dev_workspace\docs\TODO.md`
-11. `dev_workspace\docs\REGRESSION.md`
+7. `dev_workspace\docs\BUGS.md`
+
+Read the other active docs only when they are relevant:
+
+- `dev_workspace\docs\ARCHITECTURE.md`: when changing component boundaries, APIs, cache/job model, launcher layout, or shared file placement.
+- `dev_workspace\docs\DECISIONS.md`: when a task touches an accepted/deprecated project decision.
+- `dev_workspace\docs\TODO.md`: when planning or reprioritizing work.
+- `dev_workspace\docs\REGRESSION.md`: before handing off code changes that need validation.
+
+Do not read `dev_workspace\docs\archive\*` by default. Archives are for tracing older fixed bugs, benchmarks, or historical handoff details.
 
 If a child directory later adds another `AGENTS.md`, read the nearest applicable file before editing files under that directory.
 
@@ -40,6 +45,10 @@ Use these names consistently:
 - Launcher / `启动器`: `LEON-Launcher.exe`, `launcher/`, and `scripts/` startup tooling.
 
 When analyzing bugs, state which boundary is involved. For example: "frontend submits role mapping", "API backend exposes job status", and "TTS service synthesizes audio".
+
+## Bug Workflow
+
+User-reported bugs are work items, not documentation tasks. Diagnose and fix the relevant boundary first. Use `dev_workspace\docs\BUGS.md` only as a concise active ledger or post-fix handoff note; do not stop after only adding a bug entry, and do not paste raw user reports into docs.
 
 ## Tavo Rule
 

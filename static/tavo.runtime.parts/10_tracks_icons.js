@@ -3,9 +3,9 @@
   async function loadTracksForMessage(messageId) {
     if (!messageId) return [];
     var key = TRACKS_KEY_PREFIX + messageId;
-    try { var raw = localStorage.getItem(key); if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; } } catch (_) {}
     try { if (window.tavo && typeof tavo.get === "function") { var cv = await tavo.get(key, "chat"); if (Array.isArray(cv)) return cv; } } catch (_) {}
     try { if (window.tavo && typeof tavo.get === "function") { var v = await tavo.get(key, "global"); if (Array.isArray(v)) return v; } } catch (_) {}
+    try { var raw = localStorage.getItem(key); if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; } } catch (_) {}
     return [];
   }
   function localTracksForMessage(messageId) {
@@ -17,9 +17,9 @@
     try {
       if (window.tavo && typeof tavo.get === "function") {
         var cv = tavo.get(key, "chat");
-        if (Array.isArray(cv) && cv.length) return cv;
+        if (Array.isArray(cv)) return cv;
         var gv = tavo.get(key, "global");
-        if (Array.isArray(gv) && gv.length) return gv;
+        if (Array.isArray(gv)) return gv;
       }
     } catch (_) {}
     try {

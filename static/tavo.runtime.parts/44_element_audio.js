@@ -145,7 +145,27 @@
       if (/resume|AudioContext/i.test(msg)) return "浏览器没有放行音频播放，请点一次播放按钮重试。";
       return msg.replace(/\[step:[^\]]+\]\s*/g, "") || "播放失败，请重新生成一次。";
     }
-    function setPlayState(state) { if (play) { play.dataset.state = state; play.innerHTML = state === "loading" ? loadingIcon() : playIcon(state); play.disabled = false; } if (cover) cover.dataset.playing = state === "playing" ? "1" : "0"; }
+    function canPlayTrack(track) {
+      if (!track || track.deleted || isTerminalTrack(track)) return false;
+      if (isSavedTrack(track)) return !!(trackPlayableUrl(track) || track.cacheKey || track.cacheUrl);
+      if (normalizePlaybackMode(track.playbackMode) === "live") return !!(track.cacheKey || track.streamUrl || track.url);
+      return !!trackPlayableUrl(track);
+    }
+    function canPlayCurrentTrack() {
+      return canPlayTrack(currentTrack());
+    }
+    function setPlayState(state) {
+      if (play) {
+        var nextHtml = state === "loading" ? loadingIcon() : playIcon(state);
+        if (play.dataset.state !== state) play.dataset.state = state;
+        if (play.dataset.iconState !== state) {
+          play.innerHTML = nextHtml;
+          play.dataset.iconState = state;
+        }
+        play.disabled = !canPlayCurrentTrack() && state !== "loading";
+      }
+      if (cover) cover.dataset.playing = state === "playing" ? "1" : "0";
+    }
     function setHidden(el, hidden) {
       if (!el) return;
       try { el.classList.toggle("idx-hidden", !!hidden); } catch (_) {}
@@ -174,9 +194,12 @@
       if (del) del.disabled = liveControlsOnly || currentTrackIndex < 0 || !track;
       if (liveExit) liveExit.disabled = !liveControlsOnly;
       if (play) {
-        play.disabled = terminal;
-        play.setAttribute("title", terminal ? (trackState(track) === "cancelled" ? "任务已取消，点 + 重新生成" : "生成失败，点 + 重新生成") : "播放");
-        play.setAttribute("aria-label", terminal ? (trackState(track) === "cancelled" ? "任务已取消" : "生成失败") : "播放");
+        var playable = canPlayTrack(track);
+        play.disabled = terminal || !playable;
+        var playTitle = !track ? "没有音频，点音符生成" : (!playable ? "音频尚未就绪，点音符生成" : "播放");
+        if (terminal) playTitle = trackState(track) === "cancelled" ? "任务已取消，点音符重新生成" : "生成失败，点音符重新生成";
+        play.setAttribute("title", playTitle);
+        play.setAttribute("aria-label", terminal ? (trackState(track) === "cancelled" ? "任务已取消" : "生成失败") : playTitle);
       }
       updateTrackCounter();
     }

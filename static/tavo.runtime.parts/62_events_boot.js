@@ -20,8 +20,8 @@
       }
     });
     on(close, 'click', function () { closeDialog(panel); });
-    // 移动 webview 的 audio.play() 必须在用户手势的同步调用栈里执行。generate(false)
-    // 里有一串 await（refreshConfig/saveConfig/ensureTracksLoaded/prepareOffline）会把
+    // 移动 webview 的 audio.play() 必须在用户手势的同步调用栈里执行。异步播放路径
+    // 里有一串 await（ensureTracksLoaded/prepareOffline）可能会把
     // 手势耗掉，导致已落盘音频暂停后再点播放被 NotAllowedError 拒绝、看起来“卡死没法播”。
     // 这里在手势内同步处理“元素音频已就绪”的续播/暂停，命中即不进 await 链。
     function tryResumeOrPauseInGesture() {
@@ -66,22 +66,14 @@
     on(play, 'click', function () {
       primeAudioContext();
       if (tryResumeOrPauseInGesture()) return;
-      var live = currentTrack();
-      if (live && isTerminalTrack(live)) {
-        // 失败/取消是终态，播放键不能再把旧任务拉回生成中。
+      if (!canPlayCurrentTrack()) {
         setPlayState("idle");
-        setStatus(trackState(live) === "cancelled" ? "任务已取消" : "生成失败");
-        showTrackNotice(live, trackState(live) === "cancelled" ? "任务已取消" : "生成失败", live.error || "点 + 重新生成");
+        setStatus(historyStatusText());
+        showTrackNotice(currentTrack(), currentTrack() ? "还没有可播放音频" : historyStatusText(), "点音符生成音频");
         updateTrackButtons();
         return;
       }
-      if (isCancelableLiveTrack(live)) {
-        setTrackPlaybackState(live, "loading");
-        setPlayState("loading");
-        setStatus("连接实时音频…");
-        showTrackNotice(live, "连接实时音频…", live.cacheKey ? "继续实时播放；完整音频会自动进入历史" : "正在等待后端创建音频任务");
-      }
-      generate(false).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
+      playOrPauseCurrentTrack().catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
     on(add, 'click', function () {
       primeAudioContext();
@@ -115,13 +107,27 @@
     on(liveExit, 'click', function () { exitCurrentLiveTrack("live exit").catch(function (e) { setError(e && e.message ? e.message : String(e)); }); });
     on(playbackToggle, 'click', async function (ev) {
       if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-      readFields();
-      cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode) === "generate" ? "live" : "generate";
-      syncUI();
-      await saveConfig(cfg, characterId);
-      setStatus(cfg.playbackMode === "generate" ? "D：后台落盘" : "L：边生成边播放");
+      try {
+        readFields();
+        cfg.playbackMode = normalizePlaybackMode(cfg.playbackMode) === "generate" ? "live" : "generate";
+        syncUI();
+        await saveConfig(cfg, characterId);
+        setStatus(cfg.playbackMode === "generate" ? "D：后台落盘" : "L：边生成边播放");
+      } catch (e) {
+        setError("设置保存失败: " + (e && e.message ? e.message : String(e)));
+      }
     });
-    on(first(panel, '[data-role="save"]'), 'click', async function () { readFields(); await saveConfig(cfg, characterId); syncUI(); closeDialog(panel); setStatus("设置已保存"); });
+    on(first(panel, '[data-role="save"]'), 'click', async function () {
+      try {
+        readFields();
+        await saveConfig(cfg, characterId);
+        syncUI();
+        closeDialog(panel);
+        setStatus("设置已保存");
+      } catch (e) {
+        setError("设置保存失败: " + (e && e.message ? e.message : String(e)));
+      }
+    });
     try {
       window.addEventListener('resize', function () {
         if (panel && panel.open && typeof positionSettingsPanel === "function") positionSettingsPanel();
@@ -142,7 +148,16 @@
       voicesLoaded = false;
       ensureVoicesLoaded().catch(function (e) { setStatus("音色列表读取失败"); setError(e && e.message ? e.message : String(e)); });
     });
-    $all(panel, '.idx-mode').forEach(function (b) { b.addEventListener('click', async function () { readFields(); cfg.mode = normalizeModeName(b.dataset.mode); syncUI(); await saveConfig(cfg, characterId); }); });
+    $all(panel, '.idx-mode').forEach(function (b) { b.addEventListener('click', async function () {
+      try {
+        readFields();
+        cfg.mode = normalizeModeName(b.dataset.mode);
+        syncUI();
+        await saveConfig(cfg, characterId);
+      } catch (e) {
+        setError("设置保存失败: " + (e && e.message ? e.message : String(e)));
+      }
+    }); });
     on(audio, 'play', function () {
       var t = currentTrack();
       if (t) setTrackPlaybackState(t, "playing");
@@ -323,8 +338,12 @@
     syncUI();
     knownHistoryCount = messageId ? localHistoryCountForMessage(messageId) : 0;
     setStatus(historyStatusText());
-    showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点播放再读取历史音频" : "点播放开始生成音频");
-    initializeHistoryCount().catch(function () {});
+    showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点开播放器后可播放历史音频" : "点音符生成音频");
+    initializeHistoryCount()
+      .then(function () { return ensureTracksLoaded(); })
+      .catch(function (e) {
+        debugLog("⚠️ 初始化历史音频失败: " + (e && e.message ? e.message : e), "#fc9");
+      });
   }
 
   try {

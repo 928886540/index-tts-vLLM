@@ -116,9 +116,6 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     });
   }
   async function loadCharacterCfg(characterId) {
-    if (characterId) {
-      try { var rawLocal = localStorage.getItem(CHAR_KEY_PREFIX + characterId); if (rawLocal) return JSON.parse(rawLocal); } catch (_) {}
-    }
     try { if (window.tavo && typeof tavo.get === "function") { var cs = await tavo.get(CHAR_SCOPE_CONFIG_KEY, "character"); if (cs) return cs; } } catch (_) {}
     if (!characterId) return null;
     try { if (window.tavo && typeof tavo.get === "function") { var tv = await tavo.get(CHAR_KEY_PREFIX + characterId, "global"); if (tv) return tv; } } catch (_) {}
@@ -126,9 +123,10 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     return null;
   }
   async function saveCharacterCfg(characterId, partial) {
-    try { if (window.tavo && typeof tavo.set === "function") await tavo.set(CHAR_SCOPE_CONFIG_KEY, partial || {}, "character"); } catch (_) {}
+    var tavoSetAvailable = !!(window.tavo && typeof tavo.set === "function");
+    if (tavoSetAvailable) await tavo.set(CHAR_SCOPE_CONFIG_KEY, partial || {}, "character");
     if (!characterId) return;
-    try { if (window.tavo && typeof tavo.set === "function") await tavo.set(CHAR_KEY_PREFIX + characterId, partial || {}, "global"); } catch (_) {}
+    if (tavoSetAvailable) await tavo.set(CHAR_KEY_PREFIX + characterId, partial || {}, "global");
     try { localStorage.setItem(CHAR_KEY_PREFIX + characterId, JSON.stringify(partial || {})); } catch (_) {}
   }
 

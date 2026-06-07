@@ -8,6 +8,8 @@
     function voiceNameForRole(role, track) {
       var voices = currentVoicesMap(track);
       role = String(role || "").trim();
+      var mode = normalizeModeName((track && track.mode) || cfg.mode);
+      if (mode === "ai") return (role && voices[role]) || "";
       return (role && voices[role]) || voices.default || cfg.defaultVoice || "";
     }
     function displayRoleName(role) {
@@ -20,14 +22,30 @@
       var voice = voiceNameForRole(role, track);
       return voice ? shortName(voice) : "音色未设置";
     }
+    function representativeVoiceForMode(mode, voicesMap, fallback) {
+      mode = normalizeModeName(mode);
+      voicesMap = voicesMap || {};
+      if (mode === "ai") {
+        var preferred = [cfg.currentCharacterName, "旁白", "用户"].filter(Boolean);
+        for (var i = 0; i < preferred.length; i += 1) {
+          if (voicesMap[preferred[i]]) return voicesMap[preferred[i]];
+        }
+        var keys = Object.keys(voicesMap);
+        for (var j = 0; j < keys.length; j += 1) {
+          if (keys[j] !== "default" && voicesMap[keys[j]]) return voicesMap[keys[j]];
+        }
+        return "";
+      }
+      return voicesMap.default || voicesMap["旁白"] || voicesMap["对白"] || fallback || "";
+    }
     function trackPlaybackLabel(track) {
       if (!track) return cfg.defaultVoice ? shortName(cfg.defaultVoice) : "音色未设置";
       var mode = normalizeModeName(track.mode);
       if (mode === "ai" || mode === "normal") {
         var role = lastSpeakerRole || ((track.segments && track.segments[0] && track.segments[0].role) || "");
         if (role) return playbackLabelForRole(role, track);
-        var voice = (track.voicesMap && (track.voicesMap.default || track.voicesMap["旁白"] || track.voicesMap["对白"])) || cfg.defaultVoice;
-        return voice ? shortName(voice) : (mode === "ai" ? "AI模式" : "普通模式");
+        var voice = representativeVoiceForMode(mode, track.voicesMap, cfg.defaultVoice);
+        return voice ? shortName(voice) : "音色未设置";
       }
       var singleVoice = (track && track.voice) || cfg.defaultVoice;
       return singleVoice ? shortName(singleVoice) : "音色未设置";

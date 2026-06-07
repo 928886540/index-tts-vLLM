@@ -2,15 +2,19 @@
 
 ## P0
 
-- Investigate `BUG-026`:
-  - on `fast6g`, settings save reports success but reopening shows old config;
-  - capture Tavo console/storage evidence before changing code;
-  - verify save/reopen/remount/re-enter chat after the fix.
+- Real Tavo validation for `BUG-026` / `BUG-046` / `BUG-047` / `BUG-048` / `BUG-049`:
+  - verify settings save/reopen/remount/re-enter chat uses `tavo.set` values on `fast6g` and `vllm`;
+  - verify empty player disables play and only the music-note button creates a new job;
+  - verify AI mode refuses missing role mappings instead of submitting/defaulting a voice;
+  - verify restored LIVE pending audio resumes the same key and does not stay in a permanent spinner;
+  - verify LIVE either becomes audible on phone or switches to native saved audio after cache ready;
+  - verify the avatar-side status line only shows the configured/current voice label.
 
 - Make this docs workflow the active handoff path:
   - future work starts by reading root `AGENTS.md`, then `dev_workspace/AGENTS.md` and `dev_workspace/docs/*`;
-  - new bugs are recorded in `docs/BUGS.md` before code changes;
-  - fixes update `docs/REGRESSION.md` with guards.
+  - fresh user bug reports are implementation/debugging tasks first, not documentation tasks;
+  - `docs/BUGS.md` is a concise ledger or post-fix handoff note, not a place to dump raw reports;
+  - fixes update `docs/REGRESSION.md` with guards when the behavior needs future protection.
 
 - Return IndexTTS2 to the mainline Tavo engine:
   - verified `fast6g` API startup on `9880`, `/health`, `/voices`, and one short normal-mode generation on 2026-06-06;

@@ -256,6 +256,9 @@ async function runLlmErrorCopySmoke(browser, targetUrl) {
       })
     });
   });
+  await page.route("**/tts_dialogue_stream_job/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "audio/wav", body: tinyWavBuffer() });
+  });
   await page.route("**/tts_dialogue_job_status/**", async (route) => {
     statusCount += 1;
     await route.fulfill({
@@ -1204,21 +1207,26 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
   try {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
-    await page.evaluate((key) => {
-      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+    await page.evaluate(async (key) => {
+      await window.tavo.set("indextts_tavo_config_v3", {
         configVersion: 13,
         mode: "normal",
         playbackMode: "live",
         intervalMs: 50,
         qualityMode: "balanced",
         offlineAudioEnabled: false
-      }));
-      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+      }, "global");
+      await window.tavo.set("indextts_tavo_character_config_v1", {
         defaultVoice: "女声/高圆圆.wav",
         characterName: "潘金莲",
         roleVoiceList: []
-      }));
-      localStorage.setItem("indextts_pending_jobs_test-message-1", JSON.stringify([{
+      }, "character");
+      await window.tavo.set("indextts_tavo_character_v1:34", {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }, "global");
+      await window.tavo.set("indextts_pending_jobs_test-message-1", [{
         cacheKey: key,
         cacheUrl: "/cache_audio/" + key,
         streamUrl: "/tts_dialogue_stream_job/" + key,
@@ -1236,7 +1244,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
         lastWebAudioSec: 2.75,
         lastElementSec: 2.75,
         segments: []
-      }]));
+      }], "chat");
     }, liveKey);
 
     await page.click('[data-role="lazy-open"]');
@@ -1454,6 +1462,8 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
         homeControls: {
           hasRewind10: !!rewind10,
           hasForward10: !!forward10,
+          playDisabled: !!(playBtn && playBtn.disabled),
+          addDisabled: !!(addBtn && addBtn.disabled),
           playRect: playBtn ? { width: playBtn.getBoundingClientRect().width, height: playBtn.getBoundingClientRect().height } : null,
           addRect: addBtn ? { width: addBtn.getBoundingClientRect().width, height: addBtn.getBoundingClientRect().height } : null,
           liveExitRect: liveExit ? { width: liveExit.getBoundingClientRect().width, height: liveExit.getBoundingClientRect().height } : null,
@@ -1543,6 +1553,9 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     const home = afterRuntime.homeControls || {};
     if (home.hasRewind10 || home.hasForward10) {
       throw new Error("home player should not expose 10-second skip buttons: " + JSON.stringify(home));
+    }
+    if (!home.playDisabled || home.addDisabled) {
+      throw new Error("empty player should disable play and keep the music-note generate button enabled: " + JSON.stringify(home));
     }
     if (!home.playRect || !home.addRect || Math.abs(home.playRect.width - home.addRect.width) > 2 || Math.abs(home.playRect.height - home.addRect.height) > 2) {
       throw new Error("music/add button should match the main play button size: " + JSON.stringify(home));

@@ -190,7 +190,7 @@
           album: "IndexTTS",
           artwork: mediaArtworkEntries(artSrc),
         });
-        ms.setActionHandler('play',  function () { try { generate(false).catch(function(){}); } catch (_) {} });
+        ms.setActionHandler('play',  function () { try { playOrPauseCurrentTrack().catch(function(){}); } catch (_) {} });
         ms.setActionHandler('pause', function () { try { if (currentTrack() && currentTrack().webAudioPlaying) { var t = currentTrack(); if (t) t.pausedByUser = true; stopWebAudioPlayback("pause"); } else audio.pause(); } catch (_) {} });
         try { ms.setActionHandler('previoustrack', null); } catch (_) {}
         try { ms.setActionHandler('nexttrack', null); } catch (_) {}
