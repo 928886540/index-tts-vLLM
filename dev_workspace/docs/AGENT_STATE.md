@@ -26,12 +26,12 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v50"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v52"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260608-mp3-cache-v50`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260608-mp3-cache-v52`.
 - `ttsDebug=1` now keeps debug output in the Tavo console/server tail only. The in-page debug overlay is opt-in with `debugPanel=1`, so normal native-audio testing does not cover the player controls.
 - Root `README.md` is now the project introduction with README images. `dev_workspace/README.md` is the active working README for Codex repository work.
 - Root `AGENTS.md` was moved into `dev_workspace/AGENTS.md`; start new Codex sessions in `dev_workspace` for the shortest working context.
@@ -50,17 +50,17 @@ Current code state:
 - Submit/LLM progress copy is short and phase-based: `准备分析文本`, `任务已提交，等待分析文本`, `正在分析文本`, `等待合成`, `已生成 X/Y 段`. The old per-second submit timers and `AI x/y` / bare `合成 x/y` style are not user-facing.
 - vLLM and fast6g expose FIFO visibility for the existing single TTS lock; queued LIVE jobs show `前面还有 X 个 TTS 任务` in the transparent progress hint instead of only showing elapsed waiting.
 - LIVE controls keep the main play/pause button at the same position as saved-history playback; the live-exit button occupies the music-note position while previous/next only reserve invisible layout space. This remains true when cache落盘 but MP3/WebAudio LIVE output is already audible.
-- Lazy snapshot open/play and runtime play/generate gestures no longer pre-prime WebAudio or a silent native `<audio>` unlock. They only record a recent gesture timestamp for explicit WebAudio suspend/recovery decisions; the default MP3 path relies on the real `<audio>` play call.
+- Lazy snapshot open/play and runtime play/generate gestures no longer pre-prime WebAudio or a silent native `<audio>` unlock. The default MP3 path relies on the real `<audio>` play call.
 - The loader shell shows a small loading bar while the runtime opens, and its history counter is refreshed from the same Tavo/local track snapshot as the lazy card.
 - Toggling `LIVE`/`DISK` updates only playback mode chrome and does not overwrite the current speaker-owned title/avatar while audio is active.
 - Default LIVE now uses native `<audio src="/tts_dialogue_stream_job/<cache_key>/mp3">` MP3 streaming. It is the main Tavo path because native audio can continue through normal app/background switching better than WebAudio in the mobile WebView.
 - Completed cache now defaults to MP3 and remains the saved-history/offline playback path and final fallback if LIVE is unsupported or interrupted. WAV is retained only for explicit diagnostics/regression/legacy compatibility, such as `debug_save_wav=1` or `nativeLive=1` segment checks.
-- LIVE WebAudio remains available only as an explicit diagnostic/legacy path with `webAudioLive=1`, `pcmLive=1`, or `chunkedLive=1`. Its old page-hide temporary suspend still applies only to that WebAudio/raw-stream path.
+- LIVE WebAudio remains available only as an explicit diagnostic/legacy path with `webAudioLive=1`, `pcmLive=1`, or `chunkedLive=1`. Page-hide/visibility events no longer auto-suspend it; only an explicit user pause should pause playback.
 - LIVE WebAudio starts with a slightly larger PCM prebuffer, pulls larger PCM chunks, lowers the poll wait, and flushes small pending PCM tails sooner to reduce short stalls at segment boundaries.
 - LIVE WebAudio pause now keeps the local AudioContext/PCM controller alive and keeps polling the same cache key in the background; play resumes that local queue first instead of reconnecting or creating a new backend job. If local resume fails, it falls back to same-key `start_s` recovery.
-- LIVE WebAudio page-hide audio interruption records the resume second, keeps the same key/pending card/cache polling, and waits for a foreground user gesture before reconnecting.
-- Default MP3 LIVE is not page-hide suspended by the frontend; `visibilitychange` should not show “暂挂/点播放继续”, clear the stream, or delete the job.
-- LIVE background suspend resume seconds are monotonic for explicit WebAudio: foreground play uses the latest visible/WebAudio LIVE progress (`liveResumeSec` / `lastLiveProgressSec`) ahead of stale `lastStalledSec`, so a later segment does not resume from an old buffering point.
+- Default MP3 LIVE and explicit WebAudio LIVE are not page-hide suspended by the frontend; `visibilitychange` / `pagehide` should not show “暂挂/点播放继续”, set `pausedByUser`, clear the stream, or delete the job.
+- Automatic LIVE recoverable/interrupted states no longer write `pausedByUser`; only the player pause button writes user-pause state.
+- LIVE same-key recovery still keeps resume seconds monotonic: manual seek/resume/recovery uses the latest visible/WebAudio LIVE progress (`liveResumeSec` / `lastLiveProgressSec`) ahead of stale `lastStalledSec`.
 - Restored LIVE pending tracks keep resume seconds and reconnect the same key with `start_s`, without a new POST.
 - Fresh non-cached LIVE jobs now persist a chat-scoped pending card immediately after the API backend returns `cacheKey`. If the Tavo WebView dies before cache落盘, remount restores the same visible LIVE card and continues cache polling; explicit LIVE exit/delete clears that pending card and remote job/cache.
 - Explicit WebAudio LIVE uses same-key live PCM polling before cache落盘. Frontend PCM output now prefers an AudioWorklet queue, then ScriptProcessor, then BufferSource scheduling. No default silent audio/WebAudio prewarm is issued; explicit WebAudio creates/resumes its AudioContext when that diagnostic path actually starts. If WebAudio device startup fails, the same LIVE key can switch to MP3 native live before cache落盘 instead of waiting for saved audio.
@@ -69,7 +69,8 @@ Current code state:
 - vLLM and fast6g both expose `/segment/<idx>` and `/mp3`; invalid cache keys on those new routes now return JSON 404 instead of leaking `snapshot_cache` `ValueError` as a 500.
 - MP3 live stream chunks are cast to `bytes` before `StreamingResponse` yields them. This is required because this runtime's `lameenc` returns `bytearray`, which Starlette treats as text-like and otherwise raises `AttributeError: 'bytearray' object has no attribute 'encode'`.
 - If LIVE is already audible when the cache file lands, the frontend keeps the current LIVE output and does not steal playback into saved `<audio>`; native saved `<audio>` handoff is reserved for explicit saved fallback or interrupted/not-yet-audible streams.
-- When live MP3 reaches `ended` before `/cache_audio` is confirmed ready, the progress hint stays visible as "MP3 实时流已结束 / 等待完整音频保存" and is no longer overwritten by stale `LIVE 合成 x/y` text.
+- When live MP3 reaches `ended` before `/cache_audio` is confirmed ready, the progress hint stays visible as "MP3 实时流已结束 / 等待完整音频保存". The hint is released as soon as the same live MP3 starts playing again or the track becomes saved, so weak-network recovery does not leave stale ended copy on screen.
+- Saved/cache MP3 seeking always uses the native saved `<audio>` element. Once a card is saved, progress-bar drag must not reconnect `/tts_dialogue_stream_job/<cache_key>/mp3?start_s=...` or restart from zero.
 - Loading spinner has fixed SVG transform origin to reduce wobble.
 - Native `<audio>` seeking/seeked debug logs are quiet by default; use `debugSeek=1` only when diagnosing seek behavior.
 - Group chat speaker avatars now use the current Tavo chat `chat.characters` list as a display-only role/avatar map. Matching is exact role name plus lowercase key fallback; it does not auto-add group characters to AI voice mappings or `roles_hint`.
@@ -94,7 +95,7 @@ git diff --check
 
 `git diff --check` only reported Windows LF-to-CRLF warnings, not whitespace errors.
 
-After `20260608-mp3-cache-v47`, the same frontend/backend syntax checks and Playwright smoke passed again. The smoke now asserts default LIVE / `mp3Live=1` use only `live-mp3` `<audio>.play()`, `nativeLive=1` uses only `live-segment` `<audio>.play()`, explicit WebAudio background suspend reports `unlockPlays=0`, live-MP3-ended-before-cache keeps the waiting-for-final-cache state, and offline save writes `indextts-<cacheKey>.mp3` as `data:audio/mpeg;base64,...`.
+After `20260608-mp3-cache-v47`, the same frontend/backend syntax checks and Playwright smoke passed again. The smoke asserts default LIVE / `mp3Live=1` use only `live-mp3` `<audio>.play()`, `nativeLive=1` uses only `live-segment` `<audio>.play()`, live-MP3-ended-before-cache keeps the waiting-for-final-cache state, and offline save writes `indextts-<cacheKey>.mp3` as `data:audio/mpeg;base64,...`.
 
 After `20260608-mp3-cache-v48`, frontend syntax/manifest/smoke passed again. The smoke now additionally asserts:
 
@@ -112,6 +113,14 @@ After `20260608-mp3-cache-v50`, frontend syntax, manifest concat syntax, `git di
 - LIVE pending is saved only under the `msgid` pending key, with `trackIndex` / `trackId` identifying the audio card inside that message object;
 - editing the message text before script remount does not break recovery of the same LIVE card/key;
 - explicit unfinished LIVE exit clears only the pending card and keeps existing saved cards under the same message object.
+
+After `20260608-mp3-cache-v51`, frontend syntax, manifest concat syntax, `git diff --check`, and Playwright smoke passed again. The smoke now additionally asserts:
+
+- default MP3 and explicit WebAudio LIVE are not auto-suspended by `visibilitychange` / `pagehide`; the track stays playing, keeps the same job/key, does not set `pausedByUser` / `livePageSuspended`, and does not show “暂挂/点播放继续” copy;
+- weak-network live MP3 ended-before-cache copy is cleared when live MP3 starts playing again or when the track becomes saved;
+- saved/cache MP3 progress dragging keeps the saved `<audio src="/cache_audio/<key>">`, updates `audio.currentTime`, and does not reconnect `/tts_dialogue_stream_job/<key>/mp3?start_s=...`.
+
+After `20260608-mp3-cache-v52`, frontend syntax, manifest concat syntax, and Playwright smoke passed again. The code now removes the old page-hide suspend helper path entirely: lifecycle events only record hidden time for diagnostics, automatic recoverable/interrupted LIVE states do not write `pausedByUser`, and non-user retryable states use `idle/可重试` instead of pretending to be user-paused.
 
 Additional LIVE route validation on vLLM after restart:
 
@@ -137,7 +146,7 @@ Additional evidence for the latest no-sound reports:
 - User console showed `/pcm` chunks with non-zero `peak/rms`, so PCM was arriving and not silent. A later `Failed to start the audio device` happened after switching chat/app and should be treated as an output-session interruption, not proof that PCM data is bad.
 - Local `/pcm` smoke confirmed non-silent PCM on vLLM: first PCM around 3.7s, `sample_rate=22050`, `peak=0.928`, `rms=0.292`. It also exposed a header bug where `X-IndexTTS-Live-Done=1` could be returned before the client drained `X-IndexTTS-PCM-Total`; current code fixes backend done semantics and frontend keeps pulling if `next < total`.
 - After v21 changes, vLLM was restarted from old PID `29652` to new PID `10792`; `/health` is OK with `vllm_gpu_memory_utilization=0.15`. Fresh `/pcm` smoke key `7297fa757ba5ec1a21e137408937ceebddd51719` was deleted after test; first PCM arrived around `1.927s`, chunk `75264 bytes`, `peak=0.928436`, `rms=0.351856`, and `done=1` had `next=total=75264`.
-- Playwright smoke confirms progress now lives as a transparent one-line `.idx-card` floating hint above the lyric panel; top controls read `LIVE -> page counter -> settings`; delete stays in the sticky `.idx-subtitle .idx-sub-toolbar`; toggling `LIVE`/`DISK` during playback keeps the active speaker title/avatar; group chat role `李瓶儿` uses the matching `chat.characters` avatar without adding that role to `voices` or `roles_hint`; default MP3 LIVE stays on `live-mp3` after page hide without frontend suspend; explicit WebAudio LIVE background suspend with stale `lastStalledSec=7` and latest LIVE progress `17s` resumes the same key with `start_s=17.000`; LIVE pending durable smoke creates a second card under the message-id object, survives message text edits/remount without a new POST, and clears only the unfinished pending card on explicit LIVE exit; offline playback smoke verifies a failed `tavo.file.url()` audio path retries through `tavo.file.load` as an `offline-blob` without hitting `/cache_audio`; card height remains `450px`.
+- Playwright smoke confirms progress now lives as a transparent one-line `.idx-card` floating hint above the lyric panel; top controls read `LIVE -> page counter -> settings`; delete stays in the sticky `.idx-subtitle .idx-sub-toolbar`; toggling `LIVE`/`DISK` during playback keeps the active speaker title/avatar; group chat role `李瓶儿` uses the matching `chat.characters` avatar without adding that role to `voices` or `roles_hint`; default MP3 LIVE stays on `live-mp3` after page hide without frontend suspend; explicit WebAudio LIVE also ignores `visibilitychange` / `pagehide` auto-suspend and keeps the same key/job naturally playing; saved MP3 seek uses native `<audio>.currentTime` without LIVE reconnect; LIVE pending durable smoke creates a second card under the message-id object, survives message text edits/remount without a new POST, and clears only the unfinished pending card on explicit LIVE exit; offline playback smoke verifies a failed `tavo.file.url()` audio path retries through `tavo.file.load` as an `offline-blob` without hitting `/cache_audio`; card height remains `450px`.
 - Boundary conclusion: the TTS service/API backend generated audible audio; the main remaining risk is frontend/mobile LIVE playback/output. Current default uses native MP3 live; explicit WebAudio still polls same-key PCM through queued output for diagnostics/regression.
 
 Still needs real Tavo/mobile validation:
@@ -147,7 +156,7 @@ Still needs real Tavo/mobile validation:
 - LIVE first-audio/no-sound behavior on phone;
 - restored pending LIVE resume after app re-entry;
 - LIVE pending card recovery after lock-screen/WebView death before cache落盘;
-- Default MP3 LIVE background/app-switch should continue through native audio and must not show the WebAudio “暂挂/点播放继续” path. Explicit WebAudio background suspend should not loop rebuilds, delete the job, or make audible unlock chirps.
+- Default MP3 LIVE and explicit WebAudio LIVE background/app-switch should continue naturally when the host allows audio; frontend must not show “暂挂/点播放继续”, set `pausedByUser`, clear streams, or delete the job for lifecycle events.
 - saved/cache native `<audio>` MP3 background and lock-screen behavior.
 - offline saved MP3 playback through real Tavo `tavo.file.url` and `tavo.file.load` fallback on phone.
 - saved/cache card delete should remove the matching Tavo MP3 offline file first, also check legacy WAV, and keep the card if delete fails.
@@ -172,7 +181,7 @@ Current high-priority validation:
 - BUG-052: group chat role avatar map, display-only without auto-expanding voices.
 - BUG-053: LIVE pending card durability across lock-screen/WebView death.
 - BUG-054: offline saved MP3 file-url playback fallback through `tavo.file.load`.
-- BUG-055: explicit WebAudio app background interruption should temporarily suspend instead of auto-recovering without user gesture; default MP3 must not be suspended by page hide.
+- BUG-055: page-hide/visibility must not auto-suspend any LIVE playback; only the user pause gesture should pause.
 - BUG-044 / BUG-045: launcher visual/log validation.
 
 ## Active Direction

@@ -235,6 +235,15 @@
       if (progressStatusPriority(current) < 3) return false;
       try {
         var t = currentTrack();
+        if (/MP3\s*实时流已结束|等待完整音频|等待音频保存|完整音频.*保存/.test(current)) {
+          return !!(
+            t
+            && !isSavedTrack(t)
+            && t.liveEndedAwaitSaved
+            && String(t.playbackState || "") === "ended"
+            && !(typeof isElementPlayingTrackStream === "function" && isElementPlayingTrackStream(t))
+          );
+        }
         if (t && !isSavedTrack(t) && typeof isLiveProgressTrack === "function" && isLiveProgressTrack(t)) return true;
       } catch (_) {}
       return false;

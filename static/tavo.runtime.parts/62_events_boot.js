@@ -65,7 +65,7 @@
       try {
         if (typeof handleRuntimePageVisibilityChange === "function") handleRuntimePageVisibilityChange(reason);
       } catch (e) {
-        debugLog("⚠️ 页面后台暂挂处理失败: " + (e && e.message ? e.message : e), "#fc9");
+        debugLog("⚠️ 页面后台状态处理失败: " + (e && e.message ? e.message : e), "#fc9");
       }
     }
     on(document, "visibilitychange", function () { handlePageAudioSuspend("visibilitychange"); });
@@ -185,7 +185,15 @@
     }
     on(audio, 'play', function () {
       var t = currentTrack();
-      if (t) setTrackPlaybackState(t, "playing");
+      if (t) {
+        if (isElementUsingTrackLiveMp3(t)) {
+          t.liveEndedAwaitSaved = false;
+          t.streamPlaybackFinished = false;
+          t.livePageSuspended = false;
+          setTrackStreamHealth(t, "ok");
+        }
+        setTrackPlaybackState(t, "playing");
+      }
       setPlayState("playing"); setStatus(trackPlaybackLabel(t));
       // 系统媒体面板基础信息(后台/锁屏可见,可控制播放/前后 10 秒)
       try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
@@ -214,7 +222,19 @@
         setStatus(trackPlaybackLabel(t));
       }
     });
-    on(audio, 'playing', function () { var t = currentTrack(); if (t) setTrackPlaybackState(t, "playing"); setError(""); setPlayState("playing"); setStatus(trackPlaybackLabel(t)); });
+    on(audio, 'playing', function () {
+      var t = currentTrack();
+      if (t) {
+        if (isElementUsingTrackLiveMp3(t)) {
+          t.liveEndedAwaitSaved = false;
+          t.streamPlaybackFinished = false;
+          t.livePageSuspended = false;
+          setTrackStreamHealth(t, "ok");
+        }
+        setTrackPlaybackState(t, "playing");
+      }
+      setError(""); setPlayState("playing"); setStatus(trackPlaybackLabel(t));
+    });
     on(audio, 'pause', function () { var t = currentTrack(); if (t && !audio.ended) setTrackPlaybackState(t, "paused"); setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); stopSubtitle(); });
     on(audio, 'ended', function () {
       var t = currentTrack();

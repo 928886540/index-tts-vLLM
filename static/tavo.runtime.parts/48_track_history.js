@@ -163,6 +163,10 @@
       }
       track.url = track.cacheUrl;
       setTrackState(track, "saved");
+      track.liveEndedAwaitSaved = false;
+      track.streamPlaybackFinished = false;
+      track.livePageSuspended = false;
+      clearLiveMp3AudioState(track);
       if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === track) {
         updateTrackButtons();
         var liveWebAudioOwnsTrack = (typeof webAudioBelongsToTrack === "function" && webAudioBelongsToTrack(track));

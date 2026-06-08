@@ -2459,7 +2459,7 @@ async function runLiveResumableAfterFailuresSmoke(browser, targetUrl) {
   }
 }
 
-async function runLiveBackgroundSuspendSmoke(browser, targetUrl) {
+async function runLiveBackgroundNoAutoSuspendSmoke(browser, targetUrl) {
   const context = await browser.newContext();
   await context.addInitScript(() => {
     try { localStorage.clear(); } catch (_) {}
@@ -2528,7 +2528,7 @@ async function runLiveBackgroundSuspendSmoke(browser, targetUrl) {
           segments_total: 2
         },
         segments_meta: [
-          { idx: 0, role: "旁白", text: "后台挂起测试。", style: "neutral", start_s: 0, duration_s: 2.4 }
+          { idx: 0, role: "旁白", text: "后台播放测试。", style: "neutral", start_s: 0, duration_s: 2.4 }
         ]
       })
     });
@@ -2600,7 +2600,7 @@ async function runLiveBackgroundSuspendSmoke(browser, targetUrl) {
       await route.fulfill({ status: 200, contentType: "audio/wav", body: wavBufferSeconds(2.4) });
       return;
     }
-    await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "unexpected background suspend method" }) });
+    await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "unexpected background visibility method" }) });
   });
 
   try {
@@ -2673,10 +2673,6 @@ async function runLiveBackgroundSuspendSmoke(browser, targetUrl) {
       try { Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); } catch (_) {}
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    await page.waitForFunction(() => {
-      const play = document.querySelector('[data-role="play"]');
-      return play && play.dataset.state === "idle";
-    }, { timeout: 5000 });
     await page.waitForTimeout(350);
 
     const afterHidden = await page.evaluate(() => {
@@ -2692,6 +2688,7 @@ async function runLiveBackgroundSuspendSmoke(browser, targetUrl) {
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
         pcmPolls: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/pcm/.test(r.url)).length,
         deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        startSeekReconnects: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/pcm\?/.test(r.url) && /[?&]start_s=/.test(r.url)).length,
         audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
         audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
         liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
@@ -2703,65 +2700,53 @@ async function runLiveBackgroundSuspendSmoke(browser, targetUrl) {
     });
 
     if (beforeHidden.jobs !== 1 || afterHidden.jobs !== 1 || jobCount !== 1) {
-      throw new Error("background suspend must keep the original LIVE job instead of re-POSTing: " + JSON.stringify({ beforeHidden, afterHidden, jobCount, jobBodies }));
+      throw new Error("background visibility must keep the original LIVE job instead of re-POSTing: " + JSON.stringify({ beforeHidden, afterHidden, jobCount, jobBodies }));
     }
     if (afterHidden.deletes || deleteCount) {
-      throw new Error("background suspend must not delete the backend LIVE job: " + JSON.stringify({ afterHidden, deleteCount }));
+      throw new Error("background visibility must not delete the backend LIVE job: " + JSON.stringify({ afterHidden, deleteCount }));
     }
     if (afterHidden.liveElementPlays || /\/tts_dialogue_stream_job\//.test(afterHidden.audioSrc) || afterHidden.audioKind === "stream") {
-      throw new Error("background suspend must not switch WebAudio LIVE to native audio element fallback: " + JSON.stringify({ beforeHidden, afterHidden }));
+      throw new Error("background visibility must not switch WebAudio LIVE to native audio element fallback: " + JSON.stringify({ beforeHidden, afterHidden }));
     }
-    if (afterHidden.playState !== "idle" || !afterHidden.liveExitVisible) {
-      throw new Error("background suspend should leave the LIVE card resumable with exit control visible: " + JSON.stringify(afterHidden));
+    if (afterHidden.playState !== "playing" || !afterHidden.liveExitVisible) {
+      throw new Error("background visibility should leave playback naturally running with exit control visible: " + JSON.stringify(afterHidden));
     }
-    if (!/暂停|暂挂|后台|点播放/.test(afterHidden.status + afterHidden.notice)) {
-      throw new Error("background suspend should show resumable paused copy: " + JSON.stringify(afterHidden));
-    }
-    if (afterHidden.streamGets > beforeHidden.streamGets + 2) {
-      throw new Error("background suspend should stop the WebAudio polling loop instead of reconnecting repeatedly: " + JSON.stringify({ beforeHidden, afterHidden, streamUrls }));
+    if (/暂挂|切回页面后点播放|实时音频已暂停/.test(afterHidden.status + afterHidden.notice)) {
+      throw new Error("background visibility must not show resumable paused/suspend copy: " + JSON.stringify(afterHidden));
     }
     if (afterHidden.unlockPlays) {
       throw new Error("explicit WebAudio background smoke should not prewarm/unlock a separate native audio element: " + JSON.stringify(afterHidden));
     }
     if (!afterHidden.debugTrack || Math.abs(Number(afterHidden.debugTrack.trackResumeSec || 0) - 17) > 0.05 || Math.abs(Number(afterHidden.debugTrack.lastKnownLiveResumeSec || 0) - 17) > 0.05) {
-      throw new Error("background suspend should keep the latest LIVE resume second instead of stale stalled second: " + JSON.stringify({ injectedResume, afterHidden }));
+      throw new Error("background visibility should keep the latest LIVE resume second instead of stale stalled second: " + JSON.stringify({ injectedResume, afterHidden }));
     }
-    const hiddenPcmCount = afterHidden.pcmPolls;
+    if (afterHidden.debugTrack && (afterHidden.debugTrack.livePageSuspended || afterHidden.debugTrack.pausedByUser)) {
+      throw new Error("background visibility must not mark LIVE as page-suspended or user-paused: " + JSON.stringify(afterHidden));
+    }
     await page.evaluate(() => {
       try { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); } catch (_) {}
       try { Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" }); } catch (_) {}
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    await page.click('[data-role="play"]');
-    await page.waitForFunction((count) => {
-      const fetches = window.__idxTest.getFetchLog();
-      return fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/pcm/.test(r.url)).length > count;
-    }, hiddenPcmCount, { timeout: 10000 });
     await page.waitForTimeout(150);
-
-    const afterResume = await page.evaluate((count) => {
+    const afterVisible = await page.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
-      const pcmUrls = fetches
-        .filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/pcm/.test(r.url))
-        .map((r) => r.url);
       return {
-        pcmUrls,
-        resumedPcmUrls: pcmUrls.slice(count),
+        playState: (document.querySelector('[data-role="play"]') || {}).dataset ? document.querySelector('[data-role="play"]').dataset.state : "",
         jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        startSeekReconnects: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/pcm\?/.test(r.url) && /[?&]start_s=/.test(r.url)).length,
         debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null
       };
-    }, hiddenPcmCount);
-    const resumedUrl = (afterResume.resumedPcmUrls || []).find((url) => /[?&]start_s=/.test(url)) || "";
-    const resumedStart = resumedUrl ? Number(new URL(resumedUrl).searchParams.get("start_s")) : NaN;
-    if (!Number.isFinite(resumedStart) || Math.abs(resumedStart - 17) > 0.05) {
-      throw new Error("foreground play should resume LIVE from latest progress, not stale stalled second: " + JSON.stringify({ resumedUrl, resumedStart, injectedResume, afterHidden, afterResume }));
+    });
+    if (afterVisible.playState !== "playing" || afterVisible.startSeekReconnects > afterHidden.startSeekReconnects) {
+      throw new Error("foreground visibility return should not need a resume click or start_s reconnect: " + JSON.stringify({ afterHidden, afterVisible }));
     }
-    if (afterResume.jobs !== 1 || afterResume.deletes || jobCount !== 1 || deleteCount) {
-      throw new Error("foreground resume after background suspend must reuse the same LIVE job: " + JSON.stringify({ afterResume, jobCount, deleteCount }));
+    if (afterVisible.jobs !== 1 || afterVisible.deletes || jobCount !== 1 || deleteCount) {
+      throw new Error("foreground return after background visibility must reuse the same LIVE job: " + JSON.stringify({ afterVisible, jobCount, deleteCount }));
     }
-    if (pageErrors.length) throw new Error("LIVE background suspend smoke page error: " + pageErrors.join(" | "));
-    return { jobCount, statusCount, streamGetCount, pcmPollCount, deleteCount, streamUrls, beforeHidden, injectedResume, afterHidden, afterResume };
+    if (pageErrors.length) throw new Error("LIVE background no-auto-suspend smoke page error: " + pageErrors.join(" | "));
+    return { jobCount, statusCount, streamGetCount, pcmPollCount, deleteCount, streamUrls, beforeHidden, injectedResume, afterHidden, afterVisible };
   } finally {
     await context.close();
   }
@@ -2790,6 +2775,11 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
   const jobBodies = [];
 
   await context.route("**/cache_audio/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith("/" + savedKey)) {
+      await route.fulfill({ status: 200, contentType: "audio/mpeg", body: tinyMp3Buffer() });
+      return;
+    }
     await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
   });
   await context.route("**/tts_dialogue_job_status/**", async (route) => {
@@ -3594,6 +3584,155 @@ async function runOfflineSaveFetchDataUrlSmoke(browser, targetUrl) {
   }
 }
 
+async function runSavedMp3SeekSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__savedSeekPlayCalls = [];
+    try {
+      Object.defineProperty(HTMLMediaElement.prototype, "duration", { configurable: true, get: function () { return 10; } });
+      Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+        configurable: true,
+        get: function () { return Number(this.__idxMockCurrentTime || 0) || 0; },
+        set: function (v) { this.__idxMockCurrentTime = Math.max(0, Number(v || 0) || 0); }
+      });
+      HTMLMediaElement.prototype.load = function () {};
+      HTMLMediaElement.prototype.play = function () {
+        const el = this;
+        try {
+          window.__savedSeekPlayCalls.push({
+            src: el.currentSrc || el.src || "",
+            kind: el.dataset ? (el.dataset.idxSourceKind || "") : "",
+            cacheKey: el.dataset ? (el.dataset.idxCacheKey || "") : ""
+          });
+          el.dispatchEvent(new Event("loadedmetadata"));
+          el.dispatchEvent(new Event("play"));
+          el.dispatchEvent(new Event("playing"));
+          el.dispatchEvent(new Event("timeupdate"));
+        } catch (_) {}
+        return Promise.resolve();
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+  });
+
+  const cacheKey = "b".repeat(40);
+  const mp3 = tinyMp3Buffer();
+  let cacheGetCount = 0;
+  const liveUrls = [];
+  await page.route("**/cache_audio/**", async (route) => {
+    cacheGetCount += 1;
+    await route.fulfill({ status: 200, contentType: "audio/mpeg", body: mp3 });
+  });
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:(?:\/pcm)|(?:\/mp3)|(?:\/segment\/\d+))?)?(?:[?#].*)?$/, async (route) => {
+    liveUrls.push(route.request().url());
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "saved seek should not touch live stream" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(async (cacheKey) => {
+      await window.tavo.set("indextts_tavo_config_v3", {
+        configVersion: 15,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }, "global");
+      await window.tavo.set("indextts_tavo_character_config_v1", {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }, "character");
+      await window.tavo.set("indextts_tavo_character_v1:34", {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }, "global");
+      await window.tavo.set("indextts_tracks_test-message-1", [{
+        cacheKey,
+        cacheUrl: "/cache_audio/" + cacheKey,
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        parseMode: "normal",
+        playbackMode: "live",
+        state: "saved",
+        status: "ready",
+        serverState: "done",
+        cacheState: "ready",
+        remoteCacheState: "ready",
+        offlineState: "disabled",
+        offlineReady: false,
+        createdAt: Date.now(),
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav" },
+        sampleRate: 8000,
+        duration_s: 10,
+        segments: [
+          { idx: 0, role: "旁白", text: "落盘后拖动测试。", style: "neutral", start_s: 0, duration_s: 10 }
+        ]
+      }], "chat");
+    }, cacheKey);
+
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.click('[data-role="play"]');
+    await page.waitForFunction(() => {
+      const audio = document.querySelector('[data-role="audio"]');
+      return audio && audio.dataset && audio.dataset.idxSourceKind === "saved" && /\/cache_audio\//.test(audio.currentSrc || audio.src || "");
+    }, { timeout: 10000 });
+    await page.waitForTimeout(80);
+    await page.evaluate(() => {
+      const seek = document.querySelector('[data-role="seek"]');
+      if (!seek) throw new Error("missing seek");
+      seek.value = "500";
+      seek.dispatchEvent(new Event("input", { bubbles: true }));
+      seek.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await page.waitForTimeout(150);
+
+    const result = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const audio = document.querySelector('[data-role="audio"]');
+      const seek = document.querySelector('[data-role="seek"]');
+      return {
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        seekValue: seek ? String(seek.value || "") : "",
+        playCalls: window.__savedSeekPlayCalls || [],
+        liveGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).map((r) => r.url),
+        liveStartGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3\?/.test(r.url) && /[?&]start_s=/.test(r.url)).map((r) => r.url),
+        cacheGets: fetches.filter((r) => r.method === "GET" && /\/cache_audio\//.test(r.url)).length,
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        progress: (document.querySelector('[data-role="progress"]') || {}).textContent || ""
+      };
+    });
+    if (result.audioKind !== "saved" || !/\/cache_audio\//.test(result.audioSrc)) {
+      throw new Error("saved seek should keep the saved MP3 audio source mounted: " + JSON.stringify(result));
+    }
+    if (Math.abs(Number(result.audioCurrentTime || 0) - 5) > 0.2 || result.seekValue !== "500") {
+      throw new Error("saved seek should update native audio.currentTime instead of restarting from zero: " + JSON.stringify(result));
+    }
+    if (liveUrls.length || result.liveGets.length || result.liveStartGets.length) {
+      throw new Error("saved seek must not reconnect the LIVE MP3 route: " + JSON.stringify({ result, liveUrls }));
+    }
+    if (pageErrors.length) throw new Error("saved MP3 seek smoke page error: " + pageErrors.join(" | "));
+    return { result, cacheGetCount };
+  } finally {
+    await context.close();
+  }
+}
+
 async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
   const context = await browser.newContext();
   await context.addInitScript(() => {
@@ -4174,11 +4313,12 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     const nativeLiveSegment = await runNativeLiveFlagSmoke(browser, targetUrl, "nativeLive");
     const nativeLiveMp3 = await runNativeLiveFlagSmoke(browser, targetUrl, "mp3Live");
     const liveResumableAfterFailures = await runLiveResumableAfterFailuresSmoke(browser, targetUrl);
-    const liveBackgroundSuspend = await runLiveBackgroundSuspendSmoke(browser, targetUrl);
+    const liveBackgroundNoAutoSuspend = await runLiveBackgroundNoAutoSuspendSmoke(browser, targetUrl);
     const livePendingDurableHistory = await runLivePendingDurableHistorySmoke(browser, targetUrl);
     const lazyPlayDirectGenerate = await runLazyPlayDirectGenerateSmoke(browser, targetUrl);
     const offlineFileLoadPlaybackFallback = await runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl);
     const offlineSaveFetchDataUrl = await runOfflineSaveFetchDataUrlSmoke(browser, targetUrl);
+    const savedMp3Seek = await runSavedMp3SeekSmoke(browser, targetUrl);
     const liveResumeStartOffset = await runLiveResumeStartOffsetSmoke(browser, targetUrl);
 
     console.log(JSON.stringify({
@@ -4201,11 +4341,12 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       nativeLiveSegment,
       nativeLiveMp3,
       liveResumableAfterFailures,
-      liveBackgroundSuspend,
+      liveBackgroundNoAutoSuspend,
       livePendingDurableHistory,
       lazyPlayDirectGenerate,
       offlineFileLoadPlaybackFallback,
       offlineSaveFetchDataUrl,
+      savedMp3Seek,
       liveResumeStartOffset,
       consoleCount: consoleLines.length
     }, null, 2));

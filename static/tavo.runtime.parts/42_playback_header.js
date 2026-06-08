@@ -86,6 +86,7 @@
     }
     function isTrackUsingSeekableLiveOutput(track) {
       if (!track || !audio) return false;
+      if (isSavedTrack(track)) return false;
       try {
         if (isElementUsingTrackLiveMp3(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackStream(track) || isElementPlayingTrackStream(track)) return true;
       } catch (_) {}
@@ -243,9 +244,9 @@
     }
     function canSeekLiveTrack(track) {
       if (!track || track.deleted || isTerminalTrack(track)) return false;
+      if (isSavedTrack(track)) return false;
       if (normalizePlaybackMode(track.playbackMode) !== "live" || track.backgroundOnly) return false;
       if (!track.cacheKey && !liveStreamUrlForTrack(track)) return false;
-      if (isSavedTrack(track) && !isTrackUsingSeekableLiveOutput(track)) return false;
       return true;
     }
     function canSeekTrackByControls(track) {

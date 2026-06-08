@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "runtimeVersion": "20260608-mp3-cache-v50",
+  "runtimeVersion": "20260608-mp3-cache-v52",
   "mode": "ordered-fragments",
   "skin": {
     "default": "tavo.ui.skin.default.css"
