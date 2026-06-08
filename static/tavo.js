@@ -2,11 +2,15 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260608-mp3-cache-v48";
+  var LOADER_VERSION = "20260608-mp3-cache-v49";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
+  var PENDING_JOBS_KEY_PREFIX = "indextts_pending_jobs_";
+  var PENDING_JOBS_TEXT_KEY_PREFIX = "indextts_pending_jobs_text_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
   var PICKER_TRIGGER_SELECTOR = '[data-role="normal-narrator-voice-btn"],[data-role="normal-dialogue-voice-btn"],[data-role="roles-list"] .idx-voice-btn,.idx-picker-item,.idx-picker-apply';
+  // Tavo 重刷脚本后 messageId 可能变化，用当前气泡正文 hash 找回未落盘的 LIVE 卡。
+  var resolvedPendingTextHash = "";
 
   function deriveBaseUrl(src) {
     var raw = String(src || "").trim();
@@ -121,6 +125,18 @@
     } catch (_) { return ""; }
   }
 
+  function normalizedPendingHashText(text) {
+    return String(text || "").replace(/\s+/g, " ").trim();
+  }
+
+  function rememberResolvedPendingText(text) {
+    var normalized = normalizedPendingHashText(text);
+    var nextHash = normalized ? stableHash(normalized) : "";
+    if (!nextHash || nextHash === resolvedPendingTextHash) return false;
+    resolvedPendingTextHash = nextHash;
+    return true;
+  }
+
   function pickMessageId(scriptEl) {
     var id = "";
     try {
@@ -160,6 +176,13 @@
     return (tracks || []).filter(persistedTrackLooksSaved);
   }
 
+  function pendingJobLooksActive(t) {
+    if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
+    var state = String(t.state || "").trim();
+    var status = String(t.status || "").trim();
+    return state !== "saved" && state !== "failed" && state !== "cancelled" && state !== "done" && status !== "failed" && status !== "cancelled";
+  }
+
   function tracksFromStorageKey(key) {
     try {
       if (window.tavo && typeof window.tavo.get === "function") {
@@ -184,18 +207,49 @@
     return Array.isArray(tracks) ? tracks : [];
   }
 
-  function latestTrack(messageId) {
-    var arr = persistableHistoryTracks(localTracksForMessage(messageId));
-    return arr.length ? arr[arr.length - 1] : null;
+  function pendingJobsStorageKeys(messageId) {
+    var keys = [];
+    function add(key) {
+      key = String(key || "").trim();
+      if (key && keys.indexOf(key) < 0) keys.push(key);
+    }
+    add(messageId ? (PENDING_JOBS_KEY_PREFIX + messageId) : "");
+    add(resolvedPendingTextHash ? (PENDING_JOBS_TEXT_KEY_PREFIX + resolvedPendingTextHash) : "");
+    // 同时保留 DOM 文本 hash，兼容 Tavo API 正文暂时还没返回的首轮渲染。
+    var text = normalizedPendingHashText(messageTextForHash(loaderScript));
+    add(text ? (PENDING_JOBS_TEXT_KEY_PREFIX + stableHash(text)) : "");
+    return keys;
+  }
+
+  function localPendingJobsForMessage(messageId) {
+    var out = [];
+    function addList(list) {
+      if (!Array.isArray(list)) return;
+      list.filter(pendingJobLooksActive).forEach(function (item) {
+        if (!item || !item.cacheKey) return;
+        for (var i = 0; i < out.length; i++) {
+          if (out[i] && out[i].cacheKey === item.cacheKey) return;
+        }
+        out.push(item);
+      });
+    }
+    pendingJobsStorageKeys(messageId).forEach(function (key) {
+      addList(tracksFromStorageKey(key));
+    });
+    return out;
   }
 
   function historySnapshotForMessage(messageId) {
     var tracks = persistableHistoryTracks(localTracksForMessage(messageId));
-    var latest = tracks.length ? tracks[tracks.length - 1] : null;
+    var pending = localPendingJobsForMessage(messageId);
+    var latest = pending.length ? pending[pending.length - 1] : (tracks.length ? tracks[tracks.length - 1] : null);
     var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
+    var historyCount = tracks.length + pending.length;
     return {
       latest: latest,
-      historyCount: tracks.length,
+      savedCount: tracks.length,
+      pendingCount: pending.length,
+      historyCount: historyCount,
       resumeSec: resumeSec,
       title: shortName(latest && latest.voice)
     };
@@ -284,7 +338,7 @@
   }
 
   function updateLazyHistory(root, messageId) {
-    if (!root || !messageId) return;
+    if (!root) return;
     var snapshot = historySnapshotForMessage(messageId);
     var latest = snapshot.latest;
     var historyCount = snapshot.historyCount;
@@ -293,7 +347,10 @@
     var title = $(root, ".idx-lazy-title");
     var resumeSec = snapshot.resumeSec;
     if (title && latest && latest.voice) title.textContent = shortName(latest.voice);
-    if (status) status.textContent = latest ? ("历史音频 " + historyCount + " 条 · " + formatTime(resumeSec)) : "历史音频 0 条 · 点开播放器";
+    if (status) {
+      if (snapshot.pendingCount) status.textContent = snapshot.savedCount ? ("历史音频 " + historyCount + " 条 · 流式生成中") : "流式生成中 · 点开继续";
+      else status.textContent = latest ? ("历史音频 " + historyCount + " 条 · " + formatTime(resumeSec)) : "历史音频 0 条 · 点开播放器";
+    }
     if (progress) progress.style.width = (latest && latest.duration_s ? Math.max(2, Math.min(100, resumeSec / Number(latest.duration_s || 1) * 100)) : 0) + "%";
     updateLoaderShellHistory(root, snapshot);
   }
@@ -343,8 +400,8 @@
     var snapshot = historySnapshotForMessage(messageId);
     var historyCount = snapshot.historyCount;
     var title = snapshot.title;
-    var statusText = action === "play" ? "准备播放…" : "播放器打开中…";
-    var detail = action === "gear" ? "设置面板会在加载完成后自动打开" : "组件加载在后台继续，不会创建新的语音任务";
+    var statusText = action === "add" ? "准备生成…" : (action === "play" ? "准备播放…" : "播放器打开中…");
+    var detail = action === "add" ? "正在准备生成" : (action === "play" ? "正在准备播放" : (action === "gear" ? "设置面板会在加载完成后自动打开" : "正在打开播放器"));
     var narratorAvatar = assetUrl("tavo.assets/narrator.png");
     var coverStyle = narratorAvatar ? ' style="background-image:url(&quot;' + escapeHtml(narratorAvatar).replace(/"/g, "%22") + '&quot;)" data-has-image="1"' : "";
     if (shell) {
@@ -385,13 +442,14 @@
   }
 
   function refreshLazyHistoryAsync(root, messageId) {
-    if (!root || !messageId || !window.tavo || typeof window.tavo.get !== "function") {
+    if (!root || !window.tavo || typeof window.tavo.get !== "function") {
       updateLazyHistory(root, messageId);
       return;
     }
-    var key = TRACKS_KEY_PREFIX + messageId;
-    var bestCount = persistableHistoryTracks(localTracksForMessage(messageId)).length;
-    function storeAndUpdate(value) {
+    var key = messageId ? (TRACKS_KEY_PREFIX + messageId) : "";
+    var bestCount = key ? persistableHistoryTracks(localTracksForMessage(messageId)).length : 0;
+    function storeTracksAndUpdate(value) {
+      if (!key) return;
       if (!Array.isArray(value)) return;
       var saved = persistableHistoryTracks(value);
       if (!saved.length && bestCount > 0) return;
@@ -400,15 +458,45 @@
       try { localStorage.setItem(key, JSON.stringify(saved)); } catch (_) {}
       updateLazyHistory(root, messageId);
     }
+    function storePendingAndUpdate(storageKey, value) {
+      if (!storageKey || !Array.isArray(value)) return;
+      var active = value.filter(pendingJobLooksActive);
+      try { localStorage.setItem(storageKey, JSON.stringify(active)); } catch (_) {}
+      updateLazyHistory(root, messageId);
+    }
+    function refreshPendingKeys() {
+      pendingJobsStorageKeys(messageId).forEach(function (pendingKey) {
+        try {
+          var pendingValue = window.tavo.get(pendingKey, "chat");
+          if (pendingValue && typeof pendingValue.then === "function") pendingValue.then(function (value) { storePendingAndUpdate(pendingKey, value); }).catch(function () {});
+          else storePendingAndUpdate(pendingKey, pendingValue);
+        } catch (_) {}
+      });
+    }
     try {
-      var chatValue = window.tavo.get(key, "chat");
-      if (chatValue && typeof chatValue.then === "function") chatValue.then(storeAndUpdate).catch(function () {});
-      else storeAndUpdate(chatValue);
+      if (key) {
+        var chatValue = window.tavo.get(key, "chat");
+        if (chatValue && typeof chatValue.then === "function") chatValue.then(storeTracksAndUpdate).catch(function () {});
+        else storeTracksAndUpdate(chatValue);
+      }
     } catch (_) {}
     try {
-      var globalValue = window.tavo.get(key, "global");
-      if (globalValue && typeof globalValue.then === "function") globalValue.then(storeAndUpdate).catch(function () {});
-      else storeAndUpdate(globalValue);
+      if (key) {
+        var globalValue = window.tavo.get(key, "global");
+        if (globalValue && typeof globalValue.then === "function") globalValue.then(storeTracksAndUpdate).catch(function () {});
+        else storeTracksAndUpdate(globalValue);
+      }
+    } catch (_) {}
+    refreshPendingKeys();
+    try {
+      if (window.tavo && window.tavo.message && typeof window.tavo.message.current === "function") {
+        var current = window.tavo.message.current();
+        var onMessage = function (msg) {
+          if (msg && rememberResolvedPendingText(msg.content || msg.text || "")) refreshPendingKeys();
+        };
+        if (current && typeof current.then === "function") current.then(onMessage).catch(function () {});
+        else onMessage(current);
+      }
     } catch (_) {}
   }
 
@@ -481,16 +569,19 @@
     }
     try { root.setAttribute("data-indextts-message-id", messageId || ""); } catch (_) {}
     try { if (loaderScript && loaderScript.dataset) loaderScript.dataset.indexttsMessageId = messageId || ""; } catch (_) {}
-    var latest = latestTrack(messageId);
-    var historyCount = persistableHistoryTracks(localTracksForMessage(messageId)).length;
-    var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
-    var title = shortName(latest && latest.voice);
+    var initialSnapshot = historySnapshotForMessage(messageId);
+    var latest = initialSnapshot.latest;
+    var historyCount = initialSnapshot.historyCount;
+    var resumeSec = initialSnapshot.resumeSec;
+    var title = initialSnapshot.title;
+    var lazyPlayTitle = initialSnapshot.pendingCount ? "继续流式任务" : (historyCount ? (resumeSec ? ("从 " + formatTime(resumeSec) + " 继续") : "播放语音") : "生成语音");
+    var lazyStatus = initialSnapshot.pendingCount ? (initialSnapshot.savedCount ? ("历史音频 " + historyCount + " 条 · 流式生成中") : "流式生成中 · 点开继续") : (latest ? ("历史音频 " + historyCount + " 条 · " + formatTime(resumeSec)) : "历史音频 0 条 · 点开播放器");
     root.innerHTML = [
       '<div class="idx-lazy-card" data-role="lazy-card">',
-      '  <button class="idx-lazy-play" type="button" data-role="lazy-play" aria-label="播放最后一条语音" title="' + escapeHtml(resumeSec ? ("从 " + formatTime(resumeSec) + " 继续") : "播放语音") + '">' + playIcon() + '</button>',
+      '  <button class="idx-lazy-play" type="button" data-role="lazy-play" aria-label="播放或生成语音" title="' + escapeHtml(lazyPlayTitle) + '">' + playIcon() + '</button>',
       '  <div class="idx-lazy-main" data-role="lazy-open" role="button" tabindex="0">',
       '    <div class="idx-lazy-title">' + escapeHtml(title) + '</div>',
-      '    <div class="idx-lazy-status" data-role="lazy-status">' + (latest ? ("历史音频 " + historyCount + " 条 · " + formatTime(resumeSec)) : "历史音频 0 条 · 点开播放器") + '</div>',
+      '    <div class="idx-lazy-status" data-role="lazy-status">' + escapeHtml(lazyStatus) + '</div>',
       '    <div class="idx-lazy-progress"><span style="width:' + (latest && latest.duration_s ? Math.max(2, Math.min(100, resumeSec / Number(latest.duration_s || 1) * 100)) : 0) + '%"></span></div>',
       '  </div>',
       '</div>'
@@ -506,7 +597,7 @@
         if (incoming && !own) {
           setLoaderMessageId(incoming, messageId);
         }
-        refreshLazyHistoryAsync(root, messageId);
+        refreshLazyHistoryAsync(root, currentLoaderMessageId());
       });
     } catch (_) {}
 
@@ -562,6 +653,11 @@
       return bootPromise;
     }
 
+    function lazyPlaySelector() {
+      var snapshot = historySnapshotForMessage(currentLoaderMessageId());
+      return snapshot.historyCount > 0 ? '[data-role="play"]' : '[data-role="add"]';
+    }
+
     function route(selector) {
       mountRuntime(selector).then(function (sel) {
         if (!sel) return;
@@ -577,7 +673,7 @@
     on($(root, '[data-role="lazy-play"]'), "touchstart", function () { armTapGuard(1600); });
     on($(root, '[data-role="lazy-open"]'), "pointerdown", function () { armTapGuard(1600); });
     on($(root, '[data-role="lazy-open"]'), "touchstart", function () { armTapGuard(1600); });
-    on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); route('[data-role="play"]'); });
+    on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); route(lazyPlaySelector()); });
     on($(root, '[data-role="lazy-open"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); mountRuntime(""); });
     on($(root, '[data-role="lazy-open"]'), "keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); mountRuntime(""); } });
   } catch (e) {

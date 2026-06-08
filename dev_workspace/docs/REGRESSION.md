@@ -64,6 +64,8 @@ Current smoke must prove:
 - foreground play after explicit WebAudio page-hide/background suspend must reconnect the same LIVE key from the latest visible/WebAudio progress, not from an older `lastStalledSec` buffering point;
 - restored LIVE pending jobs from `tavo.get` reconnect same key with `start_s`;
 - non-cached LIVE jobs write a chat-scoped pending card immediately after `cacheKey`; remounting the message restores that same key without a new POST, and explicit LIVE exit/delete clears pending and sends DELETE;
+- LIVE pending jobs must also be stored under `indextts_pending_jobs_text_<正文hash>`; if the message-id pending key is missing after a script refresh, the lazy card should still show `流式生成中 · 点开继续`, open the same key without a new POST, and explicit LIVE exit/delete should clear both pending keys;
+- on an empty lazy card, the left play button should generate/play the current bubble through the normal music-note path, while clicking the lazy card body should only open the runtime shell/player without creating a job;
 - offline saved audio should first use Tavo chat file storage. New saves must default to `indextts-<cacheKey>.mp3`; legacy `indextts-<cacheKey>.wav` remains readable/deletable. If the `tavo.file.url()` path fails as an `<audio>` source, retry `tavo.file.load(..., { encoding: "dataUrl" })` as a local `blob:` before falling back to online `/cache_audio`;
 - avatar-side header status keeps only stable voice labels or "音色未设置";
 - transient generation/playback progress appears in a one-line transparent hint floating above the lyric panel near the seek/time area, not in the avatar-side status or lyric toolbar;
@@ -135,6 +137,7 @@ Current smoke must prove:
 - Frontend submits one `/tts_dialogue_stream_job` body containing text, parse mode, voices, LLM config, Tavo user/character context, role hints, and generation parameters.
 - Backend-owned status/error should surface through `/tts_dialogue_job_status/{cache_key}`.
 - UI should translate raw backend phases into clear text, such as LLM call, role/emotion analysis, waiting first audio, or synthesizing segment x/y.
+- During backend-owned LLM parsing, `/tts_dialogue_job_status/{cache_key}` should expose `llm_stage` and fresh `llm_elapsed_s`; the frontend should show `检查分段复用`, `等待 LLM 返回 Ns`, or `整理分段结果`, not first-audio waiting copy.
 - When a live job is waiting on the single TTS lock, `/tts_dialogue_job_status/{cache_key}` should include queue metrics and the Tavo progress hint should say `前面还有 X 个 TTS 任务` or `下一个开始`.
 - LIVE synthesis status should include current playback segment when known, and should be throttled enough that users can read it.
 - Do not expose raw internal copy like "文本已拆分" as the main user-facing status.

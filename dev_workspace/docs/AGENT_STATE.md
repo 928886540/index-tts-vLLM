@@ -26,12 +26,12 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v48"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v49"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260608-mp3-cache-v48`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260608-mp3-cache-v49`.
 - `ttsDebug=1` now keeps debug output in the Tavo console/server tail only. The in-page debug overlay is opt-in with `debugPanel=1`, so normal native-audio testing does not cover the player controls.
 - Root `README.md` is now the project introduction with README images. `dev_workspace/README.md` is the active working README for Codex repository work.
 - Root `AGENTS.md` was moved into `dev_workspace/AGENTS.md`; start new Codex sessions in `dev_workspace` for the shortest working context.
@@ -73,6 +73,10 @@ Current code state:
 - Loading spinner has fixed SVG transform origin to reduce wobble.
 - Native `<audio>` seeking/seeked debug logs are quiet by default; use `debugSeek=1` only when diagnosing seek behavior.
 - Group chat speaker avatars now use the current Tavo chat `chat.characters` list as a display-only role/avatar map. Matching is exact role name plus lowercase key fallback; it does not auto-add group characters to AI voice mappings or `roles_hint`.
+- vLLM and fast6g now expose backend LLM parse progress in live job metrics: reuse check, waiting for LLM, normalizing, done/failed, elapsed seconds, model, endpoint host, timeout, max tokens, cached flag, and segment count. `/tts_dialogue_job_status/{cache_key}` refreshes `llm_elapsed_s` while the LLM call is still blocking.
+- Tavo progress now translates LLM metrics into short frontend copy: `检查分段复用`, `等待 LLM 返回 Ns`, `整理分段结果`, and `分段已就绪，等待合成`; it no longer shows first-audio waiting copy while backend-owned LLM parsing is still running.
+- LIVE pending jobs are stored under both `indextts_pending_jobs_<messageId>` and `indextts_pending_jobs_text_<正文hash>`. The loader also reads Tavo `message.current().content` for the same hash, so script refreshes or unstable message ids can still show the ordinary lazy card as `流式生成中 · 点开继续`, open the runtime, reconnect the same key, and allow explicit LIVE exit/cancel.
+- Lazy card left play button now uses existing saved/pending history when present; when the current bubble has no history it opens runtime and triggers the music-note generation path for that bubble. Clicking the lazy card body still only opens the player/settings shell without creating a job.
 
 ## Latest Validation
 
@@ -97,6 +101,12 @@ After `20260608-mp3-cache-v48`, frontend syntax/manifest/smoke passed again. The
 - setting panel no longer shows the verbose `复用 LLM 拆段` / `保存离线音频` explanatory copy;
 - LIVE progress exposes generated-complete count plus current playback segment, e.g. `已生成 1/3 段 · 正在播第 1/3 段`;
 - ambiguous `AI x/y` or bare `合成 x/y` progress copy must not appear.
+
+After `20260608-mp3-cache-v49`, frontend/backend syntax checks and Playwright smoke passed again. The smoke now additionally asserts:
+
+- vLLM and fast6g expose fresh LLM metrics while backend-owned LLM parsing is blocking;
+- LIVE pending is saved under the text-hash key, remount can recover the same LIVE key even when the message-id pending key is cleared, and explicit LIVE exit clears both pending keys;
+- empty lazy play generates the current bubble instead of opening an inert empty player.
 
 Additional LIVE route validation on vLLM after restart:
 

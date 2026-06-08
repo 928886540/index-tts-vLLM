@@ -238,8 +238,30 @@
       return true;
     }
     var PENDING_JOBS_KEY_PREFIX = "indextts_pending_jobs_";
-    function pendingJobsStorageKey() {
-      return messageId ? (PENDING_JOBS_KEY_PREFIX + messageId) : "";
+    var PENDING_JOBS_TEXT_KEY_PREFIX = "indextts_pending_jobs_text_";
+    function pendingStorageHash(text) {
+      text = String(text || "");
+      var h = 2166136261;
+      for (var i = 0; i < text.length; i++) {
+        h ^= text.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return (h >>> 0).toString(16);
+    }
+    function pendingTextFingerprint() {
+      var text = String(messageText || "").replace(/\s+/g, " ").trim();
+      return text ? pendingStorageHash(text) : "";
+    }
+    function pendingJobsStorageKeys() {
+      var keys = [];
+      function add(key) {
+        key = String(key || "").trim();
+        if (key && keys.indexOf(key) < 0) keys.push(key);
+      }
+      add(messageId ? (PENDING_JOBS_KEY_PREFIX + messageId) : "");
+      var textHash = pendingTextFingerprint();
+      add(textHash ? (PENDING_JOBS_TEXT_KEY_PREFIX + textHash) : "");
+      return keys;
     }
     function pendingJobLooksActive(t) {
       if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
@@ -247,26 +269,36 @@
       return state !== "saved" && state !== "failed" && state !== "cancelled" && state !== "done";
     }
     async function loadPendingJobsForMessage() {
-      var key = pendingJobsStorageKey();
-      if (!key) return [];
-      try {
-        if (window.tavo && typeof tavo.get === "function") {
-          var cv = await tavo.get(key, "chat");
-          if (Array.isArray(cv)) return cv.filter(pendingJobLooksActive);
-        }
-      } catch (_) {}
-      try {
-        var raw = localStorage.getItem(key);
-        if (raw) {
-          var arr = JSON.parse(raw);
-          if (Array.isArray(arr)) return arr.filter(pendingJobLooksActive);
-        }
-      } catch (_) {}
-      return [];
+      var keys = pendingJobsStorageKeys();
+      if (!keys.length) return [];
+      var out = [];
+      function addList(list) {
+        if (!Array.isArray(list)) return;
+        list.filter(pendingJobLooksActive).forEach(function (item) {
+          if (!item || !item.cacheKey) return;
+          for (var i = 0; i < out.length; i++) {
+            if (out[i] && out[i].cacheKey === item.cacheKey) return;
+          }
+          out.push(item);
+        });
+      }
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        try {
+          if (window.tavo && typeof tavo.get === "function") {
+            addList(await tavo.get(key, "chat"));
+          }
+        } catch (_) {}
+        try {
+          var raw = localStorage.getItem(key);
+          if (raw) addList(JSON.parse(raw));
+        } catch (_) {}
+      }
+      return out;
     }
     async function savePendingJobsForMessage(list) {
-      var key = pendingJobsStorageKey();
-      if (!key) return;
+      var keys = pendingJobsStorageKeys();
+      if (!keys.length) return;
       var lite = (list || []).filter(pendingJobLooksActive).map(function (t) {
         return {
           cacheKey: t.cacheKey || "",
@@ -290,11 +322,14 @@
           segments: Array.isArray(t.segments) ? t.segments : []
         };
       });
-      try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); } catch (_) {}
-      try { localStorage.setItem(key, JSON.stringify(lite)); } catch (_) {}
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); } catch (_) {}
+        try { localStorage.setItem(key, JSON.stringify(lite)); } catch (_) {}
+      }
     }
     async function savePendingJobForTrack(track) {
-      if (!messageId || !track || !track.cacheKey || isSavedTrack(track) || track.deleted || track.cancelled) return;
+      if (!track || !track.cacheKey || isSavedTrack(track) || track.deleted || track.cancelled || !pendingJobsStorageKeys().length) return;
       var jobs = await loadPendingJobsForMessage();
       var idx = jobs.findIndex(function (j) { return j && j.cacheKey === track.cacheKey; });
       if (idx >= 0) jobs[idx] = track; else jobs.push(track);
@@ -302,7 +337,7 @@
     }
     async function removePendingJobForTrack(trackOrKey) {
       var cacheKey = typeof trackOrKey === "string" ? trackOrKey : (trackOrKey && trackOrKey.cacheKey);
-      if (!messageId || !cacheKey) return;
+      if (!cacheKey || !pendingJobsStorageKeys().length) return;
       var jobs = await loadPendingJobsForMessage();
       jobs = jobs.filter(function (j) { return !j || j.cacheKey !== cacheKey; });
       await savePendingJobsForMessage(jobs);
@@ -458,11 +493,20 @@
           }
           return "排队中";
         }
+        function llmWaitText() {
+          var elapsed = Number(metrics && metrics.llm_elapsed_s);
+          if (isFinite(elapsed) && elapsed >= 1) return "等待 LLM 返回 " + Math.floor(elapsed) + "s";
+          return "等待 LLM 返回";
+        }
         if (phase === "created") return mode === "ai" ? "等待分析文本" : "任务已提交";
-        if (phase === "llm_parse_cache") return "复用分段完成，等待合成";
+        if (phase === "llm_parse_cache") return "分段已就绪，等待合成";
         if (phase === "llm_parse") {
-          if (/检查|复用/i.test(msg)) return "检查分段复用";
-          return "正在分析文本";
+          var llmStage = String((metrics && metrics.llm_stage) || "");
+          if (llmStage === "reuse_check" || /检查|复用/i.test(msg)) return "检查分段复用";
+          if (llmStage === "waiting") return llmWaitText();
+          if (llmStage === "normalizing") return "整理分段结果";
+          if (llmStage === "done") return "分段已就绪，等待合成";
+          return /LLM/i.test(msg) ? llmWaitText() : "正在分析文本";
         }
         if (phase === "tts_queue") return queueStatusText();
         if (phase === "tts") {
@@ -652,7 +696,7 @@
         }
       })();
     }
-    var tracksLoaded = !messageId;
+    var tracksLoaded = !messageId && !pendingTextFingerprint();
     var tracksLoading = null;
     var knownHistoryCount = 0;
     function restoreTrackFromSaved(t, base) {

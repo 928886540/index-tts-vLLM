@@ -2917,16 +2917,30 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
     }, liveKey, { timeout: 10000 });
 
     const persistedBeforeClose = await firstPage.evaluate(() => {
+      function stableHash(text) {
+        text = String(text || "");
+        let h = 2166136261;
+        for (let i = 0; i < text.length; i += 1) {
+          h ^= text.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return (h >>> 0).toString(16);
+      }
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
+      const text = String((document.getElementById("messageText") || {}).value || "").replace(/\s+/g, " ").trim();
+      const textKey = "chat:indextts_pending_jobs_text_" + stableHash(text);
       const jobs = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
+      const textJobs = bucket[textKey] || [];
       const liveExit = document.querySelector('[data-role="live-exit"]');
       const play = document.querySelector('[data-role="play"]');
       return {
+        textKey,
         jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
         pendingJobs: jobs,
+        pendingTextJobs: textJobs,
         counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
         liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
         playState: play ? play.dataset.state : ""
@@ -2939,6 +2953,9 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
     if (storedLive.cacheKey !== liveKey || storedLive.playbackMode !== "live" || storedLive.backgroundOnly !== false || storedLive.state !== "live") {
       throw new Error("LIVE should persist a visible pending history card immediately after cacheKey: " + JSON.stringify(persistedBeforeClose));
     }
+    if (!persistedBeforeClose.pendingTextJobs.some((x) => x && x.cacheKey === liveKey && x.playbackMode === "live")) {
+      throw new Error("LIVE pending should also persist under the message text hash key for unstable message ids: " + JSON.stringify(persistedBeforeClose));
+    }
     if (!persistedBeforeClose.liveExitVisible || !/^\d+\/\d+$/.test(persistedBeforeClose.counterText)) {
       throw new Error("LIVE durable pending card should stay visible before close: " + JSON.stringify(persistedBeforeClose));
     }
@@ -2947,20 +2964,36 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
     const secondPage = await context.newPage();
     attachErrorHandlers(secondPage);
     await secondPage.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await secondPage.evaluate((textKey) => {
+      const preview = document.getElementById("messagePreview");
+      if (preview) preview.textContent = "DOM text changed after script refresh; use tavo.message.current().content.";
+      if (window.tavo && typeof window.tavo.set === "function") {
+        window.tavo.set("indextts_pending_jobs_test-message-1", [], "chat");
+      }
+      try { localStorage.removeItem("indextts_pending_jobs_test-message-1"); } catch (_) {}
+      const bucket = window.__idxTest.storageBucket();
+      if (!Array.isArray(bucket[textKey]) || !bucket[textKey].length) {
+        throw new Error("missing text-hash pending before remount: " + textKey);
+      }
+    }, persistedBeforeClose.textKey);
     await remountTavoScript(secondPage, "webAudioLive=1");
+    await secondPage.waitForFunction(() => {
+      const status = (document.querySelector('[data-role="lazy-status"]') || {}).textContent || "";
+      return /流式生成中|点开继续/.test(status);
+    }, { timeout: 10000 });
     await secondPage.click('[data-role="lazy-open"]');
     await secondPage.waitForSelector(".idx-card", { timeout: 10000 });
     try {
-      await secondPage.waitForFunction((key) => {
+      await secondPage.waitForFunction(({ key, textKey }) => {
         const fetches = window.__idxTest.getFetchLog();
         const bucket = window.__idxTest.storageBucket();
-        const jobs = bucket["chat:indextts_pending_jobs_test-message-1"];
+        const jobs = bucket[textKey];
         const liveExit = document.querySelector('[data-role="live-exit"]');
         return Array.isArray(jobs)
           && jobs.some((x) => x && x.cacheKey === key && x.playbackMode === "live")
           && liveExit && getComputedStyle(liveExit).display !== "none"
           && fetches.some((r) => /\/tts_dialogue_job_status\//.test(r.url));
-      }, liveKey, { timeout: 10000 });
+      }, { key: liveKey, textKey: persistedBeforeClose.textKey }, { timeout: 10000 });
     } catch (err) {
       const debug = await secondPage.evaluate(() => {
         const fetches = window.__idxTest.getFetchLog();
@@ -2979,10 +3012,11 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
       });
       throw new Error("remounted LIVE pending wait timed out: " + JSON.stringify(debug));
     }
-    const restored = await secondPage.evaluate(() => {
+    const restored = await secondPage.evaluate((textKey) => {
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
       const jobs = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
+      const textJobs = bucket[textKey] || [];
       const liveExit = document.querySelector('[data-role="live-exit"]');
       const play = document.querySelector('[data-role="play"]');
       return {
@@ -2990,42 +3024,160 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
         pendingJobs: jobs,
+        pendingTextJobs: textJobs,
         counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
         liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
         playState: play ? play.dataset.state : "",
         status: (document.querySelector('[data-role="status"]') || {}).textContent || ""
       };
-    });
+    }, persistedBeforeClose.textKey);
     if (jobCount !== 1 || restored.jobs !== 0) {
       throw new Error("remounted LIVE pending card must not POST a new job: " + JSON.stringify({ jobCount, restored, jobBodies }));
     }
-    if (!restored.pendingJobs.some((x) => x && x.cacheKey === liveKey && x.playbackMode === "live") || !restored.liveExitVisible || !/^\d+\/\d+$/.test(restored.counterText)) {
+    if (!restored.pendingTextJobs.some((x) => x && x.cacheKey === liveKey && x.playbackMode === "live") || !restored.liveExitVisible || !/^\d+\/\d+$/.test(restored.counterText)) {
       throw new Error("remounted LIVE pending card should be visible and keep the original key: " + JSON.stringify(restored));
     }
 
     await secondPage.click('[data-role="live-exit"]');
-    await secondPage.waitForFunction(() => {
+    await secondPage.waitForFunction((textKey) => {
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
       const jobs = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
+      const textJobs = bucket[textKey] || [];
       return fetches.some((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url))
-        && (!Array.isArray(jobs) || jobs.length === 0);
-    }, { timeout: 10000 });
-    const afterExit = await secondPage.evaluate(() => {
+        && (!Array.isArray(jobs) || jobs.length === 0)
+        && (!Array.isArray(textJobs) || textJobs.length === 0);
+    }, persistedBeforeClose.textKey, { timeout: 10000 });
+    const afterExit = await secondPage.evaluate((textKey) => {
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
       return {
         pendingJobs: bucket["chat:indextts_pending_jobs_test-message-1"] || [],
+        pendingTextJobs: bucket[textKey] || [],
         deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
         jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         status: (document.querySelector('[data-role="status"]') || {}).textContent || ""
       };
-    });
-    if (deleteCount < 1 || afterExit.deletes < 1 || afterExit.pendingJobs.length) {
+    }, persistedBeforeClose.textKey);
+    if (deleteCount < 1 || afterExit.deletes < 1 || afterExit.pendingJobs.length || afterExit.pendingTextJobs.length) {
       throw new Error("explicit LIVE exit should delete backend job and clear durable pending card: " + JSON.stringify({ deleteCount, afterExit }));
     }
     if (pageErrors.length) throw new Error("LIVE durable pending smoke page error: " + pageErrors.join(" | "));
     return { jobCount, statusCount, streamGetCount, deleteCount, streamUrls, persistedBeforeClose, restored, afterExit, body: jobBodies[0] };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runLazyPlayDirectGenerateSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    try {
+      HTMLMediaElement.prototype.load = function () {};
+      HTMLMediaElement.prototype.play = function () {
+        try {
+          this.dispatchEvent(new Event("play"));
+          this.dispatchEvent(new Event("playing"));
+          this.dispatchEvent(new Event("loadedmetadata"));
+        } catch (_) {}
+        return Promise.resolve();
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+  });
+
+  const cacheKey = "7".repeat(40);
+  const jobBodies = [];
+  let jobCount = 0;
+  await page.route("**/tts_dialogue_stream_job", async (route) => {
+    jobCount += 1;
+    try { jobBodies.push(JSON.parse(route.request().postData() || "{}")); } catch (_) { jobBodies.push({}); }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        url: "/tts_dialogue_stream_job/" + cacheKey,
+        cache_url: "/cache_audio/" + cacheKey,
+        cache_key: cacheKey,
+        cached: true,
+        live: false
+      })
+    });
+  });
+  await page.route("**/cache_audio/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "audio/mpeg", body: tinyMp3Buffer() });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "done",
+        cache_key: cacheKey,
+        cache_url: "/cache_audio/" + cacheKey,
+        sample_rate: 8000,
+        duration_s: 0.2,
+        metrics: { state: "done", phase: "done", message: "音频已保存", segments_total: 1, segments_done: 1 },
+        segments_meta: [{ idx: 0, role: "旁白", text: "当前气泡内容。", start_s: 0, duration_s: 0.2 }]
+      })
+    });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(async () => {
+      await window.tavo.set("indextts_tavo_config_v3", {
+        configVersion: 16,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }, "global");
+      await window.tavo.set("indextts_tavo_character_config_v1", {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }, "character");
+      await window.tavo.set("indextts_tracks_test-message-1", [], "chat");
+      await window.tavo.set("indextts_pending_jobs_test-message-1", [], "chat");
+    });
+
+    await page.click('[data-role="lazy-play"]');
+    await page.waitForFunction(() => {
+      return window.__idxTest.getFetchLog().some((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url));
+    }, { timeout: 10000 });
+    await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
+    await page.waitForTimeout(200);
+    const result = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      return {
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        card: !!document.querySelector(".idx-card:not([data-loader-shell])"),
+        shell: !!document.querySelector('[data-role="loader-shell"]'),
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        notice: (document.querySelector(".idx-subtitle") || {}).textContent || ""
+      };
+    });
+    const body = jobBodies[0] || {};
+    if (jobCount !== 1 || result.jobs !== 1 || !result.card) {
+      throw new Error("empty lazy play should mount runtime and create exactly one dialogue job: " + JSON.stringify({ jobCount, result, jobBodies }));
+    }
+    if (body.parse_mode !== "normal" || !body.text || !/潘金莲|白夜雨/.test(body.text)) {
+      throw new Error("empty lazy play should generate from the current message body: " + JSON.stringify(body));
+    }
+    if (pageErrors.length) throw new Error("lazy play direct generate smoke page error: " + pageErrors.join(" | "));
+    return { result, body };
   } finally {
     await context.close();
   }
@@ -4005,6 +4157,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     const liveResumableAfterFailures = await runLiveResumableAfterFailuresSmoke(browser, targetUrl);
     const liveBackgroundSuspend = await runLiveBackgroundSuspendSmoke(browser, targetUrl);
     const livePendingDurableHistory = await runLivePendingDurableHistorySmoke(browser, targetUrl);
+    const lazyPlayDirectGenerate = await runLazyPlayDirectGenerateSmoke(browser, targetUrl);
     const offlineFileLoadPlaybackFallback = await runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl);
     const offlineSaveFetchDataUrl = await runOfflineSaveFetchDataUrlSmoke(browser, targetUrl);
     const liveResumeStartOffset = await runLiveResumeStartOffsetSmoke(browser, targetUrl);
@@ -4031,6 +4184,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       liveResumableAfterFailures,
       liveBackgroundSuspend,
       livePendingDurableHistory,
+      lazyPlayDirectGenerate,
       offlineFileLoadPlaybackFallback,
       offlineSaveFetchDataUrl,
       liveResumeStartOffset,

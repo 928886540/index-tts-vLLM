@@ -928,11 +928,16 @@ async def _parse_dialogue_text_in_backend(prepared: dict, job: "_LiveJob") -> Li
     parse_cfg = prepared["parse"]
     cache_key = parse_cfg.get("cache_key") or ""
     if parse_cfg.get("reuse") and cache_key:
+        job.metrics["state"] = "parsing"
+        job.metrics["phase"] = "llm_parse"
+        job.metrics["llm_reuse"] = True
+        _set_llm_metrics(job.metrics, "reuse_check", "正在检查 LLM 拆段复用")
         cached = _get_parse_cache(cache_key)
         if cached:
             job.metrics["llm_parse_cached"] = True
             job.metrics["llm_segments"] = len(cached)
             job.metrics["phase"] = "llm_parse_cache"
+            _set_llm_metrics(job.metrics, "done", "已复用上次 LLM 拆段")
             job.metrics["message"] = "已复用上次 LLM 拆段"
             return cached
 
@@ -948,7 +953,14 @@ async def _parse_dialogue_text_in_backend(prepared: dict, job: "_LiveJob") -> Li
         max_tokens = _llm_max_tokens_for_text(req.get("text") or "")
     job.metrics["state"] = "parsing"
     job.metrics["phase"] = "llm_parse"
-    job.metrics["message"] = "复用未命中，正在调用 LLM 拆分文本" if parse_cfg.get("reuse") else "后端正在调用 LLM 拆分文本"
+    job.metrics["llm_reuse"] = bool(parse_cfg.get("reuse"))
+    job.metrics["llm_started_at"] = time.time()
+    job.metrics["llm_started_perf"] = started
+    job.metrics["llm_model"] = model
+    job.metrics["llm_endpoint_host"] = _llm_endpoint_label(endpoint)
+    job.metrics["llm_timeout_s"] = int(req.get("parse_timeout", 90))
+    job.metrics["llm_max_tokens"] = max_tokens
+    _set_llm_metrics(job.metrics, "waiting", "等待 LLM 返回")
     result = await asyncio.to_thread(
         llm_proxy.parse_text_openai_compatible,
         text=req.get("text") or "",
@@ -960,10 +972,12 @@ async def _parse_dialogue_text_in_backend(prepared: dict, job: "_LiveJob") -> Li
         timeout=int(req.get("parse_timeout", 90)),
         max_tokens=max_tokens,
     )
+    _set_llm_metrics(job.metrics, "normalizing", "整理分段结果")
     segments = _normalize_backend_parsed_segments(result, req)
     job.metrics["llm_parse_s"] = round(time.perf_counter() - started, 3)
     job.metrics["llm_parse_cached"] = False
     job.metrics["llm_segments"] = len(segments)
+    _set_llm_metrics(job.metrics, "done", "分段已就绪，等待合成")
     if parse_cfg.get("reuse") and cache_key:
         _put_parse_cache(cache_key, segments)
     return segments
@@ -1525,6 +1539,41 @@ def _refresh_live_job_queue_metrics(job: "_LiveJob") -> None:
     _write_tts_queue_metrics(job.metrics, _tts_queue_snapshot(cache_key=job.cache_key))
 
 
+def _llm_endpoint_label(endpoint: str) -> str:
+    raw = str(endpoint or "").strip()
+    if not raw:
+        return ""
+    without_scheme = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", raw)
+    host = without_scheme.split("/", 1)[0].split("@")[-1]
+    return host[:120]
+
+
+def _set_llm_metrics(metrics: Optional[dict], stage: str, message: str = "") -> None:
+    if not isinstance(metrics, dict):
+        return
+    metrics["llm_stage"] = stage
+    if message:
+        metrics["message"] = message
+    if stage in {"waiting", "normalizing", "done", "failed"}:
+        started = metrics.get("llm_started_perf")
+        try:
+            metrics["llm_elapsed_s"] = round(max(0.0, time.perf_counter() - float(started)), 3)
+        except (TypeError, ValueError):
+            pass
+    if stage in {"done", "failed"}:
+        metrics.pop("llm_started_perf", None)
+
+
+def _refresh_llm_metrics(metrics: Optional[dict]) -> None:
+    if not isinstance(metrics, dict):
+        return
+    if metrics.get("phase") != "llm_parse":
+        return
+    if metrics.get("llm_stage") not in {"waiting", "normalizing"}:
+        return
+    _set_llm_metrics(metrics, str(metrics.get("llm_stage") or "waiting"))
+
+
 class _TTSInferenceSlot:
     def __init__(self, kind: str = "tts", cache_key: str = "", metrics: Optional[dict] = None):
         self.item = _tts_queue_item(kind, cache_key)
@@ -2015,8 +2064,12 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
             return
         job.error = str(e)
         job.metrics["state"] = "failed"
-        job.metrics["phase"] = "failed"
-        job.metrics["message"] = "后端生成失败"
+        if job.metrics.get("phase") == "llm_parse" or job.metrics.get("state") == "parsing":
+            job.metrics["phase"] = "llm_parse_failed"
+            _set_llm_metrics(job.metrics, "failed", "后端 LLM 拆段失败")
+        else:
+            job.metrics["phase"] = "failed"
+            job.metrics["message"] = "后端生成失败"
         job.metrics["error"] = str(e)
         job.metrics["total_wall_s"] = round(time.perf_counter() - job._perf_created, 3)
         traceback.print_exc()
@@ -2391,6 +2444,7 @@ async def tts_dialogue_job_status_endpoint(cache_key: str):
     job = LIVE_JOBS.get(cache_key)
     if job:
         _refresh_live_job_queue_metrics(job)
+        _refresh_llm_metrics(job.metrics)
         if job.cancelled or job.metrics.get("state") == "cancelled":
             state = "cancelled"
         else:

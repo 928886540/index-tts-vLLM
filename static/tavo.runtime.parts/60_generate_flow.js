@@ -317,7 +317,7 @@
         setTrackState(placeholder, jobInfo.cached ? "saved" : (backgroundDetached ? "pending" : "live"));
         currentCacheKey = jobInfo.cacheKey;
         updateTrackButtons();
-        if (messageId && !jobInfo.cached) {
+        if (!jobInfo.cached) {
           savePendingJobForTrack(placeholder).catch(function(){});
           debugLog("💾 已记录生成 pending cacheKey=" + jobInfo.cacheKey + " playback=" + playbackMode, "#9ff");
         }
