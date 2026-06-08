@@ -64,7 +64,7 @@
         streamHealth: t.streamHealth || (t.streamInterrupted ? "interrupted" : (t.streamStalled ? "stalled" : "")),
         stalledCount: Number(t.stalledCount || 0) || 0,
         createdAt: t.createdAt || Date.now(),
-        offlineKey: offlineAudioKey(t.cacheKey),
+        offlineKey: t.offlineKey || offlineAudioKey(t.cacheKey),
         offlineReady: !!t.offlineReady,
         offlineWanted: !!t.offlineWanted,
         offlineSavedAt: t.offlineSavedAt || 0,

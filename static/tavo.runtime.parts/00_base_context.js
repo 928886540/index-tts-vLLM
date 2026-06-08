@@ -130,9 +130,8 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     try { localStorage.setItem(CHAR_KEY_PREFIX + characterId, JSON.stringify(partial || {})); } catch (_) {}
   }
 
-  // ---- Debug overlay (只在测试页或显式 ttsDebug=1 时显示) ------------
-  // 之前把 file:// 也当作测试页，结果手机 TAVO webview 协议命中误开了面板。
-  // 现在只两种触发：脚本/URL 含 ttsDebug=1，或者文件名是 tavo_widget_test。
+  // ---- Debug output -------------------------------------------------------
+  // ttsDebug=1 同时写 console 和页面浮窗，避免为看日志切后台干扰音频测试。
   var DEBUG_MODE = (function () {
     try {
       var href = String(location.href || "");
@@ -142,31 +141,61 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     } catch (_) {}
     return false;
   })();
+  var DEBUG_PANEL = (function () {
+    try {
+      if (!DEBUG_MODE) return false;
+      var page = String(location.search || "");
+      var src = String((script && script.src) || "");
+      if (/[?&](?:noDebugPanel=1|debugPanel=0)\b/.test(page) || /[?&](?:noDebugPanel=1|debugPanel=0)\b/.test(src)) return false;
+      return true;
+    } catch (_) {}
+    return DEBUG_MODE;
+  })();
   var DEBUG_BOX = null;
   function ensureDebugBox() {
-    if (!DEBUG_MODE) return null;
+    if (!DEBUG_PANEL) return null;
     if (DEBUG_BOX) return DEBUG_BOX;
     try {
       DEBUG_BOX = document.createElement("div");
-      DEBUG_BOX.style.cssText = "position:fixed;right:12px;bottom:12px;width:440px;max-height:55vh;display:flex;flex-direction:column;background:rgba(15,20,28,0.94);color:#cfe;font:11px/1.45 Consolas,Menlo,monospace;border:1px solid #334;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.4);z-index:2147483647";
+      DEBUG_BOX.style.cssText = "position:fixed;left:10px;bottom:86px;width:128px;max-width:calc(100vw - 20px);max-height:46vh;display:flex;flex-direction:column;background:rgba(15,20,28,0.94);color:#cfe;font:11px/1.45 Consolas,Menlo,monospace;border:1px solid #334;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.4);z-index:2147483647";
       var head = document.createElement("div");
-      head.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid #334;color:#fff;font-weight:600";
-      head.innerHTML = '<span>▼ TTS 调试日志</span>';
+      head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;color:#fff;font-weight:600;cursor:pointer";
+      var title = document.createElement("span");
+      title.textContent = "▶ TTS 日志";
+      head.appendChild(title);
       var btnRow = document.createElement("span");
       btnRow.style.cssText = "display:flex;gap:6px";
       var clearBtn = document.createElement("a"); clearBtn.textContent = "清空"; clearBtn.style.cssText = "color:#7fdbff;cursor:pointer;text-decoration:underline";
+      var collapseBtn = document.createElement("a"); collapseBtn.textContent = "收起"; collapseBtn.style.cssText = "color:#9ff;cursor:pointer;text-decoration:underline";
       var hideBtn = document.createElement("a"); hideBtn.textContent = "隐藏"; hideBtn.style.cssText = "color:#ff9;cursor:pointer;text-decoration:underline";
-      btnRow.appendChild(clearBtn); btnRow.appendChild(hideBtn);
+      btnRow.appendChild(clearBtn); btnRow.appendChild(collapseBtn); btnRow.appendChild(hideBtn);
       head.appendChild(btnRow);
       var body = document.createElement("div");
-      body.style.cssText = "flex:1;overflow:auto;padding:6px 10px;white-space:pre-wrap;word-break:break-all";
+      body.style.cssText = "flex:1;overflow:auto;padding:6px 10px;white-space:pre-wrap;word-break:break-all;max-height:calc(46vh - 34px)";
       body.id = "indextts-debug-body";
-      clearBtn.onclick = function () { body.innerHTML = ""; };
-      hideBtn.onclick = function () { DEBUG_BOX.style.display = "none"; };
+      var collapsed = false;
+      function expandedWidth() {
+        try { return Math.min(440, Math.max(260, Number(window.innerWidth || 390) - 20)) + "px"; }
+        catch (_) { return "360px"; }
+      }
+      function setCollapsed(v) {
+        collapsed = !!v;
+        body.style.display = collapsed ? "none" : "block";
+        DEBUG_BOX.style.width = collapsed ? "128px" : expandedWidth();
+        DEBUG_BOX.style.maxHeight = collapsed ? "34px" : "46vh";
+        head.style.borderBottom = collapsed ? "none" : "1px solid #334";
+        title.textContent = collapsed ? "▶ TTS 日志" : "▼ TTS 调试日志";
+        collapseBtn.textContent = collapsed ? "展开" : "收起";
+      }
+      clearBtn.onclick = function (ev) { try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {} body.innerHTML = ""; };
+      collapseBtn.onclick = function (ev) { try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {} setCollapsed(!collapsed); };
+      head.onclick = function () { setCollapsed(!collapsed); };
+      hideBtn.onclick = function (ev) { try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {} DEBUG_BOX.style.display = "none"; };
       DEBUG_BOX.appendChild(head);
       DEBUG_BOX.appendChild(body);
       document.body.appendChild(DEBUG_BOX);
       DEBUG_BOX.bodyEl = body;
+      setCollapsed(true);
     } catch (_) { DEBUG_BOX = null; }
     return DEBUG_BOX;
   }
@@ -176,7 +205,7 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
       if (color === "#f99" || /^❌/.test(String(text || ""))) console.error("[indextts]", text);
       else console.log("[indextts]", text);
     } catch (_) {}
-    if (!DEBUG_MODE) return;
+    if (!DEBUG_PANEL) return;
     try {
       var box = ensureDebugBox(); if (!box) return;
       var line = document.createElement("div");
@@ -187,6 +216,7 @@ window.__indextts_tavo_runtime_app_promise = (async function () {
     } catch (_) {}
   }
   function escapeHtmlSafe(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  try { if (DEBUG_PANEL) ensureDebugBox(); } catch (_) {}
   // Long-poll server stdout while a request is active.
   var serverLogPoller = null;
   function startServerLogPolling(base) {

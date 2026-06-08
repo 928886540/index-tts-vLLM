@@ -89,11 +89,11 @@ Status: accepted
 
 Live/pending Tavo tracks are transient job UI, not history audio. They should expose only play/pause and live exit. Normal history controls such as previous, next, add, delete, rewind, forward, and seek belong to saved/cache-ready audio.
 
-Saved/cache audio must keep using the native `<audio>` element with `/cache_audio/<cache_key>` or an offline Tavo file URL because this is the most important path for mobile background playback, lock-screen controls, MediaSession, and seek stability.
+Saved/cache audio must keep using the native `<audio>` element with default MP3 `/cache_audio/<cache_key>` or an offline Tavo MP3 file URL because this is the most important path for mobile background playback, lock-screen controls, MediaSession, seek stability, file size, and loading speed. WAV stays available only for explicit debug/regression/legacy paths.
 
 Do not copy GPT-SoVITS saved WebAudio behavior into IndexTTS2. The user explicitly noted GPT-SoVITS background playback is poor; only copy the live-card state boundary and exit semantics.
 
-Live `<audio>` element streaming is opt-in only through script flags such as `nativeLive=1` / `elementLive=1`; `start_s > 0` live stream URLs must not be assigned to native `<audio>`. By default, LIVE uses the backend live buffer with WebAudio: `GET /tts_dialogue_stream_job/<cache_key>` reads PCM while the backend keeps generating into the same cache-key buffer. Frontend recovery must not create another generation job; it may only reconnect the same `cache_key` stream with larger prebuffer, then wait for `/cache_audio/<cache_key>` as the last audible fallback after same-job live recovery is exhausted.
+Default LIVE uses native `<audio>` MP3 streaming through `GET /tts_dialogue_stream_job/<cache_key>/mp3`. `mp3Live=1` is an explicit alias for that default. `nativeLive=1` keeps finite WAV segment URLs for diagnostics, and `webAudioLive=1` / `pcmLive=1` keep the same-key PCM/WebAudio path for regression. Frontend recovery must not create another generation job; it may only reconnect the same `cache_key` stream, then use the completed MP3 `/cache_audio/<cache_key>` as the saved fallback when the LIVE path cannot continue.
 
 ## DEC-011: LLM owns dialogue role assignment
 

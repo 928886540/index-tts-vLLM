@@ -58,23 +58,8 @@
       if (action === "seek") return background ? "后台生成中，完成后才能拖动" : "流式生成中不能拖动";
       return background ? "后台生成中，先删除或等待完成" : "流式生成中，可点播放暂停或等待完成";
     }
-    var lastFreshAudioPrimeAt = 0;
-    function primeAudioForGesture(action) {
+    function noteAudioGesture() {
       try { window.__indextts_tavo_last_audio_gesture_at = Date.now(); } catch (_) {}
-      var forceNew = false;
-      try {
-        var t = currentTrack();
-        // "add" 是新生成入口，但不能默认销毁快照点击时刚预解锁的 AudioContext。
-        // 真正需要重建只发生在正在重试一个已有 live/pending 轨道时。
-        if (action === "play") {
-          var localPaused = !!(t && (t.webAudioPausedLocal || (typeof canResumePausedWebAudioTrack === "function" && canResumePausedWebAudioTrack(t))));
-          forceNew = !!(t && (isLiveTrack(t) || trackState(t) === "pending") && !t.webAudioPlaying && !localPaused);
-        }
-      } catch (_) {}
-      var now = Date.now();
-      if (forceNew && now - lastFreshAudioPrimeAt < 700) forceNew = false;
-      if (forceNew) lastFreshAudioPrimeAt = now;
-      primeAudioContext(messageId, forceNew ? { forceNew: true, reason: action + " live retry" } : { reason: action + " gesture" });
     }
     function handlePageAudioSuspend(reason) {
       try {
@@ -85,16 +70,16 @@
     }
     on(document, "visibilitychange", function () { handlePageAudioSuspend("visibilitychange"); });
     on(window, "pagehide", function () { handlePageAudioSuspend("pagehide"); });
-    on(play, 'pointerdown', function () { primeAudioForGesture("play"); });
-    on(add, 'pointerdown', function () { primeAudioForGesture("add"); });
-    on(rewind10, 'pointerdown', function () { primeAudioForGesture("seek"); });
-    on(forward10, 'pointerdown', function () { primeAudioForGesture("seek"); });
-    on(play, 'touchstart', function () { primeAudioForGesture("play"); });
-    on(add, 'touchstart', function () { primeAudioForGesture("add"); });
-    on(rewind10, 'touchstart', function () { primeAudioForGesture("seek"); });
-    on(forward10, 'touchstart', function () { primeAudioForGesture("seek"); });
-    on(play, 'click', function () {
-      primeAudioForGesture("play");
+    on(play, 'pointerdown', noteAudioGesture);
+    on(add, 'pointerdown', noteAudioGesture);
+    on(rewind10, 'pointerdown', noteAudioGesture);
+    on(forward10, 'pointerdown', noteAudioGesture);
+    on(play, 'touchstart', noteAudioGesture);
+    on(add, 'touchstart', noteAudioGesture);
+    on(rewind10, 'touchstart', noteAudioGesture);
+    on(forward10, 'touchstart', noteAudioGesture);
+    on(play, 'click', function (ev) {
+      noteAudioGesture(ev);
       if (tryResumeOrPauseInGesture()) return;
       if (!canPlayCurrentTrack()) {
         setPlayState("idle");
@@ -105,22 +90,22 @@
       }
       playOrPauseCurrentTrack().catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
-    on(add, 'click', function () {
-      primeAudioForGesture("add");
+    on(add, 'click', function (ev) {
+      noteAudioGesture(ev);
       var t = currentTrack();
       if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t)); return; }
       generate(true).catch(function (e) { setError(e && e.message ? e.message : String(e)); });
     });
-    on(rewind10, 'click', function () {
-      primeAudioForGesture("seek");
+    on(rewind10, 'click', function (ev) {
+      noteAudioGesture(ev);
       var t = currentTrack();
-      if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t, "seek")); return; }
+      if (isCancelableLiveTrack(t) && !canSeekTrackByControls(t)) { setStatus(busyGenerationStatus(t, "seek")); return; }
       if (!seekBySeconds(-10)) setStatus("暂无可跳转音频");
     });
-    on(forward10, 'click', function () {
-      primeAudioForGesture("seek");
+    on(forward10, 'click', function (ev) {
+      noteAudioGesture(ev);
       var t = currentTrack();
-      if (isCancelableLiveTrack(t)) { setStatus(busyGenerationStatus(t, "seek")); return; }
+      if (isCancelableLiveTrack(t) && !canSeekTrackByControls(t)) { setStatus(busyGenerationStatus(t, "seek")); return; }
       if (!seekBySeconds(10)) setStatus("暂无可跳转音频");
     });
     on(prev, 'click', function () {
@@ -188,6 +173,16 @@
         setError("设置保存失败: " + (e && e.message ? e.message : String(e)));
       }
     }); });
+    var seekUserDragging = false;
+    function seekTargetSecondsFromValue(track) {
+      var value = Math.max(0, Math.min(1000, Number(seek && seek.value || 0) || 0));
+      var meterDur = progressMeterDurationSec(track, trackResumeSec(track));
+      if (!(meterDur > 0)) {
+        var dur = Number(audio && audio.duration);
+        meterDur = (isFinite(dur) && dur > 0) ? dur : trackDurationHintSec(track);
+      }
+      return meterDur > 0 ? value / 1000 * meterDur : 0;
+    }
     on(audio, 'play', function () {
       var t = currentTrack();
       if (t) setTrackPlaybackState(t, "playing");
@@ -196,34 +191,8 @@
       try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
       // 桌面 / <audio> 路径的字幕：普通/AI dialogue track 有 segments 时启动。
       if (t && t.mode !== "single" && (normalizeModeName(t.mode) === "ai" || normalizeModeName(t.mode) === "normal")) {
-        if (t.segments && t.segments.length) {
+        if (t.cacheKey || (t.segments && t.segments.length)) {
           startSubtitle(t, function () { return elementPlaybackTimeSec(t); });
-        } else if (t.cacheKey && !t.fetchingSegments) {
-          // 历史卡片没存 segments → 后台拉 job_status 补回来
-          t.fetchingSegments = true;
-          debugLog("📥 历史卡无 segments,后台拉 job_status…", "#9ff");
-          fetch(cleanBase(cfg.apiBase) + "/tts_dialogue_job_status/" + encodeURIComponent(t.cacheKey))
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (j) {
-              if (j && Array.isArray(j.segments_meta) && j.segments_meta.length) {
-                t.segments = j.segments_meta.map(function (s) {
-                  return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
-                });
-                if (j.sample_rate) t.sampleRate = j.sample_rate;
-                if (j.duration_s) t.duration_s = j.duration_s;
-                if (j.metrics) t.metrics = j.metrics;
-                debugLog("✅ 补回 " + t.segments.length + " 段 segments,字幕启动", "#9f9");
-                // 现在启动字幕
-                if (currentTrackIndex >= 0 && generatedTracks[currentTrackIndex] === t) {
-                  startSubtitle(t, function () { return elementPlaybackTimeSec(t); });
-                }
-                if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-              } else {
-                debugLog("⚠️ job_status 没返回 segments_meta(可能服务端没存这条历史)", "#fc9");
-              }
-            })
-            .catch(function (e) { debugLog("❌ 拉 segments_meta 失败: " + e, "#f99"); })
-            .finally(function () { t.fetchingSegments = false; });
         }
       }
     });
@@ -249,6 +218,38 @@
     on(audio, 'pause', function () { var t = currentTrack(); if (t && !audio.ended) setTrackPlaybackState(t, "paused"); setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); stopSubtitle(); });
     on(audio, 'ended', function () {
       var t = currentTrack();
+      if (t && isElementUsingTrackLiveSegment(t) && handleLiveSegmentAudioEnded(t)) return;
+      if (t && isElementUsingTrackLiveMp3(t)) {
+        var liveEndedSec = elementPlaybackTimeSec(t);
+        rememberLiveResumeSec(t, liveEndedSec, "live mp3 ended");
+        clearLiveMp3AudioState(t);
+        t.streamPlaybackFinished = true;
+        t.streaming = false;
+        t.liveEndedAwaitSaved = true;
+        if (offlineCacheReadyForSave(t)) {
+          if (!t.cacheUrl && t.cacheKey) t.cacheUrl = cleanBase(cfg.apiBase) + "/cache_audio/" + encodeURIComponent(t.cacheKey);
+          setTrackState(t, "saved");
+          attachCacheAudio(t, { forceElement: true, autoplay: false });
+          if (t.cacheKey && t.cacheUrl) scheduleOfflineAudioSave(t, "ended offline", 800);
+          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          removePendingJobForTrack(t).catch(function(){});
+          setTrackPlaybackState(t, "ended");
+          setPlayState("idle");
+          setStatus("播放完成，完整音频已就绪");
+          showTrackNotice(t, "播放完成", "已切到完整音频，支持拖动进度条");
+          stopSubtitle();
+          updateTrackButtons();
+          return;
+        }
+        setTrackPlaybackState(t, "ended");
+        setPlayState("idle");
+        setStatus("MP3 实时流已结束，等待完整音频保存");
+        showTrackNotice(t, "MP3 实时流已结束", "完整音频落盘后会自动切到可拖动播放");
+        pollCacheUpgrade(t, "live mp3 ended before cache");
+        stopSubtitle();
+        updateTrackButtons();
+        return;
+      }
       if (t && t.mode === "single" && t.cacheKey && t.cacheUrl) {
         setTrackState(t, "saved");
         attachCacheAudio(t, { deferElement: true });
@@ -262,6 +263,12 @@
     });
     on(audio, 'error', function () {
       var active = currentTrack();
+      if (active && isTerminalTrack(active)) {
+        clearElementAudioSrc();
+        stopSubtitle();
+        setPlayState("idle");
+        return;
+      }
       if (active && (active.webAudioPlaying || shouldUseWebAudioForLiveTrack(active))) {
         debugLog("⚠️ 忽略 audio 元素错误：当前手机链路使用 Web Audio，src=" + (audio.currentSrc || audio.src || ""), "#fc9");
         setError("");
@@ -272,6 +279,26 @@
         if (audio.error) detail = "（" + mediaErrorText(audio.error) + "）";
       } catch (_) {}
       if (active && isSavedTrack(active) && recoverSavedAudioElementError(active, detail)) {
+        stopSubtitle();
+        return;
+      }
+      if (active && isElementUsingTrackLiveSegment(active)) {
+        debugLog("⚠️ live segment audio 元素不可用" + detail + "，等待完整音频 src=" + (audio.currentSrc || audio.src || ""), "#fc9");
+        waitForSavedLiveTrack(active, "audio error live segment fallback", {
+          resumeSec: trackResumeSec(active),
+          title: "等待完整音频…",
+          detail: "当前 WebView 不支持这条小段音频，生成完成后自动切到完整音频"
+        });
+        stopSubtitle();
+        return;
+      }
+      if (active && isElementUsingTrackLiveMp3(active)) {
+        debugLog("⚠️ live MP3 audio 元素不可用" + detail + "，等待完整音频 src=" + (audio.currentSrc || audio.src || ""), "#fc9");
+        waitForSavedLiveTrack(active, "audio error live mp3 fallback", {
+          resumeSec: trackResumeSec(active),
+          title: "等待完整音频…",
+          detail: "当前 WebView 不支持这条 MP3 实时流，生成完成后自动切到完整音频"
+        });
         stopSubtitle();
         return;
       }
@@ -300,9 +327,10 @@
       setError("");
       setAudioPlaybackRate();
       var t = currentTrack();
-      if (seek) seek.disabled = isCancelableLiveTrack(t);
       var dur = Number(audio.duration);
       var progressDur = progressDurationSec(t, elementPlaybackTimeSec(t));
+      var meterDur = progressMeterDurationSec(t, elementPlaybackTimeSec(t));
+      if (seek) seek.disabled = !(canSeekTrackByControls(t) && meterDur > 0);
       if (total) total.textContent = progressDur > 0 ? formatTime(progressDur) : "--:--";
       debugLog("📐 audio metadata loaded: duration=" + (isFinite(dur) ? dur.toFixed(2) : String(audio.duration)) + "s seekable=" + (audio.seekable.length > 0 ? audio.seekable.end(0).toFixed(2) : "0"), "#9ff");
     });
@@ -324,44 +352,55 @@
       if (activeTrack) activeTrack.lastElementSec = pos;
       var progressDur = progressDurationSec(activeTrack, pos);
       var meterDur = progressMeterDurationSec(activeTrack, pos);
-      if (cur) cur.textContent = formatTime(pos);
+      if (cur && !seekUserDragging) cur.textContent = formatTime(pos);
       if (total) total.textContent = progressDur > 0 ? formatTime(progressDur) : "--:--";
-      if (seek) {
+      if (seek && !seekUserDragging) {
         seekProgrammaticUpdate = true;
-        seek.disabled = isCancelableLiveTrack(activeTrack) || !(meterDur > 0);
+        seek.disabled = !(canSeekTrackByControls(activeTrack) && meterDur > 0);
         seek.value = meterDur > 0 ? String(Math.floor(Math.min(pos, meterDur) / meterDur * 1000)) : "0";
         setTimeout(function () { seekProgrammaticUpdate = false; }, 0);
       }
     });
     on(seek, 'input', function () {
       if (seekProgrammaticUpdate) return;
-      var live = currentTrack();
-      if (isCancelableLiveTrack(live)) {
-        if (seek) seek.value = "0";
-        setStatus(busyGenerationStatus(live, "seek"));
+      seekUserDragging = true;
+      var t = currentTrack();
+      if (!canSeekTrackByControls(t)) {
+        setStatus(busyGenerationStatus(t, "seek"));
+        return;
+      }
+      var target = seekTargetSecondsFromValue(t);
+      if (cur) cur.textContent = formatTime(target);
+      if (canSeekLiveTrack(t)) {
+        setStatus("松手后跳转实时音频");
         return;
       }
       var dur = Number(audio && audio.duration);
       if (audio && isFinite(dur) && dur > 0) audio.currentTime = Number(seek.value || 0) / 1000 * dur;
       else {
-        var t = currentTrack();
         var hint = trackDurationHintSec(t);
         if (hint > 0 && cur) cur.textContent = formatTime(Number(seek.value || 0) / 1000 * hint);
       }
     });
     on(seek, 'change', function () {
       if (seekProgrammaticUpdate) return;
-      var live = currentTrack();
-      if (isCancelableLiveTrack(live)) {
-        if (seek) seek.value = "0";
-        setStatus(busyGenerationStatus(live, "seek"));
+      var t = currentTrack();
+      if (!canSeekTrackByControls(t)) {
+        seekUserDragging = false;
+        setStatus(busyGenerationStatus(t, "seek"));
+        return;
+      }
+      var target = seekTargetSecondsFromValue(t);
+      if (canSeekLiveTrack(t)) {
+        seekUserDragging = false;
+        seekToSeconds(target, { noticeTitle: "拖动进度" });
         return;
       }
       var dur = Number(audio && audio.duration);
-      if (audio && isFinite(dur) && dur > 0) return;
-      var t = currentTrack();
+      if (audio && isFinite(dur) && dur > 0) { seekUserDragging = false; return; }
       var hint = trackDurationHintSec(t);
       if (hint > 0) seekToSeconds(Number(seek.value || 0) / 1000 * hint, { noticeTitle: "拖动进度" });
+      seekUserDragging = false;
     });
 
     updateTrackButtons();

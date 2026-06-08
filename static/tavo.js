@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260608-tavo-bg-v39";
+  var LOADER_VERSION = "20260608-mp3-cache-v48";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
@@ -259,163 +259,6 @@
     try { window[TAP_GUARD_KEY] = Date.now() + Math.max(800, Number(ms || 0) || 0); } catch (_) {}
   }
 
-  function adoptLoaderPreprimedAudioOwner(ownerMessageId, previousOwner) {
-    ownerMessageId = String(ownerMessageId || "").trim();
-    previousOwner = String(previousOwner || "").trim();
-    if (!ownerMessageId) return false;
-    try {
-      var ctx = window.__indextts_tavo_preprimed_audio_context;
-      if (!ctx) return false;
-      try { if (ctx.state === "closed") return false; } catch (_) {}
-      var owner = String(window.__indextts_tavo_preprimed_audio_owner || "").trim();
-      var canAdopt = !owner || owner === ownerMessageId || (previousOwner && owner === previousOwner);
-      if (!canAdopt) return false;
-      window.__indextts_tavo_preprimed_audio_owner = ownerMessageId;
-      window.__indextts_tavo_preprimed_audio_owner_at = Date.now();
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function stopPreprimedAudioKeepaliveForDifferentContext(ctx) {
-    try {
-      var src = window.__indextts_tavo_preprimed_keepalive_source;
-      var srcCtx = window.__indextts_tavo_preprimed_keepalive_ctx;
-      if (src && srcCtx && srcCtx !== ctx) {
-        try { src.stop(0); } catch (_) {}
-        window.__indextts_tavo_preprimed_keepalive_source = null;
-        window.__indextts_tavo_preprimed_keepalive_ctx = null;
-      }
-    } catch (_) {}
-  }
-
-  function startPreprimedAudioKeepalive(ctx) {
-    if (!ctx) return;
-    try {
-      if (window.__indextts_tavo_preprimed_keepalive_source && window.__indextts_tavo_preprimed_keepalive_ctx === ctx) return;
-      stopPreprimedAudioKeepaliveForDifferentContext(ctx);
-      var rate = ctx.sampleRate || 44100;
-      var frames = Math.max(1, Math.floor(rate * 0.5));
-      var buf = ctx.createBuffer(1, frames, rate);
-      var data = buf.getChannelData(0);
-      for (var i = 0; i < data.length; i++) data[i] = 0;
-      var gain = ctx.createGain ? ctx.createGain() : null;
-      var src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.loop = true;
-      if (gain) {
-        gain.gain.value = 0;
-        src.connect(gain);
-        gain.connect(ctx.destination);
-      } else {
-        src.connect(ctx.destination);
-      }
-      src.start(0);
-      window.__indextts_tavo_preprimed_keepalive_source = src;
-      window.__indextts_tavo_preprimed_keepalive_ctx = ctx;
-    } catch (_) {}
-  }
-
-  function nativeUnlockWavUrl() {
-    try {
-      if (window.__indextts_tavo_native_unlock_url) return window.__indextts_tavo_native_unlock_url;
-      var rate = 8000;
-      var frames = Math.max(1, Math.floor(rate * 0.08));
-      var bytes = new Uint8Array(44 + frames * 2);
-      function putText(off, text) {
-        for (var i = 0; i < text.length; i++) bytes[off + i] = text.charCodeAt(i);
-      }
-      function put16(off, value) {
-        bytes[off] = value & 255; bytes[off + 1] = (value >> 8) & 255;
-      }
-      function put32(off, value) {
-        bytes[off] = value & 255; bytes[off + 1] = (value >> 8) & 255; bytes[off + 2] = (value >> 16) & 255; bytes[off + 3] = (value >> 24) & 255;
-      }
-      putText(0, "RIFF"); put32(4, 36 + frames * 2); putText(8, "WAVE");
-      putText(12, "fmt "); put32(16, 16); put16(20, 1); put16(22, 1);
-      put32(24, rate); put32(28, rate * 2); put16(32, 2); put16(34, 16);
-      putText(36, "data"); put32(40, frames * 2);
-      for (var j = 0; j < frames; j++) {
-        var sample = 0;
-        put16(44 + j * 2, sample < 0 ? sample + 65536 : sample);
-      }
-      var blob = new Blob([bytes], { type: "audio/wav" });
-      window.__indextts_tavo_native_unlock_url = URL.createObjectURL(blob);
-      return window.__indextts_tavo_native_unlock_url;
-    } catch (_) {
-      return "";
-    }
-  }
-
-  function primeNativeAudioElementForGesture() {
-    try {
-      var el = window.__indextts_tavo_native_unlock_audio;
-      if (!el) {
-        el = new Audio();
-        el.preload = "auto";
-        el.volume = 0;
-        el.muted = true;
-        try { el.setAttribute("playsinline", ""); el.setAttribute("webkit-playsinline", ""); } catch (_) {}
-        window.__indextts_tavo_native_unlock_audio = el;
-      }
-      var url = nativeUnlockWavUrl();
-      if (url && el.src !== url) {
-        el.src = url;
-        try { el.load(); } catch (_) {}
-      }
-      var p = el.play();
-      if (p && typeof p.then === "function") {
-        p.then(function () {
-          setTimeout(function () { try { el.pause(); el.currentTime = 0; } catch (_) {} }, 90);
-        }).catch(function () {});
-      }
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function primeRuntimeAudioContext(ownerMessageId) {
-    try {
-      try { window.__indextts_tavo_last_audio_gesture_at = Date.now(); } catch (_) {}
-      primeNativeAudioElementForGesture();
-      ownerMessageId = String(ownerMessageId || "").trim();
-      var ctx = window.__indextts_tavo_preprimed_audio_context;
-      var owner = String(window.__indextts_tavo_preprimed_audio_owner || "").trim();
-      var canReuse = !!(ctx && (!ownerMessageId || !owner || owner === ownerMessageId));
-      try { if (ctx && ctx.state === "closed") canReuse = false; } catch (_) {}
-      if (canReuse) {
-        try { if (ctx.state === "suspended") ctx.resume(); } catch (_) {}
-        if (ownerMessageId && owner !== ownerMessageId) {
-          try { window.__indextts_tavo_preprimed_audio_owner = ownerMessageId; } catch (_) {}
-        }
-        try { window.__indextts_tavo_preprimed_audio_owner_at = Date.now(); } catch (_) {}
-        startPreprimedAudioKeepalive(ctx);
-        return ctx;
-      }
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      ctx = new AC();
-      try { ctx.resume(); } catch (_) {}
-      try {
-        var rate = ctx.sampleRate || 44100;
-        var buf = ctx.createBuffer(1, Math.max(1, Math.floor(rate * 0.025)), rate);
-        var data = buf.getChannelData(0);
-        for (var i = 0; data && i < data.length; i++) data[i] = 0;
-        var src = ctx.createBufferSource();
-        src.buffer = buf;
-        src.connect(ctx.destination);
-        src.start(0);
-      } catch (_) {}
-      window.__indextts_tavo_preprimed_audio_context = ctx;
-      window.__indextts_tavo_preprimed_audio_owner = ownerMessageId;
-      window.__indextts_tavo_preprimed_audio_owner_at = Date.now();
-      startPreprimedAudioKeepalive(ctx);
-      return ctx;
-    } catch (_) { return null; }
-  }
-
   function closeAccidentalPicker() {
     try {
       $all(document, ".idx-picker[open]").forEach(function (picker) {
@@ -627,7 +470,6 @@
       messageId = nextId;
       try { root.setAttribute("data-indextts-message-id", messageId); } catch (_) {}
       try { if (loaderScript && loaderScript.dataset) loaderScript.dataset.indexttsMessageId = messageId; } catch (_) {}
-      adoptLoaderPreprimedAudioOwner(messageId, previousId);
       return messageId;
     }
     function currentLoaderMessageId() {
@@ -680,7 +522,6 @@
       ev.stopPropagation();
       armTapGuard(1800);
       var activeMessageId = currentLoaderMessageId();
-      if (action === "play" || action === "add") primeRuntimeAudioContext(activeMessageId);
       renderLoaderShell(root, activeMessageId, action);
       route(selector);
     });
@@ -732,13 +573,13 @@
       });
     }
 
-    on($(root, '[data-role="lazy-play"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(currentLoaderMessageId()); });
-    on($(root, '[data-role="lazy-play"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(currentLoaderMessageId()); });
-    on($(root, '[data-role="lazy-open"]'), "pointerdown", function () { armTapGuard(1600); primeRuntimeAudioContext(currentLoaderMessageId()); });
-    on($(root, '[data-role="lazy-open"]'), "touchstart", function () { armTapGuard(1600); primeRuntimeAudioContext(currentLoaderMessageId()); });
-    on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(currentLoaderMessageId()); route('[data-role="play"]'); });
-    on($(root, '[data-role="lazy-open"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); primeRuntimeAudioContext(currentLoaderMessageId()); mountRuntime(""); });
-    on($(root, '[data-role="lazy-open"]'), "keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); primeRuntimeAudioContext(currentLoaderMessageId()); mountRuntime(""); } });
+    on($(root, '[data-role="lazy-play"]'), "pointerdown", function () { armTapGuard(1600); });
+    on($(root, '[data-role="lazy-play"]'), "touchstart", function () { armTapGuard(1600); });
+    on($(root, '[data-role="lazy-open"]'), "pointerdown", function () { armTapGuard(1600); });
+    on($(root, '[data-role="lazy-open"]'), "touchstart", function () { armTapGuard(1600); });
+    on($(root, '[data-role="lazy-play"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); route('[data-role="play"]'); });
+    on($(root, '[data-role="lazy-open"]'), "click", function (ev) { ev.preventDefault(); ev.stopPropagation(); armTapGuard(1800); mountRuntime(""); });
+    on($(root, '[data-role="lazy-open"]'), "keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); mountRuntime(""); } });
   } catch (e) {
     try { console.error("[IndexTTS TAVO loader]", e && e.stack ? e.stack : e); } catch (_) {}
   }

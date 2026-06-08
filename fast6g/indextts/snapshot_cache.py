@@ -14,6 +14,10 @@ from typing import Optional
 CACHE_DIR = os.path.join("outputs", "cache")
 READABLE_CACHE_DIR = os.path.join(CACHE_DIR, "by_role")
 _KEY_RE = re.compile(r"^[0-9a-f]{40}$")
+_AUDIO_FORMATS = {
+    "mp3": (".mp3", "audio/mpeg"),
+    "wav": (".wav", "audio/wav"),
+}
 _WINDOWS_BAD_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WINDOWS_RESERVED_NAMES = {
     "CON",
@@ -160,7 +164,7 @@ def _find_readable_paths_for_key(key: str) -> list[str]:
     if not os.path.isdir(READABLE_CACHE_DIR):
         return []
     paths: list[str] = []
-    suffixes = (f"_{key}.wav", f"_{key}.json")
+    suffixes = (f"_{key}.wav", f"_{key}.mp3", f"_{key}.json")
     for root, _dirs, files in os.walk(READABLE_CACHE_DIR):
         for name in files:
             if name.endswith(suffixes):
@@ -207,22 +211,68 @@ def _link_or_copy_audio(src_path: str, dest_path: str) -> str:
     return storage
 
 
-def _create_readable_entries(key: str, wav_path: str, metadata: dict) -> list[dict]:
+def _audio_format_from_path(path: str) -> str:
+    ext = os.path.splitext(str(path or ""))[1].lower()
+    return "mp3" if ext == ".mp3" else "wav"
+
+
+def _normalize_audio_format(value) -> str:
+    raw = str(value or "").strip().lower().lstrip(".")
+    if raw in ("mpeg", "audio/mpeg"):
+        raw = "mp3"
+    if raw in ("wave", "x-wav", "audio/wav", "audio/wave"):
+        raw = "wav"
+    return raw if raw in _AUDIO_FORMATS else "wav"
+
+
+def _metadata_audio_format(metadata: dict) -> str:
+    if not isinstance(metadata, dict):
+        return "wav"
+    return _normalize_audio_format(
+        metadata.get("audio_format")
+        or metadata.get("format")
+        or metadata.get("cache_audio_format")
+        or metadata.get("content_type")
+    )
+
+
+def _audio_path_for_key(key: str, audio_format: str = "wav") -> str:
+    key = _validate_key(key)
+    ext, _media = _AUDIO_FORMATS[_normalize_audio_format(audio_format)]
+    return os.path.join(CACHE_DIR, f"{key}{ext}")
+
+
+def _existing_audio_path(key: str, preferred_format: Optional[str] = None) -> Optional[str]:
+    key = _validate_key(key)
+    preferred = _normalize_audio_format(preferred_format) if preferred_format else None
+    candidates = [preferred] if preferred else ["mp3", "wav"]
+    for audio_format in candidates:
+        path = _audio_path_for_key(key, audio_format)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _create_readable_entries(key: str, audio_path: str, metadata: dict) -> list[dict]:
     roles = _role_labels_from_metadata(metadata)
     stamp = _now_stamp()
+    audio_format = _audio_format_from_path(audio_path)
+    ext, media_type = _AUDIO_FORMATS[audio_format]
     entries: list[dict] = []
     for role in roles:
         role_dir = os.path.join(READABLE_CACHE_DIR, _safe_path_label(role))
         filename = f"{stamp}_{key}"
-        readable_wav = os.path.join(role_dir, f"{filename}.wav")
+        readable_audio = os.path.join(role_dir, f"{filename}{ext}")
         readable_json = os.path.join(role_dir, f"{filename}.json")
-        storage = _link_or_copy_audio(wav_path, readable_wav)
+        storage = _link_or_copy_audio(audio_path, readable_audio)
         entries.append(
             {
                 "role": role,
-                "path": readable_wav,
+                "path": readable_audio,
                 "metadata_path": readable_json,
                 "storage": storage,
+                "audio_format": audio_format,
+                "content_type": media_type,
                 "created_at": metadata.get("created_at"),
             }
         )
@@ -243,7 +293,7 @@ def make_cache_key(payload: dict) -> str:
 
 
 def cache_paths(key: str) -> tuple[str, str]:
-    """Return the wav and metadata JSON paths for a validated cache key."""
+    """Return the legacy wav path and metadata JSON path for a validated key."""
     key = _validate_key(key)
     return (
         os.path.join(CACHE_DIR, f"{key}.wav"),
@@ -251,14 +301,24 @@ def cache_paths(key: str) -> tuple[str, str]:
     )
 
 
-def get_cached_audio(key: str) -> Optional[str]:
-    """Return cached wav path if present and update hit metadata."""
-    wav_path, json_path = cache_paths(key)
-    if not os.path.isfile(wav_path):
+def get_cached_audio(key: str, format: Optional[str] = None) -> Optional[str]:
+    """Return cached audio path if present and update hit metadata.
+
+    With no format, MP3 is preferred when available and WAV remains a
+    backwards-compatible fallback for older snapshots and debug caches.
+    Passing format="wav" or format="mp3" requires that specific file.
+    """
+    key = _validate_key(key)
+    json_path = os.path.join(CACHE_DIR, f"{key}.json")
+    audio_path = _existing_audio_path(key, preferred_format=format)
+    if not audio_path:
         return None
 
     metadata = _read_metadata(json_path)
     metadata["key"] = key
+    audio_format = _audio_format_from_path(audio_path)
+    metadata["audio_format"] = audio_format
+    metadata["content_type"] = _AUDIO_FORMATS[audio_format][1]
     metadata.setdefault("created_at", _now_iso())
     try:
         hit_count = int(metadata.get("hit_count", 0))
@@ -268,15 +328,22 @@ def get_cached_audio(key: str) -> Optional[str]:
     metadata["last_hit_at"] = _now_iso()
     _write_json_atomic(json_path, metadata)
     _sync_readable_metadata(metadata)
-    return wav_path
+    return audio_path
 
 
-def save_cached_audio(key: str, audio_bytes: bytes, metadata: dict) -> str:
-    """Persist cached wav bytes and metadata, returning the wav path."""
-    wav_path, json_path = cache_paths(key)
+def save_cached_audio(key: str, audio_bytes: bytes, metadata: dict, audio_format: Optional[str] = None, debug_wav_bytes: Optional[bytes] = None) -> str:
+    """Persist cached audio bytes and metadata, returning the main audio path."""
+    key = _validate_key(key)
+    _, json_path = cache_paths(key)
+    audio_format = _normalize_audio_format(audio_format or _metadata_audio_format(metadata))
+    audio_path = _audio_path_for_key(key, audio_format)
+    ext, media_type = _AUDIO_FORMATS[audio_format]
     old_metadata = _read_metadata(json_path)
     saved_metadata = dict(metadata or {})
     saved_metadata["key"] = key
+    saved_metadata["audio_format"] = audio_format
+    saved_metadata["content_type"] = media_type
+    saved_metadata["audio_ext"] = ext
     saved_metadata.setdefault("created_at", _now_iso())
     saved_metadata.setdefault("hit_count", 0)
     saved_metadata.setdefault("last_hit_at", None)
@@ -285,11 +352,22 @@ def save_cached_audio(key: str, audio_bytes: bytes, metadata: dict) -> str:
     stale_paths.extend(_find_readable_paths_for_key(key))
     _delete_paths(stale_paths)
 
-    _write_bytes_atomic(wav_path, audio_bytes)
-    saved_metadata["readable_cache"] = _create_readable_entries(key, wav_path, saved_metadata)
+    stale_main = [_audio_path_for_key(key, fmt) for fmt in _AUDIO_FORMATS if fmt != audio_format]
+    _delete_paths([p for p in stale_main if not (debug_wav_bytes and p.endswith(".wav"))])
+
+    _write_bytes_atomic(audio_path, bytes(audio_bytes or b""))
+    if debug_wav_bytes:
+        wav_path = _audio_path_for_key(key, "wav")
+        _write_bytes_atomic(wav_path, bytes(debug_wav_bytes))
+        saved_metadata["debug_audio"] = {
+            "audio_format": "wav",
+            "content_type": "audio/wav",
+            "path": wav_path,
+        }
+    saved_metadata["readable_cache"] = _create_readable_entries(key, audio_path, saved_metadata)
     _write_json_atomic(json_path, saved_metadata)
     _sync_readable_metadata(saved_metadata)
-    return wav_path
+    return audio_path
 
 
 def list_cache(limit: int = 200) -> list[dict]:
@@ -315,13 +393,14 @@ def list_cache(limit: int = 200) -> list[dict]:
 
 
 def delete_cache(key: str) -> bool:
-    """Delete cached wav and metadata files for a key."""
+    """Delete cached audio and metadata files for a key."""
     wav_path, json_path = cache_paths(key)
+    mp3_path = _audio_path_for_key(key, "mp3")
     metadata = _read_metadata(json_path)
     readable_paths = _readable_paths_from_entries(_readable_entries_from_metadata(metadata))
     readable_paths.extend(_find_readable_paths_for_key(_validate_key(key)))
     deleted = False
-    for path in (wav_path, json_path):
+    for path in (wav_path, mp3_path, json_path):
         try:
             os.remove(path)
         except FileNotFoundError:

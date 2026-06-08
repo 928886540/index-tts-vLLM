@@ -3,6 +3,22 @@
       opts = opts || {};
       if (!track || !trackPlayableUrl(track)) return false;
       var forceLiveElement = !!opts.forceLiveElement;
+      if (!forceLiveElement && shouldUseMp3AudioForLiveTrack(track, startSec)) {
+        return startLiveMp3Audio(track, startSec, {
+          status: opts.status || "连接 MP3 实时流…",
+          title: opts.title || "连接 MP3 实时流…",
+          detail: opts.detail || "使用后端 MP3 编码流播放同一个任务",
+          rejectStatus: opts.rejectStatus
+        });
+      }
+      if (!forceLiveElement && shouldUseSegmentAudioForLiveTrack(track, startSec)) {
+        return startLiveSegmentAudioQueue(track, startSec, {
+          status: opts.status || "等待首段音频…",
+          title: opts.title || "等待首段音频…",
+          detail: opts.detail || "audio 模式会按已完成的小段连续播放",
+          rejectStatus: opts.rejectStatus
+        });
+      }
       if (!isSavedTrack(track) && isLiveTrack(track) && liveStreamUrlForTrack(track) && !forceLiveElement && !shouldUseElementForLiveTrack(track, startSec)) {
         return waitForSavedLiveTrack(track, "element live cache fallback", {
           resumeSec: startSec,
@@ -81,6 +97,7 @@
       var resumeSec = trackResumeSec(track);
       var sourceKind = "";
       try { sourceKind = audio.dataset.idxSourceKind || ""; } catch (_) {}
+      var savedSourceActive = !!(sourceKind === "saved" || sourceKind === "saved-blob" || sameAudioUrl(src, track.cacheUrl) || sameAudioUrl(src, track.url));
       if ((sourceKind === "offline" || sourceKind === "offline-blob" || (track.offlineUrl && sameAudioUrl(src, track.offlineUrl))) && track.cacheUrl) {
         if (!track.offlineBlobRetryDone && typeof loadOfflineAudioForPlayback === "function") {
           track.offlineBlobRetryDone = true;
@@ -125,7 +142,7 @@
         startElementAudioFrom(track, resumeSec);
         return true;
       }
-      if (track.cacheUrl && !track.onlineBlobRetryDone) {
+      if (track.cacheUrl && savedSourceActive && !track.onlineBlobRetryDone) {
         track.onlineBlobRetryDone = true;
         setStatus("在线音频直连失败，尝试临时缓存播放");
         showTrackNotice(track, "正在换一种方式播放", "直接播放失败，改为先读取音频再播放");
@@ -168,6 +185,24 @@
       if (t) setTrackPlaybackState(t, "idle");
       setPlayState("idle");
       if (isUnsupportedPlayError(err)) {
+        if (t && isElementUsingTrackLiveSegment(t)) {
+          debugLog("⚠️ live segment audio.play() 不支持，等待完整音频: " + (err && err.message ? err.message : err), "#fc9");
+          waitForSavedLiveTrack(t, "live segment unsupported fallback", {
+            resumeSec: trackResumeSec(t),
+            title: "等待完整音频…",
+            detail: "当前 WebView 连完整小段音频也不支持，生成完成后自动切到完整音频"
+          });
+          return;
+        }
+        if (t && isElementUsingTrackLiveMp3(t)) {
+          debugLog("⚠️ live MP3 audio.play() 不支持，等待完整音频: " + (err && err.message ? err.message : err), "#fc9");
+          waitForSavedLiveTrack(t, "live mp3 unsupported fallback", {
+            resumeSec: trackResumeSec(t),
+            title: "等待完整音频…",
+            detail: "当前 WebView 不支持 MP3 实时流，生成完成后自动切到完整音频"
+          });
+          return;
+        }
         debugLog("⚠️ " + label + " audio.play() 不支持，已等待用户重试: " + (err && err.message ? err.message : err), "#fc9");
         setStatus(fallbackStatus || "当前 WebView 暂时没放行播放，请再点一次播放");
         return;
@@ -221,15 +256,16 @@
         }
       } catch (_) {}
       [prev, next].forEach(function (el) { setHidden(el, false); });
-      [rewind10, forward10, add].forEach(function (el) { setHidden(el, live); });
+      [rewind10, forward10].forEach(function (el) { setHidden(el, false); });
+      setHidden(add, liveControlsOnly);
       setHidden(del, liveControlsOnly);
       setHidden(liveExit, !liveControlsOnly);
       var visibleCount = visibleTrackCards().length || (!tracksLoaded ? Number(knownHistoryCount || 0) : 0);
       if (prev) prev.disabled = live || visibleCount <= 1;
       if (next) next.disabled = live || visibleCount <= 1;
-      var canSeekTrack = !!(track && isSavedTrack(track) && (trackPlayableUrl(track) || track.webAudioPlaying));
-      if (rewind10) rewind10.disabled = live || !canSeekTrack;
-      if (forward10) forward10.disabled = live || !canSeekTrack;
+      var canSeekTrack = !!(track && canSeekTrackByControls(track));
+      if (rewind10) rewind10.disabled = !canSeekTrack;
+      if (forward10) forward10.disabled = !canSeekTrack;
       if (del) del.disabled = liveControlsOnly || currentTrackIndex < 0 || !track;
       if (liveExit) liveExit.disabled = !liveControlsOnly;
       if (play) {
@@ -249,6 +285,12 @@
       }
     }
     function clearElementAudioSrc() {
+      try {
+        if (currentTrack && isElementUsingTrackLiveSegment(currentTrack())) cancelLiveSegmentAudioQueue("clear element");
+      } catch (_) {}
+      try {
+        if (currentTrack && isElementUsingTrackLiveMp3(currentTrack())) clearLiveMp3AudioState(currentTrack());
+      } catch (_) {}
       try { audio.pause(); } catch (_) {}
       try { audio.removeAttribute("src"); audio.load(); } catch (_) {}
       markElementAudioTrack(null, "");
@@ -259,8 +301,8 @@
     }
     function inferLegacyTrackState(track) {
       if (!track) return "pending";
-      if (track.deleted || track.cancelled || track.status === "cancelled") return "cancelled";
-      if (track.status === "failed" || track.serverState === "failed" || track.cacheState === "failed" || track.remoteCacheState === "failed") return "failed";
+      if (track.deleted || track.cancelled || track.state === "cancelled" || track.status === "cancelled" || track.serverState === "cancelled") return "cancelled";
+      if (track.state === "failed" || track.status === "failed" || track.serverState === "failed" || track.cacheState === "failed" || track.remoteCacheState === "failed") return "failed";
       if (track.cacheReady || track.fromHistory || track.status === "ready" || track.cacheState === "ready" || track.remoteCacheState === "ready" || (track.url && !track.streaming && !track.pendingBlob)) return "saved";
       if (track.streamUrl || track.streaming || track.status === "running" || track.serverState === "running" || track.pendingBlob) return "live";
       return "pending";

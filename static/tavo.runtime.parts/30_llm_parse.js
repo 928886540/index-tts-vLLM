@@ -1,7 +1,7 @@
 // IndexTTS Tavo runtime part: 30_llm_parse.js // Role: LLM parse prompt and normalization // This fragment is concatenated by static/tavo.runtime.js; it is not a standalone script.
   async function parseWithLlm(text, cfg, setStatus, context) {
     var llmStart = Date.now();
-    setStatus("步骤 1/3：连接 LLM…");
+    setStatus("正在分析文本");
     debugLog("🤖 LLM 请求开始: model=" + cfg.llmModel + ", endpoint=" + cfg.llmEndpoint + ", textLen=" + text.length, "#ffd479");
     // 把当前角色映射的 role 名作为「已知角色」注入 prompt,让 LLM 输出的 role 字段
     // 跟前端 voicesMap 严格对齐(否则后端归一可能错位)。
@@ -91,7 +91,7 @@
       "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0.2,0,0.3,0,0,0.2,0,0.5]}",
       "]}"
     ].join("\n");
-    setStatus("AI 分析中…");
+    setStatus("正在分析文本");
     var maxTokens = llmMaxTokensForText(text);
     var parseUrl = cleanBase(cfg.apiBase) + cfg.parseEndpoint;
     var llmTarget = "后端将访问的 LLM 地址: " + cfg.llmEndpoint;
@@ -122,7 +122,7 @@
     }
     if (!data || !Array.isArray(data.segments) || !data.segments.length) throw new Error("AI 没有返回可用片段");
     var llmSec = Math.floor((Date.now() - llmStart) / 1000);
-    setStatus("拆分完成 " + data.segments.length + " 段");
+    setStatus("分段已就绪，等待合成");
     debugLog("✅ LLM 返回 " + data.segments.length + " 段, 用时 " + llmSec + "s", "#9f9");
     try {
       data.segments.forEach(function (s, i) {

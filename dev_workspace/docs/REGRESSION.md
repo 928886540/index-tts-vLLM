@@ -54,21 +54,25 @@ Current smoke must prove:
 - settings order is mode buttons, quality, voice mapping, playback/offline;
 - normal mode shows only `旁白` and `对白`;
 - AI role mapping does not include normal dialogue rows and does not submit `voices.default`;
-- LIVE starts one generation POST then same-key stream GET;
+- Default LIVE starts one generation POST then native `<audio>` GETs `/tts_dialogue_stream_job/<cache_key>/mp3` with sourceKind `live-mp3`;
+- Explicit `webAudioLive=1` starts one generation POST then same-key `/pcm` stream GET for legacy WebAudio regression;
+- `nativeLive=1` starts one generation POST, then uses `/tts_dialogue_stream_job/<cache_key>/segment/0` through native `<audio>` with sourceKind `live-segment`; it must not poll `/pcm` or `/mp3` before cache落盘.
+- `mp3Live=1` remains an explicit alias for the default MP3 route: one generation POST, then `/tts_dialogue_stream_job/<cache_key>/mp3` through native `<audio>` with sourceKind `live-mp3`; it must not poll `/pcm` or `/segment/<idx>` before cache落盘.
 - same-key LIVE recovery never POSTs another job or DELETEs the job;
-- page-hide/background WebAudio suspend keeps the same LIVE card/key, does not switch to native live `<audio>`, does not DELETE the backend job, and waits for a user play gesture before reconnecting;
-- foreground play after page-hide/background suspend must reconnect the same LIVE key from the latest visible/WebAudio progress, not from an older `lastStalledSec` buffering point;
+- default MP3 page-hide/background must keep the `live-mp3` element active, not show “暂挂/点播放继续”, not poll `/pcm` or `/segment`, and not DELETE the backend job;
+- page-hide/background WebAudio suspend under explicit `webAudioLive=1` keeps the same LIVE card/key, does not switch to native live `<audio>`, does not DELETE the backend job, and waits for a user play gesture before reconnecting;
+- foreground play after explicit WebAudio page-hide/background suspend must reconnect the same LIVE key from the latest visible/WebAudio progress, not from an older `lastStalledSec` buffering point;
 - restored LIVE pending jobs from `tavo.get` reconnect same key with `start_s`;
 - non-cached LIVE jobs write a chat-scoped pending card immediately after `cacheKey`; remounting the message restores that same key without a new POST, and explicit LIVE exit/delete clears pending and sends DELETE;
-- offline saved audio should first use Tavo chat file storage; if the `tavo.file.url()` path fails as an `<audio>` source, retry `tavo.file.load(..., { encoding: "dataUrl" })` as a local `blob:` before falling back to online `/cache_audio`;
+- offline saved audio should first use Tavo chat file storage. New saves must default to `indextts-<cacheKey>.mp3`; legacy `indextts-<cacheKey>.wav` remains readable/deletable. If the `tavo.file.url()` path fails as an `<audio>` source, retry `tavo.file.load(..., { encoding: "dataUrl" })` as a local `blob:` before falling back to online `/cache_audio`;
 - avatar-side header status keeps only stable voice labels or "音色未设置";
 - transient generation/playback progress appears in a one-line transparent hint floating above the lyric panel near the seek/time area, not in the avatar-side status or lyric toolbar;
-- floating progress can combine synthesis progress with current playback segment, such as `AI 合成 13/36 · 播第 3/36 段`, and must not rapidly cycle through connection/buffer micro-states;
+- floating progress can combine completed synthesis progress with current playback segment, such as `已生成 8/10 段 · 正在播第 7/10 段`, and must not rapidly cycle through connection/buffer micro-states;
 - LIVE controls keep play/pause at the saved-audio play button position and put live-exit at the music-note position;
 - top controls read left-to-right as `LIVE`/`DISK`, page counter, settings; the page counter stays outside `.idx-subtitle`;
 - toggling `LIVE`/`DISK` during LIVE playback must not reset the active speaker title/avatar/voice label;
 - group chat speaker avatars use the matching `chat.characters` role avatar, while unmapped group roles are not auto-added to `voices` or AI `roles_hint`;
-- lazy snapshot open/play gestures pre-prime WebAudio/native audio before runtime loading, and the resolved `tavo.message.current().id` is synced back to the loader click closure/pre-primed owner;
+- lazy snapshot open/play and runtime play/generate gestures must not prewarm WebAudio or a separate silent native audio element; they may only record a recent gesture timestamp for explicit WebAudio recovery;
 - loader shell shows a loading bar and refreshes the history counter from Tavo/local saved tracks;
 - lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
 - the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps the delete control in place.
@@ -83,7 +87,7 @@ Current smoke must prove:
 - LIVE generation must create durable pending storage as soon as the API backend returns `cacheKey`; WebView death/lock-screen remount must restore a visible same-key card that keeps cache polling.
 - Explicit LIVE exit/delete is the only normal cleanup path for an unfinished LIVE pending card; passive page unload, app backgrounding, or playback interruption must not remove it.
 - `tavo.file.exists()` plus `tavo.file.url()` is not enough proof that an audio element can play the file path. On local file-path playback error, the frontend should use `tavo.file.load` to read the bytes and play a `blob:` URL before marking offline failed.
-- Deleting a saved/cache card must synchronously check and delete the matching Tavo chat file (`indextts-<cacheKey>.wav`) before removing persisted history. If `tavo.file.delete` fails, keep the card so the user can retry instead of leaking an offline file.
+- Deleting a saved/cache card must synchronously check and delete the matching Tavo chat MP3 file (`indextts-<cacheKey>.mp3`) plus legacy WAV candidate (`indextts-<cacheKey>.wav`) before removing persisted history. If `tavo.file.delete` fails, keep the card so the user can retry instead of leaking an offline file.
 - Live/pending/failed tracks are not saved history. Saved history count changes only after a cache-ready/saved track exists.
 
 ## Role / Voice Guard
@@ -100,25 +104,30 @@ Current smoke must prove:
 ## LIVE Playback Guard
 
 - LIVE and saved playback are separate states.
-- LIVE WebAudio must prefer same-key `/tts_dialogue_stream_job/{cache_key}/pcm` polling before the final WAV cache is saved; chunked WAV is compatibility fallback only.
+- Default LIVE must prefer native MP3 `/tts_dialogue_stream_job/{cache_key}/mp3` before the final MP3 cache is saved.
+- Explicit `webAudioLive=1` must prefer same-key `/tts_dialogue_stream_job/{cache_key}/pcm` polling before the final MP3 cache is saved; chunked/debug WAV is compatibility fallback only.
 - `/pcm` chunk headers must only send `X-IndexTTS-Live-Done=1` when `X-IndexTTS-PCM-Next-Offset >= X-IndexTTS-PCM-Total`; frontend should keep polling if a stale/old backend sends premature done.
 - PCM playback should prefer AudioWorklet queued output, then ScriptProcessor, then BufferSource scheduling. Real Tavo logs should show which output path is active.
-- User play/generate gestures should prime both WebAudio and native `<audio>` output, so a later same-key native live fallback can start without waiting for final cache.
-- The music-note generate gesture must not force-close a recently pre-primed AudioContext unless it is explicitly retrying a stuck live/pending track.
+- Default MP3 and `mp3Live=1` / `nativeLive=1` paths should only call `play()` on the real live/saved audio element, not on a silent unlock element.
+- Explicit WebAudio should create/resume AudioContext only when the explicit WebAudio/PCM path actually starts; a normal music-note generate gesture must not force-create or force-close a prewarmed AudioContext.
 - LIVE pending/restored tracks keep `playbackMode=live`, `state=live`, and last resume seconds.
 - A fresh LIVE job must also be persisted to pending storage immediately after `cacheKey`, not only after user pauses or after DISK/background mode; this is the lock-screen/WebView-death recovery anchor.
-- LIVE pause/resume keeps the local WebAudio/PCM queue alive when the controller is still valid; if local resume fails, fallback may reconnect `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>`, but must not create a new POST.
-- App background/page-hide WebAudio `suspended` / `interrupted` is a temporary suspend, not a device failure. It must record the resume second, stop automatic WebAudio rebuild/native live `<audio>` fallback loops, keep the pending card/job, and wait for a foreground user gesture.
+- LIVE pause/resume keeps the active output alive when possible; default MP3 uses native `<audio>`, while explicit WebAudio keeps the local PCM queue alive when the controller is still valid. If explicit WebAudio local resume fails, fallback may reconnect `/tts_dialogue_stream_job/<cache_key>?start_s=<last_second>`, but must not create a new POST.
+- App background/page-hide WebAudio `suspended` / `interrupted` is a temporary suspend, not a device failure. It must record the resume second, stop automatic WebAudio rebuild/native live `<audio>` fallback loops, keep the pending card/job, and wait for a foreground user gesture. This suspend rule must not apply to default MP3 live.
 - The recorded LIVE resume second must be monotonic across suspend/reconnect. If stale buffering state says `lastStalledSec=7` but the latest LIVE progress is `17s`, foreground resume must request `start_s=17`, not jump back to 7.
 - Repeated WebAudio underrun returns to idle/resumable state and keeps cache polling alive; it must not force saved-cache autoplay or leave a permanent spinner.
-- If WebAudio output/device startup fails while LIVE is active, switch to same-key native live `<audio>` with `start_s` before waiting for saved `/cache_audio`.
+- If explicit WebAudio output/device startup fails while LIVE is active, switch to same-key MP3/native live with `start_s` before waiting for saved `/cache_audio`.
+- Opt-in `nativeLive=1` should play finite WAV segments from `/tts_dialogue_stream_job/{cache_key}/segment/{idx}`. The segment endpoint should return `404 segment not ready` until the requested segment is ready, then `200 audio/wav` with `X-IndexTTS-Segment-*` headers.
+- Default LIVE and opt-in `mp3Live=1` should play `/tts_dialogue_stream_job/{cache_key}/mp3` as `200 audio/mpeg`. The MP3 route must yield real `bytes`, not `bytearray`, so Starlette does not raise `AttributeError: 'bytearray' object has no attribute 'encode'`.
+- `/tts_dialogue_stream_job/{bad_key}/segment/0` and `/tts_dialogue_stream_job/{bad_key}/mp3` should return JSON 404 for invalid cache keys, not 500.
+- `GET /cache_audio/{cache_key}` and `HEAD /cache_audio/{cache_key}` should default to the completed MP3 cache with `audio/mpeg` and `X-IndexTTS-Audio-Format: mp3`; `?format=wav` should only be used for explicit debug/regression/legacy WAV checks.
 - User-facing copy must not say "实时生成跟不上" or "手动续播".
 - Completed cache handoff must stop WebAudio before mounting native saved `<audio>` only when LIVE never became audible, was interrupted, or entered explicit saved-cache fallback; stable/audible LIVE should not be stolen just because cache landed.
 - Cache落盘 must not steal an already audible LIVE stream into saved `<audio>` or show a fresh loading handoff just because a transient stalled/buffering flag was recorded.
 - Short buffering after LIVE playback starts must not immediately reset the main button to idle or show "还没收到实时音频".
 - LIVE PCM playback should keep enough prebuffer, pull sufficiently large chunks, and flush small pending PCM tails before the queue runs dry to reduce audible 0.xs stalls at segment boundaries.
 - If cache audio becomes ready while LIVE never became audible, was interrupted, or entered explicit saved-cache fallback, the frontend may force native saved `<audio>` handoff so the user gets audible playback.
-- Saved/cache audio uses native `<audio>` with `/cache_audio/<cache_key>` or offline blob.
+- Saved/cache audio uses native `<audio>` with default MP3 `/cache_audio/<cache_key>` or offline MP3/blob. WAV remains only for debug/regression/legacy fallback.
 
 ## LLM / Status Guard
 

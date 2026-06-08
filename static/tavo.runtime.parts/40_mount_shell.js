@@ -62,10 +62,10 @@
             + '<label class="idx-field"><span class="idx-label">LLM 模型</span><input class="idx-input" data-field="llmModel" placeholder="渡鸦/grok-4.20-fast"></label>'
             + '<label class="idx-field"><span class="idx-label">LLM Key</span><input class="idx-input" type="password" data-field="llmApiKey" placeholder="sk-..."></label>'
           + '</div></details>'
-          + '<label class="idx-check"><input type="checkbox" data-field="reuseLlmParse"><span><strong>复用 LLM 拆段</strong><span>同一消息、角色和 LLM 配置未变时，由后端复用拆段结果。</span></span></label>'
+          + '<label class="idx-check"><input type="checkbox" data-field="reuseLlmParse"><span><strong>复用 LLM 拆段</strong></span></label>'
         + '</div>'
         + '<div class="idx-section-title">播放 / 离线</div>'
-        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong><span>已落盘音频存到 Tavo 当前聊天，下次优先放本地。</span></span></label>'
+        + '<label class="idx-check"><input type="checkbox" data-field="offlineAudioEnabled"><span><strong>保存离线音频</strong></span></label>'
         + '<div class="idx-actions"><button class="idx-btn" type="button" data-role="save">保存</button></div>'
         + '</dialog>'
         // 音色选择器:模态弹窗,走原生 dialog top-layer,跟设置面板同级
@@ -168,6 +168,8 @@
     var webAudioActiveTrack = null;
     var webAudioPlayToken = 0;
     var webAudioProgressTimer = null;
+    var liveSegmentAudioToken = 0;
+    var liveSegmentAudioTimer = null;
     var progressStatusLastText = "";
     var progressStatusLastAt = 0;
     var progressStatusPendingText = "";
@@ -182,7 +184,7 @@
       try {
         if (typeof isTransientProgressNotice === "function" && isTransientProgressNotice(text)) return true;
       } catch (_) {}
-      return /等待音频|正在连接音频|连接实时音频|连接断点音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|排队中|前面还有\s*\d+\s*个\s*TTS\s*任务|下一个开始|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|播第)\s*\d+|正在.*LLM|LLM\s*分段|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中|音频已合成|正在保存|保存中/.test(text);
+      return /准备生成|准备分析|任务已提交|等待分析|正在分析文本|检查分段复用|等待合成|等待音频|等待完整音频|等待音频保存|MP3\s*实时流已结束|完整音频.*保存|正在连接音频|连接实时音频|连接断点音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|排队中|前面还有\s*\d+\s*(?:个\s*)?(?:TTS\s*)?任务|下一个开始|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|已生成\s*\d+\s*\/\s*\d+\s*段|(?:当前在播第|正在播第|播第)\s*\d+|正在.*LLM|LLM\s*分段|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中|音频已合成|正在保存|保存中/.test(text);
     }
     function configuredVoiceLabelText() {
       try {
@@ -212,7 +214,7 @@
       try {
         var t = currentTrack();
         if (t && (t.webAudioPlaying || String(t.playbackState || "") === "playing")) {
-          if (/正在连接音频|等待音频|网络缓冲|缓冲中|实时音频重连/.test(text) && !/合成|当前在播|播第/.test(text)) return "";
+          if (/正在连接音频|等待音频|网络缓冲|缓冲中|实时音频重连/.test(text) && !/合成|已生成|当前在播|正在播|播第/.test(text)) return "";
         }
       } catch (_) {}
       return isHeaderProgressStatus(text) ? text : "";
@@ -220,9 +222,10 @@
     function progressStatusPriority(text) {
       text = String(text || "");
       if (!text) return 0;
-      if (/合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|播第)\s*\d+|音频合成中|音频已合成|正在保存|保存中/.test(text)) return 3;
-      if (/LLM|分段|拆段|TTS|提交|排队中|前面还有|下一个开始|后端正在|后端处理中|生成中|正在生成|正在合成/.test(text)) return 2;
-      if (/等待音频|正在连接音频|连接实时音频|连接断点音频|网络缓冲|缓冲中|实时音频重连|正在加载音频/.test(text)) return 1;
+      if (/MP3\s*实时流已结束|等待完整音频|等待音频保存|完整音频.*保存/.test(text)) return 4;
+      if (/已生成\s*\d+\s*\/\s*\d+\s*段|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|正在播第|播第)\s*\d+|音频合成中|音频已合成|正在保存|保存中/.test(text)) return 3;
+      if (/正在分析文本|检查分段复用|等待合成|LLM|分段|拆段|TTS|提交|排队中|前面还有|下一个开始|后端正在|后端处理中|生成中|正在生成|正在合成/.test(text)) return 2;
+      if (/等待音频|等待完整音频|等待音频保存|MP3\s*实时流已结束|完整音频.*保存|正在连接音频|连接实时音频|连接断点音频|网络缓冲|缓冲中|实时音频重连|正在加载音频/.test(text)) return 1;
       return 1;
     }
     function shouldKeepProgressOnClear() {
@@ -265,7 +268,7 @@
           return;
         }
         var now = Date.now();
-        var wait = Math.max(0, 1400 - (now - progressStatusLastAt));
+        var wait = Math.max(0, 850 - (now - progressStatusLastAt));
         if (wait > 0) {
           progressStatusPendingText = text;
           if (!progressStatusPendingTimer) {

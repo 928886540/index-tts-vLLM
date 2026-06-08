@@ -165,7 +165,7 @@
     try { cacheHeader = String(res.headers && res.headers.get && res.headers.get("X-IndexTTS-Cache") || "").toUpperCase(); } catch (_) { cacheHeader = ""; }
     if (cacheHeader === "HIT" && startOffsetSec > 0.01 && (!skipOffsetExplicit || skipOffsetSec <= 0.01)) {
       skipOffsetSec = startOffsetSec;
-      hooks.debug && hooks.debug("cache HIT 完整 WAV，前端按 startOffset 跳过 " + skipOffsetSec.toFixed(2) + "s PCM");
+      hooks.debug && hooks.debug("cache HIT 完整音频，前端按 startOffset 跳过 " + skipOffsetSec.toFixed(2) + "s PCM");
     }
     hooks.onStateChange && hooks.onStateChange("connected");
 

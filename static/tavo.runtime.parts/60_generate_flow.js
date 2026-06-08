@@ -193,9 +193,8 @@
       var parseMode = normalizeModeName(cfg.mode);
       var playbackMode = normalizePlaybackMode(cfg.playbackMode);
       var backgroundDetached = playbackMode === "generate";
-      var aiParseHint = cfg.reuseLlmParse !== false ? "后端会先检查 LLM 拆段复用" : "后端会做 LLM 拆段";
-      var aiSubmitTitle = cfg.reuseLlmParse !== false ? "提交到后端检查拆段…" : "提交到后端分析…";
-      var aiSubmitDetail = cfg.reuseLlmParse !== false ? "后端先查复用，未命中才调用 LLM" : "LLM 拆段由后端控制，可随时删除任务";
+      var initialProgressTitle = parseMode === "ai" ? "准备分析文本" : "准备生成";
+      var submittedProgressTitle = parseMode === "ai" ? "任务已提交，等待分析文本" : "任务已提交，等待合成";
       function showGenerationProgress(track, titleText, detailText) {
         if (backgroundDetached && currentTrack() !== track) {
           if (!currentTrack()) {
@@ -241,7 +240,7 @@
           currentTrackIndex = backgroundIndex;
           await selectTrack(currentTrackIndex, false);
         }
-        showGenerationProgress(placeholder, "准备后台生成…", parseMode === "ai" ? aiParseHint : "后端会按旁白/对白规则拆段");
+        showGenerationProgress(placeholder, initialProgressTitle, "");
         updateTrackButtons();
         debugLog("🎵 新建落盘普通卡片 mode=" + parseMode + " playback=" + playbackMode + " index=" + backgroundIndex, "#9ff");
       } else {
@@ -250,7 +249,7 @@
         try { audio.pause(); } catch (_) {}
         clearElementAudioSrc();
         await selectTrack(currentTrackIndex, false);
-        showGenerationProgress(placeholder, "准备生成…", parseMode === "ai" ? aiParseHint : "后端会按旁白/对白规则拆段");
+        showGenerationProgress(placeholder, initialProgressTitle, "");
         debugLog("🎵 新建占位卡片 mode=" + parseMode + " playback=" + playbackMode + " index=" + currentTrackIndex, "#9ff");
         setPlayState("loading");
       }
@@ -286,22 +285,15 @@
         debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
         startServerLogPolling(base);
         if (placeholder.deleted) throw Object.assign(new Error("生成已取消"), { name: "AbortError" });
-        showGenerationProgress(placeholder, parseMode === "ai" ? aiSubmitTitle : "提交到后端拆段…", playbackMode === "generate" ? "后台生成完整音频，不连接流式播放" : "拿到任务后开始等待音频");
+        showGenerationProgress(placeholder, submittedProgressTitle, "");
         var jobInfo;
         var jobCreateController = (typeof AbortController === "function") ? new AbortController() : null;
         placeholder.jobCreateAbortController = jobCreateController;
-        var ttsStart = Date.now();
-        var ttsTimer = setInterval(function () {
-          if (placeholder.deleted) return;
-          var sec = Math.floor((Date.now() - ttsStart) / 1000);
-          showGenerationProgress(placeholder, (playbackMode === "generate" ? "后台生成提交中 " : "后端处理中 ") + sec + "s…", parseMode === "ai" ? aiSubmitDetail : "普通模式规则拆段，可随时删除任务");
-        }, 1000);
         try {
           debugLog("📡 提交 dialogue job: parse_mode=" + parseMode + " playback=" + playbackMode, "#ffd479");
           jobInfo = await createDialogueStreamJob(base, body, { signal: jobCreateController && jobCreateController.signal });
           debugLog("🔗 cache_key=" + jobInfo.cacheKey + " cached=" + jobInfo.cached + " live=" + jobInfo.live, "#9f9");
         } finally {
-          clearInterval(ttsTimer);
           placeholder.jobCreateAbortController = null;
         }
         if (placeholder.deleted) {
@@ -356,7 +348,36 @@
           return;
         }
         if (parseMode === "ai" && placeholder.cacheKey) {
-          refreshTrackFromStatus(placeholder, "pre-live status").catch(function () {});
+          var preLiveResolved = false;
+          try {
+            preLiveResolved = await Promise.race([
+              refreshTrackFromStatus(placeholder, "pre-live status"),
+              new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 450); })
+            ]);
+          } catch (_) {
+            preLiveResolved = false;
+          }
+          if (preLiveResolved) {
+            stopServerLogPolling();
+            if (isTerminalTrack(placeholder)) {
+              setPlayState("idle");
+              setStatus(trackState(placeholder) === "cancelled" ? "任务已取消" : "生成失败");
+              showTrackNotice(placeholder, trackState(placeholder) === "cancelled" ? "任务已取消" : "生成失败", placeholder.error || "点音符重新生成");
+              updateTrackButtons();
+              return;
+            }
+            if (isSavedTrack(placeholder)) {
+              if (playbackMode === "live") {
+                setPlayState("loading");
+                startElementAudioFrom(placeholder, trackResumeSec(placeholder));
+              } else {
+                setPlayState("idle");
+                attachCacheAudio(placeholder, { deferElement: true });
+              }
+              updateTrackButtons();
+              return;
+            }
+          }
         }
         if (placeholder.pausedByUser) {
           setStatus("已暂停，后台合成中");
@@ -364,20 +385,20 @@
           stopServerLogPolling();
           return;
         }
-        setStatus("等待音频…");
-        showTrackNotice(placeholder, "等待音频…", "后端合成中，完整音频会自动进入历史");
+        setStatus("等待音频");
+        showTrackNotice(placeholder, "等待音频", "");
         setPlayState("loading");
         placeholder.allowStreamPlay = false;
         if (shouldUseWebAudioForLiveTrack(placeholder)) {
           debugLog("▶️ live track 使用 Web Audio API 真流式", "#ffd479");
-          await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待音频…", noticeDetail: "后端合成中，完整音频会自动进入历史", waitDetail: "后端合成中" });
+          await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待音频", noticeDetail: "", waitDetail: "" });
           if (isSavedTrack(placeholder)) attachCacheAudio(placeholder, { deferElement: true });
           stopServerLogPolling();
           return;
         }
         var totalSec = Math.floor((Date.now() - t0) / 1000);
         debugLog("▶️ 启动 live 播放路径, 截至此处用时 " + totalSec + "s", "#9f9");
-        await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待音频…", noticeDetail: "后端合成中，完整音频会自动进入历史", waitDetail: "后端合成中" });
+        await playLiveTrack(placeholder, jobInfo.streamUrl, { noticeTitle: "等待音频", noticeDetail: "", waitDetail: "" });
         try {
           audio.addEventListener("ended", stopServerLogPolling, { once: true });
           audio.addEventListener("error", stopServerLogPolling, { once: true });

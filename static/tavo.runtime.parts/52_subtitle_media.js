@@ -30,7 +30,7 @@
       var title = String(titleText || "");
       if (!title) return false;
       if (/失败|错误|不可用|取消|删除|退出/.test(title)) return false;
-      return /等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|排队中|前面还有\s*\d+\s*个\s*TTS\s*任务|下一个开始|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|播第)\s*\d+|音频合成中|等待首段音频|等待\s*TTS\s*合成|TTS\s*合成|分段完成|任务已创建|音频已合成|正在保存|保存中|正在.*LLM|LLM\s*分段|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
+      return /准备生成|准备分析|任务已提交|等待分析|正在分析文本|检查分段复用|等待合成|等待音频|正在连接音频|连接实时音频|连接断点音频|收到音频|网络缓冲|后台生成中|后台生成提交中|后端正在|后端处理中|处理中|提交|生成中|正在生成|正在合成|排队中|前面还有\s*\d+\s*(?:个\s*)?(?:TTS\s*)?任务|下一个开始|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|已生成\s*\d+\s*\/\s*\d+\s*段|(?:当前在播第|正在播第|播第)\s*\d+|音频合成中|等待首段音频|等待\s*TTS\s*合成|TTS\s*合成|分段完成|任务已创建|音频已合成|正在保存|保存中|正在.*LLM|LLM\s*分段|检查 LLM|已复用 LLM|实时音频重连|正在加载音频|缓冲中/.test(title);
     }
     function normalizedNoticeKey(titleText, detailText) {
       return String(titleText || "").replace(/\d+\s*s/g, "Ns") + "\n" + String(detailText || "");
@@ -186,6 +186,60 @@
         return item;
       });
     }
+    function mediaSessionPlayRequested() {
+      try {
+        var track = currentTrack();
+        if (track && (String(track.playbackState || "") === "playing" || isElementPlayingTrackStream(track) || (elementAudioBelongsToTrack(track) && !audio.paused && !audio.ended))) {
+          return;
+        }
+        playOrPauseCurrentTrack().catch(function(){});
+      } catch (_) {}
+    }
+    function mediaSessionPauseRequested() {
+      try {
+        var track = currentTrack();
+        if (track && typeof pauseLiveTrack === "function" && (trackHasActiveLiveOutput(track) || track.webAudioPlaying || isElementPlayingTrackStream(track))) {
+          pauseLiveTrack(track);
+          return;
+        }
+        if (track) setTrackPlaybackState(track, "paused");
+        audio.pause();
+        setPlayState("idle");
+      } catch (_) {}
+    }
+    function mediaSessionSeekBy(delta) {
+      try {
+        var track = currentTrack();
+        if (track && canSeekLiveTrack(track)) {
+          seekBySeconds(delta);
+          return;
+        }
+        if (!canSeekTrackByControls(track)) return;
+        seekBySeconds(delta);
+      } catch (_) {}
+    }
+    function mediaSessionSeekTo(pos) {
+      try {
+        pos = Math.max(0, Number(pos) || 0);
+        var track = currentTrack();
+        if (canSeekLiveTrack(track)) {
+          seekToSeconds(pos, { noticeTitle: "系统进度跳转" });
+          return;
+        }
+        if (!canSeekTrackByControls(track)) return;
+        var dur = Number(audio && audio.duration);
+        if (audio && (audio.currentSrc || audio.src) && isFinite(dur) && dur > 0) {
+          audio.currentTime = Math.max(0, Math.min(dur - 0.05, pos));
+          return;
+        }
+        seekToSeconds(pos, { noticeTitle: "系统进度跳转" });
+      } catch (_) {}
+    }
+    function setMediaActionHandler(ms, action, handler) {
+      try {
+        if (ms && typeof ms.setActionHandler === "function") ms.setActionHandler(action, handler);
+      } catch (_) {}
+    }
     function updateMediaSession(speakerRole, currentText) {
       if (!navigator.mediaSession || typeof MediaMetadata === "undefined") return;
       try {
@@ -199,33 +253,32 @@
           album: "IndexTTS",
           artwork: mediaArtworkEntries(artSrc),
         });
-        ms.setActionHandler('play',  function () { try { playOrPauseCurrentTrack().catch(function(){}); } catch (_) {} });
-        ms.setActionHandler('pause', function () { try { if (currentTrack() && currentTrack().webAudioPlaying) { var t = currentTrack(); if (t) t.pausedByUser = true; stopWebAudioPlayback("pause"); } else audio.pause(); } catch (_) {} });
-        try { ms.setActionHandler('previoustrack', null); } catch (_) {}
-        try { ms.setActionHandler('nexttrack', null); } catch (_) {}
-        ms.setActionHandler('seekbackward', function (details) {
-          try { if (isCancelableLiveTrack(currentTrack())) return; seekBySeconds(-Math.max(1, Number(details && details.seekOffset) || 10)); } catch (_) {}
+        setMediaActionHandler(ms, 'play', mediaSessionPlayRequested);
+        setMediaActionHandler(ms, 'pause', mediaSessionPauseRequested);
+        setMediaActionHandler(ms, 'previoustrack', function () { mediaSessionSeekBy(-10); });
+        setMediaActionHandler(ms, 'nexttrack', function () { mediaSessionSeekBy(10); });
+        setMediaActionHandler(ms, 'seekbackward', function (details) {
+          mediaSessionSeekBy(-Math.max(1, Number(details && details.seekOffset) || 10));
         });
-        ms.setActionHandler('seekforward', function (details) {
-          try { if (isCancelableLiveTrack(currentTrack())) return; seekBySeconds(Math.max(1, Number(details && details.seekOffset) || 10)); } catch (_) {}
+        setMediaActionHandler(ms, 'seekforward', function (details) {
+          mediaSessionSeekBy(Math.max(1, Number(details && details.seekOffset) || 10));
         });
-        ms.setActionHandler('seekto', function (details) {
-          try {
-            var pos = Number(details && details.seekTime);
-            if (isFinite(pos)) {
-              var track = currentTrack();
-              var dur = Number(audio && audio.duration);
-              if (isCancelableLiveTrack(track)) return;
-              if (audio && (audio.currentSrc || audio.src) && isFinite(dur) && dur > 0) audio.currentTime = Math.max(0, Math.min(dur - 0.05, pos));
-              else seekToSeconds(Math.max(0, pos), { noticeTitle: "系统进度跳转" });
-            }
-          } catch (_) {}
+        setMediaActionHandler(ms, 'seekto', function (details) {
+          var pos = Number(details && details.seekTime);
+          if (isFinite(pos)) mediaSessionSeekTo(pos);
         });
+        try {
+          var mediaTrack = currentTrack();
+          ms.playbackState = (mediaTrack && (String(mediaTrack.playbackState || "") === "playing" || isElementPlayingTrackStream(mediaTrack) || (elementAudioBelongsToTrack(mediaTrack) && !audio.paused && !audio.ended))) ? "playing" : "paused";
+        } catch (_) {}
         try {
           var activeForMedia = currentTrack();
           var mediaDur = Number(audio && audio.duration);
           var mediaHint = trackDurationHintSec(activeForMedia);
           if ((!isFinite(mediaDur) || mediaDur <= 0) && mediaHint > 0) mediaDur = mediaHint;
+          if ((!isFinite(mediaDur) || mediaDur <= 0) && activeForMedia && isLiveProgressTrack(activeForMedia)) {
+            mediaDur = progressMeterDurationSec(activeForMedia, elementPlaybackTimeSec(activeForMedia));
+          }
           if (audio && isFinite(mediaDur) && mediaDur > 0) {
             var mediaPos = elementPlaybackTimeSec(activeForMedia);
             ms.setPositionState({

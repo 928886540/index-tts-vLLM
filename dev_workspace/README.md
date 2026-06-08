@@ -64,7 +64,7 @@ The launcher selects `vllm` or `fast6g`, then starts the selected backend throug
 The app does not require a public domain. Same-LAN testing can use:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-tavo-bg-v39"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v48"></script>
 ```
 
 For public tunnel usage, configure the tunnel/reverse proxy outside this repository and replace only the script host. The program should not detect, store, or require a public domain.

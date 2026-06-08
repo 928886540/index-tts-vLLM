@@ -174,7 +174,7 @@
       if (parseReuseRecordMatches(record, fingerprint)) {
         var segments = cloneSegments(record.segments);
         debugLog("♻️ 复用 LLM 拆段 cacheKey=" + key + " segments=" + segments.length, "#9f9");
-        if (typeof setStatus === "function") setStatus("复用 LLM 拆段 " + segments.length + " 段");
+        if (typeof setStatus === "function") setStatus("分段已就绪，等待合成");
         return segments;
       }
     }
@@ -317,12 +317,10 @@
     catch (_) { return false; }
   }
 
-  // 在用户点击事件里同步创建并 resume AudioContext。iOS Safari 要求 audio
-  // 必须在 user gesture 里激活；后面经过 await saveConfig / await parseWithLlm
-  // 之后才创建的 ctx 会停在 suspended，永远不出声。
+  // Explicit WebAudio helpers. The default MP3/native paths no longer prewarm
+  // a silent audio element or AudioContext on normal play/generate gestures.
   var PRIMED_CTX = null;
   var PRIMED_CTX_OWNER = "";
-  var PRIMED_UNLOCK_SOURCE = null;
   var PRIMED_KEEPALIVE_SOURCE = null;
   var PRIMED_KEEPALIVE_CTX = null;
   function normalizeAudioOwner(ownerMessageId) {
@@ -370,66 +368,6 @@
       window.__indextts_tavo_preprimed_audio_owner = PRIMED_CTX_OWNER;
       window.__indextts_tavo_preprimed_audio_owner_at = Date.now();
     } catch (_) {}
-  }
-  function nativeUnlockWavUrl() {
-    try {
-      if (window.__indextts_tavo_native_unlock_url) return window.__indextts_tavo_native_unlock_url;
-      var rate = 8000;
-      var frames = Math.max(1, Math.floor(rate * 0.08));
-      var bytes = new Uint8Array(44 + frames * 2);
-      function putText(off, text) {
-        for (var i = 0; i < text.length; i++) bytes[off + i] = text.charCodeAt(i);
-      }
-      function put16(off, value) {
-        bytes[off] = value & 255; bytes[off + 1] = (value >> 8) & 255;
-      }
-      function put32(off, value) {
-        bytes[off] = value & 255; bytes[off + 1] = (value >> 8) & 255; bytes[off + 2] = (value >> 16) & 255; bytes[off + 3] = (value >> 24) & 255;
-      }
-      putText(0, "RIFF"); put32(4, 36 + frames * 2); putText(8, "WAVE");
-      putText(12, "fmt "); put32(16, 16); put16(20, 1); put16(22, 1);
-      put32(24, rate); put32(28, rate * 2); put16(32, 2); put16(34, 16);
-      putText(36, "data"); put32(40, frames * 2);
-      for (var j = 0; j < frames; j++) {
-        var sample = 0;
-        put16(44 + j * 2, sample < 0 ? sample + 65536 : sample);
-      }
-      var blob = new Blob([bytes], { type: "audio/wav" });
-      window.__indextts_tavo_native_unlock_url = URL.createObjectURL(blob);
-      return window.__indextts_tavo_native_unlock_url;
-    } catch (_) {
-      return "";
-    }
-  }
-  function primeNativeAudioElementForGesture(label) {
-    try {
-      var el = window.__indextts_tavo_native_unlock_audio;
-      if (!el) {
-        el = new Audio();
-        el.preload = "auto";
-        el.volume = 0;
-        el.muted = true;
-        try { el.setAttribute("playsinline", ""); el.setAttribute("webkit-playsinline", ""); } catch (_) {}
-        window.__indextts_tavo_native_unlock_audio = el;
-      }
-      var url = nativeUnlockWavUrl();
-      if (url && el.src !== url) {
-        el.src = url;
-        try { el.load(); } catch (_) {}
-      }
-      var p = el.play();
-      if (p && typeof p.then === "function") {
-        p.then(function () {
-          setTimeout(function () { try { el.pause(); el.currentTime = 0; } catch (_) {} }, 90);
-        }).catch(function (e) {
-          debugLog("⚠️ native audio unlock 被拒绝 " + (label || "") + ": " + (e && e.message ? e.message : e), "#fc9");
-        });
-      }
-      return true;
-    } catch (e) {
-      debugLog("⚠️ native audio unlock 失败 " + (label || "") + ": " + (e && e.message ? e.message : e), "#fc9");
-      return false;
-    }
   }
   function startRuntimeAudioKeepalive(ctx) {
     if (!ctx) return;
@@ -570,41 +508,6 @@
     } catch (_) {}
     debugLog("🔄 WebAudio ctx 已重建准备 " + (reason || ""), "#ffd479");
   }
-  function primeAudioContext(ownerMessageId, opts) {
-    opts = opts || {};
-    ownerMessageId = normalizeAudioOwner(ownerMessageId);
-    try { window.__indextts_tavo_last_audio_gesture_at = Date.now(); } catch (_) {}
-    primeNativeAudioElementForGesture(opts.reason || "audio-context");
-    if (opts.forceNew) resetPreprimedAudioContext(opts.reason || "forceNew");
-    var existing = takePreprimedAudioContext(ownerMessageId);
-    if (existing) return existing;
-    if (PRIMED_CTX && ownerMatchesAudioContext(ownerMessageId, PRIMED_CTX_OWNER)) {
-      try { if (PRIMED_CTX.state === "suspended") PRIMED_CTX.resume(); } catch (_) {}
-      startRuntimeAudioKeepalive(PRIMED_CTX);
-      return PRIMED_CTX;
-    }
-    var AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return null;
-    try {
-      var ctx = new AC();
-      // 立刻 resume + 播一段 1 帧静音解锁 iOS 音频通道
-      try { ctx.resume(); } catch (_) {}
-      try {
-        var unlockRate = ctx.sampleRate || 44100;
-        var b = ctx.createBuffer(1, Math.max(1, Math.floor(unlockRate * 0.03)), unlockRate);
-        var ch = b.getChannelData(0);
-        for (var i = 0; ch && i < ch.length; i++) ch[i] = 0;
-        var s = ctx.createBufferSource();
-        s.buffer = b; s.connect(ctx.destination); s.start(0);
-        PRIMED_UNLOCK_SOURCE = s;
-        s.onended = function () { if (PRIMED_UNLOCK_SOURCE === s) PRIMED_UNLOCK_SOURCE = null; };
-      } catch (_) {}
-      registerPreprimedAudioContext(ctx, ownerMessageId);
-      startRuntimeAudioKeepalive(ctx);
-      return ctx;
-    } catch (_) { return null; }
-  }
-
   // 真流式播放：用 Web Audio API 直接拉 chunked-WAV 的 ReadableStream，
   // 解析 WAV 头后把 PCM 块逐段塞进 AudioContext。完全不走 <audio> 元素，
   // 因此不受手机浏览器 "Content-Length 未知就报错" 的限制。

@@ -373,8 +373,8 @@ def _cache_paths(key: str) -> tuple[str, str]:
     return snapshot_cache.cache_paths(key)
 
 
-def _get_cached_audio(key: str) -> Optional[str]:
-    return snapshot_cache.get_cached_audio(key)
+def _get_cached_audio(key: str, format: Optional[str] = None) -> Optional[str]:
+    return snapshot_cache.get_cached_audio(key, format=format)
 
 
 def _write_json_atomic(path: str, data: dict) -> None:
@@ -386,8 +386,14 @@ def _write_json_atomic(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _save_cached_audio(key: str, wav_bytes: bytes, metadata: dict) -> str:
-    return snapshot_cache.save_cached_audio(key, wav_bytes, metadata)
+def _save_cached_audio(
+    key: str,
+    audio_bytes: bytes,
+    metadata: dict,
+    audio_format: Optional[str] = None,
+    debug_wav_bytes: Optional[bytes] = None,
+) -> str:
+    return snapshot_cache.save_cached_audio(key, audio_bytes, metadata, audio_format=audio_format, debug_wav_bytes=debug_wav_bytes)
 
 
 def _read_cache_metadata(key: str) -> dict:
@@ -636,6 +642,7 @@ def _dialogue_cache_payload(req: dict, segments: list, role_voice_paths: dict, d
     }
     payload = {
         "kind": "fast6g_dialogue_cache_v1",
+        "cache_audio_format": "mp3",
         "segments": [_segment_cache_payload(s) for s in segments],
         "voices": role_payload,
         "default_voice": {"path": default_path, "meta": _audio_file_meta(default_path)} if default_path else None,
@@ -1019,7 +1026,28 @@ def _wav_bytes_to_pcm_bytes(wav_bytes: bytes) -> tuple[int, bytes]:
     return rate, np.asarray(data, dtype=np.int16).tobytes()
 
 
-def _cached_wav_response_with_start_offset(path: str, cache_key: str, start_s: float):
+def _media_type_for_audio_path(path: str) -> str:
+    return "audio/mpeg" if os.path.splitext(str(path or ""))[1].lower() == ".mp3" else "audio/wav"
+
+
+def _cache_audio_headers(key: str, path: str, extra: Optional[dict] = None) -> dict:
+    headers = {
+        "X-IndexTTS-Cache": "HIT",
+        "X-IndexTTS-Cache-Key": key,
+        "X-IndexTTS-Audio-Format": "mp3" if _media_type_for_audio_path(path) == "audio/mpeg" else "wav",
+        "Accept-Ranges": "bytes",
+    }
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def _cached_wav_path_for_diagnostics(cache_key: str) -> Optional[str]:
+    return _get_cached_audio(cache_key, format="wav")
+
+
+def _cached_audio_response_with_start_offset(path: str, cache_key: str, start_s: float):
+    media_type = _media_type_for_audio_path(path)
     headers = {
         "X-IndexTTS-Cache": "HIT",
         "X-IndexTTS-Cache-Key": cache_key,
@@ -1029,8 +1057,10 @@ def _cached_wav_response_with_start_offset(path: str, cache_key: str, start_s: f
         start_s = max(0.0, float(start_s or 0.0))
     except Exception:
         start_s = 0.0
-    if start_s <= 0.01:
-        return FileResponse(path, media_type="audio/wav", headers=headers)
+    if media_type != "audio/wav" or start_s <= 0.01:
+        if start_s > 0.01 and media_type != "audio/wav":
+            headers["X-IndexTTS-Start-S"] = "0.000"
+        return FileResponse(path, media_type=media_type, headers=headers)
     try:
         with open(path, "rb") as fp:
             rate, pcm = _wav_bytes_to_pcm_bytes(fp.read())
@@ -1046,6 +1076,154 @@ def _cached_wav_response_with_start_offset(path: str, cache_key: str, start_s: f
     except Exception as e:
         print(f">> cached wav start_s fallback failed: {e}")
         return FileResponse(path, media_type="audio/wav", headers=headers)
+
+
+def _segment_meta_at(segments_meta: list, segment_idx: int) -> tuple[int, Optional[dict]]:
+    for pos, meta in enumerate(segments_meta or []):
+        if isinstance(meta, dict) and int(meta.get("idx", pos)) == int(segment_idx):
+            return pos, meta
+    if 0 <= int(segment_idx) < len(segments_meta or []):
+        meta = segments_meta[int(segment_idx)]
+        return int(segment_idx), meta if isinstance(meta, dict) else None
+    return -1, None
+
+
+def _segment_wav_response_from_pcm(
+    cache_key: str,
+    pcm: bytes,
+    sample_rate: int,
+    segments_meta: list,
+    segment_idx: int,
+    metrics: Optional[dict] = None,
+    cache_state: str = "LIVE",
+):
+    # Tavo/iOS 的 <audio> 不稳定支持未知长度 chunked WAV；这里给它普通小 WAV。
+    metrics = metrics or {}
+    sample_rate = int(sample_rate or 22050)
+    block_align = 2
+    pos, meta = _segment_meta_at(segments_meta, segment_idx)
+    if pos < 0 or not meta:
+        return JSONResponse(
+            status_code=404,
+            content={"message": "segment not ready", "cache_key": cache_key, "segment_idx": segment_idx},
+        )
+    start = _align_pcm_offset(int(meta.get("start_offset_bytes") or 0), block_align)
+    duration_s = float(meta.get("duration_s") or 0.0)
+    end = start + _align_pcm_offset(int(duration_s * sample_rate * block_align), block_align)
+    if end <= start:
+        next_meta = segments_meta[pos + 1] if pos + 1 < len(segments_meta or []) else None
+        if isinstance(next_meta, dict):
+            end = _align_pcm_offset(int(next_meta.get("start_offset_bytes") or start), block_align)
+    end = max(start, min(len(pcm), end))
+    if end <= start:
+        return JSONResponse(
+            status_code=409,
+            content={"message": "segment audio not ready", "cache_key": cache_key, "segment_idx": segment_idx},
+        )
+    segment_pcm = bytes(pcm[start:end])
+
+    # 下一段起点已知时，把段间静音留在当前段尾部，避免逐段播放节奏太紧。
+    next_meta = segments_meta[pos + 1] if pos + 1 < len(segments_meta or []) else None
+    if isinstance(next_meta, dict):
+        next_start = _align_pcm_offset(int(next_meta.get("start_offset_bytes") or end), block_align)
+        if next_start > end:
+            segment_pcm += bytes(pcm[end:min(len(pcm), next_start)])
+    else:
+        total = int(metrics.get("segments_total") or len(segments_meta or []) or 0)
+        interval_ms = int(metrics.get("interval_ms") or 0)
+        if total > 0 and pos < total - 1 and interval_ms > 0:
+            segment_pcm += _silence_pcm_bytes(sample_rate, interval_ms)
+
+    start_s = start / (sample_rate * block_align) if sample_rate else 0.0
+    audio_duration_s = len(segment_pcm) / (sample_rate * block_align) if sample_rate else 0.0
+    headers = {
+        "X-IndexTTS-Cache": cache_state,
+        "X-IndexTTS-Cache-Key": cache_key,
+        "X-IndexTTS-Segment-Index": str(segment_idx),
+        "X-IndexTTS-Segment-Start-S": f"{start_s:.3f}",
+        "X-IndexTTS-Segment-Duration-S": f"{audio_duration_s:.3f}",
+        "Cache-Control": "no-store",
+        "Access-Control-Expose-Headers": (
+            "X-IndexTTS-Cache,X-IndexTTS-Cache-Key,"
+            "X-IndexTTS-Segment-Index,X-IndexTTS-Segment-Start-S,"
+            "X-IndexTTS-Segment-Duration-S"
+        ),
+    }
+    return Response(
+        _make_complete_wav_bytes(segment_pcm, sample_rate),
+        media_type="audio/wav",
+        headers=headers,
+    )
+
+
+def _new_mp3_encoder(sample_rate: int, bit_rate: int = 128):
+    try:
+        import lameenc
+    except ImportError as e:
+        raise RuntimeError("MP3 live stream requires lameenc in the backend runtime") from e
+    encoder = lameenc.Encoder()
+    encoder.set_bit_rate(max(64, min(256, int(bit_rate or 128))))
+    encoder.set_in_sample_rate(int(sample_rate or 22050))
+    encoder.set_channels(1)
+    encoder.set_quality(2)
+    return encoder
+
+
+def _mp3_headers(cache_key: str, cache_state: str, sample_rate: int, bit_rate: int, start_s: float = 0.0) -> dict:
+    return {
+        "X-IndexTTS-Cache": cache_state,
+        "X-IndexTTS-Cache-Key": cache_key,
+        "X-IndexTTS-Sample-Rate": str(int(sample_rate or 22050)),
+        "X-IndexTTS-MP3-Bit-Rate": str(int(bit_rate or 128)),
+        "X-IndexTTS-Start-S": f"{max(0.0, float(start_s or 0.0)):.3f}",
+        "Cache-Control": "no-store",
+        "Access-Control-Expose-Headers": (
+            "X-IndexTTS-Cache,X-IndexTTS-Cache-Key,"
+            "X-IndexTTS-Sample-Rate,X-IndexTTS-MP3-Bit-Rate,X-IndexTTS-Start-S"
+        ),
+    }
+
+
+def _encode_pcm_to_mp3_bytes(pcm: bytes, sample_rate: int, bit_rate: int = 128) -> bytes:
+    encoder = _new_mp3_encoder(sample_rate, bit_rate=bit_rate)
+    return bytes(encoder.encode(bytes(pcm or b""))) + bytes(encoder.flush())
+
+
+async def _stream_mp3_from_live_job(job: "_LiveJob", start_offset_s: float = 0.0, bit_rate: int = 128):
+    try:
+        start_offset_s = max(0.0, float(start_offset_s or 0.0))
+    except Exception:
+        start_offset_s = 0.0
+    sample_rate = int(job.sample_rate or 22050)
+    if start_offset_s <= 0.001 and int(bit_rate or 128) == int(getattr(job, "_mp3_bit_rate", 128) or 128):
+        offset = 0
+        while True:
+            if offset < len(job.mp3):
+                chunk = bytes(job.mp3[offset:])
+                yield chunk
+                offset = len(job.mp3)
+            if job.finished.is_set() and offset >= len(job.mp3):
+                return
+            await asyncio.sleep(0.05)
+
+    block_align = 2
+    offset = _align_pcm_offset(int(start_offset_s * sample_rate * block_align), block_align)
+    encoder = _new_mp3_encoder(sample_rate, bit_rate=bit_rate)
+    while True:
+        if offset < len(job.pcm):
+            end = _align_pcm_offset(len(job.pcm), block_align)
+            if end > offset:
+                chunk = bytes(job.pcm[offset:end])
+                encoded = encoder.encode(chunk)
+                if encoded:
+                    yield bytes(encoded)
+                offset = end
+        if job.finished.is_set() and offset >= len(job.pcm):
+            tail = encoder.flush()
+            if tail:
+                yield bytes(tail)
+            return
+        await asyncio.sleep(0.05)
 
 
 def _array_to_pcm_bytes(data: np.ndarray) -> bytes:
@@ -1067,6 +1245,11 @@ class _LiveJob:
         self.cache_key = cache_key
         self.sample_rate = 22050
         self.pcm = bytearray()
+        self.mp3 = bytearray()
+        self._mp3_encoder = None
+        self._mp3_sample_rate = 0
+        self._mp3_bit_rate = 128
+        self._mp3_finalized = False
         self.finished = asyncio.Event()
         self.error: Optional[str] = None
         self.cancelled = False
@@ -1086,6 +1269,35 @@ class _LiveJob:
             "rtf": None,
             "segments": [],
         }
+
+    def _ensure_mp3_encoder(self):
+        sample_rate = int(self.sample_rate or 22050)
+        if self._mp3_encoder is None or self._mp3_sample_rate != sample_rate:
+            self._mp3_encoder = _new_mp3_encoder(sample_rate, bit_rate=self._mp3_bit_rate)
+            self._mp3_sample_rate = sample_rate
+            self._mp3_finalized = False
+        return self._mp3_encoder
+
+    def append_pcm(self, pcm: bytes, sample_rate: Optional[int] = None) -> None:
+        if sample_rate:
+            self.sample_rate = int(sample_rate or self.sample_rate or 22050)
+        pcm = bytes(pcm or b"")
+        if not pcm:
+            return
+        self.pcm.extend(pcm)
+        if self._mp3_finalized:
+            return
+        encoded = self._ensure_mp3_encoder().encode(pcm)
+        if encoded:
+            self.mp3.extend(bytes(encoded))
+
+    def finalize_mp3(self) -> bytes:
+        if not self._mp3_finalized:
+            tail = self._ensure_mp3_encoder().flush()
+            if tail:
+                self.mp3.extend(bytes(tail))
+            self._mp3_finalized = True
+        return bytes(self.mp3)
 
 
 def _mark_job_cancelled(job: "_LiveJob", message: str = "任务已取消") -> None:
@@ -1418,6 +1630,7 @@ class TTS_Dialogue_Request(BaseModel):
     emo_alpha: float = 1.0
     bypass_cache: bool = False
     cache_nonce: Optional[str] = None
+    debug_save_wav: bool = False
 
 
 def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
@@ -1584,34 +1797,30 @@ async def voice_preview_endpoint(name: str):
 
 
 @APP.get("/cache_audio/{key}")
-async def cache_audio_by_key(key: str):
+async def cache_audio_by_key(key: str, format: Optional[str] = None):
     try:
-        path = _get_cached_audio(key)
+        path = _get_cached_audio(key, format=format)
         if not path:
             return JSONResponse(status_code=404, content={"message": "cache miss", "key": key})
         return FileResponse(
             path,
-            media_type="audio/wav",
-            headers={"X-IndexTTS-Cache": "HIT", "X-IndexTTS-Cache-Key": key},
+            media_type=_media_type_for_audio_path(path),
+            headers=_cache_audio_headers(key, path),
         )
     except Exception as e:
         return JSONResponse(status_code=400, content={"message": "cache audio failed", "Exception": str(e)})
 
 
 @APP.head("/cache_audio/{key}")
-async def cache_audio_by_key_head(key: str):
+async def cache_audio_by_key_head(key: str, format: Optional[str] = None):
     try:
-        path = _get_cached_audio(key)
+        path = _get_cached_audio(key, format=format)
         if not path:
             return Response(status_code=404, headers={"X-IndexTTS-Cache": "MISS", "X-IndexTTS-Cache-Key": key})
         return Response(
             status_code=200,
-            media_type="audio/wav",
-            headers={
-                "X-IndexTTS-Cache": "HIT",
-                "X-IndexTTS-Cache-Key": key,
-                "Content-Length": str(os.path.getsize(path)),
-            },
+            media_type=_media_type_for_audio_path(path),
+            headers=_cache_audio_headers(key, path, {"Content-Length": str(os.path.getsize(path))}),
         )
     except Exception as e:
         return Response(status_code=400, headers={"X-IndexTTS-Error": str(e)})
@@ -1631,6 +1840,7 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
     job.metrics["prompt_audio_seconds"] = sampling_kwargs["max_prompt_audio_seconds"]
     job.metrics["segment_tokens"] = sampling_kwargs["max_text_tokens_per_segment"]
     job.metrics["s2mel_cfg_rate"] = sampling_kwargs["s2mel_cfg_rate"]
+    job.metrics["interval_ms"] = int(req.get("interval_ms") or 0)
     try:
         if prepared.get("needs_parse"):
             segments = await _parse_dialogue_text_in_backend(prepared, job)
@@ -1696,7 +1906,7 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
                 elif emo_vec:
                     emo_text_seg = None
                 if idx > 0 and int(req.get("interval_ms") or 0) > 0:
-                    job.pcm.extend(_silence_pcm_bytes(job.sample_rate, int(req.get("interval_ms") or 0)))
+                    job.append_pcm(_silence_pcm_bytes(job.sample_rate, int(req.get("interval_ms") or 0)), job.sample_rate)
                 seg_start = len(job.pcm)
                 seg_started = time.perf_counter()
 
@@ -1727,7 +1937,7 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
                 pcm = _array_to_pcm_bytes(wav_data)
                 if pcm and job.metrics.get("first_pcm_s") is None:
                     job.metrics["first_pcm_s"] = round(time.perf_counter() - job._perf_created, 3)
-                job.pcm.extend(pcm)
+                job.append_pcm(pcm, sampling_rate)
                 seg_wall = time.perf_counter() - seg_started
                 seg_bytes = len(job.pcm) - seg_start
                 seg_duration = seg_bytes / (job.sample_rate * 2) if job.sample_rate else 0.0
@@ -1773,17 +1983,24 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
         job.metrics["state"] = "saving"
         job.metrics["phase"] = "saving"
         job.metrics["message"] = "音频合成完成，正在保存缓存"
-        wav_bytes = _make_complete_wav_bytes(bytes(job.pcm), job.sample_rate)
+        mp3_full = job.finalize_mp3()
+        debug_wav = _make_complete_wav_bytes(bytes(job.pcm), job.sample_rate) if bool(req.get("debug_save_wav", False)) else None
         audio_duration = len(job.pcm) / (job.sample_rate * 2) if job.sample_rate else 0.0
         total_wall = time.perf_counter() - job._perf_created
         job.metrics["audio_duration_s"] = round(audio_duration, 3)
         job.metrics["total_wall_s"] = round(total_wall, 3)
         job.metrics["rtf"] = round(total_wall / audio_duration, 3) if audio_duration > 0 else None
+        job.metrics["cache_audio_format"] = "mp3"
+        job.metrics["mp3_bytes"] = len(mp3_full)
+        if debug_wav:
+            job.metrics["debug_wav_bytes"] = len(debug_wav)
         job.metrics["state"] = "done"
         job.metrics["phase"] = "done"
         job.metrics["message"] = "音频已保存"
         metadata = {
             "kind": "fast6g_dialogue_stream_v1",
+            "audio_format": "mp3",
+            "content_type": "audio/mpeg",
             "segments_meta": job.segments_meta,
             "segments_plan": job.metrics.get("segments_plan") or [],
             "sample_rate": job.sample_rate,
@@ -1791,7 +2008,7 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
             "metrics": job.metrics,
             "version": "fast6g",
         }
-        _save_cached_audio(job.cache_key, wav_bytes, metadata)
+        _save_cached_audio(job.cache_key, mp3_full, metadata, audio_format="mp3", debug_wav_bytes=debug_wav)
     except Exception as e:
         if job.cancelled:
             _mark_job_cancelled(job)
@@ -1957,7 +2174,7 @@ async def tts_dialogue_stream_job_audio_endpoint(job_id: str, start_s: float = 0
     cache_key = job_id
     cached_path = _get_cached_audio(cache_key)
     if cached_path:
-        return _cached_wav_response_with_start_offset(cached_path, cache_key, start_s)
+        return _cached_audio_response_with_start_offset(cached_path, cache_key, start_s)
     job = LIVE_JOBS.get(cache_key)
     if job:
         return StreamingResponse(
@@ -1976,7 +2193,7 @@ async def tts_dialogue_stream_job_pcm_endpoint(
     max_bytes: int = 262144,
     wait_ms: int = 450,
 ):
-    """Return same-key live PCM bytes before the final WAV is saved."""
+    """Return same-key live PCM bytes before the final MP3 cache is saved."""
     cache_key = job_id
     block_align = 2
     max_bytes = _align_pcm_offset(max(4096, min(1048576, int(max_bytes or 262144))), block_align)
@@ -2010,7 +2227,10 @@ async def tts_dialogue_stream_job_pcm_endpoint(
             headers=_live_pcm_headers(cache_key, sample_rate, read_offset, read_offset, total, True, "done"),
         )
 
-    cached_path = _get_cached_audio(cache_key)
+    try:
+        cached_path = _cached_wav_path_for_diagnostics(cache_key)
+    except ValueError as e:
+        return JSONResponse(status_code=404, content={"message": "invalid cache key", "Exception": str(e), "cache_key": cache_key})
     if cached_path:
         try:
             with open(cached_path, "rb") as fp:
@@ -2034,6 +2254,119 @@ async def tts_dialogue_stream_job_pcm_endpoint(
             )
         except Exception as e:
             return JSONResponse(status_code=400, content={"message": "live pcm cache read failed", "Exception": str(e), "cache_key": cache_key})
+
+    return JSONResponse(status_code=404, content={"message": "job missing or expired", "cache_key": cache_key})
+
+
+@APP.get("/tts_dialogue_stream_job/{job_id}/segment/{segment_idx}")
+async def tts_dialogue_stream_job_segment_audio_endpoint(job_id: str, segment_idx: int):
+    cache_key = job_id
+    job = LIVE_JOBS.get(cache_key)
+    if job:
+        return _segment_wav_response_from_pcm(
+            cache_key,
+            bytes(job.pcm),
+            job.sample_rate,
+            job.segments_meta,
+            segment_idx,
+            metrics=job.metrics,
+            cache_state="LIVE",
+        )
+
+    try:
+        cached_path = _cached_wav_path_for_diagnostics(cache_key)
+    except ValueError as e:
+        return JSONResponse(status_code=404, content={"message": "invalid cache key", "Exception": str(e), "cache_key": cache_key})
+    if cached_path:
+        try:
+            with open(cached_path, "rb") as fp:
+                sample_rate, pcm = _wav_bytes_to_pcm_bytes(fp.read())
+            meta = _read_cache_metadata(cache_key)
+            params = meta.get("params") if isinstance(meta.get("params"), dict) else meta
+            segments_meta = params.get("segments_meta") or meta.get("segments_meta") or []
+            metrics = params.get("metrics") or meta.get("metrics") or {}
+            return _segment_wav_response_from_pcm(
+                cache_key,
+                pcm,
+                int(sample_rate or params.get("sample_rate") or meta.get("sample_rate") or 22050),
+                segments_meta,
+                segment_idx,
+                metrics=metrics,
+                cache_state="HIT",
+            )
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"message": "segment audio cache read failed", "Exception": str(e), "cache_key": cache_key})
+
+    return JSONResponse(status_code=404, content={"message": "job missing or expired", "cache_key": cache_key})
+
+
+@APP.get("/tts_dialogue_stream_job/{job_id}/mp3")
+async def tts_dialogue_stream_job_mp3_audio_endpoint(job_id: str, start_s: float = 0.0, bit_rate: int = 128):
+    cache_key = job_id
+    bit_rate = max(64, min(256, int(bit_rate or 128)))
+    try:
+        start_s = max(0.0, float(start_s or 0.0))
+    except Exception:
+        start_s = 0.0
+
+    job = LIVE_JOBS.get(cache_key)
+    if job:
+        sample_rate = int(job.sample_rate or 22050)
+        try:
+            return StreamingResponse(
+                _stream_mp3_from_live_job(job, start_offset_s=start_s, bit_rate=bit_rate),
+                media_type="audio/mpeg",
+                headers=_mp3_headers(cache_key, "LIVE", sample_rate, bit_rate, start_s),
+            )
+        except RuntimeError as e:
+            return JSONResponse(status_code=501, content={"message": str(e), "cache_key": cache_key})
+
+    try:
+        cached_path = _get_cached_audio(cache_key)
+    except ValueError as e:
+        return JSONResponse(status_code=404, content={"message": "invalid cache key", "Exception": str(e), "cache_key": cache_key})
+    if cached_path:
+        if _media_type_for_audio_path(cached_path) == "audio/mpeg":
+            sample_rate = 22050
+            if start_s > 0.01:
+                try:
+                    debug_wav_path = _cached_wav_path_for_diagnostics(cache_key)
+                except ValueError:
+                    debug_wav_path = None
+                if debug_wav_path:
+                    try:
+                        with open(debug_wav_path, "rb") as fp:
+                            sample_rate, pcm = _wav_bytes_to_pcm_bytes(fp.read())
+                        sample_rate = int(sample_rate or 22050)
+                        block_align = 2
+                        offset = _align_pcm_offset(int(start_s * sample_rate * block_align), block_align)
+                        mp3 = _encode_pcm_to_mp3_bytes(pcm[offset:], sample_rate, bit_rate=bit_rate)
+                        return Response(
+                            mp3,
+                            media_type="audio/mpeg",
+                            headers=_mp3_headers(cache_key, "HIT", sample_rate, bit_rate, start_s),
+                        )
+                    except Exception as e:
+                        return JSONResponse(status_code=400, content={"message": "mp3 debug wav seek failed", "Exception": str(e), "cache_key": cache_key})
+            headers = _mp3_headers(cache_key, "HIT", sample_rate, bit_rate, 0.0)
+            headers["Accept-Ranges"] = "bytes"
+            return FileResponse(cached_path, media_type="audio/mpeg", headers=headers)
+        try:
+            with open(cached_path, "rb") as fp:
+                sample_rate, pcm = _wav_bytes_to_pcm_bytes(fp.read())
+            sample_rate = int(sample_rate or 22050)
+            block_align = 2
+            offset = _align_pcm_offset(int(start_s * sample_rate * block_align), block_align)
+            mp3 = _encode_pcm_to_mp3_bytes(pcm[offset:], sample_rate, bit_rate=bit_rate)
+            return Response(
+                mp3,
+                media_type="audio/mpeg",
+                headers=_mp3_headers(cache_key, "HIT", sample_rate, bit_rate, start_s),
+            )
+        except RuntimeError as e:
+            return JSONResponse(status_code=501, content={"message": str(e), "cache_key": cache_key})
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"message": "mp3 cache read failed", "Exception": str(e), "cache_key": cache_key})
 
     return JSONResponse(status_code=404, content={"message": "job missing or expired", "cache_key": cache_key})
 

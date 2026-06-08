@@ -171,7 +171,23 @@
   function offlineAudioKey(cacheKey) {
     cacheKey = String(cacheKey || "").trim();
     if (!cacheKey) return "";
+    return "indextts-" + cacheKey.replace(/[^A-Za-z0-9_-]/g, "_") + ".mp3";
+  }
+  function legacyOfflineAudioKey(cacheKey) {
+    cacheKey = String(cacheKey || "").trim();
+    if (!cacheKey) return "";
     return "indextts-" + cacheKey.replace(/[^A-Za-z0-9_-]/g, "_") + ".wav";
+  }
+  function offlineAudioKeyCandidates(cacheKey, preferredKey) {
+    var out = [];
+    function add(key) {
+      key = String(key || "").trim();
+      if (key && out.indexOf(key) < 0) out.push(key);
+    }
+    add(preferredKey);
+    add(offlineAudioKey(cacheKey));
+    add(legacyOfflineAudioKey(cacheKey));
+    return out;
   }
   function offlineFileApi() {
     if (!(window.tavo && tavo.file && typeof tavo.file.save === "function" && typeof tavo.file.exists === "function" && typeof tavo.file.delete === "function" && typeof tavo.file.url === "function")) {
@@ -191,8 +207,10 @@
     }
   }
   async function putOfflineAudioRecord(record) {
-    if (!record || !record.key || !record.sourceUrl) throw new Error("离线音频记录缺少文件名或来源");
-    var path = await offlineFileApi().save(record.key, record.sourceUrl, { scope: OFFLINE_FILE_SCOPE });
+    if (!record || !record.key || !(record.content || record.sourceUrl)) throw new Error("离线音频记录缺少文件名或来源");
+    var options = { scope: OFFLINE_FILE_SCOPE };
+    if (record.encoding) options.encoding = record.encoding;
+    var path = await offlineFileApi().save(record.key, record.content || record.sourceUrl, options);
     if (!path) throw new Error("Tavo 文件保存失败");
     return { key: record.key, path: path, size: record.size || 0, updatedAt: Date.now() };
   }

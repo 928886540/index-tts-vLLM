@@ -7,7 +7,7 @@
   - verify empty player disables play and only the music-note button creates a new job;
   - verify AI mode refuses missing role mappings instead of submitting/defaulting a voice;
   - verify restored LIVE pending audio resumes the same key and does not stay in a permanent spinner;
-  - verify LIVE either becomes audible on phone or switches to native saved audio after cache ready;
+  - verify default MP3 LIVE becomes audible on phone, and when LIVE cannot continue it switches to native saved MP3 after cache ready;
   - verify the avatar-side status line only shows the configured/current voice label.
 
 - Make this docs workflow the active handoff path:
@@ -49,8 +49,8 @@
   - error UI should show backend failure, not generic audio format errors.
 
 - Human-readable cache index:
-  - code now writes one primary-role readable entry under `outputs/cache/by_role/<主角色>/<timestamp>_<cache_key>.wav`;
-  - `fast6g` short normal-mode generation confirmed matching `by_role/旁白/...wav/json` on 2026-06-06;
+  - code now writes one primary-role readable entry under `outputs/cache/by_role/<主角色>/<timestamp>_<cache_key>.<ext>`; new user-facing cache defaults to `.mp3`, with `.wav` retained for debug/legacy entries;
+  - `fast6g` short normal-mode generation confirmed matching legacy `by_role/旁白/...wav/json` on 2026-06-06; next real Tavo generation should confirm new `.mp3/json` readable entries;
   - still run one real Tavo generation to confirm role folders look right with actual Tavo metadata.
 
 ## P1
@@ -73,11 +73,11 @@
   - ensure cache metadata has enough information to debug resource/quality regressions.
 
 - Mobile playback pass:
-  - saved audio seek and replay;
+  - saved MP3 audio seek and replay;
   - background/foreground behavior;
   - MediaSession / system playback controls;
   - live stream failure and recovery behavior.
-  - specifically confirm saved/cache audio still uses native `<audio>` and works in background/lock-screen after the live-card patch.
+  - specifically confirm saved/cache audio still uses native `<audio>` MP3 and works in background/lock-screen after the live-card patch.
 
 - User distribution defaults:
   - P1 users should run the author's built-in prompts, style mappings, voice strategy, and quality tiers by default;

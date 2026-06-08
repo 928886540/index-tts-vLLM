@@ -64,6 +64,27 @@
           updateTrackButtons();
           return;
         }
+        if (isLiveTrack(track) && (shouldUseMp3AudioForLiveTrack(track, autoplay ? trackResumeSec(track) : 0) || shouldUseSegmentAudioForLiveTrack(track, autoplay ? trackResumeSec(track) : 0))) {
+          clearElementAudioSrc();
+          if (seek) { seek.disabled = true; seek.value = "0"; }
+          if (autoplay) {
+            var nativeResumeSec = trackResumeSec(track);
+            playLiveTrack(track, liveStreamUrlForTrack(track) || srcUrl, {
+              noticeTitle: nativeResumeSec > 0 ? "从暂停位置续播" : "等待音频…",
+              noticeDetail: nativeResumeSec > 0 ? ("从 " + formatTime(nativeResumeSec) + " 继续") : "正在连接实时音频",
+              waitDetail: "后端合成中",
+              startOffsetSec: nativeResumeSec
+            });
+          } else {
+            setTrackPlaybackState(track, "idle");
+            setPlayState("idle");
+            setStatus("流式生成中");
+            showTrackNotice(track, "流式生成中", shouldUseMp3AudioForLiveTrack(track, 0) ? "点播放连接 MP3 实时流" : "点播放等待已完成小段");
+            pollCacheUpgrade(track, shouldUseMp3AudioForLiveTrack(track, 0) ? "select live mp3" : "select native segment");
+          }
+          updateTrackButtons();
+          return;
+        }
         if (isLiveTrack(track) && !shouldUseElementForLiveTrack(track, autoplay ? trackResumeSec(track) : 0)) {
           clearElementAudioSrc();
           if (seek) { seek.disabled = true; seek.value = "0"; }
@@ -160,7 +181,7 @@
           showTrackNotice(track, "完整音频已就绪", formatJobMetrics(track.metrics) || "点播放可重播");
           return true;
         }
-        if (isElementUsingTrackStream(track) && !opts.forceElement && !opts.autoplay) {
+        if ((isElementUsingTrackStream(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track)) && !opts.forceElement && !opts.autoplay) {
           setStatus(isElementPlayingTrackStream(track) ? "完整音频已就绪，继续流式播放" : "完整音频已就绪，可重播");
           showTrackNotice(track, "完整音频已就绪", trackHasStreamIssue(track) ? "检测到流式卡顿，可切到完整音频" : "当前流式播放不切换，结束后可重播");
           return true;
@@ -411,52 +432,47 @@
           raw.length,
           displayIdx
         );
-        return "播第 " + displayIdx + (total ? "/" + total : "") + " 段";
+        return "正在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
       }
       function jobStatusMessage(metrics, trackEntry, payload) {
         var phase = String((metrics && metrics.phase) || "");
         var msg = String((metrics && metrics.message) || "");
         var mode = normalizeModeName((trackEntry && (trackEntry.mode || trackEntry.parseMode)) || (metrics && metrics.parse_mode) || cfg.mode);
         var playback = normalizePlaybackMode((trackEntry && trackEntry.playbackMode) || cfg.playbackMode);
-        var live = playback === "live";
-        var flow = mode === "ai" ? (live ? "AI" : "AI落盘") : (live ? "LIVE" : "落盘");
         var total = Number((metrics && metrics.segments_total) || 0) || 0;
         if (!total && metrics && Array.isArray(metrics.segments_plan)) total = metrics.segments_plan.length;
-        var doneSegs = payload && Array.isArray(payload.segments_meta) ? payload.segments_meta.length : 0;
-        var nextSeg = total ? Math.max(1, Math.min(total, doneSegs + 1)) : 0;
+        var doneSegs = Number(metrics && metrics.segments_done);
+        if (!isFinite(doneSegs)) doneSegs = payload && Array.isArray(payload.segments_meta) ? payload.segments_meta.length : 0;
+        doneSegs = Math.max(0, Math.floor(doneSegs || 0));
+        if (total) doneSegs = Math.min(total, doneSegs);
         var playingSeg = playbackSegmentStatusText(trackEntry, payload, total);
         function withPlayingSegment(text) {
           return playingSeg ? (text + " · " + playingSeg) : text;
-        }
-        function queueWaitSuffix() {
-          var waitS = Number(metrics && metrics.queue_wait_s);
-          if (!isFinite(waitS) || waitS < 5) return "";
-          return " · 已等 " + Math.floor(waitS) + "s";
         }
         function queueStatusText() {
           var rawAhead = Number(metrics && metrics.queue_ahead);
           if (isFinite(rawAhead)) {
             var ahead = Math.max(0, Math.floor(rawAhead));
-            if (ahead > 0) return flow + " 排队中 · 前面还有 " + ahead + " 个 TTS 任务" + queueWaitSuffix();
-            return flow + " 排队中 · 下一个开始" + queueWaitSuffix();
+            if (ahead > 0) return "排队中 · 前面还有 " + ahead + " 个任务";
+            return "排队中 · 下一个开始";
           }
-          return flow + " 等" + (live ? "首音" : "合成");
+          return "排队中";
         }
-        if (phase === "created") return flow + " 等待后端";
-        if (phase === "llm_parse_cache") return flow + " 复用分段，等" + (live ? "首音" : "合成");
+        if (phase === "created") return mode === "ai" ? "等待分析文本" : "任务已提交";
+        if (phase === "llm_parse_cache") return "复用分段完成，等待合成";
         if (phase === "llm_parse") {
-          if (/检查|复用/i.test(msg)) return flow + " 分段检查中";
-          return flow + " LLM 分段中";
+          if (/检查|复用/i.test(msg)) return "检查分段复用";
+          return "正在分析文本";
         }
         if (phase === "tts_queue") return queueStatusText();
         if (phase === "tts") {
-          if (total) return withPlayingSegment(flow + " 合成 " + nextSeg + "/" + total);
-          return withPlayingSegment(flow + " 合成中");
+          if (total) return withPlayingSegment("已生成 " + doneSegs + "/" + total + " 段");
+          return withPlayingSegment("正在合成");
         }
-        if (phase === "saving") return withPlayingSegment(flow + " 保存中");
-        if (phase === "done") return flow + " 已保存";
-        if (/文本已拆分|等待 TTS 合成|拆分文本|拆段/.test(msg)) return withPlayingSegment(flow + " 等" + (live ? "首音" : "合成"));
-        return withPlayingSegment(msg || (flow + " 处理中"));
+        if (phase === "saving") return withPlayingSegment(total ? ("已生成 " + Math.max(doneSegs, total) + "/" + total + " 段，正在保存") : "正在保存");
+        if (phase === "done") return "完整音频已保存";
+        if (/文本已拆分|等待 TTS 合成|拆分文本|拆段/.test(msg)) return "等待合成";
+        return withPlayingSegment(msg || "处理中");
       }
       (async function () {
         var done = false;
@@ -480,7 +496,7 @@
                   var phase = String(j.metrics.phase || "");
                   if (phase === "llm_parse" || phase === "llm_parse_cache" || phase === "created" || phase === "tts_queue" || phase === "tts" || phase === "saving") {
                     var uiMsg = jobStatusMessage(j.metrics, trackEntry, j);
-                    trackEntry.latestSynthesisStatusText = String(uiMsg || "").replace(/\s*·\s*(?:当前在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/g, "");
+                    trackEntry.latestSynthesisStatusText = String(uiMsg || "").replace(/\s*·\s*(?:当前在播第|正在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/g, "");
                     setStatus(uiMsg);
                     if (!isTransientProgressNotice(uiMsg)) showTrackNotice(trackEntry, uiMsg || "正在生成…", formatJobMetrics(j.metrics) || "请稍等");
                   }
@@ -519,10 +535,12 @@
                 var liveWebAudioAudibleNow = !!(liveWebAudioOwnsTrack && trackEntry.webAudioPlaying);
                 var liveElementAudibleNow = !!(typeof isElementPlayingTrackStream === "function" && isElementPlayingTrackStream(trackEntry));
                 var liveStreamAudibleNow = liveWebAudioAudibleNow || liveElementAudibleNow;
+                var liveEndedAwaitSaved = !!(trackEntry.liveEndedAwaitSaved || (preSavePlaybackState === "ended" && isCurrent && normalizePlaybackMode(trackEntry.playbackMode) === "live"));
                 var hardStreamIssue = !!(trackEntry.streamInterrupted || trackEntry.streamHealth === "interrupted");
                 var liveCurrentNeedsSoundHandoff = !!(
                   isCurrent
                   && !wasBackground
+                  && !liveEndedAwaitSaved
                   && normalizePlaybackMode(trackEntry.playbackMode) === "live"
                   && !trackEntry.pausedByUser
                   && (
@@ -540,10 +558,12 @@
                 setTrackState(trackEntry, "saved");
                 var appendedDetached = wasDetached ? appendDetachedBackgroundTrackToHistory(trackEntry, label) : false;
                 var autoplaySaved = !!liveCacheHandoffNeeded;
+                if (liveEndedAwaitSaved) autoplaySaved = false;
                 if (wasBackground) autoplaySaved = false;
                 trackEntry.playSavedWhenReady = false;
                 trackEntry.streamTooSlowFallback = false;
-                attachCacheAudio(trackEntry, { forceElement: autoplaySaved, deferElement: liveWebAudioOwnsTrack && !autoplaySaved && !trackHasStreamIssue(trackEntry), autoplay: autoplaySaved });
+                attachCacheAudio(trackEntry, { forceElement: liveEndedAwaitSaved || autoplaySaved, deferElement: !liveEndedAwaitSaved && liveWebAudioOwnsTrack && !autoplaySaved && !trackHasStreamIssue(trackEntry), autoplay: autoplaySaved });
+                trackEntry.liveEndedAwaitSaved = false;
                 scheduleOfflineAudioSave(trackEntry, label + " offline", 0);
                 knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
                 updateTrackButtons();
@@ -551,6 +571,10 @@
                 removePendingJobForTrack(trackEntry).catch(function(){});
                 debugLog("✅ " + label + " 已落盘，cacheUrl 已写回卡片" + (cacheHeadReady ? " (HEAD确认)" : ""), "#9f9");
                 if (autoplaySaved) setStatus("生成完成，正在播放完整音频");
+                else if (liveEndedAwaitSaved && isCurrent) {
+                  setStatus("播放完成，完整音频已就绪");
+                  showTrackNotice(trackEntry, "播放完成", "已切到完整音频，支持拖动进度条");
+                }
                 else if (wasBackground) {
                   if (isCurrent || !currentTrack()) setStatus("后台生成完成 · 历史音频 " + knownHistoryCount + " 条");
                   if (isCurrent) {
@@ -646,7 +670,7 @@
         parseMode: restoredMode === "single" ? "normal" : restoredMode,
         playbackMode: normalizePlaybackMode(t.playbackMode || "live"),
         backgroundOnly: false,
-        offlineKey: offlineAudioKey(t.cacheKey),
+        offlineKey: t.offlineKey || offlineAudioKey(t.cacheKey),
         offlineReady: !!t.offlineReady,
         offlineWanted: !!t.offlineWanted,
         offlineSavedAt: t.offlineSavedAt || 0,

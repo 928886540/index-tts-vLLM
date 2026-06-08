@@ -13,7 +13,7 @@ Primary goal: a user runs the model service on their own Windows machine, inject
 - `static/tavo.js`: shared single Tavo frontend injected script and player UI.
 - `launcher/` and `scripts/`: shared startup tooling and version selection.
 - `prompts/library/` under each backend version: voice/reference audio library.
-- `outputs/cache/` under the selected backend version: generated WAV and metadata snapshots.
+- `outputs/cache/` under the selected backend version: generated MP3 cache, optional debug/legacy WAV, and metadata snapshots.
 - `dev_workspace/dev_tools/`: local smoke tests, payloads, Playwright runner script, audio analysis utilities.
 - `dev_workspace/docs/`: active collaboration state.
 - `dev_workspace/handoff_docs/`: historical handoff material.
@@ -52,7 +52,7 @@ The project already moved toward an async job and cache-key model:
 - `POST /tts_dialogue_stream_job`: create or attach to a dialogue generation job.
 - `GET /tts_dialogue_stream_job/{cache_key}`: stream live/generated audio.
 - `GET /tts_dialogue_job_status/{cache_key}`: inspect running/done/failed state and segment metadata.
-- `GET /cache_audio/{cache_key}`: serve completed WAV snapshots.
+- `GET /cache_audio/{cache_key}`: serve completed cache snapshots. Default response is MP3 (`audio/mpeg`); `?format=wav` is retained for explicit debug/regression/legacy WAV checks.
 - `GET /server_log/tail`: inspect recent server logs.
 
 Important invariant: TTS generation should not be tightly coupled to a single frontend HTTP connection. If Tavo disconnects, the API backend should be able to keep the job alive, let the TTS service finish when possible, and save the cache.
@@ -85,9 +85,9 @@ Track history should persist only stable saved/cacheable entries. Live/pending/f
 
 ## Audio Boundary
 
-Saved/cache audio should prefer the native `<audio>` element when possible, because it has the best chance of integrating with system background playback and MediaSession.
+Saved/cache audio should prefer MP3 through the native `<audio>` element when possible, because it has the best chance of integrating with system background playback, MediaSession, fast loading, and Tavo file storage. WAV is retained only as optional debug/regression/legacy data.
 
-Live streaming may need Web Audio or API backend buffering depending on Tavo/WebView behavior. Treat mobile playback as a real Tavo regression problem, not a normal browser-only problem.
+Default LIVE streaming should use the MP3 route through native `<audio>`. Explicit WebAudio/PCM and finite WAV segment routes remain diagnostics for regressions and compatibility checks. Treat mobile playback as a real Tavo regression problem, not a normal browser-only problem.
 
 ## Snapshot Metadata
 
@@ -99,6 +99,7 @@ Cache metadata should include enough information for resume and subtitles:
 - `start_s`, `duration_s`, sample rate
 - RTF, total duration, total elapsed time
 - model/version and important inference parameters
+- audio format / content type, currently defaulting to MP3 with optional debug WAV metadata when present
 
 The frontend should display and persist counts based on saved tracks, not transient jobs.
 

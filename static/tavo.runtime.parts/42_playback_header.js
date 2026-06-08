@@ -62,7 +62,7 @@
         if (track && track.cacheKey) audio.dataset.idxCacheKey = String(track.cacheKey);
         else delete audio.dataset.idxCacheKey;
         audio.dataset.idxSourceKind = sourceKind || "";
-        if (sourceKind === "stream" && isFinite(Number(liveOffsetSec))) audio.dataset.idxLiveOffsetSec = String(Math.max(0, Number(liveOffsetSec) || 0));
+        if ((sourceKind === "stream" || sourceKind === "live-segment" || sourceKind === "live-mp3") && isFinite(Number(liveOffsetSec))) audio.dataset.idxLiveOffsetSec = String(Math.max(0, Number(liveOffsetSec) || 0));
         else delete audio.dataset.idxLiveOffsetSec;
       } catch (_) {}
     }
@@ -78,16 +78,26 @@
     function liveElementOffsetSec(track) {
       if (!track || !audio) return 0;
       try {
-        if (audio.dataset.idxSourceKind === "stream" && audio.dataset.idxLiveOffsetSec != null) {
+        if ((audio.dataset.idxSourceKind === "stream" || audio.dataset.idxSourceKind === "live-segment" || audio.dataset.idxSourceKind === "live-mp3") && audio.dataset.idxLiveOffsetSec != null) {
           return Math.max(0, Number(audio.dataset.idxLiveOffsetSec) || 0);
         }
       } catch (_) {}
       return Math.max(0, Number(track.liveElementOffsetSec || 0) || 0);
     }
+    function isTrackUsingSeekableLiveOutput(track) {
+      if (!track || !audio) return false;
+      try {
+        if (isElementUsingTrackLiveMp3(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackStream(track) || isElementPlayingTrackStream(track)) return true;
+      } catch (_) {}
+      try {
+        if (typeof webAudioBelongsToTrack === "function" && webAudioBelongsToTrack(track)) return true;
+      } catch (_) {}
+      return false;
+    }
     function elementPlaybackTimeSec(track) {
       var current = 0;
       try { current = Math.max(0, Number(audio.currentTime || 0) || 0); } catch (_) { current = 0; }
-      return clampPlaybackTimeSec(track, (isElementUsingTrackStream(track) ? liveElementOffsetSec(track) : 0) + current);
+      return clampPlaybackTimeSec(track, ((isElementUsingTrackStream(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track)) ? liveElementOffsetSec(track) : 0) + current);
     }
     function trackResumeSec(track) {
       if (!track) return 0;
@@ -174,7 +184,7 @@
         raw.length,
         displayIdx
       );
-      return "播第 " + displayIdx + (total ? "/" + total : "") + " 段";
+      return "正在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
     }
     function trackDurationHintSec(track) {
       if (!track) return 0;
@@ -192,6 +202,7 @@
     function isLiveProgressTrack(track) {
       if (!track) return false;
       try {
+        if (isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track)) return true;
         if (isSavedTrack(track)) return false;
         if (track.webAudioPlaying || webAudioActiveTrack === track) return true;
         if (isElementUsingTrackStream(track) || isElementPlayingTrackStream(track)) return true;
@@ -230,14 +241,40 @@
       if (isLiveProgressTrack(track)) return Math.max(10, positionSec + 5);
       return 0;
     }
+    function canSeekLiveTrack(track) {
+      if (!track || track.deleted || isTerminalTrack(track)) return false;
+      if (normalizePlaybackMode(track.playbackMode) !== "live" || track.backgroundOnly) return false;
+      if (!track.cacheKey && !liveStreamUrlForTrack(track)) return false;
+      if (isSavedTrack(track) && !isTrackUsingSeekableLiveOutput(track)) return false;
+      return true;
+    }
+    function canSeekTrackByControls(track) {
+      if (!track || track.deleted || isTerminalTrack(track)) return false;
+      if (isSavedTrack(track)) return !!(trackPlayableUrl(track) || track.cacheUrl || track.cacheKey);
+      return canSeekLiveTrack(track);
+    }
     function seekToSeconds(pos, opts) {
       opts = opts || {};
       var track = currentTrack();
       pos = Math.max(0, Number(pos) || 0);
+      if (track && canSeekLiveTrack(track) && liveStreamUrlForTrack(track)) {
+        var liveDur = trackDurationHintSec(track);
+        if (liveDur > 0) pos = Math.min(pos, Math.max(0, liveDur - 0.05));
+        pos = rememberLiveResumeSec(track, pos, opts.noticeTitle || "live seek", { allowBackward: true });
+        track.pausedByUser = false;
+        setStatus(opts.noticeTitle || "跳转实时音频…");
+        showTrackNotice(track, opts.noticeTitle || "跳转实时音频", "从 " + formatTime(pos) + " 继续同一个任务");
+        return playLiveTrack(track, liveStreamUrlForTrack(track), {
+          noticeTitle: opts.noticeTitle || "跳转实时音频…",
+          noticeDetail: "从 " + formatTime(pos) + " 继续",
+          waitDetail: "等待后端返回对应位置音频",
+          startOffsetSec: pos
+        });
+      }
       if (track && isCancelableLiveTrack(track)) {
         if (seek) seek.value = "0";
         setStatus(busyGenerationStatus(track, "seek"));
-        showTrackNotice(track, track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate" ? "后台生成中" : "流式生成中", track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate" ? "完成后会变成可播放的历史音频" : "只保留播放/暂停和退出；完成后会变成可拖动历史音频");
+        showTrackNotice(track, track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate" ? "后台生成中" : "流式生成中", track.backgroundOnly || normalizePlaybackMode(track.playbackMode) === "generate" ? "完成后会变成可播放的历史音频" : "当前实时流还没有可跳转位置");
         return false;
       }
       var dur = Number(audio && audio.duration);
@@ -248,13 +285,6 @@
       if (track && isSavedTrack(track) && trackPlayableUrl(track)) {
         startElementAudioFrom(track, pos);
         return true;
-      }
-      if (track && isLiveTrack(track) && !shouldUseWebAudioForLiveTrack(track) && liveStreamUrlForTrack(track)) {
-        return waitForSavedLiveTrack(track, "seek live cache fallback", {
-          resumeSec: pos,
-          title: "等待完整音频…",
-          detail: "实时音频不支持拖动，生成完成后从完整音频播放"
-        });
       }
       if (track && (track.webAudioPlaying || isLiveTrack(track) || liveStreamUrlForTrack(track))) {
         track.lastWebAudioSec = pos;
