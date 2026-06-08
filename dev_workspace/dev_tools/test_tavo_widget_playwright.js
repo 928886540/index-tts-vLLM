@@ -2781,6 +2781,7 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
 
   const pageErrors = [];
   const liveKey = "e".repeat(40);
+  const savedKey = "d".repeat(40);
   let jobCount = 0;
   let statusCount = 0;
   let streamGetCount = 0;
@@ -2887,7 +2888,7 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
     attachErrorHandlers(firstPage);
     await firstPage.goto(targetUrl, { waitUntil: "domcontentloaded" });
     await remountTavoScript(firstPage, "webAudioLive=1");
-    await firstPage.evaluate(() => {
+    await firstPage.evaluate(async ({ savedKey }) => {
       localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
         configVersion: 14,
         mode: "normal",
@@ -2901,7 +2902,24 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
         characterName: "潘金莲",
         roleVoiceList: []
       }));
-    });
+      await window.tavo.set("indextts_tracks_test-message-1", [{
+        cacheKey: savedKey,
+        cacheUrl: "/cache_audio/" + savedKey,
+        trackIndex: 0,
+        trackId: "saved-card-0",
+        createdAt: Date.now() - 1000,
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        playbackMode: "live",
+        state: "saved",
+        serverState: "done",
+        cacheState: "ready",
+        remoteCacheState: "ready",
+        duration_s: 1.1,
+        segments: []
+      }], "chat");
+      await window.tavo.set("indextts_pending_jobs_test-message-1", [], "chat");
+    }, { savedKey });
 
     await firstPage.click('[data-role="lazy-open"]');
     await firstPage.waitForSelector(".idx-card", { timeout: 10000 });
@@ -2917,30 +2935,20 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
     }, liveKey, { timeout: 10000 });
 
     const persistedBeforeClose = await firstPage.evaluate(() => {
-      function stableHash(text) {
-        text = String(text || "");
-        let h = 2166136261;
-        for (let i = 0; i < text.length; i += 1) {
-          h ^= text.charCodeAt(i);
-          h = Math.imul(h, 16777619);
-        }
-        return (h >>> 0).toString(16);
-      }
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
-      const text = String((document.getElementById("messageText") || {}).value || "").replace(/\s+/g, " ").trim();
-      const textKey = "chat:indextts_pending_jobs_text_" + stableHash(text);
+      const textHashKeys = Object.keys(bucket).filter((k) => /indextts_pending_jobs_text_/.test(k));
+      const saved = bucket["chat:indextts_tracks_test-message-1"] || [];
       const jobs = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
-      const textJobs = bucket[textKey] || [];
       const liveExit = document.querySelector('[data-role="live-exit"]');
       const play = document.querySelector('[data-role="play"]');
       return {
-        textKey,
+        textHashKeys,
         jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        savedTracks: saved,
         pendingJobs: jobs,
-        pendingTextJobs: textJobs,
         counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
         liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
         playState: play ? play.dataset.state : ""
@@ -2950,13 +2958,16 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
       throw new Error("LIVE durable pending should create exactly one job before WebView death: " + JSON.stringify({ jobCount, persistedBeforeClose, jobBodies }));
     }
     const storedLive = (persistedBeforeClose.pendingJobs || [])[0] || {};
-    if (storedLive.cacheKey !== liveKey || storedLive.playbackMode !== "live" || storedLive.backgroundOnly !== false || storedLive.state !== "live") {
-      throw new Error("LIVE should persist a visible pending history card immediately after cacheKey: " + JSON.stringify(persistedBeforeClose));
+    if (storedLive.cacheKey !== liveKey || storedLive.playbackMode !== "live" || storedLive.backgroundOnly !== false || storedLive.state !== "live" || storedLive.trackIndex !== 1 || !storedLive.trackId) {
+      throw new Error("LIVE should persist as the second card under the message-id object immediately after cacheKey: " + JSON.stringify(persistedBeforeClose));
     }
-    if (!persistedBeforeClose.pendingTextJobs.some((x) => x && x.cacheKey === liveKey && x.playbackMode === "live")) {
-      throw new Error("LIVE pending should also persist under the message text hash key for unstable message ids: " + JSON.stringify(persistedBeforeClose));
+    if (!persistedBeforeClose.savedTracks.some((x) => x && x.cacheKey === savedKey && x.trackIndex === 0)) {
+      throw new Error("saved history should keep the first card under the same message id: " + JSON.stringify(persistedBeforeClose));
     }
-    if (!persistedBeforeClose.liveExitVisible || !/^\d+\/\d+$/.test(persistedBeforeClose.counterText)) {
+    if (persistedBeforeClose.textHashKeys.length) {
+      throw new Error("LIVE pending must not be duplicated under a message-text hash key: " + JSON.stringify(persistedBeforeClose.textHashKeys));
+    }
+    if (!persistedBeforeClose.liveExitVisible || persistedBeforeClose.counterText.trim() !== "2/2") {
       throw new Error("LIVE durable pending card should stay visible before close: " + JSON.stringify(persistedBeforeClose));
     }
     await firstPage.close();
@@ -2964,36 +2975,38 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
     const secondPage = await context.newPage();
     attachErrorHandlers(secondPage);
     await secondPage.goto(targetUrl, { waitUntil: "domcontentloaded" });
-    await secondPage.evaluate((textKey) => {
+    await secondPage.evaluate(() => {
+      const text = document.getElementById("messageText");
+      if (text) {
+        text.value = "正文已经被用户修改，但同一条消息的 msgid 不变。";
+        text.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       const preview = document.getElementById("messagePreview");
-      if (preview) preview.textContent = "DOM text changed after script refresh; use tavo.message.current().content.";
-      if (window.tavo && typeof window.tavo.set === "function") {
-        window.tavo.set("indextts_pending_jobs_test-message-1", [], "chat");
-      }
-      try { localStorage.removeItem("indextts_pending_jobs_test-message-1"); } catch (_) {}
+      if (preview) preview.textContent = "正文已经被用户修改，但同一条消息的 msgid 不变。";
       const bucket = window.__idxTest.storageBucket();
-      if (!Array.isArray(bucket[textKey]) || !bucket[textKey].length) {
-        throw new Error("missing text-hash pending before remount: " + textKey);
+      const jobs = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
+      if (!Array.isArray(jobs) || !jobs.some((x) => x && x.cacheKey === "e".repeat(40))) {
+        throw new Error("missing message-id pending before remount: " + JSON.stringify(bucket));
       }
-    }, persistedBeforeClose.textKey);
+    });
     await remountTavoScript(secondPage, "webAudioLive=1");
     await secondPage.waitForFunction(() => {
       const status = (document.querySelector('[data-role="lazy-status"]') || {}).textContent || "";
-      return /流式生成中|点开继续/.test(status);
+      return /历史音频 2 条|流式生成中|点开继续/.test(status);
     }, { timeout: 10000 });
     await secondPage.click('[data-role="lazy-open"]');
     await secondPage.waitForSelector(".idx-card", { timeout: 10000 });
     try {
-      await secondPage.waitForFunction(({ key, textKey }) => {
+      await secondPage.waitForFunction(({ key }) => {
         const fetches = window.__idxTest.getFetchLog();
         const bucket = window.__idxTest.storageBucket();
-        const jobs = bucket[textKey];
+        const jobs = bucket["chat:indextts_pending_jobs_test-message-1"];
         const liveExit = document.querySelector('[data-role="live-exit"]');
         return Array.isArray(jobs)
-          && jobs.some((x) => x && x.cacheKey === key && x.playbackMode === "live")
+          && jobs.some((x) => x && x.cacheKey === key && x.playbackMode === "live" && x.trackIndex === 1)
           && liveExit && getComputedStyle(liveExit).display !== "none"
           && fetches.some((r) => /\/tts_dialogue_job_status\//.test(r.url));
-      }, { key: liveKey, textKey: persistedBeforeClose.textKey }, { timeout: 10000 });
+      }, { key: liveKey }, { timeout: 10000 });
     } catch (err) {
       const debug = await secondPage.evaluate(() => {
         const fetches = window.__idxTest.getFetchLog();
@@ -3012,55 +3025,61 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
       });
       throw new Error("remounted LIVE pending wait timed out: " + JSON.stringify(debug));
     }
-    const restored = await secondPage.evaluate((textKey) => {
+    const restored = await secondPage.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
+      const saved = bucket["chat:indextts_tracks_test-message-1"] || [];
       const jobs = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
-      const textJobs = bucket[textKey] || [];
       const liveExit = document.querySelector('[data-role="live-exit"]');
       const play = document.querySelector('[data-role="play"]');
       return {
         jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
+        savedTracks: saved,
         pendingJobs: jobs,
-        pendingTextJobs: textJobs,
+        textHashKeys: Object.keys(bucket).filter((k) => /indextts_pending_jobs_text_/.test(k)),
         counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
         liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
         playState: play ? play.dataset.state : "",
         status: (document.querySelector('[data-role="status"]') || {}).textContent || ""
       };
-    }, persistedBeforeClose.textKey);
+    });
     if (jobCount !== 1 || restored.jobs !== 0) {
       throw new Error("remounted LIVE pending card must not POST a new job: " + JSON.stringify({ jobCount, restored, jobBodies }));
     }
-    if (!restored.pendingTextJobs.some((x) => x && x.cacheKey === liveKey && x.playbackMode === "live") || !restored.liveExitVisible || !/^\d+\/\d+$/.test(restored.counterText)) {
-      throw new Error("remounted LIVE pending card should be visible and keep the original key: " + JSON.stringify(restored));
+    if (!restored.pendingJobs.some((x) => x && x.cacheKey === liveKey && x.playbackMode === "live" && x.trackIndex === 1) || !restored.liveExitVisible || restored.counterText.trim() !== "2/2") {
+      throw new Error("remounted LIVE pending card should be visible as card 2/2 and keep the original key: " + JSON.stringify(restored));
+    }
+    if (!restored.savedTracks.some((x) => x && x.cacheKey === savedKey && x.trackIndex === 0) || restored.textHashKeys.length) {
+      throw new Error("remount should preserve the saved card and avoid text-hash storage: " + JSON.stringify(restored));
     }
 
     await secondPage.click('[data-role="live-exit"]');
-    await secondPage.waitForFunction((textKey) => {
+    await secondPage.waitForFunction(() => {
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
       const jobs = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
-      const textJobs = bucket[textKey] || [];
       return fetches.some((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url))
-        && (!Array.isArray(jobs) || jobs.length === 0)
-        && (!Array.isArray(textJobs) || textJobs.length === 0);
-    }, persistedBeforeClose.textKey, { timeout: 10000 });
-    const afterExit = await secondPage.evaluate((textKey) => {
+        && (!Array.isArray(jobs) || jobs.length === 0);
+    }, { timeout: 10000 });
+    const afterExit = await secondPage.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
       return {
+        savedTracks: bucket["chat:indextts_tracks_test-message-1"] || [],
         pendingJobs: bucket["chat:indextts_pending_jobs_test-message-1"] || [],
-        pendingTextJobs: bucket[textKey] || [],
+        textHashKeys: Object.keys(bucket).filter((k) => /indextts_pending_jobs_text_/.test(k)),
         deletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
         jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         status: (document.querySelector('[data-role="status"]') || {}).textContent || ""
       };
-    }, persistedBeforeClose.textKey);
-    if (deleteCount < 1 || afterExit.deletes < 1 || afterExit.pendingJobs.length || afterExit.pendingTextJobs.length) {
-      throw new Error("explicit LIVE exit should delete backend job and clear durable pending card: " + JSON.stringify({ deleteCount, afterExit }));
+    });
+    if (deleteCount < 1 || afterExit.deletes < 1 || afterExit.pendingJobs.length || afterExit.textHashKeys.length) {
+      throw new Error("explicit LIVE exit should delete backend job and clear only the durable pending card: " + JSON.stringify({ deleteCount, afterExit }));
+    }
+    if (!afterExit.savedTracks.some((x) => x && x.cacheKey === savedKey && x.trackIndex === 0)) {
+      throw new Error("explicit unfinished LIVE exit must keep the saved card under the same message object: " + JSON.stringify(afterExit));
     }
     if (pageErrors.length) throw new Error("LIVE durable pending smoke page error: " + pageErrors.join(" | "));
     return { jobCount, statusCount, streamGetCount, deleteCount, streamUrls, persistedBeforeClose, restored, afterExit, body: jobBodies[0] };

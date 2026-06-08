@@ -26,12 +26,12 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v49"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v50"></script>
 ```
 
 Current code state:
 
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260608-mp3-cache-v49`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260608-mp3-cache-v50`.
 - `ttsDebug=1` now keeps debug output in the Tavo console/server tail only. The in-page debug overlay is opt-in with `debugPanel=1`, so normal native-audio testing does not cover the player controls.
 - Root `README.md` is now the project introduction with README images. `dev_workspace/README.md` is the active working README for Codex repository work.
 - Root `AGENTS.md` was moved into `dev_workspace/AGENTS.md`; start new Codex sessions in `dev_workspace` for the shortest working context.
@@ -75,7 +75,7 @@ Current code state:
 - Group chat speaker avatars now use the current Tavo chat `chat.characters` list as a display-only role/avatar map. Matching is exact role name plus lowercase key fallback; it does not auto-add group characters to AI voice mappings or `roles_hint`.
 - vLLM and fast6g now expose backend LLM parse progress in live job metrics: reuse check, waiting for LLM, normalizing, done/failed, elapsed seconds, model, endpoint host, timeout, max tokens, cached flag, and segment count. `/tts_dialogue_job_status/{cache_key}` refreshes `llm_elapsed_s` while the LLM call is still blocking.
 - Tavo progress now translates LLM metrics into short frontend copy: `检查分段复用`, `等待 LLM 返回 Ns`, `整理分段结果`, and `分段已就绪，等待合成`; it no longer shows first-audio waiting copy while backend-owned LLM parsing is still running.
-- LIVE pending jobs are stored under both `indextts_pending_jobs_<messageId>` and `indextts_pending_jobs_text_<正文hash>`. The loader also reads Tavo `message.current().content` for the same hash, so script refreshes or unstable message ids can still show the ordinary lazy card as `流式生成中 · 点开继续`, open the runtime, reconnect the same key, and allow explicit LIVE exit/cancel.
+- Saved tracks and LIVE pending jobs are message-scoped by `msgid` only: `indextts_tracks_<messageId>` and `indextts_pending_jobs_<messageId>`. One Tavo message is the large persistent player object; every generated audio card stores independent `trackIndex` / `trackId` / `cacheKey`. Message text is not a persistence key, so editing the body does not break history or LIVE recovery. Explicit LIVE exit deletes only the unfinished pending card; once the cache has landed, the card remains saved.
 - Lazy card left play button now uses existing saved/pending history when present; when the current bubble has no history it opens runtime and triggers the music-note generation path for that bubble. Clicking the lazy card body still only opens the player/settings shell without creating a job.
 
 ## Latest Validation
@@ -105,8 +105,13 @@ After `20260608-mp3-cache-v48`, frontend syntax/manifest/smoke passed again. The
 After `20260608-mp3-cache-v49`, frontend/backend syntax checks and Playwright smoke passed again. The smoke now additionally asserts:
 
 - vLLM and fast6g expose fresh LLM metrics while backend-owned LLM parsing is blocking;
-- LIVE pending is saved under the text-hash key, remount can recover the same LIVE key even when the message-id pending key is cleared, and explicit LIVE exit clears both pending keys;
 - empty lazy play generates the current bubble instead of opening an inert empty player.
+
+After `20260608-mp3-cache-v50`, frontend syntax, manifest concat syntax, `git diff --check`, and Playwright smoke passed again. The smoke now additionally asserts:
+
+- LIVE pending is saved only under the `msgid` pending key, with `trackIndex` / `trackId` identifying the audio card inside that message object;
+- editing the message text before script remount does not break recovery of the same LIVE card/key;
+- explicit unfinished LIVE exit clears only the pending card and keeps existing saved cards under the same message object.
 
 Additional LIVE route validation on vLLM after restart:
 
@@ -132,7 +137,7 @@ Additional evidence for the latest no-sound reports:
 - User console showed `/pcm` chunks with non-zero `peak/rms`, so PCM was arriving and not silent. A later `Failed to start the audio device` happened after switching chat/app and should be treated as an output-session interruption, not proof that PCM data is bad.
 - Local `/pcm` smoke confirmed non-silent PCM on vLLM: first PCM around 3.7s, `sample_rate=22050`, `peak=0.928`, `rms=0.292`. It also exposed a header bug where `X-IndexTTS-Live-Done=1` could be returned before the client drained `X-IndexTTS-PCM-Total`; current code fixes backend done semantics and frontend keeps pulling if `next < total`.
 - After v21 changes, vLLM was restarted from old PID `29652` to new PID `10792`; `/health` is OK with `vllm_gpu_memory_utilization=0.15`. Fresh `/pcm` smoke key `7297fa757ba5ec1a21e137408937ceebddd51719` was deleted after test; first PCM arrived around `1.927s`, chunk `75264 bytes`, `peak=0.928436`, `rms=0.351856`, and `done=1` had `next=total=75264`.
-- Playwright smoke confirms progress now lives as a transparent one-line `.idx-card` floating hint above the lyric panel; top controls read `LIVE -> page counter -> settings`; delete stays in the sticky `.idx-subtitle .idx-sub-toolbar`; toggling `LIVE`/`DISK` during playback keeps the active speaker title/avatar; group chat role `李瓶儿` uses the matching `chat.characters` avatar without adding that role to `voices` or `roles_hint`; default MP3 LIVE stays on `live-mp3` after page hide without frontend suspend; explicit WebAudio LIVE background suspend with stale `lastStalledSec=7` and latest LIVE progress `17s` resumes the same key with `start_s=17.000`; LIVE pending durable smoke creates a pending card, remounts the same key without a new POST, and clears pending on explicit LIVE exit; offline playback smoke verifies a failed `tavo.file.url()` audio path retries through `tavo.file.load` as an `offline-blob` without hitting `/cache_audio`; card height remains `450px`.
+- Playwright smoke confirms progress now lives as a transparent one-line `.idx-card` floating hint above the lyric panel; top controls read `LIVE -> page counter -> settings`; delete stays in the sticky `.idx-subtitle .idx-sub-toolbar`; toggling `LIVE`/`DISK` during playback keeps the active speaker title/avatar; group chat role `李瓶儿` uses the matching `chat.characters` avatar without adding that role to `voices` or `roles_hint`; default MP3 LIVE stays on `live-mp3` after page hide without frontend suspend; explicit WebAudio LIVE background suspend with stale `lastStalledSec=7` and latest LIVE progress `17s` resumes the same key with `start_s=17.000`; LIVE pending durable smoke creates a second card under the message-id object, survives message text edits/remount without a new POST, and clears only the unfinished pending card on explicit LIVE exit; offline playback smoke verifies a failed `tavo.file.url()` audio path retries through `tavo.file.load` as an `offline-blob` without hitting `/cache_audio`; card height remains `450px`.
 - Boundary conclusion: the TTS service/API backend generated audible audio; the main remaining risk is frontend/mobile LIVE playback/output. Current default uses native MP3 live; explicit WebAudio still polls same-key PCM through queued output for diagnostics/regression.
 
 Still needs real Tavo/mobile validation:

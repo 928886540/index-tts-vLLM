@@ -238,20 +238,6 @@
       return true;
     }
     var PENDING_JOBS_KEY_PREFIX = "indextts_pending_jobs_";
-    var PENDING_JOBS_TEXT_KEY_PREFIX = "indextts_pending_jobs_text_";
-    function pendingStorageHash(text) {
-      text = String(text || "");
-      var h = 2166136261;
-      for (var i = 0; i < text.length; i++) {
-        h ^= text.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-      }
-      return (h >>> 0).toString(16);
-    }
-    function pendingTextFingerprint() {
-      var text = String(messageText || "").replace(/\s+/g, " ").trim();
-      return text ? pendingStorageHash(text) : "";
-    }
     function pendingJobsStorageKeys() {
       var keys = [];
       function add(key) {
@@ -259,8 +245,6 @@
         if (key && keys.indexOf(key) < 0) keys.push(key);
       }
       add(messageId ? (PENDING_JOBS_KEY_PREFIX + messageId) : "");
-      var textHash = pendingTextFingerprint();
-      add(textHash ? (PENDING_JOBS_TEXT_KEY_PREFIX + textHash) : "");
       return keys;
     }
     function pendingJobLooksActive(t) {
@@ -300,8 +284,11 @@
       var keys = pendingJobsStorageKeys();
       if (!keys.length) return;
       var lite = (list || []).filter(pendingJobLooksActive).map(function (t) {
+        var pos = ensureTrackRecordPosition(t, generatedTracks.indexOf(t) >= 0 ? generatedTracks.indexOf(t) : (list || []).indexOf(t));
         return {
           cacheKey: t.cacheKey || "",
+          trackIndex: pos.trackIndex,
+          trackId: pos.trackId,
           cacheUrl: t.cacheUrl || "",
           streamUrl: t.streamUrl || "",
           createdAt: t.createdAt || Date.now(),
@@ -322,14 +309,17 @@
           segments: Array.isArray(t.segments) ? t.segments : []
         };
       });
+      lite.sort(compareTrackRecords);
       for (var i = 0; i < keys.length; i++) {
         var key = keys[i];
-        try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); } catch (_) {}
+        try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); }
+        catch (e) { try { debugLog("⚠️ 保存 pending 到 tavo.set 失败: " + (e && e.message ? e.message : e), "#fc9"); } catch (_) {} }
         try { localStorage.setItem(key, JSON.stringify(lite)); } catch (_) {}
       }
     }
     async function savePendingJobForTrack(track) {
       if (!track || !track.cacheKey || isSavedTrack(track) || track.deleted || track.cancelled || !pendingJobsStorageKeys().length) return;
+      ensureTrackRecordPosition(track, generatedTracks.indexOf(track));
       var jobs = await loadPendingJobsForMessage();
       var idx = jobs.findIndex(function (j) { return j && j.cacheKey === track.cacheKey; });
       if (idx >= 0) jobs[idx] = track; else jobs.push(track);
@@ -352,6 +342,8 @@
         streamUrl: t.streamUrl || (base + "/tts_dialogue_stream_job/" + encodeURIComponent(t.cacheKey)),
         cacheUrl: t.cacheUrl || (base + "/cache_audio/" + encodeURIComponent(t.cacheKey)),
         cacheKey: t.cacheKey,
+        trackIndex: trackRecordPositionValue(t, 0),
+        trackId: String(t.trackId || t.cacheKey || "").trim(),
         createdAt: t.createdAt || Date.now(),
         voice: representativeVoiceForMode(mode, t.voicesMap || null, t.voice || cfg.defaultVoice),
         mode: mode,
@@ -696,9 +688,26 @@
         }
       })();
     }
-    var tracksLoaded = !messageId && !pendingTextFingerprint();
+    var tracksLoaded = !messageId;
     var tracksLoading = null;
     var knownHistoryCount = 0;
+    function restoreTrackKey(track) {
+      if (!track) return "";
+      if (track.cacheKey) return "cache:" + String(track.cacheKey);
+      if (track.trackId) return "track:" + String(track.trackId);
+      return "";
+    }
+    function pushUniqueRestoredTrack(list, track) {
+      if (!track) return false;
+      var key = restoreTrackKey(track);
+      if (key) {
+        for (var i = 0; i < list.length; i++) {
+          if (restoreTrackKey(list[i]) === key) return false;
+        }
+      }
+      list.push(track);
+      return true;
+    }
     function restoreTrackFromSaved(t, base) {
       if (!persistedTrackLooksSaved(t)) return null;
       var restoredMode = t.mode === "single" ? "single" : normalizeModeName(t.mode || "ai");
@@ -706,6 +715,8 @@
       var restored = {
         url: null,
         cacheKey: t.cacheKey,
+        trackIndex: trackRecordPositionValue(t, 0),
+        trackId: String(t.trackId || t.cacheKey || "").trim(),
         cacheUrl: base + "/cache_audio/" + encodeURIComponent(t.cacheKey),
         streamUrl: restoredMode === "single" ? "" : base + "/tts_dialogue_stream_job/" + encodeURIComponent(t.cacheKey),
         createdAt: t.createdAt || Date.now(),
@@ -749,27 +760,39 @@
         knownHistoryCount = saved && saved.length ? saved.length : 0;
         tracksLoaded = true;
         var base = cleanBase(cfg.apiBase);
+        var restoredVisible = [];
+        var savedCacheKeys = {};
         if (saved && saved.length) {
           saved.forEach(function (t) {
             var restored = restoreTrackFromSaved(t, base);
-            if (restored) generatedTracks.push(restored);
+            if (restored) {
+              if (restored.cacheKey) savedCacheKeys[restored.cacheKey] = true;
+              pushUniqueRestoredTrack(restoredVisible, restored);
+            }
           });
         }
         var detachedPendingCount = 0;
+        var restoredPending = [];
         if (pending && pending.length) {
           pending.forEach(function (t) {
+            if (t && t.cacheKey && savedCacheKeys[t.cacheKey]) return;
             var restored = restoreTrackFromPending(t, base);
             if (restored) {
               if (restored.backgroundOnly) {
                 detachedPendingCount += 1;
                 rememberDetachedBackgroundJob(restored);
+                pollCacheUpgrade(restored, "pending restore");
               } else {
-                generatedTracks.push(restored);
+                if (pushUniqueRestoredTrack(restoredVisible, restored)) {
+                  restoredPending.push(restored);
+                  pollCacheUpgrade(restored, "pending restore");
+                }
               }
-              pollCacheUpgrade(restored, "pending restore");
             }
           });
         }
+        restoredVisible.sort(compareTrackRecords);
+        generatedTracks.splice.apply(generatedTracks, [0, generatedTracks.length].concat(restoredVisible));
         if (!generatedTracks.length) {
           updateTrackButtons();
           if (detachedPendingCount) {
@@ -782,6 +805,11 @@
           return generatedTracks;
         }
         currentTrackIndex = generatedTracks.length - 1;
+        if (restoredPending.length) {
+          var latestPending = restoredPending.slice().sort(compareTrackRecords).pop();
+          var pendingIndex = generatedTracks.indexOf(latestPending);
+          if (pendingIndex >= 0) currentTrackIndex = pendingIndex;
+        }
         updateTrackButtons();
         setStatus(historyStatusText());
         showTrackNotice(currentTrack(), historyStatusText(), detachedPendingCount ? "后台生成会继续检查落盘" : "点播放继续，或用左右按钮切换历史音频");

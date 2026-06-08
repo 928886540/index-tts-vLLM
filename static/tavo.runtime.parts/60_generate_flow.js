@@ -236,6 +236,7 @@
         tracksLoaded = true;
         generatedTracks.push(placeholder);
         var backgroundIndex = generatedTracks.length - 1;
+        ensureTrackRecordPosition(placeholder, backgroundIndex);
         if (currentTrackIndex < 0) {
           currentTrackIndex = backgroundIndex;
           await selectTrack(currentTrackIndex, false);
@@ -246,6 +247,7 @@
       } else {
         generatedTracks.push(placeholder);
         currentTrackIndex = generatedTracks.length - 1;
+        ensureTrackRecordPosition(placeholder, currentTrackIndex);
         try { audio.pause(); } catch (_) {}
         clearElementAudioSrc();
         await selectTrack(currentTrackIndex, false);

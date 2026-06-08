@@ -42,6 +42,37 @@
   function persistableHistoryTracks(tracks) {
     return (tracks || []).filter(persistedTrackLooksSaved);
   }
+  function ensureTrackRecordPosition(track, index) {
+    if (!track) return { trackIndex: Math.max(0, Number(index || 0) || 0), trackId: "" };
+    var idx = Math.max(0, Number(index || 0) || 0);
+    if (!isFinite(idx)) idx = 0;
+    var existingIndex = Number(track.trackIndex);
+    if (isFinite(existingIndex) && existingIndex >= 0) idx = Math.floor(existingIndex);
+    else {
+      try { track.trackIndex = idx; } catch (_) {}
+    }
+    var id = String(track.trackId || "").trim();
+    if (!id) {
+      id = String(track.cacheKey || "").trim();
+      if (!id) id = "track-" + String(track.createdAt || Date.now()) + "-" + String(idx);
+      try { track.trackId = id; } catch (_) {}
+    }
+    return { trackIndex: idx, trackId: id };
+  }
+  function trackRecordPositionValue(track, fallbackIndex) {
+    var n = Number(track && track.trackIndex);
+    if (isFinite(n) && n >= 0) return Math.floor(n);
+    return Math.max(0, Number(fallbackIndex || 0) || 0);
+  }
+  function compareTrackRecords(a, b) {
+    var ai = trackRecordPositionValue(a, 0);
+    var bi = trackRecordPositionValue(b, 0);
+    if (ai !== bi) return ai - bi;
+    var ac = Number(a && a.createdAt) || 0;
+    var bc = Number(b && b.createdAt) || 0;
+    if (ac !== bc) return ac - bc;
+    return String((a && (a.trackId || a.cacheKey)) || "").localeCompare(String((b && (b.trackId || b.cacheKey)) || ""));
+  }
   function localHistoryCountForMessage(messageId) {
     return persistableHistoryTracks(localTracksForMessage(messageId)).length;
   }
@@ -51,8 +82,11 @@
     // 只挑能跨会话持久化的字段；blob URL 重启就失效，丢掉。
     // segments 也存下来,字幕重进页面后才有时间轴显示。
     var lite = persistableHistoryTracks(tracks).map(function (t) {
+      var pos = ensureTrackRecordPosition(t, (tracks || []).indexOf(t));
       return {
         cacheKey: t.cacheKey || "",
+        trackIndex: pos.trackIndex,
+        trackId: pos.trackId,
         voice: t.voice || "",
         mode: t.mode || "",
         state: "saved",
@@ -87,7 +121,9 @@
         }),
       };
     }).filter(function (t) { return !!t.cacheKey; });
-    try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); } catch (_) {}
+    lite.sort(compareTrackRecords);
+    try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); }
+    catch (e) { try { debugLog("⚠️ 保存历史到 tavo.set 失败: " + (e && e.message ? e.message : e), "#fc9"); } catch (_) {} }
     try { localStorage.setItem(key, JSON.stringify(lite)); } catch (_) {}
   }
   function playIcon(state) { return state === "playing" ? '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; }

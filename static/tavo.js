@@ -2,15 +2,12 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260608-mp3-cache-v49";
+  var LOADER_VERSION = "20260608-mp3-cache-v50";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var PENDING_JOBS_KEY_PREFIX = "indextts_pending_jobs_";
-  var PENDING_JOBS_TEXT_KEY_PREFIX = "indextts_pending_jobs_text_";
   var TAP_GUARD_KEY = "__indextts_tavo_tap_guard_until";
   var PICKER_TRIGGER_SELECTOR = '[data-role="normal-narrator-voice-btn"],[data-role="normal-dialogue-voice-btn"],[data-role="roles-list"] .idx-voice-btn,.idx-picker-item,.idx-picker-apply';
-  // Tavo 重刷脚本后 messageId 可能变化，用当前气泡正文 hash 找回未落盘的 LIVE 卡。
-  var resolvedPendingTextHash = "";
 
   function deriveBaseUrl(src) {
     var raw = String(src || "").trim();
@@ -66,16 +63,6 @@
     return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0");
   }
 
-  function stableHash(text) {
-    text = String(text || "");
-    var h = 2166136261;
-    for (var i = 0; i < text.length; i++) {
-      h ^= text.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return (h >>> 0).toString(16);
-  }
-
   function playIcon() {
     return '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
   }
@@ -115,28 +102,6 @@
     return scriptEl && scriptEl.parentElement;
   }
 
-  function messageTextForHash(scriptEl) {
-    try {
-      var msgEl = messageElement(scriptEl);
-      if (!msgEl) return "";
-      var clone = msgEl.cloneNode(true);
-      $all(clone, ".idx-tts,.idx-card,.idx-panel,.idx-picker,script").forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
-      return String(clone.innerText || clone.textContent || "").replace(/\s+/g, " ").trim();
-    } catch (_) { return ""; }
-  }
-
-  function normalizedPendingHashText(text) {
-    return String(text || "").replace(/\s+/g, " ").trim();
-  }
-
-  function rememberResolvedPendingText(text) {
-    var normalized = normalizedPendingHashText(text);
-    var nextHash = normalized ? stableHash(normalized) : "";
-    if (!nextHash || nextHash === resolvedPendingTextHash) return false;
-    resolvedPendingTextHash = nextHash;
-    return true;
-  }
-
   function pickMessageId(scriptEl) {
     var id = "";
     try {
@@ -145,10 +110,6 @@
       if (!id && msgEl && msgEl.getAttribute) id = String(msgEl.getAttribute("mesid") || msgEl.getAttribute("data-message-id") || msgEl.id || "").trim();
     } catch (_) {}
     try { if (!id) id = String((scriptEl && scriptEl.parentElement && (scriptEl.parentElement.id || scriptEl.parentElement.dataset.id)) || "").trim(); } catch (_) {}
-    if (!id) {
-      var text = messageTextForHash(scriptEl);
-      if (text) id = "message-" + stableHash(text);
-    }
     return id;
   }
 
@@ -174,6 +135,22 @@
 
   function persistableHistoryTracks(tracks) {
     return (tracks || []).filter(persistedTrackLooksSaved);
+  }
+
+  function trackRecordPositionValue(track, fallbackIndex) {
+    var n = Number(track && track.trackIndex);
+    if (isFinite(n) && n >= 0) return Math.floor(n);
+    return Math.max(0, Number(fallbackIndex || 0) || 0);
+  }
+
+  function compareTrackRecords(a, b) {
+    var ai = trackRecordPositionValue(a, 0);
+    var bi = trackRecordPositionValue(b, 0);
+    if (ai !== bi) return ai - bi;
+    var ac = Number(a && a.createdAt) || 0;
+    var bc = Number(b && b.createdAt) || 0;
+    if (ac !== bc) return ac - bc;
+    return String((a && (a.trackId || a.cacheKey)) || "").localeCompare(String((b && (b.trackId || b.cacheKey)) || ""));
   }
 
   function pendingJobLooksActive(t) {
@@ -214,10 +191,6 @@
       if (key && keys.indexOf(key) < 0) keys.push(key);
     }
     add(messageId ? (PENDING_JOBS_KEY_PREFIX + messageId) : "");
-    add(resolvedPendingTextHash ? (PENDING_JOBS_TEXT_KEY_PREFIX + resolvedPendingTextHash) : "");
-    // 同时保留 DOM 文本 hash，兼容 Tavo API 正文暂时还没返回的首轮渲染。
-    var text = normalizedPendingHashText(messageTextForHash(loaderScript));
-    add(text ? (PENDING_JOBS_TEXT_KEY_PREFIX + stableHash(text)) : "");
     return keys;
   }
 
@@ -240,11 +213,14 @@
   }
 
   function historySnapshotForMessage(messageId) {
-    var tracks = persistableHistoryTracks(localTracksForMessage(messageId));
-    var pending = localPendingJobsForMessage(messageId);
-    var latest = pending.length ? pending[pending.length - 1] : (tracks.length ? tracks[tracks.length - 1] : null);
+    var tracks = persistableHistoryTracks(localTracksForMessage(messageId)).sort(compareTrackRecords);
+    var savedKeys = {};
+    tracks.forEach(function (t) { if (t && t.cacheKey) savedKeys[t.cacheKey] = true; });
+    var pending = localPendingJobsForMessage(messageId).filter(function (t) { return !(t && t.cacheKey && savedKeys[t.cacheKey]); }).sort(compareTrackRecords);
+    var all = tracks.concat(pending).sort(compareTrackRecords);
+    var latest = all.length ? all[all.length - 1] : null;
     var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
-    var historyCount = tracks.length + pending.length;
+    var historyCount = all.length;
     return {
       latest: latest,
       savedCount: tracks.length,
@@ -488,16 +464,6 @@
       }
     } catch (_) {}
     refreshPendingKeys();
-    try {
-      if (window.tavo && window.tavo.message && typeof window.tavo.message.current === "function") {
-        var current = window.tavo.message.current();
-        var onMessage = function (msg) {
-          if (msg && rememberResolvedPendingText(msg.content || msg.text || "")) refreshPendingKeys();
-        };
-        if (current && typeof current.then === "function") current.then(onMessage).catch(function () {});
-        else onMessage(current);
-      }
-    } catch (_) {}
   }
 
   function scheduleLazyHistoryRefresh(root, messageId, onResolved) {
