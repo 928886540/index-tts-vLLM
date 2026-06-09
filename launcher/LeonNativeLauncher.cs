@@ -68,6 +68,8 @@ internal sealed class LauncherForm : Form
     private readonly string launcherDir;
     private readonly string scriptsDir;
     private readonly string staticDir;
+    private readonly string profileDir;
+    private readonly string activeProfilePath;
     private readonly string iconPath;
     private readonly string lanHost;
     private readonly object logLock = new object();
@@ -97,12 +99,14 @@ internal sealed class LauncherForm : Form
     private Panel homePanel;
     private Panel logPanel;
     private Panel envPanel;
+    private Panel configPanel;
     private WrappedLogView logBox;
     private DataGridView envGrid;
     private Label statusLabel;
     private Button startButton;
     private Button navHomeButton;
     private Button navLogButton;
+    private Button navConfigButton;
     private Button navEnvButton;
     private Button tabLauncherButton;
     private Button tabApiButton;
@@ -115,6 +119,19 @@ internal sealed class LauncherForm : Form
     private Button envCheckButton;
     private Button envRepairButton;
     private TextBox ratioBox;
+    private ComboBox liveQualityBox;
+    private ComboBox generateQualityBox;
+    private TextBox liveDiffusionBox;
+    private TextBox livePromptSecondsBox;
+    private TextBox liveSegmentTokensBox;
+    private TextBox liveFirstTokensBox;
+    private TextBox liveCfgRateBox;
+    private TextBox generateDiffusionBox;
+    private TextBox generatePromptSecondsBox;
+    private TextBox generateSegmentTokensBox;
+    private TextBox generateFirstTokensBox;
+    private TextBox generateCfgRateBox;
+    private TextBox llmPromptBox;
     private System.Windows.Forms.Timer logTimer;
     private System.Windows.Forms.Timer healthTimer;
     private string activeView = "home";
@@ -128,6 +145,8 @@ internal sealed class LauncherForm : Form
         launcherDir = Path.Combine(workspaceRoot, "launcher");
         scriptsDir = Path.Combine(workspaceRoot, "scripts");
         staticDir = Path.Combine(workspaceRoot, "static");
+        profileDir = Path.Combine(workspaceRoot, "config", "profiles");
+        activeProfilePath = Path.Combine(profileDir, "active.json");
         iconPath = Path.Combine(launcherDir, "leon-launcher.ico");
         lanHost = string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEON_LAN_HOST"))
             ? GetPreferredLanHost()
@@ -257,9 +276,11 @@ internal sealed class LauncherForm : Form
 
         navHomeButton = CreateSideButton("首页", 18, delegate { ShowView("home"); });
         navLogButton = CreateSideButton("日志", 64, delegate { ShowView("log"); });
-        navEnvButton = CreateSideButton("环境检测", 110, delegate { ShowView("env"); });
+        navConfigButton = CreateSideButton("配置", 110, delegate { ShowView("config"); });
+        navEnvButton = CreateSideButton("环境检测", 156, delegate { ShowView("env"); });
         side.Controls.Add(navHomeButton);
         side.Controls.Add(navLogButton);
+        side.Controls.Add(navConfigButton);
         side.Controls.Add(navEnvButton);
 
         Panel bottomPanel = new Panel();
@@ -315,7 +336,9 @@ internal sealed class LauncherForm : Form
             navHomeButton.Size = new Size(contentWidth, 38);
             navLogButton.Location = new Point(left, 64);
             navLogButton.Size = new Size(contentWidth, 38);
-            navEnvButton.Location = new Point(left, 110);
+            navConfigButton.Location = new Point(left, 110);
+            navConfigButton.Size = new Size(contentWidth, 38);
+            navEnvButton.Location = new Point(left, 156);
             navEnvButton.Size = new Size(contentWidth, 38);
 
             configRow.Location = new Point(Math.Max(0, (bottomPanel.ClientSize.Width - contentWidth) / 2), 0);
@@ -326,6 +349,7 @@ internal sealed class LauncherForm : Form
             sideBackground.SendToBack();
             navHomeButton.BringToFront();
             navLogButton.BringToFront();
+            navConfigButton.BringToFront();
             navEnvButton.BringToFront();
             bottomPanel.BringToFront();
         };
@@ -356,6 +380,9 @@ internal sealed class LauncherForm : Form
 
         logPanel = BuildLogPanel();
         content.Controls.Add(logPanel);
+
+        configPanel = BuildConfigPanel();
+        content.Controls.Add(configPanel);
 
         envPanel = BuildEnvironmentPanel();
         content.Controls.Add(envPanel);
@@ -405,6 +432,386 @@ internal sealed class LauncherForm : Form
 
         SetLogTabActive("launcher");
         return panel;
+    }
+
+    private Panel BuildConfigPanel()
+    {
+        Panel panel = new Panel();
+        panel.Dock = DockStyle.Fill;
+        panel.BackColor = Color.FromArgb(12, 16, 21);
+        panel.Visible = false;
+
+        Panel top = new Panel();
+        top.Dock = DockStyle.Top;
+        top.Height = 46;
+        top.BackColor = panel.BackColor;
+        panel.Controls.Add(top);
+
+        Button saveButton = CreateFlatButton("保存配置", 0, 0, 104, 34, Color.FromArgb(25, 126, 89), delegate { SaveConfigFromUi(); });
+        Button reloadButton = CreateFlatButton("重新读取", 112, 0, 104, 34, Color.FromArgb(48, 68, 88), delegate { LoadProfileIntoConfigUi(); });
+        Button defaultButton = CreateFlatButton("恢复默认", 224, 0, 104, 34, Color.FromArgb(118, 78, 42), delegate { ResetConfigDefaults(); });
+        top.Controls.Add(saveButton);
+        top.Controls.Add(reloadButton);
+        top.Controls.Add(defaultButton);
+
+        Label tip = new Label();
+        tip.Text = "这里编辑本机 active profile；Tavo 重新挂载后读取。LLM Prompt 留空时使用后端内置提示词。";
+        tip.Location = new Point(346, 8);
+        tip.Size = new Size(760, 22);
+        tip.ForeColor = Color.FromArgb(205, 214, 224);
+        tip.BackColor = panel.BackColor;
+        tip.Font = NewFont(9.0f, FontStyle.Regular);
+        top.Controls.Add(tip);
+
+        Panel scroll = new Panel();
+        scroll.Dock = DockStyle.Fill;
+        scroll.AutoScroll = true;
+        scroll.BackColor = Color.FromArgb(12, 16, 21);
+        panel.Controls.Add(scroll);
+        scroll.BringToFront();
+
+        AddConfigSectionLabel(scroll, "质量档位", 0, 2, 840);
+        AddQualityEditor(scroll, "LIVE 档位", 30, true);
+        AddQualityEditor(scroll, "D 模式档位", 252, false);
+
+        AddConfigSectionLabel(scroll, "LLM 提示词", 0, 486, 840);
+        Label llmHint = AddConfigLabel(scroll, "系统提示词覆盖项。留空 = 后端内置；填写后会作为 parse_system_prompt 提交给 AI 拆段。", 0, 512, 840);
+        llmHint.ForeColor = Color.FromArgb(160, 172, 184);
+        llmPromptBox = CreateConfigTextBox(scroll, 0, 540, 920, 170);
+        llmPromptBox.Multiline = true;
+        llmPromptBox.ScrollBars = ScrollBars.Vertical;
+        llmPromptBox.AcceptsReturn = true;
+        llmPromptBox.AcceptsTab = true;
+
+        Label pathHint = AddConfigLabel(scroll, "保存路径: " + activeProfilePath, 0, 724, 920);
+        pathHint.ForeColor = Color.FromArgb(138, 154, 170);
+
+        LoadProfileIntoConfigUi();
+        return panel;
+    }
+
+    private void AddQualityEditor(Panel parent, string title, int top, bool live)
+    {
+        Panel box = new Panel();
+        box.Location = new Point(0, top);
+        box.Size = new Size(920, 204);
+        box.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        box.BackColor = Color.FromArgb(16, 21, 27);
+        parent.Controls.Add(box);
+
+        AddConfigSectionLabel(box, title, 14, 12, 300);
+        ComboBox quality = CreateQualityComboBox(box, 14, 42, 180);
+        AddConfigLabel(box, "fast / balanced / expressive / ultra / custom", 210, 48, 500);
+
+        TextBox diffusion = AddConfigNumberField(box, "扩散步数", 14, 86, "14");
+        TextBox prompt = AddConfigNumberField(box, "参考秒数", 176, 86, "10");
+        TextBox segment = AddConfigNumberField(box, "分段 token", 338, 86, "60");
+        TextBox first = AddConfigNumberField(box, "首段 token", 500, 86, "18");
+        TextBox cfgRate = AddConfigNumberField(box, "S2Mel CFG", 662, 86, "0.70");
+
+        Label hint = AddConfigLabel(box, "上面专家参数只在档位选 custom 时作为 Tavo 请求覆盖项；后端仍会 clamp 上限。", 14, 158, 820);
+        hint.ForeColor = Color.FromArgb(160, 172, 184);
+
+        if (live)
+        {
+            liveQualityBox = quality;
+            liveDiffusionBox = diffusion;
+            livePromptSecondsBox = prompt;
+            liveSegmentTokensBox = segment;
+            liveFirstTokensBox = first;
+            liveCfgRateBox = cfgRate;
+        }
+        else
+        {
+            generateQualityBox = quality;
+            generateDiffusionBox = diffusion;
+            generatePromptSecondsBox = prompt;
+            generateSegmentTokensBox = segment;
+            generateFirstTokensBox = first;
+            generateCfgRateBox = cfgRate;
+        }
+    }
+
+    private TextBox AddConfigNumberField(Panel parent, string label, int x, int y, string placeholder)
+    {
+        AddConfigLabel(parent, label, x, y, 130);
+        TextBox box = CreateConfigTextBox(parent, x, y + 24, 130, 28);
+        box.TextAlign = HorizontalAlignment.Center;
+        box.Text = placeholder;
+        return box;
+    }
+
+    private Label AddConfigSectionLabel(Panel parent, string text, int x, int y, int width)
+    {
+        Label label = AddConfigLabel(parent, text, x, y, width);
+        label.Font = NewFont(11.0f, FontStyle.Bold);
+        label.ForeColor = Color.FromArgb(226, 232, 238);
+        return label;
+    }
+
+    private Label AddConfigLabel(Panel parent, string text, int x, int y, int width)
+    {
+        Label label = new Label();
+        label.Text = text;
+        label.Location = new Point(x, y);
+        label.Size = new Size(width, 22);
+        label.AutoEllipsis = true;
+        label.BackColor = parent.BackColor;
+        label.ForeColor = Color.FromArgb(205, 214, 224);
+        label.Font = NewFont(9.0f, FontStyle.Regular);
+        parent.Controls.Add(label);
+        return label;
+    }
+
+    private TextBox CreateConfigTextBox(Panel parent, int x, int y, int width, int height)
+    {
+        TextBox box = new TextBox();
+        box.Location = new Point(x, y);
+        box.Size = new Size(width, height);
+        box.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        box.BorderStyle = BorderStyle.FixedSingle;
+        box.BackColor = Color.FromArgb(8, 12, 17);
+        box.ForeColor = Color.WhiteSmoke;
+        box.Font = NewMonoFont(9.0f);
+        parent.Controls.Add(box);
+        return box;
+    }
+
+    private ComboBox CreateQualityComboBox(Panel parent, int x, int y, int width)
+    {
+        ComboBox box = new ComboBox();
+        box.Location = new Point(x, y);
+        box.Size = new Size(width, 28);
+        box.DropDownStyle = ComboBoxStyle.DropDownList;
+        box.FlatStyle = FlatStyle.Flat;
+        box.BackColor = Color.FromArgb(8, 12, 17);
+        box.ForeColor = Color.WhiteSmoke;
+        box.Font = NewFont(9.5f, FontStyle.Bold);
+        box.Items.AddRange(new object[] { "fast", "balanced", "expressive", "ultra", "custom" });
+        box.SelectedItem = "balanced";
+        parent.Controls.Add(box);
+        return box;
+    }
+
+    private void LoadProfileIntoConfigUi()
+    {
+        try
+        {
+            Dictionary<string, object> profile = LoadActiveProfileData();
+            Dictionary<string, object> quality = GetObjectDict(profile, "quality");
+            Dictionary<string, object> custom = GetObjectDict(quality, "custom");
+            Dictionary<string, object> live = GetObjectDict(custom, "live");
+            Dictionary<string, object> generate = GetObjectDict(custom, "generate");
+
+            SetComboValue(liveQualityBox, GetStringValue(quality, "live", "balanced"));
+            SetComboValue(generateQualityBox, GetStringValue(quality, "generate", "balanced"));
+            SetQualityFields(live, liveDiffusionBox, livePromptSecondsBox, liveSegmentTokensBox, liveFirstTokensBox, liveCfgRateBox);
+            SetQualityFields(generate, generateDiffusionBox, generatePromptSecondsBox, generateSegmentTokensBox, generateFirstTokensBox, generateCfgRateBox);
+            if (llmPromptBox != null) llmPromptBox.Text = GetStringValue(profile, "llmPrompt", "");
+            SetStatus("配置已读取。", Color.Khaki);
+        }
+        catch (Exception ex)
+        {
+            AddLauncherLog("读取配置失败: " + ex.Message, "ERROR");
+            SetStatus("读取配置失败，请看日志。", Color.LightCoral);
+        }
+    }
+
+    private void SaveConfigFromUi()
+    {
+        try
+        {
+            Dictionary<string, object> profile = DefaultProfileData();
+            profile["updatedAt"] = DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+            profile["llmPrompt"] = llmPromptBox == null ? "" : llmPromptBox.Text.Trim();
+
+            Dictionary<string, object> quality = GetObjectDict(profile, "quality");
+            quality["live"] = SelectedQualityValue(liveQualityBox);
+            quality["generate"] = SelectedQualityValue(generateQualityBox);
+
+            Dictionary<string, object> custom = GetObjectDict(quality, "custom");
+            custom["live"] = ReadQualityFields(liveDiffusionBox, livePromptSecondsBox, liveSegmentTokensBox, liveFirstTokensBox, liveCfgRateBox);
+            custom["generate"] = ReadQualityFields(generateDiffusionBox, generatePromptSecondsBox, generateSegmentTokensBox, generateFirstTokensBox, generateCfgRateBox);
+
+            Directory.CreateDirectory(profileDir);
+            File.WriteAllText(activeProfilePath, json.Serialize(profile), new UTF8Encoding(false));
+            AddLauncherLog("已保存 active profile: " + activeProfilePath);
+            SetStatus("配置已保存，Tavo 重新挂载后生效。", Color.LightGreen);
+        }
+        catch (Exception ex)
+        {
+            AddLauncherLog("保存配置失败: " + ex.Message, "ERROR");
+            SetStatus("保存配置失败，请看日志。", Color.LightCoral);
+        }
+    }
+
+    private void ResetConfigDefaults()
+    {
+        SetComboValue(liveQualityBox, "balanced");
+        SetComboValue(generateQualityBox, "balanced");
+        SetQualityFields(DefaultQualityCustomData(), liveDiffusionBox, livePromptSecondsBox, liveSegmentTokensBox, liveFirstTokensBox, liveCfgRateBox);
+        SetQualityFields(DefaultQualityCustomData(), generateDiffusionBox, generatePromptSecondsBox, generateSegmentTokensBox, generateFirstTokensBox, generateCfgRateBox);
+        if (llmPromptBox != null) llmPromptBox.Text = "";
+        SetStatus("已恢复默认，点保存配置后写入。", Color.Khaki);
+    }
+
+    private Dictionary<string, object> LoadActiveProfileData()
+    {
+        EnsureActiveProfileFile();
+        string text = File.ReadAllText(activeProfilePath, Encoding.UTF8);
+        object value = json.DeserializeObject(text);
+        Dictionary<string, object> profile = value as Dictionary<string, object>;
+        if (profile == null) throw new InvalidDataException("active profile 不是 JSON object");
+        return profile;
+    }
+
+    private void EnsureActiveProfileFile()
+    {
+        if (File.Exists(activeProfilePath)) return;
+        Directory.CreateDirectory(profileDir);
+        File.WriteAllText(activeProfilePath, json.Serialize(DefaultProfileData()), new UTF8Encoding(false));
+    }
+
+    private Dictionary<string, object> DefaultProfileData()
+    {
+        Dictionary<string, object> custom = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        custom["live"] = DefaultQualityCustomData();
+        custom["generate"] = DefaultQualityCustomData();
+
+        Dictionary<string, object> quality = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        quality["live"] = "balanced";
+        quality["generate"] = "balanced";
+        quality["custom"] = custom;
+
+        Dictionary<string, object> profile = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        profile["version"] = 1;
+        profile["name"] = "LEON default";
+        profile["description"] = "Default local tuning profile managed by the LEON launcher.";
+        profile["llmPromptId"] = "builtin_backend_default";
+        profile["llmPrompt"] = "";
+        profile["quality"] = quality;
+        return profile;
+    }
+
+    private Dictionary<string, object> DefaultQualityCustomData()
+    {
+        Dictionary<string, object> data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        data["diffusion_steps"] = 14;
+        data["prompt_audio_seconds"] = 10;
+        data["segment_tokens"] = 60;
+        data["first_tokens"] = 18;
+        data["s2mel_cfg_rate"] = 0.7;
+        return data;
+    }
+
+    private void SetQualityFields(Dictionary<string, object> data, TextBox diffusion, TextBox promptSeconds, TextBox segmentTokens, TextBox firstTokens, TextBox cfgRate)
+    {
+        if (diffusion != null) diffusion.Text = GetIntValue(data, "diffusion_steps", 14).ToString();
+        if (promptSeconds != null) promptSeconds.Text = FormatDouble(GetDoubleValue(data, "prompt_audio_seconds", 10));
+        if (segmentTokens != null) segmentTokens.Text = GetIntValue(data, "segment_tokens", 60).ToString();
+        if (firstTokens != null) firstTokens.Text = GetIntValue(data, "first_tokens", 18).ToString();
+        if (cfgRate != null) cfgRate.Text = FormatDouble(GetDoubleValue(data, "s2mel_cfg_rate", 0.7));
+    }
+
+    private Dictionary<string, object> ReadQualityFields(TextBox diffusion, TextBox promptSeconds, TextBox segmentTokens, TextBox firstTokens, TextBox cfgRate)
+    {
+        Dictionary<string, object> data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        data["diffusion_steps"] = ReadIntBox(diffusion, 14, 2, 24);
+        data["prompt_audio_seconds"] = ReadDoubleBox(promptSeconds, 10, 2, 16);
+        data["segment_tokens"] = ReadIntBox(segmentTokens, 60, 8, 120);
+        data["first_tokens"] = ReadIntBox(firstTokens, 18, 4, ReadIntBox(segmentTokens, 60, 8, 120));
+        data["s2mel_cfg_rate"] = ReadDoubleBox(cfgRate, 0.7, 0, 1.2);
+        return data;
+    }
+
+    private Dictionary<string, object> GetObjectDict(Dictionary<string, object> parent, string key)
+    {
+        object value;
+        if (parent != null && parent.TryGetValue(key, out value))
+        {
+            Dictionary<string, object> dict = value as Dictionary<string, object>;
+            if (dict != null) return dict;
+        }
+        Dictionary<string, object> created = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        if (parent != null) parent[key] = created;
+        return created;
+    }
+
+    private string GetStringValue(Dictionary<string, object> dict, string key, string fallback)
+    {
+        object value;
+        if (dict == null || !dict.TryGetValue(key, out value) || value == null) return fallback;
+        string text = Convert.ToString(value);
+        return string.IsNullOrWhiteSpace(text) ? fallback : text.Trim();
+    }
+
+    private int GetIntValue(Dictionary<string, object> dict, string key, int fallback)
+    {
+        object value;
+        if (dict == null || !dict.TryGetValue(key, out value) || value == null) return fallback;
+        int parsed;
+        if (int.TryParse(Convert.ToString(value), out parsed)) return parsed;
+        double parsedDouble;
+        if (double.TryParse(Convert.ToString(value), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedDouble)) return (int)Math.Round(parsedDouble);
+        return fallback;
+    }
+
+    private double GetDoubleValue(Dictionary<string, object> dict, string key, double fallback)
+    {
+        object value;
+        if (dict == null || !dict.TryGetValue(key, out value) || value == null) return fallback;
+        double parsed;
+        return double.TryParse(Convert.ToString(value), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) ? parsed : fallback;
+    }
+
+    private int ReadIntBox(TextBox box, int fallback, int min, int max)
+    {
+        int parsed;
+        if (box != null && int.TryParse(StringOrEmpty(box.Text), out parsed))
+        {
+            return Math.Max(min, Math.Min(max, parsed));
+        }
+        return fallback;
+    }
+
+    private double ReadDoubleBox(TextBox box, double fallback, double min, double max)
+    {
+        double parsed;
+        if (box != null && double.TryParse(StringOrEmpty(box.Text), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed))
+        {
+            return Math.Max(min, Math.Min(max, parsed));
+        }
+        return fallback;
+    }
+
+    private static string StringOrEmpty(string value)
+    {
+        return value == null ? string.Empty : value.Trim();
+    }
+
+    private static string FormatDouble(double value)
+    {
+        return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private void SetComboValue(ComboBox box, string value)
+    {
+        if (box == null) return;
+        value = NormalizeQualityMode(value);
+        if (box.Items.Contains(value)) box.SelectedItem = value;
+        else box.SelectedItem = "balanced";
+    }
+
+    private string SelectedQualityValue(ComboBox box)
+    {
+        return NormalizeQualityMode(box == null ? null : Convert.ToString(box.SelectedItem));
+    }
+
+    private string NormalizeQualityMode(string value)
+    {
+        value = StringOrEmpty(value).ToLowerInvariant();
+        if (value == "fast" || value == "balanced" || value == "expressive" || value == "ultra" || value == "custom") return value;
+        return "balanced";
     }
 
     private Panel BuildEnvironmentPanel()
@@ -570,6 +977,7 @@ internal sealed class LauncherForm : Form
             psi.EnvironmentVariables["LEON_LAUNCHER_NO_PAUSE"] = "1";
             psi.EnvironmentVariables["LEON_LAUNCHER_VERSION"] = versionKey;
             psi.EnvironmentVariables["LEON_ENABLE_QWEN_EMO"] = "0";
+            psi.EnvironmentVariables["LEON_ACTIVE_PROFILE_PATH"] = activeProfilePath;
             psi.EnvironmentVariables["PYTHONUTF8"] = "1";
             psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
             if (string.Equals(versionKey, "vllm", StringComparison.OrdinalIgnoreCase))
@@ -1422,9 +1830,11 @@ internal sealed class LauncherForm : Form
         activeView = view;
         homePanel.Visible = view == "home";
         logPanel.Visible = view == "log";
+        configPanel.Visible = view == "config";
         envPanel.Visible = view == "env";
         if (homePanel.Visible) homePanel.BringToFront();
         if (logPanel.Visible) logPanel.BringToFront();
+        if (configPanel.Visible) configPanel.BringToFront();
         if (envPanel.Visible) envPanel.BringToFront();
         SyncNavButtons();
         if (view == "log")
@@ -1506,6 +1916,7 @@ internal sealed class LauncherForm : Form
     {
         StyleNavButton(navHomeButton, activeView == "home");
         StyleNavButton(navLogButton, activeView == "log");
+        StyleNavButton(navConfigButton, activeView == "config");
         StyleNavButton(navEnvButton, activeView == "env");
     }
 

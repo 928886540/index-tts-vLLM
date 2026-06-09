@@ -68,12 +68,55 @@
     }
     function elementAudioBelongsToTrack(track) {
       if (!track || !audio) return false;
+      var kind = "";
+      try { kind = audio.dataset.idxSourceKind || ""; } catch (_) { kind = ""; }
       try {
-        if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey)) return true;
+        if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey)) {
+          if (!isSavedTrack(track)) return true;
+          return kind === "saved" || kind === "saved-blob" || kind === "offline" || kind === "offline-blob" || kind === "stream" || kind === "live-segment" || kind === "live-mp3";
+        }
       } catch (_) {}
       var src = "";
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       return !!(src && src === trackPlayableUrl(track));
+    }
+    function savedElementAudioBelongsToTrack(track) {
+      if (!track || !audio || !isSavedTrack(track)) return false;
+      var kind = "";
+      try { kind = audio.dataset.idxSourceKind || ""; } catch (_) { kind = ""; }
+      if (kind === "stream" || kind === "live-segment" || kind === "live-mp3") return false;
+      var src = "";
+      try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
+      if (/\/tts_dialogue_stream_job\//.test(String(src || ""))) return false;
+      if (elementAudioBelongsToTrack(track)) return true;
+      if (!src) return false;
+      var candidates = [track.offlineUrl, track.cacheUrl, track.url, trackPlayableUrl(track)];
+      for (var i = 0; i < candidates.length; i += 1) {
+        if (candidates[i] && sameAudioUrl(src, candidates[i])) return true;
+      }
+      return false;
+    }
+    function savedSourceKindForUrl(track, url) {
+      if (track && sameAudioUrl(url, track.offlineUrl)) {
+        return /^blob:|^data:/i.test(String(url || track.offlineUrl || "")) ? "offline-blob" : "offline";
+      }
+      return "saved";
+    }
+    function elementLiveAudioBelongsToTrack(track) {
+      if (!track || !audio) return false;
+      var kind = "";
+      var src = "";
+      try { kind = audio.dataset.idxSourceKind || ""; } catch (_) { kind = ""; }
+      if (kind !== "stream" && kind !== "live-segment" && kind !== "live-mp3") return false;
+      try {
+        if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey)) return true;
+      } catch (_) {}
+      try { src = audio.currentSrc || audio.src || ""; } catch (_) { src = ""; }
+      if (!src) return false;
+      if (kind === "stream" && track.streamUrl && sameAudioUrl(src, track.streamUrl)) return true;
+      if (track.cacheKey && /\/tts_dialogue_stream_job\//.test(src) && src.indexOf(encodeURIComponent(String(track.cacheKey))) >= 0) return true;
+      if (track.cacheKey && /\/tts_dialogue_stream_job\//.test(src) && src.indexOf(String(track.cacheKey)) >= 0) return true;
+      return false;
     }
     function liveElementOffsetSec(track) {
       if (!track || !audio) return 0;
@@ -98,13 +141,62 @@
     function elementPlaybackTimeSec(track) {
       var current = 0;
       try { current = Math.max(0, Number(audio.currentTime || 0) || 0); } catch (_) { current = 0; }
-      return clampPlaybackTimeSec(track, ((isElementUsingTrackStream(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track)) ? liveElementOffsetSec(track) : 0) + current);
+      if (track && isLiveProgressTrack(track) && !elementLiveAudioBelongsToTrack(track)) {
+        return bestStoredLiveResumeSec(track);
+      }
+      return clampPlaybackTimeSec(track, (elementLiveAudioBelongsToTrack(track) ? liveElementOffsetSec(track) : 0) + current);
+    }
+    function resetLiveProgressForTrack(track, reason) {
+      if (!track) return;
+      track.liveResumeSec = 0;
+      track.lastLiveProgressSec = 0;
+      track.lastWebAudioSec = 0;
+      track.lastElementSec = 0;
+      track.lastStalledSec = 0;
+      track.liveElementOffsetSec = 0;
+      track.liveMp3StartSec = 0;
+      track.streamPlaybackFinished = false;
+      track.liveEndedAwaitSaved = false;
+      try {
+        if (currentTrack && currentTrack() === track) {
+          if (cur) cur.textContent = "00:00";
+          if (seek) seek.value = "0";
+        }
+      } catch (_) {}
+      if (reason) debugLog("↩️ 清理 LIVE 进度: " + reason + " cacheKey=" + (track.cacheKey || ""), "#9ff");
+    }
+    function bestStoredLiveResumeSec(track) {
+      if (!track) return 0;
+      var best = 0;
+      function take(v) {
+        v = Number(v);
+        if (isFinite(v) && v > best) best = v;
+      }
+      take(track.liveResumeSec);
+      take(track.lastLiveProgressSec);
+      take(track.lastWebAudioSec);
+      return clampPlaybackTimeSec(track, best);
+    }
+    function savedTrackResumeSec(track) {
+      if (!track) return 0;
+      if (String(track.playbackState || "") === "ended") return 0;
+      var stored = 0;
+      if (isFinite(Number(track.lastElementSec))) stored = clampPlaybackTimeSec(track, Math.max(0, Number(track.lastElementSec) || 0));
+      try {
+        if (savedElementAudioBelongsToTrack(track) && isFinite(Number(audio.currentTime))) {
+          var current = clampPlaybackTimeSec(track, Math.max(0, Number(audio.currentTime || 0) || 0));
+          if (current > 0.05 || String(track.playbackState || "") === "playing") return current;
+          if (stored > 0.05 && !audio.ended) return stored;
+          return current;
+        }
+      } catch (_) {}
+      return stored;
     }
     function trackResumeSec(track) {
       if (!track) return 0;
-      if (isSavedTrack(track) && String(track.playbackState || "") === "ended") return 0;
-      if ((track.livePageSuspended || track.pausedByUser || String(track.playbackState || "") === "paused") && isFinite(Number(track.liveResumeSec))) {
-        return Math.max(0, Number(track.liveResumeSec) || 0);
+      if (isSavedTrack(track)) return savedTrackResumeSec(track);
+      if (track.livePageSuspended || track.pausedByUser || String(track.playbackState || "") === "paused") {
+        return bestStoredLiveResumeSec(track);
       }
       if (typeof webAudioPlaybackSecForTrack === "function" && webAudioActiveTrack === track) {
         var webSec = webAudioPlaybackSecForTrack(track);
@@ -113,16 +205,34 @@
       var src = "";
       try { src = audio.currentSrc || audio.src || ""; } catch (_) {}
       var playable = trackPlayableUrl(track);
-      if ((elementAudioBelongsToTrack(track) || (playable && src === playable)) && isFinite(Number(audio.currentTime))) return Math.max(0, elementPlaybackTimeSec(track));
-      if (isFinite(Number(track.liveResumeSec))) return Math.max(0, Number(track.liveResumeSec) || 0);
-      if (isFinite(Number(track.lastLiveProgressSec))) return Math.max(0, Number(track.lastLiveProgressSec) || 0);
+      if ((elementAudioBelongsToTrack(track) || elementLiveAudioBelongsToTrack(track) || (playable && src === playable)) && isFinite(Number(audio.currentTime))) return Math.max(0, elementPlaybackTimeSec(track));
+      var storedResume = bestStoredLiveResumeSec(track);
+      if (storedResume > 0) return storedResume;
       if ((track.state === "live" || track.state === "pending") && (track.streamHealth === "stalled" || track.streamHealth === "interrupted" || track.streamStalled) && isFinite(Number(track.lastStalledSec))) {
         return Math.max(0, (Number(track.lastStalledSec) || 0) - 0.5);
       }
-      if (isFinite(Number(track.lastWebAudioSec))) return Math.max(0, Number(track.lastWebAudioSec) || 0);
-      if (isFinite(Number(track.lastElementSec))) return Math.max(0, Number(track.lastElementSec) || 0);
-      if (isFinite(Number(track.lastStalledSec))) return Math.max(0, Number(track.lastStalledSec) || 0);
       return 0;
+    }
+    function rememberNativeLiveElementResumeSec(track, reason, opts) {
+      if (!track) return 0;
+      var usingNativeLive = false;
+      try {
+        usingNativeLive = !!(isElementUsingTrackStream(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track) || isElementPlayingTrackStream(track));
+      } catch (_) {
+        usingNativeLive = false;
+      }
+      var sec = NaN;
+      if (usingNativeLive) {
+        try {
+          if (isFinite(Number(audio.currentTime))) sec = elementPlaybackTimeSec(track);
+        } catch (_) { sec = NaN; }
+      }
+      if (!isFinite(Number(sec)) || Number(sec) <= 0) sec = bestStoredLiveResumeSec(track);
+      if (!isFinite(Number(sec)) || Number(sec) <= 0) {
+        try { sec = trackResumeSec(track); } catch (_) { sec = 0; }
+      }
+      sec = rememberLiveResumeSec(track, Math.max(0, Number(sec) || 0), reason || "native live element pause", opts);
+      return sec;
     }
     function segmentStartSec(seg, sampleRate) {
       if (!seg) return NaN;
@@ -203,8 +313,8 @@
     function isLiveProgressTrack(track) {
       if (!track) return false;
       try {
-        if (isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track)) return true;
         if (isSavedTrack(track)) return false;
+        if (isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track)) return true;
         if (track.webAudioPlaying || webAudioActiveTrack === track) return true;
         if (isElementUsingTrackStream(track) || isElementPlayingTrackStream(track)) return true;
         var state = trackState(track);
@@ -239,27 +349,122 @@
       positionSec = Math.max(0, Number(positionSec || 0) || 0);
       var dur = progressDurationSec(track, positionSec);
       if (dur > 0) return dur;
-      if (isLiveProgressTrack(track)) return Math.max(10, positionSec + 5);
       return 0;
+    }
+    function liveSeekDurationSec(track) {
+      if (!track || isSavedTrack(track) || !isLiveProgressTrack(track)) return 0;
+      var pos = 0;
+      try { pos = trackResumeSec(track); } catch (_) { pos = bestStoredLiveResumeSec(track); }
+      pos = Math.max(0, Number(pos || 0) || 0);
+      function usable(d) {
+        d = Number(d);
+        return isFinite(d) && d > 0 && pos <= d + 0.25 ? d : 0;
+      }
+      var direct = usable(track.duration_s || (track.metrics && track.metrics.audio_duration_s));
+      if (direct > 0) return direct;
+      return usable(trackDurationHintSec(track));
     }
     function canSeekLiveTrack(track) {
       if (!track || track.deleted || isTerminalTrack(track)) return false;
       if (isSavedTrack(track)) return false;
       if (normalizePlaybackMode(track.playbackMode) !== "live" || track.backgroundOnly) return false;
       if (!track.cacheKey && !liveStreamUrlForTrack(track)) return false;
-      return true;
+      return liveSeekDurationSec(track) > 0;
     }
     function canSeekTrackByControls(track) {
       if (!track || track.deleted || isTerminalTrack(track)) return false;
       if (isSavedTrack(track)) return !!(trackPlayableUrl(track) || track.cacheUrl || track.cacheKey);
       return canSeekLiveTrack(track);
     }
+    function applySavedElementSeek(track, pos) {
+      if (!track || !isSavedTrack(track)) return false;
+      pos = Math.max(0, Number(pos) || 0);
+      var url = trackPlayableUrl(track);
+      if (!url && track.cacheKey) {
+        track.cacheUrl = cleanBase(cfg.apiBase) + "/cache_audio/" + encodeURIComponent(track.cacheKey);
+        track.url = track.cacheUrl;
+        url = trackPlayableUrl(track);
+      }
+      if (!url) return false;
+      var wasPlaying = false;
+      try {
+        wasPlaying = !!(
+          String(track.playbackState || "") === "playing"
+          || (play && play.dataset && play.dataset.state === "playing")
+          || (!track.savedElementUserPaused && !audio.ended && Number(track.savedElementLastPlayingAt || 0) > 0 && Date.now() - Number(track.savedElementLastPlayingAt || 0) < 5000)
+          || (savedElementAudioBelongsToTrack(track) && !audio.paused && !audio.ended)
+        );
+      } catch (_) { wasPlaying = String(track.playbackState || "") === "playing"; }
+      stopWebAudioPlayback("switch");
+      var sourceChanged = false;
+      if (!savedElementAudioBelongsToTrack(track) || !sameAudioUrl(audio.currentSrc || audio.src || "", url)) {
+        suppressElementPauseState(500);
+        audio.src = url;
+        try { audio.load(); } catch (_) {}
+        markElementAudioTrack(track, savedSourceKindForUrl(track, url));
+        sourceChanged = true;
+      } else {
+        markElementAudioTrack(track, savedSourceKindForUrl(track, url));
+      }
+      track.lastElementSec = pos;
+      var apply = function () {
+        try {
+          if (currentTrack && currentTrack() !== track) return;
+          var activeSrc = audio.currentSrc || audio.src || "";
+          if (activeSrc && !sameAudioUrl(activeSrc, url) && !savedElementAudioBelongsToTrack(track)) return;
+          var target = pos;
+          if (isFinite(audio.duration) && audio.duration > 0) target = Math.min(target, Math.max(0, audio.duration - 0.05));
+          audio.currentTime = Math.max(0, target);
+          track.lastElementSec = Math.max(0, target);
+          if (cur) cur.textContent = formatTime(target);
+          var hint = progressDurationSec(track, target);
+          if (total) total.textContent = hint > 0 ? formatTime(hint) : "--:--";
+          if (seek) {
+            var meter = progressMeterDurationSec(track, target);
+            if (meter > 0) seek.value = String(Math.floor(Math.min(target, meter) / meter * 1000));
+          }
+          refreshActiveSubtitleForTrack(track, target, { force: true, scroll: true });
+          markElementAudioTrack(track, savedSourceKindForUrl(track, url));
+        } catch (_) {}
+      };
+      apply();
+      try { audio.addEventListener("loadedmetadata", apply, { once: true }); } catch (_) {}
+      try { audio.addEventListener("canplay", apply, { once: true }); } catch (_) {}
+      setTimeout(apply, 80);
+      setTimeout(apply, 260);
+      if (wasPlaying && sourceChanged) {
+        try {
+          setAudioPlaybackRate();
+          var p = audio.play();
+          if (p && typeof p.catch === "function") p.catch(function (e) { handleAudioPlayReject("saved-seek", e, "请点播放继续"); });
+        } catch (_) {}
+      }
+      if (wasPlaying) {
+        track.savedSeekKeepPlayingUntil = Date.now() + 700;
+        setTrackPlaybackState(track, "playing");
+        setPlayState("playing");
+        setStatus(trackPlaybackLabel(track));
+        setTimeout(function () {
+          try {
+            if (currentTrack() === track && savedElementAudioBelongsToTrack(track) && !audio.ended) {
+              setTrackPlaybackState(track, "playing");
+              setPlayState("playing");
+              setStatus(trackPlaybackLabel(track));
+            }
+          } catch (_) {}
+        }, 320);
+      }
+      return true;
+    }
     function seekToSeconds(pos, opts) {
       opts = opts || {};
       var track = currentTrack();
       pos = Math.max(0, Number(pos) || 0);
+      if (track && isSavedTrack(track)) {
+        return applySavedElementSeek(track, pos);
+      }
       if (track && canSeekLiveTrack(track) && liveStreamUrlForTrack(track)) {
-        var liveDur = trackDurationHintSec(track);
+        var liveDur = liveSeekDurationSec(track);
         if (liveDur > 0) pos = Math.min(pos, Math.max(0, liveDur - 0.05));
         pos = rememberLiveResumeSec(track, pos, opts.noticeTitle || "live seek", { allowBackward: true });
         track.pausedByUser = false;
@@ -306,7 +511,8 @@
       delta = Number(delta) || 0;
       var track = currentTrack();
       var dur = Number(audio && audio.duration);
-      var maxDur = (isFinite(dur) && dur > 0) ? dur : trackDurationHintSec(track);
+      if (track && isLiveProgressTrack(track) && !canSeekLiveTrack(track)) return false;
+      var maxDur = track && isLiveProgressTrack(track) ? liveSeekDurationSec(track) : ((isFinite(dur) && dur > 0) ? dur : trackDurationHintSec(track));
       var target = Math.max(0, trackResumeSec(track) + delta);
       if (maxDur > 0) target = Math.min(target, Math.max(0, maxDur - 0.05));
       return seekToSeconds(target, { noticeTitle: delta < 0 ? "后退 10 秒" : "快进 10 秒" });

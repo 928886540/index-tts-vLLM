@@ -30,17 +30,36 @@
     } catch (_) {}
     return [];
   }
-  function persistedTrackLooksSaved(t) {
-    if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
+  function cardGenerationState(t) {
+    if (!t) return "generating";
     var state = String(t.state || "").trim();
+    var generationState = String(t.generationState || t.cardState || "").trim();
     var status = String(t.status || "").trim();
     var serverState = String(t.serverState || "").trim();
     var cacheState = String(t.cacheState || t.remoteCacheState || "").trim();
-    if (state === "failed" || state === "cancelled" || status === "failed" || status === "cancelled" || serverState === "failed" || serverState === "cancelled") return false;
-    return state === "saved" || cacheState === "ready" || !!(t.cacheReady || t.fromHistory || t.status === "ready");
+    var phase = String((t.metrics && t.metrics.phase) || "").trim();
+    if (t.deleted || t.cancelled || state === "cancelled" || status === "cancelled" || serverState === "cancelled" || generationState === "cancelled") return "cancelled";
+    if (state === "failed" || status === "failed" || serverState === "failed" || cacheState === "failed" || generationState === "failed") return "failed";
+    if (t.cacheReady || t.fromHistory || state === "saved" || status === "ready" || status === "done" || serverState === "done" || cacheState === "ready" || generationState === "ready") return "ready";
+    if (phase === "saving" || status === "saving" || serverState === "saving" || cacheState === "saving" || generationState === "saving") return "saving";
+    return "generating";
+  }
+  function legacyStateForCardGenerationState(t) {
+    var generationState = cardGenerationState(t);
+    if (generationState === "ready") return "saved";
+    if (generationState === "failed") return "failed";
+    if (generationState === "cancelled") return "cancelled";
+    return normalizePlaybackMode(t && t.playbackMode) === "live" ? "live" : "pending";
+  }
+  function persistedTrackLooksSaved(t) {
+    return !!(t && t.cacheKey && cardGenerationState(t) === "ready");
+  }
+  function persistedTrackLooksVisible(t) {
+    if (!t || !t.cacheKey || t.deleted) return false;
+    return cardGenerationState(t) !== "cancelled";
   }
   function persistableHistoryTracks(tracks) {
-    return (tracks || []).filter(persistedTrackLooksSaved);
+    return (tracks || []).filter(persistedTrackLooksVisible);
   }
   function ensureTrackRecordPosition(track, index) {
     if (!track) return { trackIndex: Math.max(0, Number(index || 0) || 0), trackId: "" };
@@ -76,27 +95,46 @@
   function localHistoryCountForMessage(messageId) {
     return persistableHistoryTracks(localTracksForMessage(messageId)).length;
   }
-  async function saveTracksForMessage(messageId, tracks) {
+  async function saveTracksForMessage(messageId, tracks, opts) {
     if (!messageId) return;
+    opts = opts || {};
     var key = TRACKS_KEY_PREFIX + messageId;
     // 只挑能跨会话持久化的字段；blob URL 重启就失效，丢掉。
     // segments 也存下来,字幕重进页面后才有时间轴显示。
     var lite = persistableHistoryTracks(tracks).map(function (t) {
       var pos = ensureTrackRecordPosition(t, (tracks || []).indexOf(t));
+      var generationState = cardGenerationState(t);
+      var legacyState = legacyStateForCardGenerationState(t);
+      var ready = generationState === "ready";
+      var playbackMode = normalizePlaybackMode(t.playbackMode);
       return {
         cacheKey: t.cacheKey || "",
         trackIndex: pos.trackIndex,
         trackId: pos.trackId,
         voice: t.voice || "",
         mode: t.mode || "",
-        state: "saved",
+        parseMode: t.parseMode || t.mode || "",
+        playbackMode: playbackMode,
+        backgroundOnly: !!(playbackMode === "generate" || t.backgroundOnly),
+        livePageExited: !!t.livePageExited,
+        allowStreamPlay: !!t.allowStreamPlay,
+        generationState: generationState,
+        state: legacyState,
         playbackState: t.playbackState || "",
-        serverState: "done",
-        cacheState: "ready",
-        remoteCacheState: "ready",
+        status: ready ? "ready" : (t.status || (generationState === "failed" ? "failed" : (legacyState === "live" ? "running" : "pending"))),
+        serverState: ready ? "done" : (t.serverState || (generationState === "failed" ? "failed" : (legacyState === "live" ? "running" : "pending"))),
+        cacheState: ready ? "ready" : (t.cacheState || t.remoteCacheState || (generationState === "saving" ? "pending" : "pending")),
+        remoteCacheState: ready ? "ready" : (t.remoteCacheState || t.cacheState || (generationState === "saving" ? "pending" : "pending")),
+        cacheReady: !!(ready || t.cacheReady),
+        cacheUrl: t.cacheUrl || "",
+        streamUrl: ready ? "" : (t.streamUrl || ""),
         offlineState: t.offlineState || "",
         streamHealth: t.streamHealth || (t.streamInterrupted ? "interrupted" : (t.streamStalled ? "stalled" : "")),
         stalledCount: Number(t.stalledCount || 0) || 0,
+        lastElementSec: 0,
+        lastWebAudioSec: isFinite(Number(t.lastWebAudioSec)) ? Math.max(0, Number(t.lastWebAudioSec)) : 0,
+        lastLiveProgressSec: isFinite(Number(t.lastLiveProgressSec)) ? Math.max(0, Number(t.lastLiveProgressSec)) : 0,
+        liveResumeSec: isFinite(Number(t.liveResumeSec)) ? Math.max(0, Number(t.liveResumeSec)) : 0,
         createdAt: t.createdAt || Date.now(),
         offlineKey: t.offlineKey || offlineAudioKey(t.cacheKey),
         offlineReady: !!t.offlineReady,
@@ -104,7 +142,10 @@
         offlineSavedAt: t.offlineSavedAt || 0,
         offlineSize: t.offlineSize || 0,
         voicesMap: t.voicesMap || null,
+        error: t.error || "",
         metrics: t.metrics ? {
+          phase: t.metrics.phase,
+          message: t.metrics.message,
           first_pcm_s: t.metrics.first_pcm_s,
           total_wall_s: t.metrics.total_wall_s,
           audio_duration_s: t.metrics.audio_duration_s,
@@ -122,9 +163,12 @@
       };
     }).filter(function (t) { return !!t.cacheKey; });
     lite.sort(compareTrackRecords);
+    var failed = null;
     try { if (window.tavo && typeof tavo.set === "function") await tavo.set(key, lite, "chat"); }
-    catch (e) { try { debugLog("⚠️ 保存历史到 tavo.set 失败: " + (e && e.message ? e.message : e), "#fc9"); } catch (_) {} }
-    try { localStorage.setItem(key, JSON.stringify(lite)); } catch (_) {}
+    catch (e) { failed = e; try { debugLog("⚠️ 保存历史到 tavo.set 失败: " + (e && e.message ? e.message : e), "#fc9"); } catch (_) {} }
+    try { localStorage.setItem(key, JSON.stringify(lite)); }
+    catch (e) { if (!failed) failed = e; }
+    if (opts.strict && failed) throw failed;
   }
   function playIcon(state) { return state === "playing" ? '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; }
   function loadingIcon() { return '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10h-3a7 7 0 1 1-7-7V2z"/></svg>'; }

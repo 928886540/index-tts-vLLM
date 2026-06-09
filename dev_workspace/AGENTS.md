@@ -14,12 +14,14 @@ Before doing repository work here, read the short active context:
 2. `C:\Users\Administrator\.codex\instruction.md`
 3. this `AGENTS.md`
 4. `README.md`
-5. `docs/AGENT_STATE.md`
-6. `docs/BUGS.md`
+5. `docs/LOGIC.md`
+6. `docs/AGENT_STATE.md`
+7. `docs/BUGS.md`
 
 Read the other active docs only when relevant:
 
 - `docs/ARCHITECTURE.md`: component boundaries, APIs, cache/job model, launcher layout, or shared file placement.
+- `docs/LOGIC.md`: source of truth for Tavo generation/playback/storage state, LIVE page exit, saved/offline playback, and LLM reuse.
 - `docs/DECISIONS.md`: accepted/deprecated project decisions.
 - `docs/TODO.md`: planning or reprioritization.
 - `docs/REGRESSION.md`: before handing off code changes that need validation.

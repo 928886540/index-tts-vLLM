@@ -164,6 +164,7 @@
     var detachedBackgroundJobs = [];
     var currentTrackIndex = -1;
     var currentCacheKey = "";
+    var elementPauseStateSuppressedUntil = 0;
     var webAudioController = null;
     var webAudioActiveTrack = null;
     var webAudioPlayToken = 0;
@@ -174,6 +175,13 @@
     var progressStatusLastAt = 0;
     var progressStatusPendingText = "";
     var progressStatusPendingTimer = null;
+
+    function suppressElementPauseState(ms) {
+      elementPauseStateSuppressedUntil = Math.max(elementPauseStateSuppressedUntil, Date.now() + Math.max(0, Number(ms || 0) || 0));
+    }
+    function isElementPauseStateSuppressed() {
+      return Date.now() < elementPauseStateSuppressedUntil;
+    }
 
     if (!panel) throw new Error("TAVO player missing settings panel");
     removeLegacyGlobalGear();

@@ -2,15 +2,21 @@
     function pauseLiveTrack(track) {
       if (!track) return;
       track.pausedByUser = true;
+      var elementSec = NaN;
+      try {
+        if (isElementUsingTrackStream(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track) || isElementPlayingTrackStream(track)) {
+          elementSec = rememberNativeLiveElementResumeSec(track, "user/media pause");
+        }
+      } catch (_) { elementSec = NaN; }
       try {
         var webSec = webAudioPlaybackSecForTrack(track);
         if (isFinite(Number(webSec)) && Number(webSec) > 0) {
           track.lastWebAudioSec = Math.max(0, Number(webSec));
-          track.lastElementSec = track.lastWebAudioSec;
+          rememberLiveResumeSec(track, track.lastWebAudioSec, "user/media pause");
         }
       } catch (_) {}
       try {
-        if (isFinite(Number(audio.currentTime))) track.lastElementSec = Math.max(0, elementPlaybackTimeSec(track));
+        if (!isFinite(Number(elementSec)) && isFinite(Number(audio.currentTime))) rememberNativeLiveElementResumeSec(track, "user/media pause");
       } catch (_) {}
       try { audio.pause(); } catch (_) {}
       if (!pauseWebAudioTrackLocally(track)) stopWebAudioPlayback("pause");
@@ -47,19 +53,21 @@
         return false;
       }
       var existingIsPlaying = String(existingTrack.playbackState || "") === "playing"
-        && (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (elementAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended));
+        && (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (elementLiveAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended) || (elementAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended));
       if (existingIsPlaying) {
-        if (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (typeof trackHasActiveLiveOutput === "function" && trackHasActiveLiveOutput(existingTrack))) {
-          pauseLiveTrack(existingTrack);
-        } else if (isSavedTrack(existingTrack)) {
+        if (isSavedTrack(existingTrack)) {
           try {
             existingTrack.lastElementSec = Math.max(0, Number(audio.currentTime || 0) || 0);
+            existingTrack.savedElementUserPaused = true;
+            existingTrack.savedSeekKeepPlayingUntil = 0;
             audio.pause();
             setTrackPlaybackState(existingTrack, "paused");
             setPlayState("idle");
             setStatus("已暂停");
             showTrackNotice(existingTrack, "已暂停", "点播放从当前位置继续");
           } catch (_) {}
+        } else if (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (typeof trackHasActiveLiveOutput === "function" && trackHasActiveLiveOutput(existingTrack))) {
+          pauseLiveTrack(existingTrack);
         }
         updateTrackButtons();
         return true;
@@ -84,6 +92,23 @@
           startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
         } else if (audio.src) {
           if (audio.paused) {
+            try {
+              if (isSavedTrack(existingTrack)) {
+                existingTrack.savedElementUserPaused = false;
+                var savedResume = trackResumeSec(existingTrack);
+                if (savedResume > 0.05 && Math.abs((Number(audio.currentTime || 0) || 0) - savedResume) > 0.25) {
+                  var applySavedResume = function () {
+                    try {
+                      var target = savedResume;
+                      if (isFinite(audio.duration) && audio.duration > 0) target = Math.min(target, Math.max(0, audio.duration - 0.05));
+                      audio.currentTime = Math.max(0, target);
+                    } catch (_) {}
+                  };
+                  if (audio.readyState > 0) applySavedResume();
+                  else audio.addEventListener("loadedmetadata", applySavedResume, { once: true });
+                }
+              }
+            } catch (_) {}
             setAudioPlaybackRate();
             await audio.play().catch(function(e){ handleAudioPlayReject("element", e, "请点播放继续"); });
           } else {
@@ -206,7 +231,6 @@
         setStatus(titleText);
         if (!isTransientProgressNotice(titleText)) showTrackNotice(track, titleText, detailText);
       }
-      if (parseMode === "ai" && (!cfg.llmEndpoint || !cfg.llmModel)) throw new Error("AI模式需要填写 LLM 接口地址和模型。");
       var voicesMap = parseMode === "normal" ? normalModeVoicesMap(cfg) : rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
       var representativeVoice = representativeVoiceForMode(parseMode, voicesMap, cfg.defaultVoice);
       var rolesHint = parseMode === "normal"
@@ -229,7 +253,14 @@
         status: "pending",
         pendingBlob: true,
         streaming: false,
-        allowStreamPlay: false
+        allowStreamPlay: false,
+        liveResumeSec: 0,
+        lastLiveProgressSec: 0,
+        lastWebAudioSec: 0,
+        lastElementSec: 0,
+        lastStalledSec: 0,
+        liveElementOffsetSec: 0,
+        liveMp3StartSec: 0
       };
       setTrackState(placeholder, "pending");
       if (backgroundDetached) {
@@ -281,13 +312,28 @@
           body.character_name = (context && context.characterName) || cfg.currentCharacterName || "";
           body.roles_hint = rolesHint;
         }
+        var reusedSegments = null;
+        if (parseMode === "ai" && cfg.reuseLlmParse !== false) {
+          showGenerationProgress(placeholder, "检查分段复用", "");
+          reusedSegments = await loadReusableSegments(messageText, cfg, context, function (text) {
+            showGenerationProgress(placeholder, text, "");
+          });
+          if (Array.isArray(reusedSegments) && reusedSegments.length) {
+            body.segments = reusedSegments;
+            placeholder.segments = reusedSegments;
+            placeholder.segmentPlan = reusedSegments;
+            placeholder.reusedLlmSegments = true;
+            showGenerationProgress(placeholder, "分段已就绪，等待合成", "");
+          }
+        }
+        if (parseMode === "ai" && !(body.segments && body.segments.length) && (!cfg.llmEndpoint || !cfg.llmModel)) throw new Error("AI模式需要填写 LLM 接口地址和模型。");
         if (force) body.cache_nonce = String(Date.now()) + "-" + Math.random().toString(36).slice(2);
         debugLog("━━━━━━━━━━━━━━━━━━━━━━━━━", "#fff");
         debugLog("🎬 生成开始: mode=" + parseMode + " playback=" + playbackMode + " text=" + messageText.length + " 字", "#fff");
         debugLog("🎙️ 音色映射: " + JSON.stringify(voicesMap), "#ffd479");
         startServerLogPolling(base);
         if (placeholder.deleted) throw Object.assign(new Error("生成已取消"), { name: "AbortError" });
-        showGenerationProgress(placeholder, submittedProgressTitle, "");
+        showGenerationProgress(placeholder, body.segments && body.segments.length ? "分段已就绪，等待合成" : submittedProgressTitle, "");
         var jobInfo;
         var jobCreateController = (typeof AbortController === "function") ? new AbortController() : null;
         placeholder.jobCreateAbortController = jobCreateController;
@@ -305,7 +351,8 @@
         placeholder.streamUrl = jobInfo.streamUrl;
         placeholder.cacheUrl = jobInfo.cacheUrl;
         placeholder.cacheKey = jobInfo.cacheKey;
-        placeholder.segments = [];
+        placeholder.segments = Array.isArray(reusedSegments) ? reusedSegments : [];
+        if (placeholder.segments.length) placeholder.segmentPlan = placeholder.segments;
         placeholder.voicesMap = voicesMap;
         placeholder.streamInterrupted = false;
         placeholder.streamStalled = false;
@@ -317,10 +364,13 @@
         placeholder.allowStreamPlay = playbackMode === "live" && !jobInfo.cached;
         placeholder.url = jobInfo.cached ? jobInfo.cacheUrl : (playbackMode === "live" ? jobInfo.streamUrl : "");
         setTrackState(placeholder, jobInfo.cached ? "saved" : (backgroundDetached ? "pending" : "live"));
+        if (!jobInfo.cached && playbackMode === "live") resetLiveProgressForTrack(placeholder, "fresh live generation");
         currentCacheKey = jobInfo.cacheKey;
         updateTrackButtons();
         if (!jobInfo.cached) {
           savePendingJobForTrack(placeholder).catch(function(){});
+          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+          knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
           debugLog("💾 已记录生成 pending cacheKey=" + jobInfo.cacheKey + " playback=" + playbackMode, "#9ff");
         }
         if (jobInfo.cached && jobInfo.cacheUrl) {

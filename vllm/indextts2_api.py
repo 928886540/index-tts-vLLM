@@ -152,6 +152,50 @@ STATIC_DIR = _resolve_dir_from_env(
     os.path.join(WORKSPACE_ROOT, "static"),
     os.path.join(APP_ROOT, os.pardir, "static"),
 )
+ACTIVE_PROFILE_PATH = os.path.abspath(
+    os.getenv("LEON_ACTIVE_PROFILE_PATH")
+    or os.path.join(WORKSPACE_ROOT, "config", "profiles", "active.json")
+)
+
+
+def _default_active_profile() -> dict:
+    return {
+        "version": 1,
+        "name": "LEON default",
+        "description": "Default local tuning profile managed by the LEON launcher.",
+        "llmPromptId": "builtin_backend_default",
+        "llmPrompt": "",
+        "quality": {
+            "live": "balanced",
+            "generate": "balanced",
+            "custom": {
+                "live": {
+                    "diffusion_steps": 14,
+                    "prompt_audio_seconds": 10,
+                    "segment_tokens": 60,
+                    "first_tokens": 18,
+                    "s2mel_cfg_rate": 0.7,
+                },
+                "generate": {
+                    "diffusion_steps": 14,
+                    "prompt_audio_seconds": 10,
+                    "segment_tokens": 60,
+                    "first_tokens": 18,
+                    "s2mel_cfg_rate": 0.7,
+                },
+            },
+        },
+    }
+
+
+def _load_active_profile() -> dict:
+    if not os.path.isfile(ACTIVE_PROFILE_PATH):
+        return _default_active_profile()
+    with open(ACTIVE_PROFILE_PATH, "r", encoding="utf-8") as f:
+        profile = json.load(f)
+    if not isinstance(profile, dict):
+        raise ValueError("active profile must be a JSON object")
+    return profile
 
 
 def _static_file_path(name: str) -> Optional[str]:
@@ -201,6 +245,19 @@ async def tavo_widget_test_head():
         "Content-Length": str(os.path.getsize(path)) if os.path.exists(path) else "0",
     }
     return Response(status_code=200 if os.path.exists(path) else 404, media_type="text/html", headers=headers)
+
+
+@APP.get("/profiles/active")
+async def active_profile_endpoint():
+    try:
+        profile = _load_active_profile()
+        return JSONResponse(
+            content=profile,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "active profile load failed", "Exception": str(e)})
 
 
 def _icon_media_type(path: str) -> str:
@@ -3984,13 +4041,43 @@ async def tts_dialogue_stream_job_mp3_audio_endpoint(job_id: str, start_s: float
 
 
 @APP.delete("/tts_dialogue_stream_job/{job_id}")
-async def tts_dialogue_stream_job_delete_endpoint(job_id: str):
-    """Cancel a live dialogue job and delete its saved snapshot if present."""
+async def tts_dialogue_stream_job_delete_endpoint(job_id: str, preserve_completed: bool = False):
+    """Cancel a live dialogue job and delete its saved snapshot if present.
+
+    preserve_completed is used by the Tavo "exit live" button: unfinished
+    jobs may be cancelled, but already-saving/done jobs must stay as history.
+    """
     cache_key = job_id
     try:
         from indextts import snapshot_cache
 
         live_job = LIVE_JOBS.get(cache_key)
+        cached_path = snapshot_cache.get_cached_audio(cache_key)
+        if preserve_completed and cached_path:
+            return JSONResponse(content={
+                "cancelled_live": False,
+                "deleted": False,
+                "preserved": True,
+                "state": "done",
+                "cache_key": cache_key,
+                "cache_url": f"/cache_audio/{cache_key}",
+            })
+        if preserve_completed and live_job:
+            phase = str(live_job.metrics.get("phase") or live_job.metrics.get("state") or "")
+            segments_total = int(live_job.metrics.get("segments_total") or len(live_job.metrics.get("segments_plan") or []) or 0)
+            segments_done = int(live_job.metrics.get("segments_done") or len(live_job.segments_meta or []) or 0)
+            all_segments_done = bool(segments_total > 0 and segments_done >= segments_total and len(live_job.pcm) > 0)
+            if live_job.finished.is_set() or phase in ("saving", "done") or all_segments_done:
+                state = "done" if live_job.finished.is_set() or phase == "done" else "saving"
+                return JSONResponse(content={
+                    "cancelled_live": False,
+                    "deleted": False,
+                    "preserved": True,
+                    "state": state,
+                    "cache_key": cache_key,
+                    "cache_url": f"/cache_audio/{cache_key}",
+                    "metrics": live_job.metrics,
+                })
         if live_job:
             _mark_job_cancelled(live_job)
             live_job.finished.set()
@@ -3999,6 +4086,8 @@ async def tts_dialogue_stream_job_delete_endpoint(job_id: str):
         return JSONResponse(content={
             "cancelled_live": bool(live_job),
             "deleted": deleted,
+            "preserved": False,
+            "state": "cancelled" if live_job else "missing",
             "cache_key": cache_key,
         })
     except Exception as e:

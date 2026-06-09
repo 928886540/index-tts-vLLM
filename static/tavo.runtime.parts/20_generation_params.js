@@ -153,12 +153,16 @@
   function parseReuseStorageKeys(fingerprint, context) {
     var keys = [];
     function add(key) { if (key && keys.indexOf(key) < 0) keys.push(key); }
+    if (context && context.messageId) add("indextts_llm_parse_msg_v2_" + parseReuseHash(String(context.messageId)));
     add("indextts_llm_parse_v1_" + parseReuseHash(fingerprint));
     if (context && context.messageId) add("indextts_llm_parse_msg_" + parseReuseHash(String(context.messageId)) + "_" + parseReuseHash(fingerprint));
     return keys;
   }
-  function parseReuseRecordMatches(record, fingerprint) {
-    return !!(record && record.fingerprint === fingerprint && Array.isArray(record.segments) && record.segments.length);
+  function parseReuseRecordMatches(record, fingerprint, context, key) {
+    if (!(record && Array.isArray(record.segments) && record.segments.length)) return false;
+    var messageScopedKey = context && context.messageId && key === ("indextts_llm_parse_msg_v2_" + parseReuseHash(String(context.messageId)));
+    if (messageScopedKey) return true;
+    return record.fingerprint === fingerprint;
   }
   async function loadReusableSegments(text, cfg, context, setStatus) {
     if (!cfg || cfg.reuseLlmParse === false) return null;
@@ -171,7 +175,7 @@
       if (!record) {
         try { if (window.tavo && typeof tavo.get === "function") record = await tavo.get(key, "chat"); } catch (_) {}
       }
-      if (parseReuseRecordMatches(record, fingerprint)) {
+      if (parseReuseRecordMatches(record, fingerprint, context, key)) {
         var segments = cloneSegments(record.segments);
         debugLog("♻️ 复用 LLM 拆段 cacheKey=" + key + " segments=" + segments.length, "#9f9");
         if (typeof setStatus === "function") setStatus("分段已就绪，等待合成");
@@ -181,15 +185,57 @@
     return null;
   }
   async function saveReusableSegments(text, cfg, context, segments) {
-    if (!cfg || cfg.reuseLlmParse === false || !Array.isArray(segments) || !segments.length) return;
+    if (!cfg || !Array.isArray(segments) || !segments.length) return;
     var fingerprint = parseReuseFingerprint(text, cfg, context);
     var keys = parseReuseStorageKeys(fingerprint, context);
-    var record = { fingerprint: fingerprint, segments: cloneSegments(segments), createdAt: Date.now() };
+    var record = {
+      schema: 2,
+      messageId: String((context && context.messageId) || ""),
+      fingerprint: fingerprint,
+      sourceText: String(text || ""),
+      segments: cloneSegments(segments),
+      createdAt: Date.now()
+    };
     for (var i = 0; i < keys.length; i++) {
       try { localStorage.setItem(keys[i], JSON.stringify(record)); } catch (_) {}
       try { if (window.tavo && typeof tavo.set === "function") await tavo.set(keys[i], record, "chat"); } catch (_) {}
     }
     debugLog("💾 保存 LLM 拆段复用 cacheKey=" + keys[0] + " segments=" + segments.length, "#9ff");
+  }
+  function reusableSegmentsFromStatusPayload(payload) {
+    if (!payload) return [];
+    var raw = [];
+    if (Array.isArray(payload.segments_plan) && payload.segments_plan.length) raw = payload.segments_plan;
+    else if (payload.metrics && Array.isArray(payload.metrics.segments_plan) && payload.metrics.segments_plan.length) raw = payload.metrics.segments_plan;
+    else if (Array.isArray(payload.segments_meta) && payload.segments_meta.length) raw = payload.segments_meta;
+    return (raw || []).map(function (s, i) {
+      return {
+        idx: s && s.idx != null ? s.idx : i,
+        role: (s && s.role) || "",
+        text: (s && s.text) || "",
+        style: (s && s.style) || "neutral",
+        style_alpha: s && s.style_alpha,
+        emo_text: s && s.emo_text,
+        emo_vec: s && s.emo_vec
+      };
+    }).filter(function (s) { return String(s.text || "").trim(); });
+  }
+  function reusableSegmentsSignature(segments) {
+    return (segments || []).map(function (s) {
+      return [s.role || "", s.text || "", s.style || "", s.style_alpha == null ? "" : s.style_alpha].join("\u0001");
+    }).join("\u0002");
+  }
+  async function saveReusableSegmentsFromStatus(text, cfg, context, track, payload, label) {
+    if (!track) return false;
+    if (normalizeModeName(track.parseMode || track.mode || (cfg && cfg.mode)) !== "ai") return false;
+    var segments = reusableSegmentsFromStatusPayload(payload);
+    if (!segments.length) return false;
+    var sig = reusableSegmentsSignature(segments);
+    if (sig && track.reusableSegmentsSavedSig === sig) return true;
+    track.reusableSegmentsSavedSig = sig;
+    await saveReusableSegments(text, cfg, context, segments);
+    debugLog("💾 " + (label || "status") + " 已更新消息级 LLM 拆段缓存 segments=" + segments.length, "#9ff");
+    return true;
   }
   async function parseWithOptionalReuse(text, cfg, setStatus, context) {
     var cached = await loadReusableSegments(text, cfg, context, setStatus);

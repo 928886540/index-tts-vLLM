@@ -30,7 +30,7 @@ D:\apiWorkSpace\leon_api\LEON-Launcher.exe
 共享的 Tavo 前端由 `static/` 提供。同一局域网内测试 Tavo 时可加载：
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v52"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260609-mp3-cache-v61"></script>
 ```
 
 如需公网访问，请在仓库外自行配置隧道或反向代理，只替换脚本地址中的主机部分。
@@ -44,3 +44,13 @@ D:\apiWorkSpace\leon_api\LEON-Launcher.exe
 - `scripts/`：共享启动脚本。
 - `dev_workspace/`：交接文档、回归记录和 smoke 测试。
 - `assets/readme/`：README 图片素材。
+
+## 开发约束
+
+修改 Tavo 播放、生成、离线音频、退出流式、消息级缓存或 LLM 复用前，先读：
+
+```text
+dev_workspace/docs/LOGIC.md
+```
+
+核心规则：没有“live 卡”，只有普通音频卡和 LIVE 页面；历史/已落盘音频只播放完整音频，不能进入 LIVE 路径。

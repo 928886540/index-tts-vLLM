@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260608-mp3-cache-v52";
+  var LOADER_VERSION = "20260609-mp3-cache-v61";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var PENDING_JOBS_KEY_PREFIX = "indextts_pending_jobs_";
@@ -123,18 +123,32 @@
     return fallbackId || "";
   }
 
-  function persistedTrackLooksSaved(t) {
-    if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
+  function cardGenerationState(t) {
+    if (!t) return "generating";
     var state = String(t.state || "").trim();
+    var generationState = String(t.generationState || t.cardState || "").trim();
     var status = String(t.status || "").trim();
     var serverState = String(t.serverState || "").trim();
     var cacheState = String(t.cacheState || t.remoteCacheState || "").trim();
-    if (state === "failed" || state === "cancelled" || status === "failed" || status === "cancelled" || serverState === "failed" || serverState === "cancelled") return false;
-    return state === "saved" || cacheState === "ready" || !!(t.cacheReady || t.fromHistory || t.status === "ready");
+    var phase = String((t.metrics && t.metrics.phase) || "").trim();
+    if (t.deleted || t.cancelled || state === "cancelled" || status === "cancelled" || serverState === "cancelled" || generationState === "cancelled") return "cancelled";
+    if (state === "failed" || status === "failed" || serverState === "failed" || cacheState === "failed" || generationState === "failed") return "failed";
+    if (t.cacheReady || t.fromHistory || state === "saved" || status === "ready" || status === "done" || serverState === "done" || cacheState === "ready" || generationState === "ready") return "ready";
+    if (phase === "saving" || status === "saving" || serverState === "saving" || cacheState === "saving" || generationState === "saving") return "saving";
+    return "generating";
+  }
+
+  function persistedTrackLooksSaved(t) {
+    return !!(t && t.cacheKey && cardGenerationState(t) === "ready");
+  }
+
+  function persistedTrackLooksVisible(t) {
+    if (!t || !t.cacheKey || t.deleted) return false;
+    return cardGenerationState(t) !== "cancelled";
   }
 
   function persistableHistoryTracks(tracks) {
-    return (tracks || []).filter(persistedTrackLooksSaved);
+    return (tracks || []).filter(persistedTrackLooksVisible);
   }
 
   function trackRecordPositionValue(track, fallbackIndex) {
@@ -155,9 +169,8 @@
 
   function pendingJobLooksActive(t) {
     if (!t || !t.cacheKey || t.deleted || t.cancelled) return false;
-    var state = String(t.state || "").trim();
-    var status = String(t.status || "").trim();
-    return state !== "saved" && state !== "failed" && state !== "cancelled" && state !== "done" && status !== "failed" && status !== "cancelled";
+    var generationState = cardGenerationState(t);
+    return generationState !== "ready" && generationState !== "failed" && generationState !== "cancelled";
   }
 
   function tracksFromStorageKey(key) {
@@ -214,17 +227,25 @@
 
   function historySnapshotForMessage(messageId) {
     var tracks = persistableHistoryTracks(localTracksForMessage(messageId)).sort(compareTrackRecords);
-    var savedKeys = {};
-    tracks.forEach(function (t) { if (t && t.cacheKey) savedKeys[t.cacheKey] = true; });
-    var pending = localPendingJobsForMessage(messageId).filter(function (t) { return !(t && t.cacheKey && savedKeys[t.cacheKey]); }).sort(compareTrackRecords);
+    var historyKeys = {};
+    tracks.forEach(function (t) { if (t && t.cacheKey) historyKeys[t.cacheKey] = true; });
+    var pending = localPendingJobsForMessage(messageId).filter(function (t) { return !(t && t.cacheKey && historyKeys[t.cacheKey]); }).sort(compareTrackRecords);
     var all = tracks.concat(pending).sort(compareTrackRecords);
     var latest = all.length ? all[all.length - 1] : null;
-    var resumeSec = latest ? Math.max(0, Number(latest.lastElementSec || latest.lastWebAudioSec || 0) || 0) : 0;
+    var resumeSec = 0;
+    var readyCount = tracks.filter(persistedTrackLooksSaved).length;
+    var generatingCount = all.filter(function (t) {
+      var s = cardGenerationState(t);
+      return s === "generating" || s === "saving";
+    }).length;
     var historyCount = all.length;
     return {
       latest: latest,
-      savedCount: tracks.length,
+      savedCount: readyCount,
+      ordinaryCount: tracks.length,
+      generatingCount: generatingCount,
       pendingCount: pending.length,
+      totalCount: all.length,
       historyCount: historyCount,
       resumeSec: resumeSec,
       title: shortName(latest && latest.voice)
@@ -324,10 +345,12 @@
     var resumeSec = snapshot.resumeSec;
     if (title && latest && latest.voice) title.textContent = shortName(latest.voice);
     if (status) {
-      if (snapshot.pendingCount) status.textContent = snapshot.savedCount ? ("历史音频 " + historyCount + " 条 · 流式生成中") : "流式生成中 · 点开继续";
+      if (snapshot.historyCount && snapshot.generatingCount) status.textContent = "历史音频 " + snapshot.historyCount + " 条 · 生成中 " + snapshot.generatingCount + " 条";
+      else if (snapshot.historyCount) status.textContent = "历史音频 " + snapshot.historyCount + " 条 · " + formatTime(resumeSec);
+      else if (snapshot.pendingCount) status.textContent = "流式生成中 · 点开继续";
       else status.textContent = latest ? ("历史音频 " + historyCount + " 条 · " + formatTime(resumeSec)) : "历史音频 0 条 · 点开播放器";
     }
-    if (progress) progress.style.width = (latest && latest.duration_s ? Math.max(2, Math.min(100, resumeSec / Number(latest.duration_s || 1) * 100)) : 0) + "%";
+    if (progress) progress.style.width = (latest && latest.duration_s && resumeSec > 0 ? Math.max(2, Math.min(100, resumeSec / Number(latest.duration_s || 1) * 100)) : 0) + "%";
     updateLoaderShellHistory(root, snapshot);
   }
 
@@ -427,11 +450,11 @@
     function storeTracksAndUpdate(value) {
       if (!key) return;
       if (!Array.isArray(value)) return;
-      var saved = persistableHistoryTracks(value);
-      if (!saved.length && bestCount > 0) return;
-      if (saved.length < bestCount) return;
-      bestCount = saved.length;
-      try { localStorage.setItem(key, JSON.stringify(saved)); } catch (_) {}
+      var visible = persistableHistoryTracks(value).sort(compareTrackRecords);
+      if (!visible.length && bestCount > 0) return;
+      if (visible.length < bestCount) return;
+      bestCount = visible.length;
+      try { localStorage.setItem(key, JSON.stringify(visible)); } catch (_) {}
       updateLazyHistory(root, messageId);
     }
     function storePendingAndUpdate(storageKey, value) {
@@ -540,15 +563,15 @@
     var historyCount = initialSnapshot.historyCount;
     var resumeSec = initialSnapshot.resumeSec;
     var title = initialSnapshot.title;
-    var lazyPlayTitle = initialSnapshot.pendingCount ? "继续流式任务" : (historyCount ? (resumeSec ? ("从 " + formatTime(resumeSec) + " 继续") : "播放语音") : "生成语音");
-    var lazyStatus = initialSnapshot.pendingCount ? (initialSnapshot.savedCount ? ("历史音频 " + historyCount + " 条 · 流式生成中") : "流式生成中 · 点开继续") : (latest ? ("历史音频 " + historyCount + " 条 · " + formatTime(resumeSec)) : "历史音频 0 条 · 点开播放器");
+    var lazyPlayTitle = initialSnapshot.savedCount ? (resumeSec ? ("从 " + formatTime(resumeSec) + " 继续") : "播放语音") : (initialSnapshot.pendingCount ? "继续流式任务" : "生成语音");
+    var lazyStatus = initialSnapshot.savedCount ? ("历史音频 " + initialSnapshot.savedCount + " 条 · " + formatTime(resumeSec)) : (initialSnapshot.pendingCount ? "流式生成中 · 点开继续" : (latest ? ("历史音频 " + historyCount + " 条 · " + formatTime(resumeSec)) : "历史音频 0 条 · 点开播放器"));
     root.innerHTML = [
       '<div class="idx-lazy-card" data-role="lazy-card">',
       '  <button class="idx-lazy-play" type="button" data-role="lazy-play" aria-label="播放或生成语音" title="' + escapeHtml(lazyPlayTitle) + '">' + playIcon() + '</button>',
       '  <div class="idx-lazy-main" data-role="lazy-open" role="button" tabindex="0">',
       '    <div class="idx-lazy-title">' + escapeHtml(title) + '</div>',
       '    <div class="idx-lazy-status" data-role="lazy-status">' + escapeHtml(lazyStatus) + '</div>',
-      '    <div class="idx-lazy-progress"><span style="width:' + (latest && latest.duration_s ? Math.max(2, Math.min(100, resumeSec / Number(latest.duration_s || 1) * 100)) : 0) + '%"></span></div>',
+      '    <div class="idx-lazy-progress"><span style="width:' + (latest && latest.duration_s && resumeSec > 0 ? Math.max(2, Math.min(100, resumeSec / Number(latest.duration_s || 1) * 100)) : 0) + '%"></span></div>',
       '  </div>',
       '</div>'
     ].join("");

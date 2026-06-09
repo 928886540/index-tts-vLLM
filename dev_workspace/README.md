@@ -38,6 +38,7 @@ Keep those terms separate when diagnosing bugs.
 Read these for normal repo work:
 
 - `AGENTS.md`: rules for this collaboration area.
+- `docs/LOGIC.md`: source of truth for Tavo generation/playback/storage state, LIVE page exit, saved/offline playback, and LLM reuse.
 - `docs/AGENT_STATE.md`: current state and latest validation.
 - `docs/BUGS.md`: active/recent bug ledger.
 - `docs/REGRESSION.md`: validation checklist before handoff.
@@ -64,7 +65,7 @@ The launcher selects `vllm` or `fast6g`, then starts the selected backend throug
 The app does not require a public domain. Same-LAN testing can use:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260608-mp3-cache-v52"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260609-mp3-cache-v61"></script>
 ```
 
 For public tunnel usage, configure the tunnel/reverse proxy outside this repository and replace only the script host. The program should not detect, store, or require a public domain.

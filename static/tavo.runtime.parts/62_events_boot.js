@@ -31,7 +31,7 @@
           clearElementAudioSrc();
           return false;
         }
-        if (t && (isCancelableLiveTrack(t) || (typeof trackHasActiveLiveOutput === "function" && trackHasActiveLiveOutput(t)))) {
+        if (t && !isSavedTrack(t) && (isCancelableLiveTrack(t) || (typeof trackHasActiveLiveOutput === "function" && trackHasActiveLiveOutput(t)))) {
           var ps = String(t.playbackState || "");
           if (ps === "paused" && typeof resumePausedWebAudioTrack === "function" && resumePausedWebAudioTrack(t)) {
             return true;
@@ -41,14 +41,46 @@
             return true;
           }
         }
-        if (!t || !elementAudioBelongsToTrack(t)) return false;
+        if (!t) return false;
+        if (isSavedTrack(t)) {
+          if (!savedElementAudioBelongsToTrack(t)) return false;
+        } else if (!elementAudioBelongsToTrack(t)) return false;
         if (!(audio.currentSrc || audio.src) || audio.ended) return false;
         if (audio.paused) {
+          try {
+            if (isSavedTrack(t) && cfg.offlineAudioEnabled && !t.offlineReady && t.cacheKey && (t.cacheUrl || trackPlayableUrl(t))) {
+              scheduleOfflineAudioSave(t, "gesture play offline", 0);
+            }
+          } catch (_) {}
           setAudioPlaybackRate();
+          setTrackPlaybackState(t, "loading");
+          setPlayState("loading");
           var p = audio.play();
-          if (p && typeof p.then === "function") p.catch(function (e) { handleAudioPlayReject("element", e, "请点播放继续"); });
+          if (p && typeof p.then === "function") {
+            p.then(function () {
+              setTrackPlaybackState(t, "playing");
+              setPlayState("playing");
+              setStatus(trackPlaybackLabel(t));
+            }).catch(function (e) {
+              setTrackPlaybackState(t, "idle");
+              setPlayState("idle");
+              handleAudioPlayReject("element", e, "请点播放继续");
+            });
+          } else {
+            setTrackPlaybackState(t, "playing");
+            setPlayState("playing");
+            setStatus(trackPlaybackLabel(t));
+          }
         } else {
+          try {
+            if (isLiveProgressTrack(t)) rememberNativeLiveElementResumeSec(t, "gesture pause");
+            else if (isFinite(Number(audio.currentTime))) t.lastElementSec = Math.max(0, Number(audio.currentTime || 0) || 0);
+          } catch (_) {}
           audio.pause();
+          setTrackPlaybackState(t, "paused");
+          setPlayState("idle");
+          setStatus("已暂停");
+          showTrackNotice(t, "已暂停", "点播放从当前位置继续");
         }
         return true;
       } catch (_) { return false; }
@@ -61,15 +93,6 @@
     function noteAudioGesture() {
       try { window.__indextts_tavo_last_audio_gesture_at = Date.now(); } catch (_) {}
     }
-    function handlePageAudioSuspend(reason) {
-      try {
-        if (typeof handleRuntimePageVisibilityChange === "function") handleRuntimePageVisibilityChange(reason);
-      } catch (e) {
-        debugLog("⚠️ 页面后台状态处理失败: " + (e && e.message ? e.message : e), "#fc9");
-      }
-    }
-    on(document, "visibilitychange", function () { handlePageAudioSuspend("visibilitychange"); });
-    on(window, "pagehide", function () { handlePageAudioSuspend("pagehide"); });
     on(play, 'pointerdown', noteAudioGesture);
     on(add, 'pointerdown', noteAudioGesture);
     on(rewind10, 'pointerdown', noteAudioGesture);
@@ -176,10 +199,10 @@
     var seekUserDragging = false;
     function seekTargetSecondsFromValue(track) {
       var value = Math.max(0, Math.min(1000, Number(seek && seek.value || 0) || 0));
-      var meterDur = progressMeterDurationSec(track, trackResumeSec(track));
+      var meterDur = track && isLiveProgressTrack(track) ? liveSeekDurationSec(track) : progressMeterDurationSec(track, trackResumeSec(track));
       if (!(meterDur > 0)) {
         var dur = Number(audio && audio.duration);
-        meterDur = (isFinite(dur) && dur > 0) ? dur : trackDurationHintSec(track);
+        meterDur = track && isLiveProgressTrack(track) ? 0 : ((isFinite(dur) && dur > 0) ? dur : trackDurationHintSec(track));
       }
       return meterDur > 0 ? value / 1000 * meterDur : 0;
     }
@@ -191,6 +214,10 @@
           t.streamPlaybackFinished = false;
           t.livePageSuspended = false;
           setTrackStreamHealth(t, "ok");
+        }
+        if (isSavedTrack(t) && savedElementAudioBelongsToTrack(t)) {
+          t.savedElementLastPlayingAt = Date.now();
+          t.savedElementUserPaused = false;
         }
         setTrackPlaybackState(t, "playing");
       }
@@ -235,7 +262,52 @@
       }
       setError(""); setPlayState("playing"); setStatus(trackPlaybackLabel(t));
     });
-    on(audio, 'pause', function () { var t = currentTrack(); if (t && !audio.ended) setTrackPlaybackState(t, "paused"); setPlayState("idle"); if (audio.currentTime > 0 && !audio.ended) setStatus("已暂停"); stopSubtitle(); });
+    on(audio, 'pause', function () {
+      var t = currentTrack();
+      var pauseSec = 0;
+      var isNativeLivePause = false;
+      if (isElementPauseStateSuppressed()) {
+        try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
+        return;
+      }
+      if (t && !audio.ended) {
+        try {
+          if (isSavedTrack(t) && t.savedSeekKeepPlayingUntil && Date.now() < Number(t.savedSeekKeepPlayingUntil || 0) && savedElementAudioBelongsToTrack(t)) {
+            setTrackPlaybackState(t, "playing");
+            setPlayState("playing");
+            setStatus(trackPlaybackLabel(t));
+            try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
+            return;
+          }
+        } catch (_) {}
+        try {
+          if (isSavedTrack(t) && !savedElementAudioBelongsToTrack(t)) {
+            debugLog("↪️ 忽略 saved 卡残留非完整音频源 pause，不反写播放态 src=" + (audio.currentSrc || audio.src || ""), "#fc9");
+            try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
+            return;
+          }
+        } catch (_) {}
+        try {
+          isNativeLivePause = !!(isElementUsingTrackStream(t) || isElementUsingTrackLiveSegment(t) || isElementUsingTrackLiveMp3(t) || isElementPlayingTrackStream(t));
+        } catch (_) {
+          isNativeLivePause = false;
+        }
+        if (isNativeLivePause) {
+          pauseSec = rememberNativeLiveElementResumeSec(t, "native audio pause");
+        } else {
+          try {
+            if (elementAudioBelongsToTrack(t) && isFinite(Number(audio.currentTime))) {
+              pauseSec = Math.max(0, Number(audio.currentTime || 0) || 0);
+              t.lastElementSec = pauseSec;
+            }
+          } catch (_) {}
+        }
+        setTrackPlaybackState(t, "paused");
+      }
+      setPlayState("idle");
+      if (((pauseSec > 0) || (audio.currentTime > 0)) && !audio.ended) setStatus("已暂停");
+      try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
+    });
     on(audio, 'ended', function () {
       var t = currentTrack();
       if (t && isElementUsingTrackLiveSegment(t) && handleLiveSegmentAudioEnded(t)) return;
@@ -299,7 +371,6 @@
         if (audio.error) detail = "（" + mediaErrorText(audio.error) + "）";
       } catch (_) {}
       if (active && isSavedTrack(active) && recoverSavedAudioElementError(active, detail)) {
-        stopSubtitle();
         return;
       }
       if (active && isElementUsingTrackLiveSegment(active)) {
@@ -355,21 +426,33 @@
       debugLog("📐 audio metadata loaded: duration=" + (isFinite(dur) ? dur.toFixed(2) : String(audio.duration)) + "s seekable=" + (audio.seekable.length > 0 ? audio.seekable.end(0).toFixed(2) : "0"), "#9ff");
     });
     on(audio, 'seeking', function () { if (scriptFlagEnabled("debugSeek")) debugLog("⏩ seeking → " + audio.currentTime.toFixed(2), "#9ff"); });
-    on(audio, 'seeked',  function () { if (scriptFlagEnabled("debugSeek")) debugLog("✅ seeked  → " + audio.currentTime.toFixed(2), "#9ff"); });
+    on(audio, 'seeked',  function () {
+      var t = currentTrack();
+      var pos = elementPlaybackTimeSec(t);
+      if (t) {
+        if (isLiveProgressTrack(t)) rememberLiveResumeSec(t, pos, "native seeked", { allowBackward: true });
+        else t.lastElementSec = pos;
+        refreshActiveSubtitleForTrack(t, pos, { force: true, scroll: true });
+      }
+      if (scriptFlagEnabled("debugSeek")) debugLog("✅ seeked  → " + audio.currentTime.toFixed(2), "#9ff");
+    });
     on(audio, 'stalled', function () {
       var t = currentTrack();
       if (t) {
         t.stalledCount = Number(t.stalledCount || 0) + 1;
         setTrackStreamHealth(t, "stalled");
         t.lastStalledAt = Date.now();
-        t.lastStalledSec = elementPlaybackTimeSec(t);
+        t.lastStalledSec = isLiveProgressTrack(t) ? rememberLiveResumeSec(t, elementPlaybackTimeSec(t), "native stalled") : elementPlaybackTimeSec(t);
       }
       debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2) + (t ? " count=" + t.stalledCount : ""), "#fc9");
     });
     on(audio, 'timeupdate', function () {
       var activeTrack = currentTrack();
       var pos = elementPlaybackTimeSec(activeTrack);
-      if (activeTrack) activeTrack.lastElementSec = pos;
+      if (activeTrack) {
+        if (isLiveProgressTrack(activeTrack)) rememberLiveResumeSec(activeTrack, pos, "native timeupdate");
+        else activeTrack.lastElementSec = pos;
+      }
       var progressDur = progressDurationSec(activeTrack, pos);
       var meterDur = progressMeterDurationSec(activeTrack, pos);
       if (cur && !seekUserDragging) cur.textContent = formatTime(pos);
@@ -391,6 +474,10 @@
       }
       var target = seekTargetSecondsFromValue(t);
       if (cur) cur.textContent = formatTime(target);
+      if (isSavedTrack(t)) {
+        applySavedElementSeek(t, target);
+        return;
+      }
       if (canSeekLiveTrack(t)) {
         setStatus("松手后跳转实时音频");
         return;
@@ -411,6 +498,13 @@
         return;
       }
       var target = seekTargetSecondsFromValue(t);
+      if (isSavedTrack(t)) {
+        seekUserDragging = false;
+        if (seekToSeconds(target, { noticeTitle: "拖动进度" })) {
+          refreshActiveSubtitleForTrack(t, target, { force: true, scroll: true });
+        }
+        return;
+      }
       if (canSeekLiveTrack(t)) {
         seekUserDragging = false;
         seekToSeconds(target, { noticeTitle: "拖动进度" });
@@ -430,6 +524,9 @@
     showTrackNotice(null, historyStatusText(), knownHistoryCount ? "点开播放器后可播放历史音频" : "点音符生成音频");
     initializeHistoryCount()
       .then(function () { return ensureTracksLoaded(); })
+      .then(function () {
+        if (currentTrackIndex >= 0 && currentTrack()) return selectTrack(currentTrackIndex, false);
+      })
       .catch(function (e) {
         debugLog("⚠️ 初始化历史音频失败: " + (e && e.message ? e.message : e), "#fc9");
       });

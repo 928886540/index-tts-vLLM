@@ -96,7 +96,7 @@ async function runLlmReuseSmoke(browser, targetUrl) {
   page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
   page.on("console", (msg) => {
     const text = msg.text();
-    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404|status of 500/i.test(text)) pageErrors.push(text);
   });
 
   let parseCount = 0;
@@ -118,8 +118,8 @@ async function runLlmReuseSmoke(browser, targetUrl) {
         url: "/tts_dialogue_stream_job/" + key,
         cache_url: "/cache_audio/" + key,
         cache_key: key,
-        cached: true,
-        live: false
+        cached: false,
+        live: true
       })
     });
   });
@@ -148,7 +148,7 @@ async function runLlmReuseSmoke(browser, targetUrl) {
   try {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
         configVersion: 11,
         mode: "ai",
@@ -179,8 +179,8 @@ async function runLlmReuseSmoke(browser, targetUrl) {
       }));
     });
     await page.click('[data-role="lazy-open"]');
-    await page.waitForSelector(".idx-card", { timeout: 10000 });
-    await page.evaluate(() => {
+    await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
+    await page.evaluate(async () => {
       const add = document.querySelector('[data-role="add"]');
       if (!add) throw new Error("missing add button");
       add.click();
@@ -188,7 +188,10 @@ async function runLlmReuseSmoke(browser, targetUrl) {
     await page.waitForFunction(() => {
       return window.__idxTest.getFetchLog().filter((r) => /tts_dialogue_stream_job/.test(r.url)).length >= 1;
     }, { timeout: 10000 });
-    await page.evaluate(() => {
+    await page.waitForFunction(() => {
+      return Object.keys(localStorage).some((key) => /^indextts_llm_parse_msg_v2_/.test(key));
+    }, { timeout: 10000 });
+    await page.evaluate(async () => {
       document.querySelectorAll(".idx-tts,.idx-card,.idx-panel,.idx-picker,[data-indextts-host]").forEach((node) => {
         if (node.parentNode) node.parentNode.removeChild(node);
       });
@@ -203,7 +206,7 @@ async function runLlmReuseSmoke(browser, targetUrl) {
     });
     await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
     await page.click('[data-role="lazy-open"]');
-    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
     await page.evaluate(() => document.querySelector('[data-role="add"]').click());
     await page.waitForFunction(() => {
       return window.__idxTest.getFetchLog().filter((r) => /tts_dialogue_stream_job/.test(r.url)).length >= 2;
@@ -216,6 +219,7 @@ async function runLlmReuseSmoke(browser, targetUrl) {
         parseFetches: fetches.filter((r) => /\/parse_text(?:[?#]|$)/.test(r.url)).length,
         jobs: fetches.filter((r) => /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
         reuseToggle: !!document.querySelector('[data-field="reuseLlmParse"]'),
+        reuseCacheKeys: Object.keys(localStorage).filter((key) => /^indextts_llm_parse_msg_v2_/.test(key)),
         status: (document.querySelector('[data-role="status"]') || {}).textContent || ""
       };
     });
@@ -227,10 +231,12 @@ async function runLlmReuseSmoke(browser, targetUrl) {
       throw new Error("backend-owned parse smoke should submit two mocked dialogue jobs, jobCount=" + jobCount + " result=" + JSON.stringify(result));
     }
     if (!result.reuseToggle) throw new Error("reuseLlmParse setting toggle is missing");
-    for (const body of jobBodies) {
+    if (!result.reuseCacheKeys.length) throw new Error("status payload should be saved as message-scoped LLM cache: " + JSON.stringify(result));
+    for (const [idx, body] of jobBodies.entries()) {
       if (!body || typeof body.text !== "string" || !body.text.includes("潘金莲")) throw new Error("dialogue job body should include original text: " + JSON.stringify(body));
       if (body.parse_mode !== "ai") throw new Error("AI mode should submit parse_mode=ai: " + JSON.stringify(body));
-      if (Array.isArray(body.segments)) throw new Error("frontend should not submit pre-parsed segments in AI path: " + JSON.stringify(body));
+      if (idx === 0 && Array.isArray(body.segments)) throw new Error("first AI generation has no cache and must not submit pre-parsed segments: " + JSON.stringify(body));
+      if (idx === 1 && !(Array.isArray(body.segments) && body.segments.length === 3)) throw new Error("second AI generation should reuse message-scoped LLM segments: " + JSON.stringify(body));
       if (!body.voices || body.voices["旁白"] !== "女声/高圆圆.wav" || body.voices["用户"] !== "男声/旁白.mp3" || body.voices["潘金莲"] !== "女声/风韵少妇.wav") {
         throw new Error("dialogue job body should include role voice map: " + JSON.stringify(body));
       }
@@ -244,7 +250,7 @@ async function runLlmReuseSmoke(browser, targetUrl) {
     }
     if (pageErrors.length) throw new Error("LLM reuse smoke page error: " + pageErrors.join(" | "));
 
-    return { parseCount, jobCount, result, firstJobBody: jobBodies[0] };
+    return { parseCount, jobCount, result, firstJobBody: jobBodies[0], secondJobBody: jobBodies[1] };
   } finally {
     await context.close();
   }
@@ -628,7 +634,7 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
   page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
   page.on("console", (msg) => {
     const text = msg.text();
-    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404|status of 500/i.test(text)) pageErrors.push(text);
   });
 
   const explicitKey = "e".repeat(40);
@@ -636,6 +642,9 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
   const jobBodies = [];
   const wav = tinyWavBuffer();
 
+  await page.route("**/profiles/active", async (route) => {
+    await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "profile disabled in smoke" }) });
+  });
   await page.route("**/tts_dialogue_stream_job", async (route) => {
     jobCount += 1;
     try { jobBodies.push(JSON.parse(route.request().postData() || "{}")); } catch (_) { jobBodies.push({}); }
@@ -676,7 +685,7 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
   try {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       const dirtyText = [
         "潘金莲停了一下。「我在这里。」",
         "<think>不要朗读这段推理</think>",
@@ -688,7 +697,7 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
       if (textarea) textarea.value = dirtyText;
       const preview = document.getElementById("messagePreview");
       if (preview) preview.innerHTML = dirtyText;
-      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+      const cfg = {
         configVersion: 13,
         mode: "normal",
         playbackMode: "live",
@@ -707,8 +716,8 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
         s2melCfgRate: 0.7,
         subtitleLeadSec: 0.25,
         offlineAudioEnabled: false
-      }));
-      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+      };
+      const charCfg = {
         defaultVoice: "女声/高圆圆.wav",
         characterName: "潘金莲",
         roleVoiceList: [
@@ -716,8 +725,15 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
           { role: "对话", voice: "女声/单独对白.wav" },
           { role: "对白", voice: "" }
         ]
-      }));
+      };
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify(cfg));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify(charCfg));
+      if (window.tavo && typeof window.tavo.set === "function") {
+        await window.tavo.set("indextts_tavo_config_v3", cfg, "global");
+        await window.tavo.set("indextts_tavo_character_v1:34", charCfg, "global");
+      }
     });
+    await remountTavoScript(page, "");
     await page.click('[data-role="lazy-open"]');
     await page.waitForSelector(".idx-card", { timeout: 10000 });
     await page.evaluate(() => {
@@ -1307,7 +1323,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     await page.waitForFunction(() => {
       const play = document.querySelector('[data-role="play"]');
       return play && play.dataset.state === "idle";
-    }, { timeout: 5000 });
+    }, undefined, { timeout: 5000 });
     const paused = await page.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
       const play = document.querySelector('[data-role="play"]');
@@ -2001,6 +2017,224 @@ async function runLiveMp3EndedAwaitCacheSmoke(browser, targetUrl) {
   }
 }
 
+async function runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__cacheReadyPlayCalls = [];
+    try {
+      Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+        configurable: true,
+        get: function () { return !this.__idxPlaying; }
+      });
+      Object.defineProperty(HTMLMediaElement.prototype, "ended", {
+        configurable: true,
+        get: function () { return !!this.__idxEnded; }
+      });
+      Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+        configurable: true,
+        get: function () { return 2; }
+      });
+      Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+        configurable: true,
+        get: function () { return Number(this.__idxMockCurrentTime || 0) || 0; },
+        set: function (v) { this.__idxMockCurrentTime = Math.max(0, Number(v || 0) || 0); }
+      });
+      HTMLMediaElement.prototype.load = function () { this.__idxEnded = false; this.__idxMockCurrentTime = 0; };
+      HTMLMediaElement.prototype.play = function () {
+        const el = this;
+        const src = el.currentSrc || el.src || "";
+        const kind = el.dataset ? (el.dataset.idxSourceKind || "") : "";
+        el.__idxPlaying = true;
+        el.__idxEnded = false;
+        try {
+          window.__cacheReadyPlayCalls.push({
+            src,
+            kind,
+            cacheKey: el.dataset ? (el.dataset.idxCacheKey || "") : ""
+          });
+        } catch (_) {}
+        try { if (src) fetch(src, { cache: "no-store" }).catch(() => {}); } catch (_) {}
+        try {
+          el.dispatchEvent(new Event("play"));
+          el.dispatchEvent(new Event("playing"));
+          el.dispatchEvent(new Event("loadedmetadata"));
+        } catch (_) {}
+        return Promise.resolve();
+      };
+      HTMLMediaElement.prototype.pause = function () {
+        this.__idxPlaying = false;
+        try { this.dispatchEvent(new Event("pause")); } catch (_) {}
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+  });
+
+  const liveKey = "5".repeat(40);
+  const mp3Bytes = tinyMp3Buffer();
+  let jobCount = 0;
+  let statusCount = 0;
+  let cacheHeadCount = 0;
+  let cacheGetCount = 0;
+  const liveRequests = [];
+
+  await page.route("**/cache_audio/**", async (route) => {
+    const method = route.request().method().toUpperCase();
+    if (method === "HEAD") {
+      cacheHeadCount += 1;
+      await route.fulfill({ status: 200, contentType: "audio/mpeg", body: "" });
+      return;
+    }
+    cacheGetCount += 1;
+    await route.fulfill({ status: 200, contentType: "audio/mpeg", body: mp3Bytes });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    statusCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: statusCount >= 2 ? "done" : "running",
+        cache_key: liveKey,
+        cache_url: "/cache_audio/" + liveKey,
+        sample_rate: 8000,
+        duration_s: 2.0,
+        metrics: { state: statusCount >= 2 ? "done" : "running", phase: statusCount >= 2 ? "done" : "tts", message: statusCount >= 2 ? "完整音频已保存" : "后端正在合成…", segments_done: 2, segments_total: 2 },
+        segments_meta: [
+          { idx: 0, role: "旁白", text: "第一句。", style: "neutral", start_s: 0, duration_s: 1.0 },
+          { idx: 1, role: "对白", text: "第二句。", style: "neutral", start_s: 1.0, duration_s: 1.0 }
+        ],
+        segments_plan: [
+          { idx: 0, role: "旁白", text: "第一句。", style: "neutral" },
+          { idx: 1, role: "对白", text: "第二句。", style: "neutral" }
+        ]
+      })
+    });
+  });
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:(?:\/pcm)|(?:\/mp3)|(?:\/segment\/\d+))?)?(?:[?#].*)?$/, async (route) => {
+    const req = route.request();
+    const method = req.method().toUpperCase();
+    const pathname = new URL(req.url()).pathname;
+    if (method === "POST" && /\/tts_dialogue_stream_job\/?$/.test(pathname)) {
+      jobCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          url: "/tts_dialogue_stream_job/" + liveKey,
+          cache_url: "/cache_audio/" + liveKey,
+          cache_key: liveKey,
+          cached: false,
+          live: true
+        })
+      });
+      return;
+    }
+    if (method === "GET" && /\/mp3$/.test(pathname)) {
+      liveRequests.push(req.url());
+      await route.fulfill({
+        status: 200,
+        contentType: "audio/mpeg",
+        headers: {
+          "X-IndexTTS-Cache-Key": liveKey,
+          "X-IndexTTS-Live-State": "LIVE",
+          "X-IndexTTS-Sample-Rate": "8000"
+        },
+        body: mp3Bytes
+      });
+      return;
+    }
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "unexpected live cache-ready method" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await remountTavoScript(page, "");
+    await page.evaluate(() => {
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+        configVersion: 15,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }));
+    });
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.evaluate(() => document.querySelector('[data-role="add"]').click());
+    await page.waitForFunction((liveKey) => {
+      const audio = document.querySelector('[data-role="audio"]');
+      return audio && audio.dataset && audio.dataset.idxSourceKind === "live-mp3" && audio.dataset.idxCacheKey === liveKey;
+    }, liveKey, { timeout: 10000 });
+    await page.waitForFunction(() => {
+      const t = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      return t && t.state === "saved";
+    }, { timeout: 10000 });
+    await page.evaluate(() => {
+      const audio = document.querySelector('[data-role="audio"]');
+      audio.currentTime = 1.2;
+      audio.dispatchEvent(new Event("timeupdate"));
+    });
+    await page.waitForTimeout(180);
+
+    const result = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const audio = document.querySelector('[data-role="audio"]');
+      const seek = document.querySelector('[data-role="seek"]');
+      const currentLyric = document.querySelector(".idx-sub-row.is-current .idx-sub-text");
+      const play = document.querySelector('[data-role="play"]');
+      return {
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        liveGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).map((r) => r.url),
+        cacheGets: fetches.filter((r) => r.method === "GET" && /\/cache_audio\//.test(r.url)).length,
+        cacheHeads: fetches.filter((r) => r.method === "HEAD" && /\/cache_audio\//.test(r.url)).length,
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioCacheKey: audio && audio.dataset ? audio.dataset.idxCacheKey || "" : "",
+        audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        seekValue: seek ? String(seek.value || "") : "",
+        currentLyricText: currentLyric ? currentLyric.textContent || "" : "",
+        playState: play ? play.dataset.state || "" : "",
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
+        playCalls: window.__cacheReadyPlayCalls || []
+      };
+    });
+    if (jobCount !== 1 || result.jobs !== 1 || !result.liveGets.some((u) => /\/mp3(?:[?#]|$)/.test(u))) {
+      throw new Error("cache-ready live smoke should start exactly one live MP3 job: " + JSON.stringify({ jobCount, result, liveRequests }));
+    }
+    if (result.audioKind !== "live-mp3" || !/\/tts_dialogue_stream_job\/[^/?#]+\/mp3/.test(result.audioSrc)) {
+      throw new Error("LIVE MP3 cache-ready must not steal playback into /cache_audio: " + JSON.stringify(result));
+    }
+    if (!result.debugTrack || result.debugTrack.state !== "saved" || result.debugTrack.playbackState !== "playing") {
+      throw new Error("cache-ready live track should be saved but keep current playback state: " + JSON.stringify(result));
+    }
+    if (result.cacheGets > 0 || result.playCalls.some((x) => x && x.kind === "saved")) {
+      throw new Error("cache-ready live track should not GET/play saved cache until user asks: " + JSON.stringify(result));
+    }
+    if (Number(result.seekValue || 0) <= 0 || !/第二句/.test(result.currentLyricText)) {
+      throw new Error("cache-ready live source should keep progress and lyric moving: " + JSON.stringify(result));
+    }
+    if (pageErrors.length) throw new Error("live MP3 cache-ready keep-source smoke page error: " + pageErrors.join(" | "));
+    return { result, statusCount, cacheHeadCount, cacheGetCount, liveRequests };
+  } finally {
+    await context.close();
+  }
+}
+
 async function runMediaSessionMp3ControlsSmoke(browser, targetUrl) {
   const context = await browser.newContext();
   await context.addInitScript(() => {
@@ -2023,9 +2257,22 @@ async function runMediaSessionMp3ControlsSmoke(browser, targetUrl) {
       });
     } catch (_) {}
     try {
-      HTMLMediaElement.prototype.load = function () {};
+      Object.defineProperty(HTMLMediaElement.prototype, "duration", { configurable: true, get: function () { return 12; } });
+      Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+        configurable: true,
+        get: function () { return Number(this.__idxMockCurrentTime || 0) || 0; },
+        set: function (v) { this.__idxMockCurrentTime = Math.max(0, Number(v || 0) || 0); }
+      });
+      Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+        configurable: true,
+        get: function () { return this.__idxMockPaused !== false; }
+      });
+      HTMLMediaElement.prototype.load = function () {
+        this.__idxMockCurrentTime = 0;
+      };
       HTMLMediaElement.prototype.play = function () {
         const el = this;
+        try { el.__idxMockPaused = false; } catch (_) {}
         const src = el.src || el.currentSrc || "";
         try {
           window.__cachePlayCalls.push({
@@ -2044,6 +2291,7 @@ async function runMediaSessionMp3ControlsSmoke(browser, targetUrl) {
       };
       HTMLMediaElement.prototype.pause = function () {
         const el = this;
+        try { el.__idxMockPaused = true; } catch (_) {}
         try {
           window.__pauseCalls.push({
             src: el.src || el.currentSrc || "",
@@ -2165,38 +2413,42 @@ async function runMediaSessionMp3ControlsSmoke(browser, targetUrl) {
         positionStates: window.__mediaPositionStates || []
       };
     });
+    await page.evaluate(() => {
+      const audio = document.querySelector('[data-role="audio"]');
+      if (!audio) throw new Error("missing audio element before media pause");
+      audio.currentTime = 6;
+      audio.dispatchEvent(new Event("timeupdate"));
+    });
     await page.evaluate(() => window.__mediaHandlers.pause());
     await page.waitForFunction(() => {
       const play = document.querySelector('[data-role="play"]');
       return play && play.dataset.state === "idle" && window.__pauseCalls && window.__pauseCalls.length;
     }, undefined, { timeout: 5000 });
+    const afterPause = await page.evaluate(() => {
+      const play = document.querySelector('[data-role="play"]');
+      const audio = document.querySelector('[data-role="audio"]');
+      return {
+        playState: play ? play.dataset.state : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        pauseCalls: window.__pauseCalls || [],
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null
+      };
+    });
+    const beforeMediaPlayFetchCount = await page.evaluate(() => window.__idxTest.getFetchLog().length);
+    await page.evaluate(() => window.__mediaHandlers.play());
+    await page.waitForFunction((beforeCount) => {
+      const audio = document.querySelector('[data-role="audio"]');
+      const play = document.querySelector('[data-role="play"]');
+      return audio && audio.dataset && audio.dataset.idxSourceKind === "live-mp3"
+        && Math.abs(Number(audio.currentTime || 0) - 6) < 0.05
+        && play && play.dataset.state === "playing"
+        && window.__idxTest.getFetchLog().length >= beforeCount;
+    }, beforeMediaPlayFetchCount, { timeout: 5000 });
     await page.evaluate(() => window.__mediaHandlers.seekto({ seekTime: 5 }));
-    try {
-      await page.waitForFunction(() => {
-        return window.__idxTest.getFetchLog().some((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3\?/.test(r.url) && /[?&]start_s=5\.000/.test(r.url));
-      }, undefined, { timeout: 5000 });
-    } catch (err) {
-      const debug = await page.evaluate(() => {
-        const fetches = window.__idxTest.getFetchLog();
-        const play = document.querySelector('[data-role="play"]');
-        const audio = document.querySelector('[data-role="audio"]');
-        return {
-          handlers: Object.keys(window.__mediaHandlers || {}).sort(),
-          fetches: fetches.filter((r) => /\/tts_dialogue_stream_job\//.test(r.url)).map((r) => ({ method: r.method, url: r.url })),
-          playState: play ? play.dataset.state : "",
-          audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
-          audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
-          audioCacheKey: audio && audio.dataset ? audio.dataset.idxCacheKey || "" : "",
-          audioLiveOffset: audio && audio.dataset ? audio.dataset.idxLiveOffsetSec || "" : "",
-          pauseCalls: window.__pauseCalls || [],
-          playCalls: window.__cachePlayCalls || [],
-          debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
-          status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
-          notice: (document.querySelector(".idx-subtitle") || {}).textContent || ""
-        };
-      });
-      throw new Error("MediaSession seekto did not request live MP3 start_s=5.000: " + JSON.stringify(debug));
-    }
+    await page.waitForFunction(() => {
+      const audio = document.querySelector('[data-role="audio"]');
+      return audio && Math.abs(Number(audio.currentTime || 0) - 5) < 0.05;
+    }, undefined, { timeout: 5000 });
 
     const after = await page.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
@@ -2222,14 +2474,348 @@ async function runMediaSessionMp3ControlsSmoke(browser, targetUrl) {
     if (!after.pauseCalls.some((x) => x && x.kind === "live-mp3")) {
       throw new Error("MediaSession pause should pause the real live-mp3 audio element: " + JSON.stringify(after));
     }
-    if (!after.mp3Gets.some((url) => /[?&]start_s=5\.000/.test(url))) {
-      throw new Error("MediaSession seekto should reconnect same MP3 live key with start_s: " + JSON.stringify(after));
+    if (!afterPause.debugTrack || afterPause.debugTrack.pausedByUser || Math.abs(Number(afterPause.debugTrack.liveResumeSec || 0) - 6) > 0.02 || Math.abs(Number(afterPause.debugTrack.trackResumeSec || 0) - 6) > 0.02) {
+      throw new Error("MediaSession pause should preserve the native live MP3 second without marking the job user-paused: " + JSON.stringify(afterPause));
     }
-    if (!after.debugTrack || Math.abs(Number(after.debugTrack.liveResumeSec || 0) - 5) > 0.02) {
-      throw new Error("MediaSession seekto should update the live resume second: " + JSON.stringify(after));
+    if (after.mp3Gets.some((url) => /[?&]start_s=/.test(url))) {
+      throw new Error("MediaSession controls should keep using the same native audio element, not reconnect MP3 with start_s: " + JSON.stringify(after));
+    }
+    if (!after.debugTrack || Math.abs(Number(after.debugTrack.trackResumeSec || 0) - 5) > 0.02) {
+      throw new Error("MediaSession seekto should update the native audio currentTime/resume second: " + JSON.stringify(after));
     }
     if (pageErrors.length) throw new Error("MediaSession MP3 controls smoke page error: " + pageErrors.join(" | "));
-    return { before, after, statusCount, liveRequests };
+    return { before, afterPause, after, statusCount, liveRequests };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runLiveMp3SeekGuardSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__cachePlayCalls = [];
+    try {
+      Object.defineProperty(HTMLMediaElement.prototype, "duration", { configurable: true, get: function () { return NaN; } });
+      Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+        configurable: true,
+        get: function () { return Number(this.__idxMockCurrentTime || 0) || 0; },
+        set: function (v) { this.__idxMockCurrentTime = Math.max(0, Number(v || 0) || 0); }
+      });
+      HTMLMediaElement.prototype.load = function () { this.__idxMockCurrentTime = 0; };
+      HTMLMediaElement.prototype.play = function () {
+        const el = this;
+        try {
+          window.__cachePlayCalls.push({
+            src: el.currentSrc || el.src || "",
+            kind: el.dataset ? (el.dataset.idxSourceKind || "") : ""
+          });
+          if (el.src || el.currentSrc) fetch(el.src || el.currentSrc, { cache: "no-store" }).catch(() => {});
+          el.dispatchEvent(new Event("play"));
+          el.dispatchEvent(new Event("playing"));
+          el.dispatchEvent(new Event("timeupdate"));
+        } catch (_) {}
+        return Promise.resolve();
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+  });
+
+  const liveKey = "4".repeat(40);
+  const mp3Bytes = tinyMp3Buffer();
+  let jobCount = 0;
+  const mp3Gets = [];
+
+  await page.route("**/cache_audio/**", async (route) => {
+    await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "running",
+        cache_key: liveKey,
+        cache_url: "/cache_audio/" + liveKey,
+        sample_rate: 8000,
+        metrics: { state: "running", phase: "tts", message: "后端正在合成…", segments_done: 0, segments_total: 2 },
+        segments_plan: [
+          { idx: 0, role: "旁白", text: "第一段。" },
+          { idx: 1, role: "对白", text: "第二段。" }
+        ]
+      })
+    });
+  });
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:(?:\/pcm)|(?:\/mp3)|(?:\/segment\/\d+))?)?(?:[?#].*)?$/, async (route) => {
+    const req = route.request();
+    const method = req.method().toUpperCase();
+    const pathname = new URL(req.url()).pathname;
+    if (method === "POST" && /\/tts_dialogue_stream_job\/?$/.test(pathname)) {
+      jobCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          url: "/tts_dialogue_stream_job/" + liveKey,
+          cache_url: "/cache_audio/" + liveKey,
+          cache_key: liveKey,
+          cached: false,
+          live: true
+        })
+      });
+      return;
+    }
+    if (method === "GET" && /\/mp3$/.test(pathname)) {
+      mp3Gets.push(req.url());
+      await route.fulfill({ status: 200, contentType: "audio/mpeg", body: mp3Bytes });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "unexpected live seek guard route" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await remountTavoScript(page, "");
+    await page.evaluate(() => {
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify({
+        configVersion: 16,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify({
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }));
+    });
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.evaluate(() => document.querySelector('[data-role="add"]').click());
+    await page.waitForFunction(() => {
+      return window.__idxTest.getFetchLog().some((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3(?:[?#]|$)/.test(r.url));
+    }, undefined, { timeout: 10000 });
+
+    await page.evaluate(() => {
+      const seek = document.querySelector('[data-role="seek"]');
+      if (!seek) throw new Error("missing seek");
+      seek.value = "600";
+      seek.dispatchEvent(new Event("input", { bubbles: true }));
+      seek.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await page.waitForTimeout(180);
+
+    const result = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const seek = document.querySelector('[data-role="seek"]');
+      return {
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        mp3Gets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3(?:[?#]|$)/.test(r.url)).map((r) => r.url),
+        mp3StartGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3\?/.test(r.url) && /[?&]start_s=/.test(r.url)).map((r) => r.url),
+        seekDisabled: !!(seek && seek.disabled),
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        progress: (document.querySelector('[data-role="progress"]') || {}).textContent || "",
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null
+      };
+    });
+    if (jobCount !== 1 || result.jobs !== 1) {
+      throw new Error("LIVE seek guard should keep one generation job: " + JSON.stringify({ jobCount, result }));
+    }
+    if (!result.seekDisabled) {
+      throw new Error("LIVE without reliable duration should keep the progress slider disabled: " + JSON.stringify(result));
+    }
+    if (result.mp3StartGets.length || mp3Gets.some((url) => /[?&]start_s=/.test(url))) {
+      throw new Error("LIVE without reliable duration must not convert slider value into start_s: " + JSON.stringify({ result, mp3Gets }));
+    }
+    if (pageErrors.length) throw new Error("LIVE MP3 seek guard smoke page error: " + pageErrors.join(" | "));
+    return { result, mp3Gets };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runPendingDonePromotionSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__savedPlayCalls = [];
+    try {
+      Object.defineProperty(HTMLMediaElement.prototype, "duration", { configurable: true, get: function () { return 18; } });
+      Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+        configurable: true,
+        get: function () { return Number(this.__idxMockCurrentTime || 0) || 0; },
+        set: function (v) { this.__idxMockCurrentTime = Math.max(0, Number(v || 0) || 0); }
+      });
+      HTMLMediaElement.prototype.load = function () {};
+      HTMLMediaElement.prototype.play = function () {
+        const el = this;
+        try {
+          window.__savedPlayCalls.push({
+            src: el.currentSrc || el.src || "",
+            kind: el.dataset ? (el.dataset.idxSourceKind || "") : "",
+            cacheKey: el.dataset ? (el.dataset.idxCacheKey || "") : ""
+          });
+          if (el.src || el.currentSrc) fetch(el.src || el.currentSrc, { cache: "no-store" }).catch(() => {});
+          el.dispatchEvent(new Event("loadedmetadata"));
+          el.dispatchEvent(new Event("play"));
+          el.dispatchEvent(new Event("playing"));
+          el.dispatchEvent(new Event("timeupdate"));
+        } catch (_) {}
+        return Promise.resolve();
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+  });
+
+  const cacheKey = "5".repeat(40);
+  const mp3Bytes = tinyMp3Buffer();
+  let statusCount = 0;
+  let cacheHeadCount = 0;
+  let cacheGetCount = 0;
+  const liveUrls = [];
+
+  await page.route("**/cache_audio/**", async (route) => {
+    if (route.request().method().toUpperCase() === "HEAD") {
+      cacheHeadCount += 1;
+      await route.fulfill({ status: 200, contentType: "audio/mpeg", headers: { "Content-Length": String(mp3Bytes.length) } });
+      return;
+    }
+    cacheGetCount += 1;
+    await route.fulfill({ status: 200, contentType: "audio/mpeg", body: mp3Bytes });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    statusCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "done",
+        cache_key: cacheKey,
+        cache_url: "/cache_audio/" + cacheKey,
+        sample_rate: 8000,
+        duration_s: 18,
+        metrics: { state: "done", phase: "done", message: "音频已保存", audio_duration_s: 18, segments_done: 1, segments_total: 1 },
+        segments_meta: [
+          { idx: 0, role: "旁白", text: "已经落盘的 pending 卡。", style: "neutral", start_s: 0, duration_s: 18 }
+        ]
+      })
+    });
+  });
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:(?:\/pcm)|(?:\/mp3)|(?:\/segment\/\d+))?)?(?:[?#].*)?$/, async (route) => {
+    liveUrls.push(route.request().url());
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "done pending must not enter live stream" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await remountTavoScript(page, "");
+    await page.evaluate(async (key) => {
+      await window.tavo.set("indextts_tavo_config_v3", {
+        configVersion: 16,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }, "global");
+      await window.tavo.set("indextts_tavo_character_v1:34", {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }, "global");
+      await window.tavo.set("indextts_tracks_test-message-1", [], "chat");
+      await window.tavo.set("indextts_pending_jobs_test-message-1", [{
+        cacheKey: key,
+        cacheUrl: "/cache_audio/" + key,
+        streamUrl: "/tts_dialogue_stream_job/" + key,
+        trackIndex: 0,
+        trackId: "stale-pending-done",
+        createdAt: Date.now() - 1000,
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        parseMode: "normal",
+        playbackMode: "live",
+        backgroundOnly: false,
+        state: "live",
+        status: "running",
+        pendingBlob: true,
+        streaming: true,
+        metrics: { phase: "llm_parse", llm_stage: "waiting", llm_reuse: true, llm_parse_cached: false, llm_elapsed_s: 16 },
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav" }
+      }], "chat");
+    }, cacheKey);
+
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.waitForFunction((key) => {
+      const bucket = window.__idxTest.storageBucket();
+      const saved = bucket["chat:indextts_tracks_test-message-1"] || [];
+      const pending = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
+      const debug = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      return debug && debug.cacheKey === key && debug.state === "saved"
+        && Array.isArray(saved) && saved.some((x) => x && x.cacheKey === key && x.state === "saved")
+        && Array.isArray(pending) && !pending.some((x) => x && x.cacheKey === key);
+    }, cacheKey, { timeout: 10000 });
+
+    await page.click('[data-role="play"]');
+    await page.waitForFunction(() => {
+      const audio = document.querySelector('[data-role="audio"]');
+      return audio && audio.dataset && audio.dataset.idxSourceKind === "saved" && /\/cache_audio\//.test(audio.currentSrc || audio.src || "");
+    }, undefined, { timeout: 10000 });
+
+    const result = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const bucket = window.__idxTest.storageBucket();
+      const audio = document.querySelector('[data-role="audio"]');
+      const liveExit = document.querySelector('[data-role="live-exit"]');
+      return {
+        savedTracks: bucket["chat:indextts_tracks_test-message-1"] || [],
+        pendingJobs: bucket["chat:indextts_pending_jobs_test-message-1"] || [],
+        statusCalls: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
+        liveGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).map((r) => r.url),
+        cacheGets: fetches.filter((r) => r.method === "GET" && /\/cache_audio\//.test(r.url)).length,
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
+        counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
+        liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        progress: (document.querySelector('[data-role="progress"]') || {}).textContent || "",
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
+        playCalls: window.__savedPlayCalls || []
+      };
+    });
+    if (!result.debugTrack || result.debugTrack.state !== "saved") {
+      throw new Error("pending job with done status should promote to saved before playback: " + JSON.stringify(result));
+    }
+    if (result.pendingJobs.some((x) => x && x.cacheKey === cacheKey) || !result.savedTracks.some((x) => x && x.cacheKey === cacheKey && x.state === "saved")) {
+      throw new Error("done pending promotion should persist saved history and clear pending storage: " + JSON.stringify(result));
+    }
+    if (result.audioKind !== "saved" || !/\/cache_audio\//.test(result.audioSrc) || result.liveGets.length || liveUrls.length) {
+      throw new Error("done pending playback must use saved cache_audio and never live MP3: " + JSON.stringify({ result, liveUrls }));
+    }
+    if (result.liveExitVisible || /等待 LLM|流式生成中|正在生成/.test(result.status + result.progress)) {
+      throw new Error("done pending card should not remain in LIVE/LLM pending UI: " + JSON.stringify(result));
+    }
+    if (pageErrors.length) throw new Error("pending done promotion smoke page error: " + pageErrors.join(" | "));
+    return { result, statusCount, cacheHeadCount, cacheGetCount };
   } finally {
     await context.close();
   }
@@ -2772,6 +3358,7 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
   let streamGetCount = 0;
   let deleteCount = 0;
   const streamUrls = [];
+  const deleteUrls = [];
   const jobBodies = [];
 
   await context.route("**/cache_audio/**", async (route) => {
@@ -2859,7 +3446,8 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
     }
     if (method === "DELETE" && pathname.indexOf("/tts_dialogue_stream_job/") >= 0) {
       deleteCount += 1;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: true }) });
+      deleteUrls.push(req.url());
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: true, state: "cancelled" }) });
       return;
     }
     await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "unexpected live durable method" }) });
@@ -2982,19 +3570,21 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
     await remountTavoScript(secondPage, "webAudioLive=1");
     await secondPage.waitForFunction(() => {
       const status = (document.querySelector('[data-role="lazy-status"]') || {}).textContent || "";
-      return /历史音频 2 条|流式生成中|点开继续/.test(status);
-    }, { timeout: 10000 });
+      return /历史音频\s+[12]\s+条|生成中|流式生成中|点开继续/.test(status);
+    }, undefined, { timeout: 10000 });
     await secondPage.click('[data-role="lazy-open"]');
-    await secondPage.waitForSelector(".idx-card", { timeout: 10000 });
+    await secondPage.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
     try {
       await secondPage.waitForFunction(({ key }) => {
         const fetches = window.__idxTest.getFetchLog();
         const bucket = window.__idxTest.storageBucket();
         const jobs = bucket["chat:indextts_pending_jobs_test-message-1"];
         const liveExit = document.querySelector('[data-role="live-exit"]');
+        const counter = (document.querySelector('[data-role="counter"]') || {}).textContent || "";
         return Array.isArray(jobs)
           && jobs.some((x) => x && x.cacheKey === key && x.playbackMode === "live" && x.trackIndex === 1)
           && liveExit && getComputedStyle(liveExit).display !== "none"
+          && counter.trim() === "2/2"
           && fetches.some((r) => /\/tts_dialogue_job_status\//.test(r.url));
       }, { key: liveKey }, { timeout: 10000 });
     } catch (err) {
@@ -3013,9 +3603,9 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
           progress: (document.querySelector('[data-role="progress"]') || {}).textContent || ""
         };
       });
-      throw new Error("remounted LIVE pending wait timed out: " + JSON.stringify(debug));
+      throw new Error("remounted LIVE pending active-live wait timed out: " + JSON.stringify(debug));
     }
-    const restored = await secondPage.evaluate(() => {
+    const restoredDefault = await secondPage.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
       const bucket = window.__idxTest.storageBucket();
       const saved = bucket["chat:indextts_tracks_test-message-1"] || [];
@@ -3035,14 +3625,14 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
         status: (document.querySelector('[data-role="status"]') || {}).textContent || ""
       };
     });
-    if (jobCount !== 1 || restored.jobs !== 0) {
-      throw new Error("remounted LIVE pending card must not POST a new job: " + JSON.stringify({ jobCount, restored, jobBodies }));
+    if (jobCount !== 1 || restoredDefault.jobs !== 0) {
+      throw new Error("remounted LIVE pending card must not POST a new job: " + JSON.stringify({ jobCount, restoredDefault, jobBodies }));
     }
-    if (!restored.pendingJobs.some((x) => x && x.cacheKey === liveKey && x.playbackMode === "live" && x.trackIndex === 1) || !restored.liveExitVisible || restored.counterText.trim() !== "2/2") {
-      throw new Error("remounted LIVE pending card should be visible as card 2/2 and keep the original key: " + JSON.stringify(restored));
+    if (!restoredDefault.pendingJobs.some((x) => x && x.cacheKey === liveKey && x.playbackMode === "live" && x.trackIndex === 1) || !restoredDefault.liveExitVisible || restoredDefault.counterText.trim() !== "2/2") {
+      throw new Error("remount should open the active LIVE pending card 2/2 while keeping pending durable: " + JSON.stringify(restoredDefault));
     }
-    if (!restored.savedTracks.some((x) => x && x.cacheKey === savedKey && x.trackIndex === 0) || restored.textHashKeys.length) {
-      throw new Error("remount should preserve the saved card and avoid text-hash storage: " + JSON.stringify(restored));
+    if (!restoredDefault.savedTracks.some((x) => x && x.cacheKey === savedKey && x.trackIndex === 0) || restoredDefault.textHashKeys.length) {
+      throw new Error("remount should preserve the saved card and avoid text-hash storage: " + JSON.stringify(restoredDefault));
     }
 
     await secondPage.click('[data-role="live-exit"]');
@@ -3065,17 +3655,196 @@ async function runLivePendingDurableHistorySmoke(browser, targetUrl) {
         status: (document.querySelector('[data-role="status"]') || {}).textContent || ""
       };
     });
-    if (deleteCount < 1 || afterExit.deletes < 1 || afterExit.pendingJobs.length || afterExit.textHashKeys.length) {
-      throw new Error("explicit LIVE exit should delete backend job and clear only the durable pending card: " + JSON.stringify({ deleteCount, afterExit }));
+    if (deleteCount < 1 || afterExit.deletes < 1 || afterExit.pendingJobs.length || afterExit.textHashKeys.length || !deleteUrls.some((url) => /[?&]preserve_completed=1/.test(url))) {
+      throw new Error("explicit LIVE exit should protect completed jobs, delete backend job, and clear only the durable pending card: " + JSON.stringify({ deleteCount, deleteUrls, afterExit }));
     }
     if (!afterExit.savedTracks.some((x) => x && x.cacheKey === savedKey && x.trackIndex === 0)) {
       throw new Error("explicit unfinished LIVE exit must keep the saved card under the same message object: " + JSON.stringify(afterExit));
     }
     if (pageErrors.length) throw new Error("LIVE durable pending smoke page error: " + pageErrors.join(" | "));
-    return { jobCount, statusCount, streamGetCount, deleteCount, streamUrls, persistedBeforeClose, restored, afterExit, body: jobBodies[0] };
+    return { jobCount, statusCount, streamGetCount, deleteCount, deleteUrls, streamUrls, persistedBeforeClose, restoredDefault, afterExit, body: jobBodies[0] };
   } finally {
     await context.close();
   }
+}
+
+async function runLiveExitAtomicitySmoke(browser, targetUrl) {
+  async function runCase(kind) {
+    const context = await browser.newContext();
+    await context.addInitScript(() => {
+      try { localStorage.clear(); } catch (_) {}
+      try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    });
+    const page = await context.newPage();
+    const pageErrors = [];
+    const liveKey = (kind === "preserved" ? "f" : "c").repeat(40);
+    const savedKey = (kind === "preserved" ? "a" : "b").repeat(40);
+    const deleteUrls = [];
+    page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+    page.on("console", (msg) => {
+      const text = msg.text();
+      if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404|status of 500|HTTP 500/i.test(text)) pageErrors.push(text);
+    });
+
+    await context.route("**/cache_audio/**", async (route) => {
+      const req = route.request();
+      const pathname = new URL(req.url()).pathname;
+      if (pathname.endsWith("/" + savedKey)) {
+        await route.fulfill({ status: 200, contentType: "audio/mpeg", body: req.method().toUpperCase() === "HEAD" ? "" : tinyMp3Buffer() });
+        return;
+      }
+      await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+    });
+    await context.route("**/tts_dialogue_job_status/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          state: "running",
+          cache_key: liveKey,
+          cache_url: "/cache_audio/" + liveKey,
+          sample_rate: 8000,
+          duration_s: 1.2,
+          metrics: { state: "running", phase: "tts", message: "后端正在合成…", segments_done: 1, segments_total: 2 },
+          segments_meta: [{ idx: 0, role: "旁白", text: "第一段。", start_s: 0, duration_s: 0.4 }],
+          segments_plan: [{ idx: 0, role: "旁白", text: "第一段。" }, { idx: 1, role: "对白", text: "第二段。" }]
+        })
+      });
+    });
+    await context.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:(?:\/pcm)|(?:\/mp3)|(?:\/segment\/\d+))?)?(?:[?#].*)?$/, async (route) => {
+      const req = route.request();
+      const method = req.method().toUpperCase();
+      const pathname = new URL(req.url()).pathname;
+      if (method === "DELETE") {
+        deleteUrls.push(req.url());
+        if (kind === "preserved") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ preserved: true, deleted: false, cancelled_live: false, state: "done", cache_key: liveKey, cache_url: "/cache_audio/" + liveKey })
+          });
+        } else {
+          await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "cancel failed" }) });
+        }
+        return;
+      }
+      if (method === "GET" && /\/mp3$/.test(pathname)) {
+        await route.fulfill({ status: 200, contentType: "audio/mpeg", body: tinyMp3Buffer() });
+        return;
+      }
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "unexpected live-exit atomicity method" }) });
+    });
+    await context.route(/\/cache\/[^/?#]+(?:[?#].*)?$/, async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: true }) });
+    });
+
+    try {
+      await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+      await page.evaluate(async ({ savedKey, liveKey }) => {
+        await window.tavo.set("indextts_tavo_config_v3", {
+          configVersion: 14,
+          mode: "normal",
+          playbackMode: "live",
+          intervalMs: 50,
+          qualityMode: "balanced",
+          offlineAudioEnabled: false
+        }, "chat");
+        await window.tavo.set("indextts_tavo_character_config_v1", { defaultVoice: "女声/高圆圆.wav", characterName: "潘金莲", roleVoiceList: [] }, "chat");
+        await window.tavo.set("indextts_tavo_character_v1:34", { defaultVoice: "女声/高圆圆.wav", characterName: "潘金莲", roleVoiceList: [] }, "chat");
+        await window.tavo.set("indextts_tracks_test-message-1", [{
+          cacheKey: savedKey,
+          cacheUrl: "/cache_audio/" + savedKey,
+          trackIndex: 0,
+          trackId: "saved-card-0",
+          createdAt: Date.now() - 1000,
+          voice: "女声/高圆圆.wav",
+          mode: "normal",
+          playbackMode: "live",
+          state: "saved",
+          serverState: "done",
+          cacheState: "ready",
+          remoteCacheState: "ready",
+          duration_s: 1.2,
+          lastElementSec: 0.7,
+          segments: []
+        }], "chat");
+        await window.tavo.set("indextts_pending_jobs_test-message-1", [{
+          cacheKey: liveKey,
+          cacheUrl: "/cache_audio/" + liveKey,
+          streamUrl: "/tts_dialogue_stream_job/" + liveKey,
+          trackIndex: 1,
+          trackId: "live-card-1",
+          createdAt: Date.now(),
+          voice: "女声/高圆圆.wav",
+          mode: "normal",
+          parseMode: "normal",
+          playbackMode: "live",
+          backgroundOnly: false,
+          state: "live",
+          status: "running",
+          pendingBlob: true,
+          streaming: true,
+          duration_s: 1.2,
+          segments: []
+        }], "chat");
+      }, { savedKey, liveKey });
+      await remountTavoScript(page, "");
+      await page.click('[data-role="lazy-open"]');
+      await page.waitForSelector(".idx-card", { timeout: 10000 });
+      await page.waitForFunction(() => {
+        const liveExit = document.querySelector('[data-role="live-exit"]');
+        const counter = (document.querySelector('[data-role="counter"]') || {}).textContent || "";
+        return liveExit && getComputedStyle(liveExit).display !== "none" && counter.trim() === "2/2";
+      }, { timeout: 10000 });
+      await page.click('[data-role="live-exit"]');
+      await page.waitForFunction((kind) => {
+        const fetches = window.__idxTest.getFetchLog();
+        const bucket = window.__idxTest.storageBucket();
+        const saved = bucket["chat:indextts_tracks_test-message-1"] || [];
+        const pending = bucket["chat:indextts_pending_jobs_test-message-1"] || [];
+        const sawDelete = fetches.some((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url));
+        if (!sawDelete) return false;
+        if (kind === "preserved") return saved.length === 2 && pending.length === 0;
+        return pending.length === 1;
+      }, kind, { timeout: 10000 });
+      const result = await page.evaluate(() => {
+        const fetches = window.__idxTest.getFetchLog();
+        const bucket = window.__idxTest.storageBucket();
+        const liveExit = document.querySelector('[data-role="live-exit"]');
+        return {
+          savedTracks: bucket["chat:indextts_tracks_test-message-1"] || [],
+          pendingJobs: bucket["chat:indextts_pending_jobs_test-message-1"] || [],
+          streamDeletes: fetches.filter((r) => r.method === "DELETE" && /\/tts_dialogue_stream_job\//.test(r.url)).map((r) => r.url),
+          cacheDeletes: fetches.filter((r) => r.method === "DELETE" && /\/cache\//.test(r.url)).map((r) => r.url),
+          counterText: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
+          liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
+          cardText: (document.querySelector(".idx-card") || {}).textContent || ""
+        };
+      });
+      if (!result.streamDeletes.some((url) => /[?&]preserve_completed=1/.test(url))) {
+        throw new Error("live exit DELETE must use preserve_completed guard: " + JSON.stringify({ kind, result, deleteUrls }));
+      }
+      if (result.cacheDeletes.length) {
+        throw new Error("live exit must not call /cache delete directly: " + JSON.stringify({ kind, result }));
+      }
+      if (kind === "preserved") {
+        if (!result.savedTracks.some((x) => x && x.cacheKey === liveKey && x.state === "saved") || result.pendingJobs.length || result.liveExitVisible) {
+          throw new Error("preserved live exit should keep the landed audio as saved and clear pending: " + JSON.stringify(result));
+        }
+      } else if (!result.pendingJobs.some((x) => x && x.cacheKey === liveKey) || !result.liveExitVisible || result.counterText.trim() !== "2/2") {
+        throw new Error("failed live exit must keep the pending card visible and retryable: " + JSON.stringify(result));
+      }
+      if (pageErrors.length) throw new Error("live exit atomicity page error: " + pageErrors.join(" | "));
+      return result;
+    } finally {
+      await context.close();
+    }
+  }
+
+  return {
+    preserved: await runCase("preserved"),
+    deleteFailed: await runCase("failed")
+  };
 }
 
 async function runLazyPlayDirectGenerateSmoke(browser, targetUrl) {
@@ -3268,6 +4037,7 @@ async function runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl) {
       files[offlineKey] = dataUrl;
       window.__offlineFiles = files;
       window.__offlineFileLoadCount = 0;
+      window.__offlineFileLoadCalls = [];
       window.__offlineFileExistsCalls = [];
       window.__offlineFileDeleteCalls = [];
       window.tavo.file = {
@@ -3280,6 +4050,12 @@ async function runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl) {
         },
         load: async function (name, options) {
           window.__offlineFileLoadCount += 1;
+          window.__offlineFileLoadCalls.push({ name, encoding: options && options.encoding || "utf8", scope: options && options.scope || "chat" });
+          if ((options && options.encoding) === "base64") {
+            const value = files[name] || "";
+            const m = /^data:[^,]+,(.*)$/i.exec(value);
+            return m ? m[1] : value;
+          }
           return files[name] || null;
         },
         save: async function (name, content, options) {
@@ -3341,8 +4117,7 @@ async function runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl) {
     try {
       await page.waitForFunction(() => {
         const calls = window.__offlinePlayCalls || [];
-        return calls.some((x) => x && /files\/chat\/indextts-/.test(x.src || ""))
-          && calls.some((x) => x && /^blob:/.test(x.src || "") && x.kind === "offline-blob")
+        return calls.some((x) => x && /^blob:/.test(x.src || "") && x.kind === "offline-blob")
           && (window.__offlineFileLoadCount || 0) >= 1;
       }, undefined, { timeout: 10000 });
     } catch (err) {
@@ -3353,6 +4128,7 @@ async function runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl) {
         return {
           calls,
           fileLoads: window.__offlineFileLoadCount || 0,
+          fileLoadCalls: window.__offlineFileLoadCalls || [],
           nativeFileErrors: window.__offlineNativeFileErrors || 0,
           playDisabled: play ? play.disabled : null,
           playState: play ? play.dataset.state : "",
@@ -3370,6 +4146,7 @@ async function runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl) {
       const calls = window.__offlinePlayCalls || [];
       return {
         fileLoads: window.__offlineFileLoadCount || 0,
+        fileLoadCalls: window.__offlineFileLoadCalls || [],
         nativeFileErrors: window.__offlineNativeFileErrors || 0,
         calls,
         onlinePlays: calls.filter((x) => /\/cache_audio\//.test(x && x.src || "")).length,
@@ -3378,8 +4155,11 @@ async function runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl) {
         notice: (document.querySelector(".idx-subtitle") || {}).textContent || ""
       };
     });
-    if (result.fileLoads < 1 || result.blobOfflinePlays < 1 || result.nativeFileErrors < 1) {
-      throw new Error("offline file.url failure should retry through tavo.file.load blob playback: " + JSON.stringify(result));
+    if (result.fileLoads < 1 || result.blobOfflinePlays < 1) {
+      throw new Error("offline playback should use tavo.file.load blob playback: " + JSON.stringify(result));
+    }
+    if (!result.fileLoadCalls.length || result.fileLoadCalls[0].encoding !== "dataUrl" || result.fileLoadCalls.some((x) => x && x.encoding === "base64")) {
+      throw new Error("offline playback should read Tavo file as dataUrl first; base64 is fallback only: " + JSON.stringify(result));
     }
     if (result.onlinePlays || cacheGetCount) {
       throw new Error("offline file.load fallback should not fall back to online cache_audio when blob playback succeeds: " + JSON.stringify({ result, cacheGetCount }));
@@ -3416,6 +4196,168 @@ async function runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl) {
     }
     if (pageErrors.length) throw new Error("offline file.load fallback smoke page error: " + pageErrors.join(" | "));
     return { result, afterDelete, cacheGetCount, remoteDeleteCount };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runOfflineBlobUnsupportedOnlineFallbackSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__offlinePlayCalls = [];
+    window.__offlineNativeFileErrors = 0;
+    window.__offlineBlobRejects = 0;
+    try {
+      HTMLMediaElement.prototype.load = function () {};
+      HTMLMediaElement.prototype.play = function () {
+        const el = this;
+        const src = el.src || el.currentSrc || "";
+        const kind = el.dataset ? (el.dataset.idxSourceKind || "") : "";
+        window.__offlinePlayCalls.push({ src, kind });
+        if (/\/files\/chat\/indextts-/.test(src) || /files\/chat\/indextts-/.test(src)) {
+          window.__offlineNativeFileErrors += 1;
+          try {
+            Object.defineProperty(el, "error", { configurable: true, get: () => ({ code: 4 }) });
+          } catch (_) {}
+          setTimeout(() => {
+            try { el.dispatchEvent(new Event("error")); } catch (_) {}
+          }, 0);
+          return Promise.resolve();
+        }
+        if (/^blob:/i.test(src) && kind === "offline-blob") {
+          window.__offlineBlobRejects += 1;
+          return Promise.reject(new DOMException("The operation is not supported.", "NotSupportedError"));
+        }
+        try {
+          el.dispatchEvent(new Event("play"));
+          el.dispatchEvent(new Event("playing"));
+          el.dispatchEvent(new Event("loadedmetadata"));
+        } catch (_) {}
+        return Promise.resolve();
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+  });
+
+  const cacheKey = "9".repeat(40);
+  const offlineKey = "indextts-" + cacheKey + ".mp3";
+  const dataUrl = "data:audio/mpeg;base64," + tinyMp3Buffer().toString("base64");
+  let cacheGetCount = 0;
+  await page.route("**/cache_audio/**", async (route) => {
+    cacheGetCount += 1;
+    await route.fulfill({ status: 200, contentType: "audio/mpeg", body: tinyMp3Buffer() });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(async ({ cacheKey, offlineKey, dataUrl }) => {
+      const files = {};
+      files[offlineKey] = dataUrl;
+      window.__offlineFiles = files;
+      window.__offlineFileLoadCalls = [];
+      window.tavo.file = {
+        exists: async function (name) { return !!files[name]; },
+        url: function (name, scope) { return "files/" + (scope || "chat") + "/" + name; },
+        load: async function (name, options) {
+          window.__offlineFileLoadCalls.push({ name, encoding: options && options.encoding || "utf8", scope: options && options.scope || "chat" });
+          return files[name] || null;
+        },
+        save: async function (name, content, options) {
+          files[name] = content;
+          return "files/" + ((options && options.scope) || "chat") + "/" + name;
+        },
+        delete: async function (name) { delete files[name]; }
+      };
+      await window.tavo.set("indextts_tavo_config_v3", {
+        configVersion: 15,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        qualityMode: "balanced",
+        offlineAudioEnabled: true
+      }, "global");
+      await window.tavo.set("indextts_tavo_character_config_v1", {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }, "character");
+      await window.tavo.set("indextts_tavo_character_v1:34", {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }, "global");
+      await window.tavo.set("indextts_tracks_test-message-1", [{
+        cacheKey,
+        cacheUrl: "/cache_audio/" + cacheKey,
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        parseMode: "normal",
+        playbackMode: "live",
+        state: "saved",
+        status: "ready",
+        serverState: "done",
+        cacheState: "ready",
+        remoteCacheState: "ready",
+        offlineState: "ready",
+        offlineKey,
+        offlineReady: true,
+        offlineWanted: false,
+        createdAt: Date.now(),
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav" },
+        sampleRate: 8000,
+        duration_s: 0.3,
+        segments: [
+          { idx: 0, role: "旁白", text: "离线回退测试。", style: "neutral", start_s: 0, duration_s: 0.3 }
+        ]
+      }], "chat");
+    }, { cacheKey, offlineKey, dataUrl });
+
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.click('[data-role="play"]');
+    await page.waitForFunction(() => {
+      const calls = window.__offlinePlayCalls || [];
+      return (window.__offlineBlobRejects || 0) >= 1
+        && calls.some((x) => /\/cache_audio\//.test(x && x.src || "") && x.kind === "saved");
+    }, undefined, { timeout: 10000 });
+
+    const result = await page.evaluate(() => {
+      const calls = window.__offlinePlayCalls || [];
+      const audio = document.querySelector('[data-role="audio"]');
+      return {
+        calls,
+        fileLoadCalls: window.__offlineFileLoadCalls || [],
+        nativeFileErrors: window.__offlineNativeFileErrors || 0,
+        blobRejects: window.__offlineBlobRejects || 0,
+        onlinePlays: calls.filter((x) => /\/cache_audio\//.test(x && x.src || "")).length,
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        notice: (document.querySelector(".idx-subtitle") || {}).textContent || "",
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null
+      };
+    });
+    if (!result.fileLoadCalls.length || result.fileLoadCalls[0].encoding !== "dataUrl") {
+      throw new Error("offline unsupported fallback should still read Tavo file as dataUrl first: " + JSON.stringify(result));
+    }
+    if (result.blobRejects < 1 || result.onlinePlays < 1 || result.audioKind !== "saved") {
+      throw new Error("unsupported offline blob should fall back to online saved cache_audio: " + JSON.stringify({ result, cacheGetCount }));
+    }
+    if (/已等待用户重试|请再点一次播放/.test(result.status + result.notice)) {
+      throw new Error("unsupported offline blob must not stop at manual retry copy: " + JSON.stringify(result));
+    }
+    if (pageErrors.length) throw new Error("offline blob unsupported fallback smoke page error: " + pageErrors.join(" | "));
+    return { result, cacheGetCount };
   } finally {
     await context.close();
   }
@@ -3545,7 +4487,7 @@ async function runOfflineSaveFetchDataUrlSmoke(browser, targetUrl) {
     }, { cacheKey, offlineKey });
 
     await page.click('[data-role="lazy-open"]');
-    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
     await page.click('[data-role="play"]');
     await page.waitForFunction((key) => {
       return window.__offlineFiles
@@ -3597,10 +4539,15 @@ async function runSavedMp3SeekSmoke(browser, targetUrl) {
         get: function () { return Number(this.__idxMockCurrentTime || 0) || 0; },
         set: function (v) { this.__idxMockCurrentTime = Math.max(0, Number(v || 0) || 0); }
       });
+      Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+        configurable: true,
+        get: function () { return this.__idxMockPaused !== false; }
+      });
       HTMLMediaElement.prototype.load = function () {};
       HTMLMediaElement.prototype.play = function () {
         const el = this;
         try {
+          el.__idxMockPaused = false;
           window.__savedSeekPlayCalls.push({
             src: el.currentSrc || el.src || "",
             kind: el.dataset ? (el.dataset.idxSourceKind || "") : "",
@@ -3613,6 +4560,13 @@ async function runSavedMp3SeekSmoke(browser, targetUrl) {
         } catch (_) {}
         return Promise.resolve();
       };
+      HTMLMediaElement.prototype.pause = function () {
+        const el = this;
+        try {
+          el.__idxMockPaused = true;
+          el.dispatchEvent(new Event("pause"));
+        } catch (_) {}
+      };
     } catch (_) {}
   });
 
@@ -3621,10 +4575,11 @@ async function runSavedMp3SeekSmoke(browser, targetUrl) {
   page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
   page.on("console", (msg) => {
     const text = msg.text();
-    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404|status of 500/i.test(text)) pageErrors.push(text);
   });
 
   const cacheKey = "b".repeat(40);
+  const secondKey = "d".repeat(40);
   const mp3 = tinyMp3Buffer();
   let cacheGetCount = 0;
   const liveUrls = [];
@@ -3640,7 +4595,7 @@ async function runSavedMp3SeekSmoke(browser, targetUrl) {
   try {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
-    await page.evaluate(async (cacheKey) => {
+    await page.evaluate(async ({ cacheKey, secondKey }) => {
       await window.tavo.set("indextts_tavo_config_v3", {
         configVersion: 15,
         mode: "normal",
@@ -3662,6 +4617,8 @@ async function runSavedMp3SeekSmoke(browser, targetUrl) {
       await window.tavo.set("indextts_tracks_test-message-1", [{
         cacheKey,
         cacheUrl: "/cache_audio/" + cacheKey,
+        trackIndex: 0,
+        trackId: "saved-a",
         voice: "女声/高圆圆.wav",
         mode: "normal",
         parseMode: "normal",
@@ -3678,19 +4635,64 @@ async function runSavedMp3SeekSmoke(browser, targetUrl) {
         sampleRate: 8000,
         duration_s: 10,
         segments: [
-          { idx: 0, role: "旁白", text: "落盘后拖动测试。", style: "neutral", start_s: 0, duration_s: 10 }
+          { idx: 0, role: "旁白", text: "第一句。", style: "neutral", start_s: 0, duration_s: 3 },
+          { idx: 1, role: "对白", text: "第二句。", style: "neutral", start_s: 3, duration_s: 7 }
+        ]
+      }, {
+        cacheKey: secondKey,
+        cacheUrl: "/cache_audio/" + secondKey,
+        trackIndex: 1,
+        trackId: "saved-b",
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        parseMode: "normal",
+        playbackMode: "live",
+        state: "saved",
+        status: "ready",
+        serverState: "done",
+        cacheState: "ready",
+        remoteCacheState: "ready",
+        offlineState: "disabled",
+        offlineReady: false,
+        createdAt: Date.now() + 1,
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav" },
+        sampleRate: 8000,
+        duration_s: 10,
+        lastElementSec: 7,
+        segments: [
+          { idx: 0, role: "旁白", text: "下一条第一句。", style: "neutral", start_s: 0, duration_s: 10 }
         ]
       }], "chat");
-    }, cacheKey);
+    }, { cacheKey, secondKey });
 
     await page.click('[data-role="lazy-open"]');
     await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.click('[data-role="prev"]');
+    await page.waitForFunction((cacheKey) => {
+      const track = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      const counter = (document.querySelector('[data-role="counter"]') || {}).textContent || "";
+      return track && track.cacheKey === cacheKey && counter.trim() === "1/2";
+    }, cacheKey, { timeout: 5000 });
     await page.click('[data-role="play"]');
     await page.waitForFunction(() => {
       const audio = document.querySelector('[data-role="audio"]');
       return audio && audio.dataset && audio.dataset.idxSourceKind === "saved" && /\/cache_audio\//.test(audio.currentSrc || audio.src || "");
     }, { timeout: 10000 });
     await page.waitForTimeout(80);
+    await page.evaluate((cacheKey) => {
+      const audio = document.querySelector('[data-role="audio"]');
+      if (!audio) throw new Error("missing audio before stale live source injection");
+      audio.src = "/tts_dialogue_stream_job/" + cacheKey + "/mp3";
+      audio.dataset.idxSourceKind = "live-mp3";
+      audio.dataset.idxCacheKey = cacheKey;
+      audio.dataset.idxLiveOffsetSec = "0";
+      audio.currentTime = 0;
+    }, cacheKey);
+    await page.waitForTimeout(80);
+    const liveBaseline = liveUrls.length;
+    const liveFetchBaseline = await page.evaluate(() => {
+      return window.__idxTest.getFetchLog().filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length;
+    });
     await page.evaluate(() => {
       const seek = document.querySelector('[data-role="seek"]');
       if (!seek) throw new Error("missing seek");
@@ -3704,11 +4706,15 @@ async function runSavedMp3SeekSmoke(browser, targetUrl) {
       const fetches = window.__idxTest.getFetchLog();
       const audio = document.querySelector('[data-role="audio"]');
       const seek = document.querySelector('[data-role="seek"]');
+      const currentLyric = document.querySelector(".idx-sub-row.is-current .idx-sub-text");
       return {
         audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
         audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
         audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
         seekValue: seek ? String(seek.value || "") : "",
+        currentLyricText: currentLyric ? currentLyric.textContent || "" : "",
+        playState: (document.querySelector('[data-role="play"]') || {}).dataset ? document.querySelector('[data-role="play"]').dataset.state || "" : "",
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
         playCalls: window.__savedSeekPlayCalls || [],
         liveGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).map((r) => r.url),
         liveStartGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3\?/.test(r.url) && /[?&]start_s=/.test(r.url)).map((r) => r.url),
@@ -3723,11 +4729,324 @@ async function runSavedMp3SeekSmoke(browser, targetUrl) {
     if (Math.abs(Number(result.audioCurrentTime || 0) - 5) > 0.2 || result.seekValue !== "500") {
       throw new Error("saved seek should update native audio.currentTime instead of restarting from zero: " + JSON.stringify(result));
     }
-    if (liveUrls.length || result.liveGets.length || result.liveStartGets.length) {
-      throw new Error("saved seek must not reconnect the LIVE MP3 route: " + JSON.stringify({ result, liveUrls }));
+    if (!/第二句/.test(result.currentLyricText)) {
+      throw new Error("saved seek should immediately sync the highlighted lyric row: " + JSON.stringify(result));
+    }
+    if (result.playState !== "playing" || !result.debugTrack || result.debugTrack.playbackState !== "playing") {
+      throw new Error("saved seek while playing should keep the play button in playing state: " + JSON.stringify(result));
+    }
+    if (liveUrls.length > liveBaseline || result.liveGets.length > liveFetchBaseline || result.liveStartGets.length) {
+      throw new Error("saved seek must not reconnect the LIVE MP3 route: " + JSON.stringify({ result, liveUrls, liveBaseline, liveFetchBaseline }));
+    }
+    await page.click('[data-role="play"]');
+    await page.waitForFunction(() => {
+      const play = document.querySelector('[data-role="play"]');
+      return play && play.dataset.state === "idle";
+    }, { timeout: 5000 });
+    const afterPauseClick = await page.evaluate(() => {
+      const audio = document.querySelector('[data-role="audio"]');
+      const play = document.querySelector('[data-role="play"]');
+      return {
+        playState: play ? play.dataset.state || "" : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null
+      };
+    });
+    if (Math.abs(Number(afterPauseClick.audioCurrentTime || 0) - 5) > 0.2 || !afterPauseClick.debugTrack || afterPauseClick.debugTrack.playbackState !== "paused") {
+      throw new Error("first click after saved seek should pause the playing audio at the seeked second: " + JSON.stringify(afterPauseClick));
+    }
+    await page.click('[data-role="next"]');
+    await page.waitForFunction((secondKey) => {
+      const audio = document.querySelector('[data-role="audio"]');
+      return audio && audio.dataset && audio.dataset.idxCacheKey === secondKey;
+    }, secondKey, { timeout: 5000 });
+    const afterNext = await page.evaluate(() => {
+      const audio = document.querySelector('[data-role="audio"]');
+      const seek = document.querySelector('[data-role="seek"]');
+      const play = document.querySelector('[data-role="play"]');
+      return {
+        audioCacheKey: audio && audio.dataset ? audio.dataset.idxCacheKey || "" : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        seekValue: seek ? String(seek.value || "") : "",
+        playState: play ? play.dataset.state || "" : "",
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null
+      };
+    });
+    if (afterNext.audioCacheKey !== secondKey || Math.abs(Number(afterNext.audioCurrentTime || 0)) > 0.2 || Number(afterNext.seekValue || 0) > 20 || !afterNext.debugTrack || Math.abs(Number(afterNext.debugTrack.trackResumeSec || 0)) > 0.2) {
+      throw new Error("next saved card must not inherit the previous card seek position: " + JSON.stringify(afterNext));
     }
     if (pageErrors.length) throw new Error("saved MP3 seek smoke page error: " + pageErrors.join(" | "));
-    return { result, cacheGetCount };
+    return { result, afterPauseClick, afterNext, cacheGetCount };
+  } finally {
+    await context.close();
+  }
+}
+
+async function runLivePendingProgressIsolationSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__liveIsolationPlayCalls = [];
+    try {
+      Object.defineProperty(HTMLMediaElement.prototype, "duration", { configurable: true, get: function () { return 12; } });
+      Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+        configurable: true,
+        get: function () { return Number(this.__idxMockCurrentTime || 0) || 0; },
+        set: function (v) { this.__idxMockCurrentTime = Math.max(0, Number(v || 0) || 0); }
+      });
+      Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+        configurable: true,
+        get: function () { return this.__idxMockPaused !== false; }
+      });
+      HTMLMediaElement.prototype.load = function () {};
+      HTMLMediaElement.prototype.play = function () {
+        const el = this;
+        try {
+          el.__idxMockPaused = false;
+          window.__liveIsolationPlayCalls.push({
+            src: el.currentSrc || el.src || "",
+            kind: el.dataset ? (el.dataset.idxSourceKind || "") : "",
+            cacheKey: el.dataset ? (el.dataset.idxCacheKey || "") : "",
+            currentTime: Number(el.currentTime || 0) || 0
+          });
+          el.dispatchEvent(new Event("loadedmetadata"));
+          el.dispatchEvent(new Event("play"));
+          el.dispatchEvent(new Event("playing"));
+          el.dispatchEvent(new Event("timeupdate"));
+        } catch (_) {}
+        return Promise.resolve();
+      };
+      HTMLMediaElement.prototype.pause = function () {
+        const el = this;
+        try {
+          el.__idxMockPaused = true;
+          el.dispatchEvent(new Event("pause"));
+        } catch (_) {}
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404|status of 500/i.test(text)) pageErrors.push(text);
+  });
+
+  const savedKey = "e".repeat(40);
+  const liveKey = "9".repeat(40);
+  const mp3 = tinyMp3Buffer();
+  const liveMp3Gets = [];
+
+  await page.route("**/cache_audio/**", async (route) => {
+    const req = route.request();
+    const url = req.url();
+    if (url.includes(savedKey)) {
+      await route.fulfill({ status: 200, contentType: "audio/mpeg", body: req.method().toUpperCase() === "HEAD" ? undefined : mp3 });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "running",
+        cache_key: liveKey,
+        cache_url: "/cache_audio/" + liveKey,
+        sample_rate: 8000,
+        duration_s: 12,
+        metrics: { state: "running", phase: "tts", message: "后端正在合成…", segments_done: 1, segments_total: 2 },
+        segments_meta: [
+          { idx: 0, role: "旁白", text: "LIVE第一句。", start_s: 0, duration_s: 6 },
+          { idx: 1, role: "对白", text: "LIVE第二句。", start_s: 6, duration_s: 6 }
+        ]
+      })
+    });
+  });
+  await page.route(/\/tts_dialogue_stream_job\/[^/?#]+\/mp3(?:[?#].*)?$/, async (route) => {
+    liveMp3Gets.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: "audio/mpeg", body: mp3 });
+  });
+  await page.route(/\/tts_dialogue_stream_job(?:[?#].*)?$/, async (route) => {
+    await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "LIVE isolation smoke must not create a new job" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(async ({ savedKey, liveKey }) => {
+      await window.tavo.set("indextts_tavo_config_v3", {
+        configVersion: 16,
+        mode: "normal",
+        playbackMode: "live",
+        intervalMs: 50,
+        qualityMode: "balanced",
+        offlineAudioEnabled: false
+      }, "global");
+      await window.tavo.set("indextts_tavo_character_config_v1", {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      }, "character");
+      await window.tavo.set("indextts_tracks_test-message-1", [{
+        cacheKey: savedKey,
+        cacheUrl: "/cache_audio/" + savedKey,
+        trackIndex: 0,
+        trackId: "saved-before-live",
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        parseMode: "normal",
+        playbackMode: "live",
+        generationState: "ready",
+        state: "saved",
+        status: "ready",
+        serverState: "done",
+        cacheState: "ready",
+        remoteCacheState: "ready",
+        cacheReady: true,
+        createdAt: Date.now(),
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav" },
+        sampleRate: 8000,
+        duration_s: 12,
+        lastElementSec: 7,
+        segments: [{ idx: 0, role: "旁白", text: "历史音频。", start_s: 0, duration_s: 12 }]
+      }, {
+        cacheKey: liveKey,
+        cacheUrl: "/cache_audio/" + liveKey,
+        streamUrl: "/tts_dialogue_stream_job/" + liveKey,
+        trackIndex: 1,
+        trackId: "dirty-live-pending",
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        parseMode: "normal",
+        playbackMode: "live",
+        generationState: "generating",
+        state: "live",
+        status: "running",
+        serverState: "running",
+        cacheState: "pending",
+        remoteCacheState: "pending",
+        pendingBlob: true,
+        streaming: true,
+        createdAt: Date.now() + 1,
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav" },
+        sampleRate: 8000,
+        duration_s: 12,
+        lastElementSec: 7,
+        lastWebAudioSec: 0,
+        lastLiveProgressSec: 0,
+        liveResumeSec: 0,
+        lastStalledSec: 0,
+        segments: [{ idx: 0, role: "旁白", text: "LIVE第一句。", start_s: 0, duration_s: 6 }]
+      }], "chat");
+      await window.tavo.set("indextts_pending_jobs_test-message-1", [{
+        cacheKey: liveKey,
+        cacheUrl: "/cache_audio/" + liveKey,
+        streamUrl: "/tts_dialogue_stream_job/" + liveKey,
+        trackIndex: 1,
+        trackId: "dirty-live-pending",
+        voice: "女声/高圆圆.wav",
+        mode: "normal",
+        parseMode: "normal",
+        playbackMode: "live",
+        backgroundOnly: false,
+        state: "live",
+        status: "running",
+        pendingBlob: true,
+        streaming: true,
+        voicesMap: { default: "女声/高圆圆.wav", "旁白": "女声/高圆圆.wav" },
+        lastElementSec: 7,
+        lastWebAudioSec: 0,
+        lastLiveProgressSec: 0,
+        liveResumeSec: 0,
+        lastStalledSec: 0,
+        segments: []
+      }], "chat");
+      window.dispatchEvent(new CustomEvent("indextts:tracks-updated", { detail: { messageId: "test-message-1" } }));
+    }, { savedKey, liveKey });
+
+    await page.waitForTimeout(80);
+    const lazyBeforeOpen = await page.evaluate(() => {
+      const status = document.querySelector('[data-role="lazy-status"]');
+      const progress = document.querySelector(".idx-lazy-progress span");
+      return {
+        statusText: status ? status.textContent || "" : "",
+        progressWidth: progress ? progress.style.width || "" : ""
+      };
+    });
+    if (/00:07/.test(lazyBeforeOpen.statusText) || !/^(?:0(?:px|%)?|)$/.test(String(lazyBeforeOpen.progressWidth || "").trim())) {
+      throw new Error("lazy snapshot must not inherit stored card progress before runtime opens: " + JSON.stringify(lazyBeforeOpen));
+    }
+
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    const beforePlay = await page.evaluate(() => {
+      const seek = document.querySelector('[data-role="seek"]');
+      const fetches = window.__idxTest.getFetchLog();
+      return {
+        counter: (document.querySelector('[data-role="counter"]') || {}).textContent || "",
+        curText: (document.querySelector('[data-role="cur"]') || {}).textContent || "",
+        seekValue: seek ? String(seek.value || "") : "",
+        seekDisabled: !!(seek && seek.disabled),
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        notice: (document.querySelector(".idx-subtitle") || {}).textContent || "",
+        fetches: fetches.map((r) => ({ method: r.method, url: r.url })).slice(-20)
+      };
+    });
+    if (beforePlay.counter.trim() !== "2/2" || !beforePlay.debugTrack || beforePlay.debugTrack.cacheKey !== liveKey) {
+      throw new Error("dirty LIVE snapshot should open on the active pending card: " + JSON.stringify(beforePlay));
+    }
+    if ((beforePlay.curText && beforePlay.curText !== "00:00") || Number(beforePlay.seekValue || 0) !== 0 || Math.abs(Number(beforePlay.debugTrack.trackResumeSec || 0)) > 0.2 || beforePlay.debugTrack.currentText !== "00:00") {
+      throw new Error("dirty LIVE snapshot must not inherit saved/element progress before play: " + JSON.stringify(beforePlay));
+    }
+
+    await page.click('[data-role="play"]');
+    await page.waitForTimeout(800);
+
+    const afterPlay = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const audio = document.querySelector('[data-role="audio"]');
+      const seek = document.querySelector('[data-role="seek"]');
+      const lyric = document.querySelector(".idx-sub-row.is-current .idx-sub-text");
+      const play = document.querySelector('[data-role="play"]');
+      return {
+        curText: (document.querySelector('[data-role="cur"]') || {}).textContent || "",
+        seekValue: seek ? String(seek.value || "") : "",
+        playDisabled: !!(play && play.disabled),
+        playState: play && play.dataset ? play.dataset.state || "" : "",
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioCacheKey: audio && audio.dataset ? audio.dataset.idxCacheKey || "" : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        currentLyricText: lyric ? lyric.textContent || "" : "",
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
+        mp3Gets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3/.test(r.url)).map((r) => r.url),
+        playCalls: window.__liveIsolationPlayCalls || []
+      };
+    });
+    if (!afterPlay.mp3Gets.length && !liveMp3Gets.length) {
+      throw new Error("dirty LIVE play did not request MP3 stream: " + JSON.stringify({ beforePlay, afterPlay, liveMp3Gets }));
+    }
+    if (afterPlay.audioKind !== "live-mp3" || afterPlay.audioCacheKey !== liveKey) {
+      throw new Error("dirty LIVE play should mount the current live MP3 source: " + JSON.stringify(afterPlay));
+    }
+    if (afterPlay.mp3Gets.some((url) => /[?&]start_s=7(?:\.0+)?(?:&|$)/.test(url)) || liveMp3Gets.some((url) => /[?&]start_s=7(?:\.0+)?(?:&|$)/.test(url))) {
+      throw new Error("dirty LIVE play must not reconnect from inherited start_s=7: " + JSON.stringify({ afterPlay, liveMp3Gets }));
+    }
+    if (Math.abs(Number(afterPlay.audioCurrentTime || 0)) > 0.2 || Math.abs(Number(afterPlay.debugTrack && afterPlay.debugTrack.trackResumeSec || 0)) > 0.2) {
+      throw new Error("dirty LIVE play should start from clean zero progress: " + JSON.stringify(afterPlay));
+    }
+    if (afterPlay.currentLyricText && !/LIVE第一句/.test(afterPlay.currentLyricText)) {
+      throw new Error("dirty LIVE lyric should stay on the first live line: " + JSON.stringify(afterPlay));
+    }
+    if (pageErrors.length) throw new Error("LIVE pending progress isolation smoke page error: " + pageErrors.join(" | "));
+    return { beforePlay, afterPlay, liveMp3Gets };
   } finally {
     await context.close();
   }
@@ -4297,7 +5616,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       throw new Error("voice picker should be slightly taller for one page of voices: " + JSON.stringify(afterPicker.pickerRect));
     }
     if (pageErrors.length) throw new Error("pageerror: " + pageErrors.join(" | "));
-    const badConsole = consoleLines.filter((x) => /^error:/i.test(x) && !/favicon|net::ERR/i.test(x));
+    const badConsole = consoleLines.filter((x) => /^error:/i.test(x) && !/favicon|net::ERR|status of 404|Failed to load resource:.*404/i.test(x));
     if (badConsole.length) throw new Error("console error: " + badConsole.slice(0, 5).join(" | "));
 
     const llmReuse = await runLlmReuseSmoke(browser, targetUrl);
@@ -4309,16 +5628,22 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     const defaultLiveMp3 = await runNativeLiveFlagSmoke(browser, targetUrl, "");
     const defaultMp3Background = await runDefaultMp3BackgroundSmoke(browser, targetUrl);
     const liveMp3EndedAwaitCache = await runLiveMp3EndedAwaitCacheSmoke(browser, targetUrl);
+    const liveMp3CacheReadyKeepsLiveSource = await runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl);
     const mediaSessionMp3Controls = await runMediaSessionMp3ControlsSmoke(browser, targetUrl);
+    const liveMp3SeekGuard = await runLiveMp3SeekGuardSmoke(browser, targetUrl);
+    const pendingDonePromotion = await runPendingDonePromotionSmoke(browser, targetUrl);
     const nativeLiveSegment = await runNativeLiveFlagSmoke(browser, targetUrl, "nativeLive");
     const nativeLiveMp3 = await runNativeLiveFlagSmoke(browser, targetUrl, "mp3Live");
     const liveResumableAfterFailures = await runLiveResumableAfterFailuresSmoke(browser, targetUrl);
     const liveBackgroundNoAutoSuspend = await runLiveBackgroundNoAutoSuspendSmoke(browser, targetUrl);
     const livePendingDurableHistory = await runLivePendingDurableHistorySmoke(browser, targetUrl);
+    const liveExitAtomicity = await runLiveExitAtomicitySmoke(browser, targetUrl);
     const lazyPlayDirectGenerate = await runLazyPlayDirectGenerateSmoke(browser, targetUrl);
     const offlineFileLoadPlaybackFallback = await runOfflineFileLoadPlaybackFallbackSmoke(browser, targetUrl);
+    const offlineBlobUnsupportedOnlineFallback = await runOfflineBlobUnsupportedOnlineFallbackSmoke(browser, targetUrl);
     const offlineSaveFetchDataUrl = await runOfflineSaveFetchDataUrlSmoke(browser, targetUrl);
     const savedMp3Seek = await runSavedMp3SeekSmoke(browser, targetUrl);
+    const livePendingProgressIsolation = await runLivePendingProgressIsolationSmoke(browser, targetUrl);
     const liveResumeStartOffset = await runLiveResumeStartOffsetSmoke(browser, targetUrl);
 
     console.log(JSON.stringify({
@@ -4337,16 +5662,22 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       defaultLiveMp3,
       defaultMp3Background,
       liveMp3EndedAwaitCache,
+      liveMp3CacheReadyKeepsLiveSource,
       mediaSessionMp3Controls,
+      liveMp3SeekGuard,
+      pendingDonePromotion,
       nativeLiveSegment,
       nativeLiveMp3,
       liveResumableAfterFailures,
       liveBackgroundNoAutoSuspend,
       livePendingDurableHistory,
+      liveExitAtomicity,
       lazyPlayDirectGenerate,
       offlineFileLoadPlaybackFallback,
+      offlineBlobUnsupportedOnlineFallback,
       offlineSaveFetchDataUrl,
       savedMp3Seek,
+      livePendingProgressIsolation,
       liveResumeStartOffset,
       consoleCount: consoleLines.length
     }, null, 2));

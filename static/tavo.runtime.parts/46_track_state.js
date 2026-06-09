@@ -102,8 +102,14 @@
     function setTrackState(track, state) {
       if (!track) return "";
       state = oneOf(state, ["pending", "live", "saved", "failed", "cancelled"], "pending");
+      if ((state === "live" || state === "pending") && inferLegacyTrackState(track) === "saved") state = "saved";
       track.state = state;
       if (state === "saved") {
+        track.generationState = "ready";
+        track.livePageExited = false;
+        track.livePageSuspended = false;
+        track.allowStreamPlay = false;
+        track.playSavedWhenReady = false;
         track.cancelled = false;
         track.deleted = false;
         track.status = "ready";
@@ -114,6 +120,7 @@
         setTrackCacheState(track, "ready");
         if (!track.playbackState || track.playbackState === "loading" || track.playbackState === "streaming" || track.playbackState === "buffering") setTrackPlaybackState(track, "idle");
       } else if (state === "live") {
+        if (track.generationState !== "saving") track.generationState = "generating";
         track.status = "running";
         track.pendingBlob = true;
         track.streaming = true;
@@ -121,6 +128,7 @@
         setTrackCacheState(track, (track.cacheKey || track.cacheUrl) ? "pending" : "none");
         if (!track.playbackState || track.playbackState === "idle") setTrackPlaybackState(track, "streaming");
       } else if (state === "failed") {
+        track.generationState = "failed";
         track.status = "failed";
         track.pendingBlob = false;
         track.streaming = false;
@@ -132,6 +140,7 @@
         setTrackPlaybackState(track, "error");
         clearTerminalTrackLiveOutput(track, "failed");
       } else if (state === "cancelled") {
+        track.generationState = "cancelled";
         track.status = "cancelled";
         track.cancelled = true;
         track.pendingBlob = false;
@@ -144,6 +153,7 @@
         setTrackPlaybackState(track, "cancelled");
         clearTerminalTrackLiveOutput(track, "cancelled");
       } else {
+        if (track.generationState !== "saving") track.generationState = "generating";
         track.status = "pending";
         track.pendingBlob = true;
         setTrackServerState(track, "pending");
@@ -165,21 +175,24 @@
     function isSavedTrack(track) { return trackState(track) === "saved"; }
     function isLiveTrack(track) { return trackState(track) === "live"; }
     function isLiveExitTrack(track) {
+      if (track && track.livePageExited) return false;
       return isCancelableLiveTrack(track) || trackHasActiveLiveOutput(track);
     }
     function trackHasActiveLiveOutput(track) {
+      if (track && track.livePageExited) return false;
       if (!track || track.deleted || isTerminalTrack(track)) return false;
       var ps = String(track.playbackState || "");
       try {
         if (webAudioBelongsToTrack(track) && (track.webAudioPlaying || track.webAudioPausedLocal || ps === "playing" || ps === "buffering" || ps === "loading")) return true;
       } catch (_) {}
       try {
-        if ((isElementUsingTrackStream(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track)) && (ps === "playing" || ps === "buffering" || ps === "loading" || !audio.paused)) return true;
+        if ((isElementUsingTrackStream(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track) || elementLiveAudioBelongsToTrack(track)) && (ps === "playing" || ps === "buffering" || ps === "loading" || !audio.paused)) return true;
       } catch (_) {}
       return false;
     }
     function isCancelableLiveTrack(track) {
       if (!track || track.deleted || isSavedTrack(track)) return false;
+      if (track.livePageExited) return false;
       if (normalizePlaybackMode(track.playbackMode) !== "live" || track.backgroundOnly) return false;
       var state = trackState(track);
       if (state === "failed" || state === "cancelled") return false;
@@ -208,8 +221,16 @@
       if (!track) return "";
       var state = trackState(track);
       if (track.deleted || state === "failed" || state === "cancelled") return "";
-      if (cfg.offlineAudioEnabled && track.offlineUrl) return track.offlineUrl;
-      if (state === "saved") return track.url || track.cacheUrl || track.streamUrl || "";
+      if (state === "saved") {
+        if (cfg.offlineAudioEnabled && track.offlineUrl) return track.offlineUrl;
+        if (track.cacheUrl) return track.cacheUrl;
+        if (track.cacheKey) {
+          track.cacheUrl = cleanBase(cfg.apiBase) + "/cache_audio/" + encodeURIComponent(track.cacheKey);
+          return track.cacheUrl;
+        }
+        if (track.url && !/\/tts_dialogue_stream_job\//.test(String(track.url))) return track.url;
+        return "";
+      }
       if (state === "live") return track.streamUrl || track.url || "";
       return track.url || "";
     }
@@ -244,6 +265,7 @@
     }
     function isElementUsingTrackStream(track) {
       if (!track || !track.streamUrl) return false;
+      if (isSavedTrack(track)) return false;
       try {
         if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey) && audio.dataset.idxSourceKind === "stream") return true;
       } catch (_) {}
@@ -252,6 +274,7 @@
     }
     function isElementUsingTrackLiveSegment(track) {
       if (!track || !audio) return false;
+      if (isSavedTrack(track)) return false;
       try {
         return !!(track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey) && audio.dataset.idxSourceKind === "live-segment");
       } catch (_) {
@@ -272,6 +295,7 @@
     }
     function isElementUsingTrackLiveMp3(track) {
       if (!track || !audio) return false;
+      if (isSavedTrack(track)) return false;
       try {
         if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey) && audio.dataset.idxSourceKind === "live-mp3") return true;
       } catch (_) {}
@@ -301,6 +325,27 @@
         if (track.offlineUrl && /^blob:/i.test(track.offlineUrl)) track.offlineUrl = "";
       }
     }
+    function offlineAudioMimeForKey(key) {
+      key = String(key || "").toLowerCase();
+      if (/\.wav(?:$|[?#])/.test(key)) return "audio/wav";
+      if (/\.m4a(?:$|[?#])/.test(key)) return "audio/mp4";
+      if (/\.ogg(?:$|[?#])/.test(key)) return "audio/ogg";
+      return "audio/mpeg";
+    }
+    function base64ToObjectUrl(value, fallbackType) {
+      value = String(value || "").trim();
+      if (!value) return "";
+      if (/^data:/i.test(value)) return dataUrlToObjectUrl(value, fallbackType);
+      try {
+        var compact = value.replace(/\s+/g, "");
+        var bin = atob(compact);
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+        return URL.createObjectURL(new Blob([bytes], { type: fallbackType || "audio/mpeg" }));
+      } catch (_) {
+        return "";
+      }
+    }
     function dataUrlToObjectUrl(dataUrl, fallbackType) {
       dataUrl = String(dataUrl || "");
       if (!/^data:/i.test(dataUrl)) return "";
@@ -310,7 +355,8 @@
         var head = dataUrl.slice(0, comma);
         var body = dataUrl.slice(comma + 1);
         var mimeMatch = /^data:([^;,]+)/i.exec(head);
-        var mime = (mimeMatch && mimeMatch[1]) || fallbackType || "audio/mpeg";
+        var detectedMime = (mimeMatch && mimeMatch[1]) || "";
+        var mime = /^audio\//i.test(detectedMime) ? detectedMime : (fallbackType || "audio/mpeg");
         var bytes;
         if (/;base64/i.test(head)) {
           var bin = atob(body);
@@ -398,29 +444,43 @@
       var api = offlineFileApi();
       if (typeof api.load !== "function") throw new Error("当前 Tavo 文件存储不支持读取离线音频");
       var key = "";
-      var dataUrl = "";
+      var objectUrl = "";
+      var loadEncoding = "";
       var errors = [];
       for (var i = 0; i < keys.length; i += 1) {
+        key = keys[i];
+        var mime = offlineAudioMimeForKey(key);
         try {
-          key = keys[i];
-          dataUrl = await api.load(key, { scope: OFFLINE_FILE_SCOPE, encoding: "dataUrl" });
-          if (dataUrl) break;
+          var dataUrl = await api.load(key, { scope: OFFLINE_FILE_SCOPE, encoding: "dataUrl" });
+          objectUrl = dataUrlToObjectUrl(dataUrl, mime);
+          if (objectUrl) {
+            loadEncoding = "dataUrl";
+            break;
+          }
         } catch (e) {
-          errors.push(keys[i] + ": " + (e && e.message ? e.message : String(e)));
-          dataUrl = "";
+          errors.push(key + " dataUrl: " + (e && e.message ? e.message : String(e)));
+        }
+        try {
+          var base64 = await api.load(key, { scope: OFFLINE_FILE_SCOPE, encoding: "base64" });
+          objectUrl = base64ToObjectUrl(base64, mime);
+          if (objectUrl) {
+            loadEncoding = "base64";
+            break;
+          }
+        } catch (e2) {
+          errors.push(key + " base64: " + (e2 && e2.message ? e2.message : String(e2)));
         }
       }
-      if (!dataUrl) throw new Error("Tavo 离线文件为空或不存在");
+      if (!objectUrl) throw new Error(errors.length ? errors.join("; ") : "Tavo 离线文件为空或不存在");
       revokeOfflineObjectUrl(track);
-      var objectUrl = dataUrlToObjectUrl(dataUrl, "audio/mpeg");
       track.offlineKey = key;
-      track.offlineObjectUrl = objectUrl || "";
-      track.offlineUrl = objectUrl || String(dataUrl);
+      track.offlineObjectUrl = objectUrl;
+      track.offlineUrl = objectUrl;
       track.offlineReady = true;
       track.offlineWanted = false;
       track.offlineSavedAt = Date.now();
       setTrackOfflineState(track, "ready");
-      debugLog("📦 " + (label || "offline") + " 已用 tavo.file.load 读取离线音频: " + key, "#9f9");
+      debugLog("📦 " + (label || "offline") + " 已用 tavo.file.load(" + loadEncoding + ") 读取离线音频: " + key, "#9f9");
       return track.offlineUrl;
     }
     function ensureTrackOfflineKey(track) {
@@ -440,7 +500,7 @@
         if (track) setTrackOfflineState(track, cfg.offlineAudioEnabled ? "missing" : "disabled");
         return false;
       }
-      if (track.offlineReady && track.offlineUrl && !/^blob:/i.test(String(track.offlineUrl))) {
+      if (track.offlineReady && track.offlineUrl && /^blob:/i.test(String(track.offlineUrl))) {
         setTrackOfflineState(track, "ready");
         return true;
       }
@@ -462,17 +522,22 @@
         setTrackOfflineState(track, "missing");
         return false;
       }
-      revokeOfflineObjectUrl(track);
-      track.offlineKey = key;
-      track.offlineUrl = rec.path;
-      track.offlineObjectUrl = "";
-      track.offlineReady = true;
-      track.offlineWanted = false;
-      track.offlineSavedAt = rec.updatedAt || Date.now();
-      track.offlineSize = rec.size || track.offlineSize || 0;
-      setTrackOfflineState(track, "ready");
-      debugLog("📦 " + (label || "offline") + " 命中 Tavo 文件: " + key, "#9f9");
-      return true;
+      try {
+        track.offlineKey = key;
+        await loadOfflineAudioForPlayback(track, label || "offline");
+        track.offlineSavedAt = rec.updatedAt || track.offlineSavedAt || Date.now();
+        track.offlineSize = rec.size || track.offlineSize || 0;
+        debugLog("📦 " + (label || "offline") + " 命中 Tavo 文件并转为 blob: " + key, "#9f9");
+        return true;
+      } catch (e) {
+        revokeOfflineObjectUrl(track);
+        track.offlineUrl = "";
+        track.offlineReady = false;
+        track.offlineWanted = true;
+        setTrackOfflineState(track, "failed");
+        debugLog("⚠️ " + (label || "offline") + " Tavo 文件存在但读取失败，改用在线 cache_audio: " + (e && e.message ? e.message : e), "#fc9");
+        return false;
+      }
     }
     async function saveOfflineAudioForTrack(track, label) {
       if (!cfg.offlineAudioEnabled || !track || !track.cacheKey || track.offlineSaveInProgress) {
@@ -554,13 +619,23 @@
           }
         }
         revokeOfflineObjectUrl(track);
-        track.offlineUrl = saved.path;
+        track.offlineKey = key;
+        track.offlineUrl = "";
         track.offlineObjectUrl = "";
         track.offlineReady = true;
         track.offlineWanted = false;
         track.offlineSavedAt = now;
         track.offlineSize = saved.size || track.offlineSize || 0;
         setTrackOfflineState(track, "ready");
+        try {
+          await loadOfflineAudioForPlayback(track, label || "offline saved");
+        } catch (loadError) {
+          track.offlineUrl = "";
+          track.offlineReady = false;
+          track.offlineWanted = true;
+          setTrackOfflineState(track, "failed");
+          debugLog("⚠️ " + (label || "offline") + " 已保存但无法读回 blob，当前播放回退在线 cache_audio: " + (loadError && loadError.message ? loadError.message : loadError), "#fc9");
+        }
         if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
         debugLog("💾 " + (label || "offline") + " 已保存 Tavo 离线音频: " + key, "#9f9");
         return true;
@@ -697,7 +772,6 @@
       track.liveResumeSec = sec;
       track.lastLiveProgressSec = sec;
       track.lastWebAudioSec = sec;
-      track.lastElementSec = sec;
       return sec;
     }
     function lastKnownLiveResumeSec(track) {
@@ -710,8 +784,11 @@
       take(track.liveResumeSec);
       take(track.lastLiveProgressSec);
       take(track.lastWebAudioSec);
-      take(track.lastElementSec);
-      try { if (currentTrack() === track && cur) take(parseDisplayedTimeSec(cur.textContent)); } catch (_) {}
+      try {
+        if (currentTrack() === track && cur && (elementLiveAudioBelongsToTrack(track) || webAudioBelongsToTrack(track))) {
+          take(parseDisplayedTimeSec(cur.textContent));
+        }
+      } catch (_) {}
       return clampPlaybackTimeSec(track, best);
     }
     function cancelLiveSegmentAudioQueue(reason) {
@@ -845,6 +922,7 @@
           });
         }
       }
+      try { saveReusableSegmentsFromStatus(messageText, cfg, context, track, payload, "dialogue status").catch(function(){}); } catch (_) {}
       if (payload.state === "failed") {
         track.error = (payload.metrics && payload.metrics.message ? payload.metrics.message + ": " : "") + (payload.error || "服务端生成失败");
         setTrackState(track, "failed");
@@ -1090,12 +1168,6 @@
       } catch (_) {}
     }
     function handleRuntimePageVisibilityChange(reason) {
-      var hidden = isRuntimePageHidden();
-      if (hidden) {
-        lastRuntimePageHiddenAt = Date.now();
-        try { window.__indextts_tavo_last_page_hidden_at = lastRuntimePageHiddenAt; } catch (_) {}
-        if (reason) debugLog("📱 页面进入后台，不主动暂停 audio reason=" + reason, "#9ff");
-      }
       return false;
     }
     function startNativeLiveElementFallback(track, reason, opts) {
@@ -1159,7 +1231,7 @@
       track.allowStreamPlay = false;
       track.playSavedWhenReady = opts.autoplaySaved !== false;
       if (opts.resumeSec != null && isFinite(Number(opts.resumeSec))) {
-        track.lastElementSec = Math.max(0, Number(opts.resumeSec) || 0);
+        rememberLiveResumeSec(track, Math.max(0, Number(opts.resumeSec) || 0), label || "live cache fallback", { allowBackward: true });
       }
       setTrackStreamHealth(track, "stalled");
       setTrackPlaybackState(track, "buffering");
@@ -1304,7 +1376,6 @@
         take(track.liveResumeSec);
         take(track.lastLiveProgressSec);
         take(track.lastWebAudioSec);
-        take(track.lastElementSec);
         if (!(best > 0)) take(track.lastStalledSec);
       }
       return Math.max(0, isFinite(best) ? best : 0);
@@ -1864,7 +1935,6 @@
         if (!track.cacheUrl) track.cacheUrl = cleanBase(cfg.apiBase) + "/cache_audio/" + encodeURIComponent(track.cacheKey);
         var hs = await fetch(track.cacheUrl, { method: "HEAD", cache: "no-store" });
         if (!hs || !hs.ok) return false;
-        setTrackState(track, "saved");
         attachCacheAudio(track, { deferElement: true });
         scheduleOfflineAudioSave(track, (label || "cache ready") + " offline", 0);
         knownHistoryCount = persistableHistoryTracks(generatedTracks).length;
@@ -1906,6 +1976,7 @@
             return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
           });
         }
+        try { saveReusableSegmentsFromStatus(messageText, cfg, context, track, j, label || "track status").catch(function(){}); } catch (_) {}
         if (j && j.state === "done") {
           setTrackState(track, "saved");
           attachCacheAudio(track, { deferElement: true });

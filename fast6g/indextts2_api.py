@@ -126,7 +126,51 @@ STATIC_DIR = _resolve_dir_from_env(
     os.path.join(WORKSPACE_ROOT, "static"),
     os.path.join(APP_ROOT, os.pardir, "static"),
 )
+ACTIVE_PROFILE_PATH = os.path.abspath(
+    os.getenv("LEON_ACTIVE_PROFILE_PATH")
+    or os.path.join(WORKSPACE_ROOT, "config", "profiles", "active.json")
+)
 VOICE_LIB_EXTS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+
+
+def _default_active_profile() -> dict:
+    return {
+        "version": 1,
+        "name": "LEON default",
+        "description": "Default local tuning profile managed by the LEON launcher.",
+        "llmPromptId": "builtin_backend_default",
+        "llmPrompt": "",
+        "quality": {
+            "live": "balanced",
+            "generate": "balanced",
+            "custom": {
+                "live": {
+                    "diffusion_steps": 14,
+                    "prompt_audio_seconds": 10,
+                    "segment_tokens": 60,
+                    "first_tokens": 18,
+                    "s2mel_cfg_rate": 0.7,
+                },
+                "generate": {
+                    "diffusion_steps": 14,
+                    "prompt_audio_seconds": 10,
+                    "segment_tokens": 60,
+                    "first_tokens": 18,
+                    "s2mel_cfg_rate": 0.7,
+                },
+            },
+        },
+    }
+
+
+def _load_active_profile() -> dict:
+    if not os.path.isfile(ACTIVE_PROFILE_PATH):
+        return _default_active_profile()
+    with open(ACTIVE_PROFILE_PATH, "r", encoding="utf-8") as f:
+        profile = json.load(f)
+    if not isinstance(profile, dict):
+        raise ValueError("active profile must be a JSON object")
+    return profile
 
 
 def _voice_dir_has_audio(path: str) -> bool:
@@ -1726,6 +1770,19 @@ async def tavo_widget_test_head():
     return Response(status_code=200 if path and os.path.exists(path) else 404, media_type="text/html", headers=headers)
 
 
+@APP.get("/profiles/active")
+async def active_profile_endpoint():
+    try:
+        profile = _load_active_profile()
+        return JSONResponse(
+            content=profile,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "active profile load failed", "Exception": str(e)})
+
+
 if STATIC_DIR:
     APP.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -2425,8 +2482,34 @@ async def tts_dialogue_stream_job_mp3_audio_endpoint(job_id: str, start_s: float
 
 
 @APP.delete("/tts_dialogue_stream_job/{job_id}")
-async def tts_dialogue_stream_job_delete_endpoint(job_id: str):
+async def tts_dialogue_stream_job_delete_endpoint(job_id: str, preserve_completed: bool = False):
     live = LIVE_JOBS.get(job_id)
+    cached_path = _get_cached_audio(job_id)
+    if preserve_completed and cached_path:
+        return JSONResponse(content={
+            "cancelled_live": False,
+            "deleted": False,
+            "preserved": True,
+            "state": "done",
+            "cache_key": job_id,
+            "cache_url": f"/cache_audio/{job_id}",
+        })
+    if preserve_completed and live:
+        phase = str(live.metrics.get("phase") or live.metrics.get("state") or "")
+        segments_total = int(live.metrics.get("segments_total") or len(live.metrics.get("segments_plan") or []) or 0)
+        segments_done = int(live.metrics.get("segments_done") or len(live.segments_meta or []) or 0)
+        all_segments_done = bool(segments_total > 0 and segments_done >= segments_total and len(live.pcm) > 0)
+        if live.finished.is_set() or phase in ("saving", "done") or all_segments_done:
+            state = "done" if live.finished.is_set() or phase == "done" else "saving"
+            return JSONResponse(content={
+                "cancelled_live": False,
+                "deleted": False,
+                "preserved": True,
+                "state": state,
+                "cache_key": job_id,
+                "cache_url": f"/cache_audio/{job_id}",
+                "metrics": live.metrics,
+            })
     if live:
         _mark_job_cancelled(live)
         live.finished.set()
@@ -2436,7 +2519,13 @@ async def tts_dialogue_stream_job_delete_endpoint(job_id: str):
         deleted = _delete_cache(job_id)
     except Exception:
         deleted = False
-    return JSONResponse(content={"cancelled_live": bool(live), "deleted": deleted, "cache_key": job_id})
+    return JSONResponse(content={
+        "cancelled_live": bool(live),
+        "deleted": deleted,
+        "preserved": False,
+        "state": "cancelled" if live else "missing",
+        "cache_key": job_id,
+    })
 
 
 @APP.get("/tts_dialogue_job_status/{cache_key}")

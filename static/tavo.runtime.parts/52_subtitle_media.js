@@ -119,6 +119,24 @@
       if (activeSubtitle.pollHandle) clearInterval(activeSubtitle.pollHandle);
       activeSubtitle = null;
     }
+    function canStartSubtitleForTrack(track) {
+      if (!track || track.mode === "single") return false;
+      var mode = normalizeModeName(track.mode);
+      if (mode !== "ai" && mode !== "normal") return false;
+      return !!(track.cacheKey || (track.segments && track.segments.length));
+    }
+    function refreshActiveSubtitleForTrack(track, sec, opts) {
+      opts = opts || {};
+      try {
+        if ((!activeSubtitle || activeSubtitle.track !== track) && !opts.noStart && canStartSubtitleForTrack(track)) {
+          startSubtitle(track, function () { return elementPlaybackTimeSec(track); });
+        }
+        if (!activeSubtitle || activeSubtitle.track !== track || typeof activeSubtitle.refresh !== "function") return false;
+        return activeSubtitle.refresh(sec, opts);
+      } catch (_) {
+        return false;
+      }
+    }
 
     function renderSubtitleRows(timeline, resetScroll) {
       if (!subBox) return;
@@ -189,7 +207,23 @@
     function mediaSessionPlayRequested() {
       try {
         var track = currentTrack();
+        if (track && isSavedTrack(track)) {
+          if (audio && (audio.currentSrc || audio.src) && savedElementAudioBelongsToTrack(track)) {
+            setAudioPlaybackRate();
+            var savedPlay = audio.play();
+            if (savedPlay && typeof savedPlay.catch === "function") savedPlay.catch(function (e) { handleAudioPlayReject("media-session", e, "请点播放继续"); });
+            return;
+          }
+          startElementAudioFrom(track, trackResumeSec(track));
+          return;
+        }
         if (track && (String(track.playbackState || "") === "playing" || isElementPlayingTrackStream(track) || (elementAudioBelongsToTrack(track) && !audio.paused && !audio.ended))) {
+          return;
+        }
+        if (audio && (audio.currentSrc || audio.src)) {
+          setAudioPlaybackRate();
+          var p = audio.play();
+          if (p && typeof p.catch === "function") p.catch(function (e) { handleAudioPlayReject("media-session", e, "请点播放继续"); });
           return;
         }
         playOrPauseCurrentTrack().catch(function(){});
@@ -198,20 +232,66 @@
     function mediaSessionPauseRequested() {
       try {
         var track = currentTrack();
-        if (track && typeof pauseLiveTrack === "function" && (trackHasActiveLiveOutput(track) || track.webAudioPlaying || isElementPlayingTrackStream(track))) {
+        if (track && isSavedTrack(track)) {
+          if (audio && (audio.currentSrc || audio.src) && savedElementAudioBelongsToTrack(track)) {
+            try {
+              if (isFinite(Number(audio.currentTime))) track.lastElementSec = Math.max(0, Number(audio.currentTime || 0) || 0);
+            } catch (_) {}
+            track.savedElementUserPaused = true;
+            track.savedSeekKeepPlayingUntil = 0;
+            audio.pause();
+          } else if (audio && (audio.currentSrc || audio.src)) {
+            clearElementAudioSrc();
+          }
+          setTrackPlaybackState(track, "paused");
+          setPlayState("idle");
+          return;
+        }
+        if (audio && (audio.currentSrc || audio.src)) {
+          try {
+            if (track && isElementUsingTrackLiveMp3(track)) rememberNativeLiveElementResumeSec(track, "media audio pause");
+          } catch (_) {}
+          audio.pause();
+          if (track) setTrackPlaybackState(track, "paused");
+          setPlayState("idle");
+          setStatus("已暂停");
+          return;
+        }
+        if (track && track.webAudioPlaying && typeof pauseLiveTrack === "function") {
           pauseLiveTrack(track);
           return;
         }
         if (track) setTrackPlaybackState(track, "paused");
-        audio.pause();
         setPlayState("idle");
       } catch (_) {}
+    }
+    function seekCurrentMediaElementTo(track, pos) {
+      pos = Math.max(0, Number(pos) || 0);
+      if (track && isSavedTrack(track)) return applySavedElementSeek(track, pos);
+      if (!(audio && (audio.currentSrc || audio.src))) return false;
+      try {
+        var dur = Number(audio.duration);
+        if (isFinite(dur) && dur > 0) pos = Math.min(pos, Math.max(0, dur - 0.05));
+        audio.currentTime = pos;
+        if (track && isSavedTrack(track)) track.lastElementSec = pos;
+        else if (track && (isElementUsingTrackLiveMp3(track) || isElementUsingTrackLiveSegment(track) || isElementUsingTrackStream(track))) {
+          rememberNativeLiveElementResumeSec(track, "media audio seek", { allowBackward: true });
+        }
+        refreshActiveSubtitleForTrack(track, pos, { force: true, scroll: true });
+        return true;
+      } catch (_) {
+        return false;
+      }
     }
     function mediaSessionSeekBy(delta) {
       try {
         var track = currentTrack();
-        if (track && canSeekLiveTrack(track)) {
-          seekBySeconds(delta);
+        if (track && isSavedTrack(track)) {
+          seekToSeconds(Math.max(0, trackResumeSec(track) + Number(delta || 0)), { noticeTitle: Number(delta || 0) < 0 ? "后退 10 秒" : "快进 10 秒" });
+          return;
+        }
+        if (audio && (audio.currentSrc || audio.src)) {
+          seekCurrentMediaElementTo(track, Math.max(0, Number(audio.currentTime || 0) + Number(delta || 0)));
           return;
         }
         if (!canSeekTrackByControls(track)) return;
@@ -222,16 +302,15 @@
       try {
         pos = Math.max(0, Number(pos) || 0);
         var track = currentTrack();
-        if (canSeekLiveTrack(track)) {
+        if (track && isSavedTrack(track)) {
           seekToSeconds(pos, { noticeTitle: "系统进度跳转" });
           return;
         }
-        if (!canSeekTrackByControls(track)) return;
-        var dur = Number(audio && audio.duration);
-        if (audio && (audio.currentSrc || audio.src) && isFinite(dur) && dur > 0) {
-          audio.currentTime = Math.max(0, Math.min(dur - 0.05, pos));
+        if (audio && (audio.currentSrc || audio.src)) {
+          seekCurrentMediaElementTo(track, pos);
           return;
         }
+        if (!canSeekTrackByControls(track)) return;
         seekToSeconds(pos, { noticeTitle: "系统进度跳转" });
       } catch (_) {}
     }
@@ -418,11 +497,11 @@
         activeSubtitle = null;
         return;
       }
-      state.tickHandle = setInterval(function () {
+      state.refresh = function (sec, opts) {
+        opts = opts || {};
         if (activeSubtitle !== state) return;
-        if (!timeline.length) return;
-        var t;
-        try { t = getTimeSec(); } catch (_) { t = NaN; }
+        if (!timeline.length) return false;
+        var t = Number(sec);
         if (!isFinite(t) || t < 0) return;
         t = clampPlaybackTimeSec(trackEntry, t);
         var displayT = t + clampNumber(cfg.subtitleLeadSec == null ? 0.30 : cfg.subtitleLeadSec, 0.30, 0, 1.0);
@@ -435,13 +514,20 @@
           if (displayT >= timeline[i].start && displayT < timeline[i].end) { idx = i; break; }
           if (displayT >= timeline[i].start) idx = i;
         }
-        if (idx >= 0 && idx !== lastIdx) {
+        if (idx >= 0 && (opts.force || idx !== lastIdx)) {
           lastIdx = idx;
           setRowClass(idx, idx);
-          scrollCurrentIntoMiddle();
+          if (opts.scroll !== false) scrollCurrentIntoMiddle();
           // 左上角 cover/标题 + 系统媒体面板同步当前说话人
           syncHeaderToSpeaker(timeline[idx].role, timeline[idx].text);
+          return true;
         }
+        return idx >= 0;
+      };
+      state.tickHandle = setInterval(function () {
+        var t;
+        try { t = getTimeSec(); } catch (_) { t = NaN; }
+        state.refresh(t);
       }, 100);
       // 后台轮询 job_status 拿真实 segments_meta 校准时间轴
       if (trackEntry.cacheKey) {

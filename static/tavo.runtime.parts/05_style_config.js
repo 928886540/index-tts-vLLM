@@ -59,6 +59,56 @@
   }
 
   async function getConfig() {
+    async function fetchActiveProfile() {
+      try {
+        var r = await fetch(cleanBase(scriptOrigin()) + "/profiles/active", { cache: "no-store" });
+        if (!r.ok) return null;
+        var profile = await r.json();
+        return profile && typeof profile === "object" ? profile : null;
+      } catch (_) {
+        return null;
+      }
+    }
+    function normalizeProfileQuality(mode) {
+      mode = String(mode || "").trim().toLowerCase();
+      return ["fast", "balanced", "expressive", "ultra", "custom"].indexOf(mode) >= 0 ? mode : "";
+    }
+    function normalizeProfileCustomQuality(item) {
+      if (!item || typeof item !== "object") return null;
+      var out = {};
+      if (item.diffusion_steps != null) out.diffusion_steps = clampNumber(item.diffusion_steps, 14, 2, 24);
+      if (item.prompt_audio_seconds != null) out.prompt_audio_seconds = clampNumber(item.prompt_audio_seconds, 10, 2, 16);
+      if (item.segment_tokens != null) out.segment_tokens = Math.round(clampNumber(item.segment_tokens, 60, 8, 120));
+      if (item.first_tokens != null) out.first_tokens = Math.round(clampNumber(item.first_tokens, 18, 4, Math.max(4, out.segment_tokens || 120)));
+      if (item.s2mel_cfg_rate != null) out.s2mel_cfg_rate = clampNumber(item.s2mel_cfg_rate, 0.7, 0, 1.2);
+      return Object.keys(out).length ? out : null;
+    }
+    function applyActiveProfile(cfg, profile) {
+      if (!profile || typeof profile !== "object") return cfg;
+      cfg.activeProfileName = String(profile.name || "").trim();
+      var quality = profile.quality && typeof profile.quality === "object" ? profile.quality : null;
+      if (quality) {
+        var liveMode = normalizeProfileQuality(quality.live);
+        var generateMode = normalizeProfileQuality(quality.generate);
+        if (liveMode || generateMode) {
+          cfg.profileQuality = {
+            live: liveMode || generateMode || cfg.qualityMode || "balanced",
+            generate: generateMode || liveMode || cfg.qualityMode || "balanced"
+          };
+          cfg.qualityMode = cfg.profileQuality.live;
+        }
+        var custom = quality.custom && typeof quality.custom === "object" ? quality.custom : null;
+        if (custom) {
+          cfg.profileQualityCustom = {
+            live: normalizeProfileCustomQuality(custom.live),
+            generate: normalizeProfileCustomQuality(custom.generate)
+          };
+        }
+      }
+      if (typeof profile.llmPrompt === "string") cfg.llmPrompt = profile.llmPrompt.trim();
+      return cfg;
+    }
+    var activeProfile = await fetchActiveProfile();
     var saved = null;
     try { if (window.tavo && typeof tavo.get === "function") saved = await tavo.get(CONFIG_KEY, "global"); } catch (_) {}
     if (!saved) { try { saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null"); } catch (_) {} }
@@ -87,6 +137,7 @@
     if (!Array.isArray(cfg.roleVoiceList) || cfg.roleVoiceList.length === 0) {
       cfg.roleVoiceList = parseRoleVoiceText(cfg.roleVoicesText || "");
     }
+    applyActiveProfile(cfg, activeProfile);
     return cfg;
   }
   function pickGlobalConfig(cfg) {
