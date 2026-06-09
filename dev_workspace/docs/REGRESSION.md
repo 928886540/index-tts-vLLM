@@ -153,6 +153,7 @@ Current smoke must prove:
 - Tavo frontend must not call `/parse_text` in normal AI generation.
 - Frontend submits one `/tts_dialogue_stream_job` body containing text, parse mode, voices, LLM config, Tavo user/character context, role hints, and generation parameters.
 - Backend-owned status/error should surface through `/tts_dialogue_job_status/{cache_key}`.
+- Backend LLM proxy requests should send a normal user-agent; some OpenAI-compatible gateways reject urllib's default Python user-agent even when the same key/model works directly.
 - UI should translate raw backend phases into clear text, such as LLM call, role/emotion analysis, waiting first audio, or synthesizing segment x/y.
 - During backend-owned LLM parsing, `/tts_dialogue_job_status/{cache_key}` should expose `llm_stage` and fresh `llm_elapsed_s`; the frontend should show `检查分段复用`, `等待 LLM 返回 Ns`, or `整理分段结果`, not first-audio waiting copy.
 - If `复用 LLM 拆段` is requested but no parse cache is hit, user-facing copy should say `复用未命中，等待 LLM 返回 Ns` so it is clear the option was checked but missed.

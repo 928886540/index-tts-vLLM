@@ -41,6 +41,7 @@ Current code state:
 - `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260609-mp3-cache-v63`.
 - Launcher tuning first slice now uses profile schema v2: `config/profiles/*.json` are editable source profiles, `config/profiles/active.json` is the applied runtime snapshot, and `quality.presets.live/generate` stores parameters for every Tavo quality mode. Saving writes the selected profile; applying writes `active.json`; backend startup receives `LEON_ACTIVE_PROFILE_PATH` pointing at the active snapshot.
 - Tavo generation now reads `/profiles/active` at config load and again immediately before generation. Tavo only stores/selects the quality mode name; request parameters are taken from active profile `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Profile `llmPrompt` is submitted as `parse_system_prompt` and rendered by the API backend as a template with runtime role/user/style placeholders.
+- vLLM and fast6g LLM proxy requests now send a stable LEON user-agent. This fixes real OpenAI-compatible gateways that reject urllib's default Python user-agent with Cloudflare 1010 while direct keyed requests succeed.
 - `ttsDebug=1` now keeps debug output in the Tavo console/server tail only. The in-page debug overlay is opt-in with `debugPanel=1`, so normal native-audio testing does not cover the player controls.
 - Root `README.md` is now the project introduction with README images. `dev_workspace/README.md` is the active working README for Codex repository work.
 - Root `AGENTS.md` was moved into `dev_workspace/AGENTS.md`; start new Codex sessions in `dev_workspace` for the shortest working context.
@@ -122,6 +123,14 @@ After `20260609-mp3-cache-v63`, launcher/frontend validation additionally assert
 - launcher source compiles to a temporary smoke exe and exits with code `0` under `LEON_LAUNCHER_SMOKE_TEST=1`;
 - root `LEON-Launcher.exe` was overwritten successfully and exits with code `0` under `LEON_LAUNCHER_SMOKE_TEST=1`;
 - active profile tuning smoke fetches `/profiles/active` for both LIVE and DISK/generate, keeps the Tavo-selected `balanced` mode, uses `quality.presets.live.balanced` / `quality.presets.generate.balanced` request fields, and submits profile `llmPrompt` as `parse_system_prompt`.
+
+Real lifecycle validation on 2026-06-09:
+
+- Started `fast6g` on port `9880` with `LEON_ACTIVE_PROFILE_PATH=config/profiles/active.json`; `/health` returned `version=fast6g` and `llm_parse=true`.
+- `/profiles/active` returned schema v2; `/voices` and `/static/tavo.js` were reachable.
+- Direct OpenAI-compatible smoke against liangjie `grok-4.1` returned `200 OK`.
+- Backend-owned AI dialogue job `bc3845c69e36ddedd6a4c828c677c463204357be` used `grok-4.1`, active profile `fast` LIVE params, and voice `400个火爆音色/短剧解说`; `llm_stage=done`, `segments_done=4/4`, `audio_duration_s=4.817`, `total_wall_s=13.564`, `rtf=2.816`.
+- `/cache_audio/bc3845c69e36ddedd6a4c828c677c463204357be` returned `200 audio/mpeg`, `X-IndexTTS-Audio-Format: mp3`, `Content-Length: 78158`; cache JSON/MP3 and readable `by_role/用户/...` entries landed under `fast6g/outputs/cache`.
 
 After `20260609-mp3-cache-v61`, Playwright smoke additionally asserts:
 

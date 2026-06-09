@@ -59,6 +59,8 @@ def parse_text_openai_compatible(
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
+        # Some OpenAI-compatible gateways reject urllib's default Python UA.
+        "User-Agent": "LEON-IndexTTS2/1.0",
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
