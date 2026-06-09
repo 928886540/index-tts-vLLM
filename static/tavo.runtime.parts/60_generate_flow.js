@@ -201,7 +201,10 @@
         return;
       }
       await refreshCharacterConfig({ skipIfEditing: true });
-      readFields(); await saveConfig(cfg, characterId); setError("");
+      readFields();
+      await refreshActiveProfileConfig(cfg);
+      await saveConfig(cfg, characterId);
+      setError("");
       if (!messageText) { setError("当前消息没有可朗读正文。"); return; }
       try {
         await ensureTracksLoaded();
@@ -289,11 +292,12 @@
       try {
         var base = cleanBase(cfg.apiBase);
         var t0 = Date.now();
+        var qualityMode = effectiveQualityMode(cfg, playbackMode);
         var body = Object.assign({
           text: messageText,
           voices: voicesMap,
           parse_mode: parseMode,
-          performance_mode: cfg.qualityMode || "balanced",
+          performance_mode: qualityMode,
           interval_ms: cfg.intervalMs,
           top_p: cfg.topP,
           top_k: cfg.topK,
@@ -302,7 +306,7 @@
           emo_alpha: cfg.emoAlpha,
           speed_factor: clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25),
           bypass_cache: !!force
-        }, generationQualityOverrides(cfg.qualityMode, cfg));
+        }, generationQualityOverrides(qualityMode, cfg, playbackMode));
         if (parseMode === "ai") {
           body.llm_endpoint = cfg.llmEndpoint;
           body.llm_model = cfg.llmModel;
@@ -311,6 +315,7 @@
           body.user_name = (context && context.userName) || "";
           body.character_name = (context && context.characterName) || cfg.currentCharacterName || "";
           body.roles_hint = rolesHint;
+          if (cfg.llmPrompt) body.parse_system_prompt = String(cfg.llmPrompt || "");
         }
         var reusedSegments = null;
         if (parseMode === "ai" && cfg.reuseLlmParse !== false) {

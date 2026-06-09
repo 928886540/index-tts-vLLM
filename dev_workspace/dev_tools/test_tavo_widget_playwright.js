@@ -764,14 +764,196 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
     if (/assistant message mock|IndexTTS Tavo 测试页|用户身份名|角色名/.test(body.text)) {
       throw new Error("message text should prefer Tavo API content over DOM chrome: " + JSON.stringify(body));
     }
-    if (body.diffusion_steps !== 16 || body.prompt_audio_seconds !== 12 || body.segment_tokens !== 72 || body.first_tokens !== 24 || body.s2mel_cfg_rate !== 0.7) {
-      throw new Error("custom generation params should be submitted unchanged: " + JSON.stringify(body));
+    if (body.performance_mode !== "custom" || body.diffusion_steps !== 14 || body.prompt_audio_seconds !== 10 || body.segment_tokens !== 60 || body.first_tokens !== 18 || body.s2mel_cfg_rate !== 0.7) {
+      throw new Error("without active profile, custom mode should use built-in fallback params instead of stale Tavo local fields: " + JSON.stringify(body));
     }
     if (pageErrors.length) throw new Error("normal explicit dialogue smoke page error: " + pageErrors.join(" | "));
     return { jobCount, body };
   } finally {
     await context.close();
   }
+}
+
+async function runActiveProfileQualitySmoke(browser, targetUrl) {
+  async function runCase(playbackMode) {
+    const context = await browser.newContext();
+    await context.addInitScript(() => {
+      try { localStorage.clear(); } catch (_) {}
+      try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    });
+
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+    page.on("console", (msg) => {
+      const text = msg.text();
+      if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404|status of 500/i.test(text)) pageErrors.push(text);
+    });
+
+    let jobCount = 0;
+    let profileFetches = 0;
+    const jobBodies = [];
+    const cacheKey = playbackMode === "generate" ? "d".repeat(40) : "c".repeat(40);
+    const activeProfile = {
+      version: 2,
+      name: "Smoke tuning profile",
+      llmPrompt: "PROFILE PROMPT FROM ACTIVE",
+      quality: {
+        presets: {
+          live: {
+            balanced: {
+              diffusion_steps: 11,
+              prompt_audio_seconds: 7,
+              segment_tokens: 44,
+              first_tokens: 12,
+              s2mel_cfg_rate: 0.61
+            },
+            custom: {
+              diffusion_steps: 21,
+              prompt_audio_seconds: 15,
+              segment_tokens: 99,
+              first_tokens: 40,
+              s2mel_cfg_rate: 0.95
+            }
+          },
+          generate: {
+            balanced: {
+              diffusion_steps: 17,
+              prompt_audio_seconds: 12,
+              segment_tokens: 82,
+              first_tokens: 29,
+              s2mel_cfg_rate: 0.83
+            },
+            custom: {
+              diffusion_steps: 19,
+              prompt_audio_seconds: 13,
+              segment_tokens: 88,
+              first_tokens: 31,
+              s2mel_cfg_rate: 0.9
+            }
+          }
+        }
+      }
+    };
+
+    await page.route("**/profiles/active", async (route) => {
+      profileFetches += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(activeProfile) });
+    });
+    await page.route("**/tts_dialogue_stream_job", async (route) => {
+      jobCount += 1;
+      try { jobBodies.push(JSON.parse(route.request().postData() || "{}")); } catch (_) { jobBodies.push({}); }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          url: "/tts_dialogue_stream_job/" + cacheKey,
+          cache_url: "/cache_audio/" + cacheKey,
+          cache_key: cacheKey,
+          cached: false,
+          live: playbackMode === "live"
+        })
+      });
+    });
+    await page.route("**/tts_dialogue_stream_job/**", async (route) => {
+      await route.fulfill({ status: 200, contentType: "audio/mpeg", body: tinyMp3Buffer() });
+    });
+    await page.route("**/cache_audio/**", async (route) => {
+      await route.fulfill({ status: 200, contentType: "audio/wav", body: tinyWavBuffer() });
+    });
+    await page.route("**/tts_dialogue_job_status/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          state: playbackMode === "generate" ? "pending" : "running",
+          cache_key: cacheKey,
+          metrics: { state: "running", phase: "tts_queue", message: "等待合成", segments_total: 1, segments_done: 0 }
+        })
+      });
+    });
+
+    try {
+      await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+      await page.evaluate(async (mode) => {
+        const cfg = {
+          configVersion: 13,
+          mode: "ai",
+          playbackMode: mode,
+          llmEndpoint: "http://127.0.0.1:8317/v1",
+          llmModel: "profile-smoke-model",
+          llmApiKey: "",
+          reuseLlmParse: false,
+          intervalMs: 50,
+          topP: 0.8,
+          topK: 30,
+          temperature: 0.7,
+          repetitionPenalty: 1.2,
+          emoAlpha: 0.38,
+          speedFactor: 1.0,
+          qualityMode: "balanced",
+          diffusionSteps: 23,
+          promptAudioSeconds: 16,
+          segmentTokens: 120,
+          firstTokens: 60,
+          s2melCfgRate: 1.1,
+          subtitleLeadSec: 0.25,
+          offlineAudioEnabled: false
+        };
+        const charCfg = {
+          defaultVoice: "女声/高圆圆.wav",
+          characterName: "潘金莲",
+          roleVoiceList: [
+            { role: "旁白", voice: "女声/高圆圆.wav" },
+            { role: "用户", voice: "男声/旁白.mp3" },
+            { role: "潘金莲", voice: "女声/风韵少妇.wav" }
+          ]
+        };
+        localStorage.setItem("indextts_tavo_config_v3", JSON.stringify(cfg));
+        localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify(charCfg));
+        if (window.tavo && typeof window.tavo.set === "function") {
+          await window.tavo.set("indextts_tavo_config_v3", cfg, "global");
+          await window.tavo.set("indextts_tavo_character_v1:34", charCfg, "global");
+        }
+      }, playbackMode);
+      await remountTavoScript(page, "");
+      await page.click('[data-role="lazy-open"]');
+      await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
+      await page.evaluate(() => {
+        const add = document.querySelector('[data-role="add"]');
+        if (!add) throw new Error("missing add button");
+        add.click();
+      });
+      await page.waitForFunction(() => {
+        return window.__idxTest.getFetchLog().some((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url));
+      }, { timeout: 10000 });
+      await page.waitForTimeout(250);
+      if (pageErrors.length) throw new Error("active profile quality smoke page error: " + pageErrors.join(" | "));
+      return { playbackMode, profileFetches, jobCount, body: jobBodies[0] || {} };
+    } finally {
+      await context.close();
+    }
+  }
+
+  const live = await runCase("live");
+  const disk = await runCase("generate");
+  if (live.profileFetches < 1 || disk.profileFetches < 1) {
+    throw new Error("active profile should be fetched for both playback modes: " + JSON.stringify({ live, disk }));
+  }
+  if (live.jobCount !== 1 || disk.jobCount !== 1) {
+    throw new Error("active profile smoke should create one job per mode: " + JSON.stringify({ live, disk }));
+  }
+  if (live.body.performance_mode !== "balanced" || live.body.diffusion_steps !== 11 || live.body.prompt_audio_seconds !== 7 || live.body.segment_tokens !== 44 || live.body.first_tokens !== 12 || live.body.s2mel_cfg_rate !== 0.61) {
+    throw new Error("LIVE should keep Tavo-selected balanced mode and read active profile live balanced params: " + JSON.stringify(live.body));
+  }
+  if (disk.body.performance_mode !== "balanced" || disk.body.diffusion_steps !== 17 || disk.body.prompt_audio_seconds !== 12 || disk.body.segment_tokens !== 82 || disk.body.first_tokens !== 29 || disk.body.s2mel_cfg_rate !== 0.83) {
+    throw new Error("DISK should keep Tavo-selected balanced mode and read active profile generate balanced params: " + JSON.stringify(disk.body));
+  }
+  if (live.body.parse_system_prompt !== "PROFILE PROMPT FROM ACTIVE" || disk.body.parse_system_prompt !== "PROFILE PROMPT FROM ACTIVE") {
+    throw new Error("AI generation should submit llmPrompt from active profile: " + JSON.stringify({ live: live.body, disk: disk.body }));
+  }
+  return { live, disk };
 }
 
 async function runGroupRoleAvatarSmoke(browser, targetUrl) {
@@ -5623,6 +5805,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     const llmErrorCopy = await runLlmErrorCopySmoke(browser, targetUrl);
     const normalGenerateCancel = await runNormalGenerateCancelSmoke(browser, targetUrl);
     const normalExplicitDialogueMapping = await runNormalExplicitDialogueMappingSmoke(browser, targetUrl);
+    const activeProfileQuality = await runActiveProfileQualitySmoke(browser, targetUrl);
     const groupRoleAvatar = await runGroupRoleAvatarSmoke(browser, targetUrl);
     const livePlayClick = await runLivePlayClickSmoke(browser, targetUrl);
     const defaultLiveMp3 = await runNativeLiveFlagSmoke(browser, targetUrl, "");
@@ -5657,6 +5840,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       llmErrorCopy,
       normalGenerateCancel,
       normalExplicitDialogueMapping,
+      activeProfileQuality,
       groupRoleAvatar,
       livePlayClick,
       defaultLiveMp3,

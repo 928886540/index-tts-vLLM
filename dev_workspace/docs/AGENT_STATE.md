@@ -32,13 +32,15 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260609-mp3-cache-v61"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260609-mp3-cache-v63"></script>
 ```
 
 Current code state:
 
 - Root `README.md`, `dev_workspace/README.md`, and `dev_workspace/AGENTS.md` now point Tavo playback/generation work to `dev_workspace/docs/LOGIC.md`.
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260609-mp3-cache-v61`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260609-mp3-cache-v63`.
+- Launcher tuning first slice now uses profile schema v2: `config/profiles/*.json` are editable source profiles, `config/profiles/active.json` is the applied runtime snapshot, and `quality.presets.live/generate` stores parameters for every Tavo quality mode. Saving writes the selected profile; applying writes `active.json`; backend startup receives `LEON_ACTIVE_PROFILE_PATH` pointing at the active snapshot.
+- Tavo generation now reads `/profiles/active` at config load and again immediately before generation. Tavo only stores/selects the quality mode name; request parameters are taken from active profile `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Profile `llmPrompt` is submitted as `parse_system_prompt` and rendered by the API backend as a template with runtime role/user/style placeholders.
 - `ttsDebug=1` now keeps debug output in the Tavo console/server tail only. The in-page debug overlay is opt-in with `debugPanel=1`, so normal native-audio testing does not cover the player controls.
 - Root `README.md` is now the project introduction with README images. `dev_workspace/README.md` is the active working README for Codex repository work.
 - Root `AGENTS.md` was moved into `dev_workspace/AGENTS.md`; start new Codex sessions in `dev_workspace` for the shortest working context.
@@ -104,6 +106,8 @@ Current code state:
 Passed on 2026-06-09:
 
 ```powershell
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /platform:anycpu /optimize+ /out:LEON-Launcher.profile-smoke.exe /win32icon:launcher\leon-launcher.ico /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll /r:System.Management.dll launcher\LeonNativeLauncher.cs
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; $p = Start-Process -FilePath "D:\apiWorkSpace\leon_api\LEON-Launcher.profile-smoke.exe" -WorkingDirectory "D:\apiWorkSpace\leon_api" -Wait -PassThru; $p.ExitCode
 node --check static\tavo.js
 node --check static\tavo.runtime.js
 node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
@@ -112,6 +116,12 @@ node dev_workspace\dev_tools\test_tavo_widget_playwright.js
 git diff --check
 python C:\Users\Administrator\.codex\skills\.system\skill-creator\scripts\quick_validate.py C:\Users\Administrator\.codex\skills\leon-api
 ```
+
+After `20260609-mp3-cache-v63`, launcher/frontend validation additionally asserts:
+
+- launcher source compiles to a temporary smoke exe and exits with code `0` under `LEON_LAUNCHER_SMOKE_TEST=1`;
+- root `LEON-Launcher.exe` was overwritten successfully and exits with code `0` under `LEON_LAUNCHER_SMOKE_TEST=1`;
+- active profile tuning smoke fetches `/profiles/active` for both LIVE and DISK/generate, keeps the Tavo-selected `balanced` mode, uses `quality.presets.live.balanced` / `quality.presets.generate.balanced` request fields, and submits profile `llmPrompt` as `parse_system_prompt`.
 
 After `20260609-mp3-cache-v61`, Playwright smoke additionally asserts:
 

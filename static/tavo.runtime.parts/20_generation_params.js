@@ -290,7 +290,7 @@
     p.set("top_k", String(cfg.topK));
     p.set("temperature", String(cfg.temperature));
     p.set("repetition_penalty", String(cfg.repetitionPenalty));
-    applyGenerationParamsToSearchParams(p, cfg);
+    applyGenerationParamsToSearchParams(p, cfg, cfg && cfg.playbackMode);
     return p;
   }
   function singleStreamUrl(base, cfg, text, force) {
@@ -305,9 +305,11 @@
     return cleanBase(base) + "/cache_tts_single?" + singleParams(cfg, text).toString();
   }
   function singleBody(cfg, text, force) {
+    var qualityMode = effectiveQualityMode(cfg, cfg && cfg.playbackMode);
     return Object.assign({
       text: text,
       ref_audio_path: cfg.defaultVoice,
+      performance_mode: qualityMode,
       emo_text: "",
       emo_ref_audio_path: "",
       emo_vec: [],
@@ -318,7 +320,7 @@
       repetition_penalty: cfg.repetitionPenalty,
       emo_alpha: cfg.emoAlpha,
       bypass_cache: !!force
-    }, generationQualityOverrides(cfg.qualityMode, cfg));
+    }, generationQualityOverrides(qualityMode, cfg, cfg && cfg.playbackMode));
   }
   async function createSingleStreamJob(base, cfg, text, force) {
     var res = await fetch(cleanBase(base) + "/tts_stream_job", {

@@ -60,7 +60,7 @@ internal sealed class LauncherForm : Form
 
     private const int ApiPort = 9880;
     private const string ApiBase = "http://127.0.0.1:9880";
-    private const string TavoCacheBust = "20260607-tavo-file-v31";
+    private const string TavoCacheBust = "20260609-mp3-cache-v63";
     private const string WarmupVoice = "400个火爆音色/短剧解说";
     private const string WarmupText = "短剧解说启动测试。";
 
@@ -100,7 +100,7 @@ internal sealed class LauncherForm : Form
     private Panel logPanel;
     private Panel envPanel;
     private Panel configPanel;
-    private WrappedLogView logBox;
+    private TextBox logBox;
     private DataGridView envGrid;
     private Label statusLabel;
     private Button startButton;
@@ -110,7 +110,6 @@ internal sealed class LauncherForm : Form
     private Button navEnvButton;
     private Button tabLauncherButton;
     private Button tabApiButton;
-    private Button tabStdoutButton;
     private Button tabStderrButton;
     private Button vllmButton;
     private Button fast6gButton;
@@ -119,6 +118,11 @@ internal sealed class LauncherForm : Form
     private Button envCheckButton;
     private Button envRepairButton;
     private TextBox ratioBox;
+    private ComboBox profileSelectBox;
+    private TextBox profileNameBox;
+    private TextBox profileFileNameBox;
+    private TextBox profileDescriptionBox;
+    private Label profilePathHintLabel;
     private ComboBox liveQualityBox;
     private ComboBox generateQualityBox;
     private TextBox liveDiffusionBox;
@@ -136,6 +140,12 @@ internal sealed class LauncherForm : Form
     private System.Windows.Forms.Timer healthTimer;
     private string activeView = "home";
     private string activeLogTab = "launcher";
+    private string selectedProfilePath;
+    private bool profileListLoading;
+    private bool qualityUiLoading;
+    private string liveEditingPreset = "balanced";
+    private string generateEditingPreset = "balanced";
+    private Dictionary<string, object> currentProfileData;
     private bool envCheckRunning;
     private bool envRepairRunning;
 
@@ -154,7 +164,6 @@ internal sealed class LauncherForm : Form
 
         logTexts["launcher"] = string.Empty;
         logTexts["api"] = string.Empty;
-        logTexts["stdout"] = string.Empty;
         logTexts["stderr"] = string.Empty;
 
         string envVersion = Environment.GetEnvironmentVariable("LEON_LAUNCHER_VERSION");
@@ -276,7 +285,7 @@ internal sealed class LauncherForm : Form
 
         navHomeButton = CreateSideButton("首页", 18, delegate { ShowView("home"); });
         navLogButton = CreateSideButton("日志", 64, delegate { ShowView("log"); });
-        navConfigButton = CreateSideButton("配置", 110, delegate { ShowView("config"); });
+        navConfigButton = CreateSideButton("调音台", 110, delegate { ShowView("config"); });
         navEnvButton = CreateSideButton("环境检测", 156, delegate { ShowView("env"); });
         side.Controls.Add(navHomeButton);
         side.Controls.Add(navLogButton);
@@ -407,7 +416,7 @@ internal sealed class LauncherForm : Form
 
         FlowLayoutPanel tabs = new FlowLayoutPanel();
         tabs.Dock = DockStyle.Top;
-        tabs.Height = 42;
+        tabs.Height = 50;
         tabs.WrapContents = false;
         tabs.Padding = new Padding(0, 0, 0, 8);
         tabs.BackColor = panel.BackColor;
@@ -415,18 +424,23 @@ internal sealed class LauncherForm : Form
 
         tabLauncherButton = CreateLogTabButton("启动器", "launcher");
         tabApiButton = CreateLogTabButton("服务日志", "api");
-        tabStdoutButton = CreateLogTabButton("服务启动", "stdout");
-        tabStderrButton = CreateLogTabButton("诊断日志", "stderr");
+        tabStderrButton = CreateLogTabButton("诊断/错误", "stderr");
         tabs.Controls.Add(tabLauncherButton);
         tabs.Controls.Add(tabApiButton);
-        tabs.Controls.Add(tabStdoutButton);
         tabs.Controls.Add(tabStderrButton);
 
-        logBox = new WrappedLogView();
+        logBox = new TextBox();
         logBox.Dock = DockStyle.Fill;
         logBox.BackColor = Color.FromArgb(8, 12, 17);
         logBox.ForeColor = Color.FromArgb(222, 230, 238);
-        logBox.Font = NewMonoFont(9.0f);
+        logBox.Font = NewMonoFont(11.5f);
+        logBox.Multiline = true;
+        logBox.ReadOnly = true;
+        logBox.BorderStyle = BorderStyle.None;
+        logBox.ScrollBars = ScrollBars.Vertical;
+        logBox.WordWrap = true;
+        logBox.ShortcutsEnabled = true;
+        logBox.HideSelection = false;
         panel.Controls.Add(logBox);
         logBox.BringToFront();
 
@@ -443,24 +457,51 @@ internal sealed class LauncherForm : Form
 
         Panel top = new Panel();
         top.Dock = DockStyle.Top;
-        top.Height = 46;
+        top.Height = 128;
         top.BackColor = panel.BackColor;
         panel.Controls.Add(top);
 
-        Button saveButton = CreateFlatButton("保存配置", 0, 0, 104, 34, Color.FromArgb(25, 126, 89), delegate { SaveConfigFromUi(); });
-        Button reloadButton = CreateFlatButton("重新读取", 112, 0, 104, 34, Color.FromArgb(48, 68, 88), delegate { LoadProfileIntoConfigUi(); });
-        Button defaultButton = CreateFlatButton("恢复默认", 224, 0, 104, 34, Color.FromArgb(118, 78, 42), delegate { ResetConfigDefaults(); });
+        AddConfigLabel(top, "Profile", 0, 8, 70);
+        profileSelectBox = new ComboBox();
+        profileSelectBox.Location = new Point(76, 4);
+        profileSelectBox.Size = new Size(300, 32);
+        profileSelectBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        profileSelectBox.FlatStyle = FlatStyle.Flat;
+        profileSelectBox.BackColor = Color.FromArgb(8, 12, 17);
+        profileSelectBox.ForeColor = Color.WhiteSmoke;
+        profileSelectBox.Font = NewFont(11.0f, FontStyle.Bold);
+        profileSelectBox.SelectedIndexChanged += delegate { OnProfileSelectionChanged(); };
+        top.Controls.Add(profileSelectBox);
+
+        Button newButton = CreateFlatButton("新建配置", 392, 2, 96, 34, Color.FromArgb(42, 110, 154), delegate { CreateNewProfileFromDefaults(); });
+        Button reloadButton = CreateFlatButton("读取配置", 496, 2, 96, 34, Color.FromArgb(48, 68, 88), delegate { LoadProfileIntoConfigUi(); });
+        Button refreshButton = CreateFlatButton("刷新列表", 600, 2, 96, 34, Color.FromArgb(48, 68, 88), delegate { RefreshProfileList(true); });
+        Button defaultButton = CreateFlatButton("恢复默认", 704, 2, 96, 34, Color.FromArgb(118, 78, 42), delegate { ResetConfigDefaults(); });
+        Button saveButton = CreateFlatButton("保存 Profile", 0, 48, 132, 38, Color.FromArgb(25, 126, 89), delegate { SaveSelectedProfileFromUi(); });
+        Button applyButton = CreateFlatButton("应用到 Tavo", 142, 48, 132, 38, Color.FromArgb(42, 110, 154), delegate { ApplySelectedProfileFromUi(); });
+        Button cloneButton = CreateFlatButton("复制配置", 284, 48, 100, 38, Color.FromArgb(48, 68, 88), delegate { SaveAsNewProfileFromUi(); });
+        StyleConfigActionButton(saveButton);
+        StyleConfigActionButton(applyButton);
+        StyleConfigActionButton(cloneButton);
+        StyleConfigActionButton(newButton);
+        StyleConfigActionButton(reloadButton);
+        StyleConfigActionButton(refreshButton);
+        StyleConfigActionButton(defaultButton);
         top.Controls.Add(saveButton);
+        top.Controls.Add(applyButton);
+        top.Controls.Add(cloneButton);
+        top.Controls.Add(newButton);
         top.Controls.Add(reloadButton);
+        top.Controls.Add(refreshButton);
         top.Controls.Add(defaultButton);
 
         Label tip = new Label();
-        tip.Text = "这里编辑本机 active profile；Tavo 重新挂载后读取。LLM Prompt 留空时使用后端内置提示词。";
-        tip.Location = new Point(346, 8);
-        tip.Size = new Size(760, 22);
+        tip.Text = "这里配置档位参数库；Tavo 只选择档位名，生成时按 active.json 里的同名参数执行。保存写 Profile，应用写 active.json，下一次生成生效。";
+        tip.Location = new Point(0, 96);
+        tip.Size = new Size(840, 24);
         tip.ForeColor = Color.FromArgb(205, 214, 224);
         tip.BackColor = panel.BackColor;
-        tip.Font = NewFont(9.0f, FontStyle.Regular);
+        tip.Font = NewFont(10.0f, FontStyle.Regular);
         top.Controls.Add(tip);
 
         Panel scroll = new Panel();
@@ -470,46 +511,63 @@ internal sealed class LauncherForm : Form
         panel.Controls.Add(scroll);
         scroll.BringToFront();
 
-        AddConfigSectionLabel(scroll, "质量档位", 0, 2, 840);
-        AddQualityEditor(scroll, "LIVE 档位", 30, true);
-        AddQualityEditor(scroll, "D 模式档位", 252, false);
+        scroll.AutoScrollMinSize = new Size(860, 840);
 
-        AddConfigSectionLabel(scroll, "LLM 提示词", 0, 486, 840);
-        Label llmHint = AddConfigLabel(scroll, "系统提示词覆盖项。留空 = 后端内置；填写后会作为 parse_system_prompt 提交给 AI 拆段。", 0, 512, 840);
+        AddConfigSectionLabel(scroll, "当前 Profile", 0, 2, 840);
+        AddConfigLabel(scroll, "名称", 0, 36, 120);
+        profileNameBox = CreateConfigTextBox(scroll, 0, 62, 240, 32);
+        AddConfigLabel(scroll, "文件名", 260, 36, 120);
+        profileFileNameBox = CreateConfigTextBox(scroll, 260, 62, 180, 32);
+        AddConfigLabel(scroll, "描述", 460, 36, 120);
+        profileDescriptionBox = CreateConfigTextBox(scroll, 460, 62, 360, 32);
+        profilePathHintLabel = AddConfigLabel(scroll, "Profile 路径: ", 0, 104, 820);
+        profilePathHintLabel.ForeColor = Color.FromArgb(138, 154, 170);
+
+        AddConfigSectionLabel(scroll, "档位参数库", 0, 144, 840);
+        AddQualityEditor(scroll, "LIVE 实时播放", 0, 176, true);
+        AddQualityEditor(scroll, "DISK 完整生成", 424, 176, false);
+
+        AddConfigSectionLabel(scroll, "LLM 提示词", 0, 476, 840);
+        Label llmHint = AddConfigLabel(scroll, "这是 active profile 的完整拆段提示词；保存并应用后，下一次 AI 拆段会使用这里的内容。", 0, 506, 840);
         llmHint.ForeColor = Color.FromArgb(160, 172, 184);
-        llmPromptBox = CreateConfigTextBox(scroll, 0, 540, 920, 170);
+        llmPromptBox = CreateConfigTextBox(scroll, 0, 534, 820, 150);
         llmPromptBox.Multiline = true;
         llmPromptBox.ScrollBars = ScrollBars.Vertical;
         llmPromptBox.AcceptsReturn = true;
         llmPromptBox.AcceptsTab = true;
+        llmPromptBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        Label pathHint = AddConfigLabel(scroll, "保存路径: " + activeProfilePath, 0, 724, 920);
+        Label pathHint = AddConfigLabel(scroll, "Active 快照路径: " + activeProfilePath, 0, 700, 820);
         pathHint.ForeColor = Color.FromArgb(138, 154, 170);
 
-        LoadProfileIntoConfigUi();
+        RefreshProfileList(false);
         return panel;
     }
 
-    private void AddQualityEditor(Panel parent, string title, int top, bool live)
+    private void AddQualityEditor(Panel parent, string title, int x, int top, bool live)
     {
         Panel box = new Panel();
-        box.Location = new Point(0, top);
-        box.Size = new Size(920, 204);
-        box.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        box.Location = new Point(x, top);
+        box.Size = new Size(404, 290);
+        box.Anchor = AnchorStyles.Top | AnchorStyles.Left;
         box.BackColor = Color.FromArgb(16, 21, 27);
         parent.Controls.Add(box);
 
         AddConfigSectionLabel(box, title, 14, 12, 300);
-        ComboBox quality = CreateQualityComboBox(box, 14, 42, 180);
-        AddConfigLabel(box, "fast / balanced / expressive / ultra / custom", 210, 48, 500);
+        AddConfigLabel(box, "正在编辑档位", 14, 50, 110);
+        ComboBox quality = CreateQualityComboBox(box, 104, 44, 170);
+        quality.SelectedIndexChanged += delegate { OnQualityPresetSelectionChanged(live); };
+        Label modeHint = AddConfigLabel(box, "切换这里只是编辑对应档位参数，不限制 Tavo 页面选档位。", 14, 86, 360);
+        modeHint.ForeColor = Color.FromArgb(160, 172, 184);
 
-        TextBox diffusion = AddConfigNumberField(box, "扩散步数", 14, 86, "14");
-        TextBox prompt = AddConfigNumberField(box, "参考秒数", 176, 86, "10");
-        TextBox segment = AddConfigNumberField(box, "分段 token", 338, 86, "60");
-        TextBox first = AddConfigNumberField(box, "首段 token", 500, 86, "18");
-        TextBox cfgRate = AddConfigNumberField(box, "S2Mel CFG", 662, 86, "0.70");
+        AddConfigLabel(box, "该档位生成参数", 14, 116, 220);
+        TextBox diffusion = AddConfigNumberField(box, "扩散步数", 14, 144, "14", 112);
+        TextBox prompt = AddConfigNumberField(box, "参考秒数", 144, 144, "10", 112);
+        TextBox cfgRate = AddConfigNumberField(box, "S2Mel CFG", 274, 144, "0.70", 112);
+        TextBox segment = AddConfigNumberField(box, "分段 token", 14, 208, "60", 112);
+        TextBox first = AddConfigNumberField(box, "首段 token", 144, 208, "18", 112);
 
-        Label hint = AddConfigLabel(box, "上面专家参数只在档位选 custom 时作为 Tavo 请求覆盖项；后端仍会 clamp 上限。", 14, 158, 820);
+        Label hint = AddConfigLabel(box, "所有档位都可改", 274, 234, 112);
         hint.ForeColor = Color.FromArgb(160, 172, 184);
 
         if (live)
@@ -534,8 +592,14 @@ internal sealed class LauncherForm : Form
 
     private TextBox AddConfigNumberField(Panel parent, string label, int x, int y, string placeholder)
     {
-        AddConfigLabel(parent, label, x, y, 130);
-        TextBox box = CreateConfigTextBox(parent, x, y + 24, 130, 28);
+        return AddConfigNumberField(parent, label, x, y, placeholder, 130);
+    }
+
+    private TextBox AddConfigNumberField(Panel parent, string label, int x, int y, string placeholder, int width)
+    {
+        AddConfigLabel(parent, label, x, y, width);
+        TextBox box = CreateConfigTextBox(parent, x, y + 26, width, 32);
+        box.Anchor = AnchorStyles.Top | AnchorStyles.Left;
         box.TextAlign = HorizontalAlignment.Center;
         box.Text = placeholder;
         return box;
@@ -544,7 +608,7 @@ internal sealed class LauncherForm : Form
     private Label AddConfigSectionLabel(Panel parent, string text, int x, int y, int width)
     {
         Label label = AddConfigLabel(parent, text, x, y, width);
-        label.Font = NewFont(11.0f, FontStyle.Bold);
+        label.Font = NewFont(12.0f, FontStyle.Bold);
         label.ForeColor = Color.FromArgb(226, 232, 238);
         return label;
     }
@@ -558,7 +622,7 @@ internal sealed class LauncherForm : Form
         label.AutoEllipsis = true;
         label.BackColor = parent.BackColor;
         label.ForeColor = Color.FromArgb(205, 214, 224);
-        label.Font = NewFont(9.0f, FontStyle.Regular);
+        label.Font = NewFont(10.0f, FontStyle.Regular);
         parent.Controls.Add(label);
         return label;
     }
@@ -568,11 +632,11 @@ internal sealed class LauncherForm : Form
         TextBox box = new TextBox();
         box.Location = new Point(x, y);
         box.Size = new Size(width, height);
-        box.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        box.Anchor = AnchorStyles.Top | AnchorStyles.Left;
         box.BorderStyle = BorderStyle.FixedSingle;
         box.BackColor = Color.FromArgb(8, 12, 17);
         box.ForeColor = Color.WhiteSmoke;
-        box.Font = NewMonoFont(9.0f);
+        box.Font = NewMonoFont(10.5f);
         parent.Controls.Add(box);
         return box;
     }
@@ -581,127 +645,711 @@ internal sealed class LauncherForm : Form
     {
         ComboBox box = new ComboBox();
         box.Location = new Point(x, y);
-        box.Size = new Size(width, 28);
+        box.Size = new Size(width, 32);
         box.DropDownStyle = ComboBoxStyle.DropDownList;
         box.FlatStyle = FlatStyle.Flat;
         box.BackColor = Color.FromArgb(8, 12, 17);
         box.ForeColor = Color.WhiteSmoke;
-        box.Font = NewFont(9.5f, FontStyle.Bold);
+        box.Font = NewFont(11.0f, FontStyle.Bold);
         box.Items.AddRange(new object[] { "fast", "balanced", "expressive", "ultra", "custom" });
         box.SelectedItem = "balanced";
         parent.Controls.Add(box);
         return box;
     }
 
+    private void StyleConfigActionButton(Button button)
+    {
+        if (button == null) return;
+        button.Font = NewFont(10.0f, FontStyle.Bold);
+    }
+
+    private void RefreshProfileList(bool showStatus)
+    {
+        try
+        {
+            EnsureDefaultProfileFiles();
+            string preferred = selectedProfilePath;
+            if (string.IsNullOrWhiteSpace(preferred)) preferred = GetAppliedSourceProfilePath();
+
+            List<ProfileOption> options = ListProfileOptions();
+            profileListLoading = true;
+            if (profileSelectBox != null)
+            {
+                profileSelectBox.Items.Clear();
+                foreach (ProfileOption option in options)
+                {
+                    profileSelectBox.Items.Add(option);
+                }
+
+                int selectedIndex = 0;
+                for (int i = 0; i < options.Count; i++)
+                {
+                    if (SamePath(options[i].FilePath, preferred))
+                    {
+                        selectedIndex = i;
+                        break;
+                    }
+                }
+                if (profileSelectBox.Items.Count > 0) profileSelectBox.SelectedIndex = selectedIndex;
+            }
+            profileListLoading = false;
+
+            ProfileOption selectedOption = profileSelectBox == null ? null : profileSelectBox.SelectedItem as ProfileOption;
+            if (selectedOption != null)
+            {
+                selectedProfilePath = selectedOption.FilePath;
+            }
+            else if (options.Count > 0)
+            {
+                selectedProfilePath = options[0].FilePath;
+            }
+            LoadProfileIntoConfigUi();
+            if (showStatus) SetStatus("Profile 列表已刷新。", Color.Khaki);
+        }
+        catch (Exception ex)
+        {
+            profileListLoading = false;
+            AddLauncherLog("刷新 Profile 列表失败: " + ex.Message, "ERROR");
+            SetStatus("刷新 Profile 失败，请看日志。", Color.LightCoral);
+        }
+    }
+
+    private void OnProfileSelectionChanged()
+    {
+        if (profileListLoading) return;
+        ProfileOption option = profileSelectBox == null ? null : profileSelectBox.SelectedItem as ProfileOption;
+        if (option == null) return;
+        selectedProfilePath = option.FilePath;
+        LoadProfileIntoConfigUi();
+    }
+
     private void LoadProfileIntoConfigUi()
     {
         try
         {
-            Dictionary<string, object> profile = LoadActiveProfileData();
-            Dictionary<string, object> quality = GetObjectDict(profile, "quality");
-            Dictionary<string, object> custom = GetObjectDict(quality, "custom");
-            Dictionary<string, object> live = GetObjectDict(custom, "live");
-            Dictionary<string, object> generate = GetObjectDict(custom, "generate");
+            EnsureDefaultProfileFiles();
+            if (string.IsNullOrWhiteSpace(selectedProfilePath) || !File.Exists(selectedProfilePath))
+            {
+                List<ProfileOption> options = ListProfileOptions();
+                if (options.Count == 0) throw new FileNotFoundException("没有可用的 profile 文件");
+                selectedProfilePath = options[0].FilePath;
+            }
 
-            SetComboValue(liveQualityBox, GetStringValue(quality, "live", "balanced"));
-            SetComboValue(generateQualityBox, GetStringValue(quality, "generate", "balanced"));
-            SetQualityFields(live, liveDiffusionBox, livePromptSecondsBox, liveSegmentTokensBox, liveFirstTokensBox, liveCfgRateBox);
-            SetQualityFields(generate, generateDiffusionBox, generatePromptSecondsBox, generateSegmentTokensBox, generateFirstTokensBox, generateCfgRateBox);
-            if (llmPromptBox != null) llmPromptBox.Text = GetStringValue(profile, "llmPrompt", "");
-            SetStatus("配置已读取。", Color.Khaki);
+            Dictionary<string, object> profile = LoadProfileData(selectedProfilePath);
+            ApplyProfileToConfigUi(profile, selectedProfilePath);
+            SelectProfileBoxPath(selectedProfilePath);
+            SetStatus("Profile 已读取: " + GetStringValue(profile, "name", Path.GetFileNameWithoutExtension(selectedProfilePath)), Color.Khaki);
         }
         catch (Exception ex)
         {
-            AddLauncherLog("读取配置失败: " + ex.Message, "ERROR");
-            SetStatus("读取配置失败，请看日志。", Color.LightCoral);
+            AddLauncherLog("读取 Profile 失败: " + ex.Message, "ERROR");
+            SetStatus("读取 Profile 失败，请看日志。", Color.LightCoral);
         }
     }
 
-    private void SaveConfigFromUi()
+    private void SaveSelectedProfileFromUi()
     {
         try
         {
-            Dictionary<string, object> profile = DefaultProfileData();
-            profile["updatedAt"] = DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
-            profile["llmPrompt"] = llmPromptBox == null ? "" : llmPromptBox.Text.Trim();
+            EnsureDefaultProfileFiles();
+            string sourcePath = selectedProfilePath;
+            if (string.IsNullOrWhiteSpace(sourcePath) || IsActiveProfilePath(sourcePath))
+            {
+                sourcePath = null;
+            }
 
-            Dictionary<string, object> quality = GetObjectDict(profile, "quality");
-            quality["live"] = SelectedQualityValue(liveQualityBox);
-            quality["generate"] = SelectedQualityValue(generateQualityBox);
-
-            Dictionary<string, object> custom = GetObjectDict(quality, "custom");
-            custom["live"] = ReadQualityFields(liveDiffusionBox, livePromptSecondsBox, liveSegmentTokensBox, liveFirstTokensBox, liveCfgRateBox);
-            custom["generate"] = ReadQualityFields(generateDiffusionBox, generatePromptSecondsBox, generateSegmentTokensBox, generateFirstTokensBox, generateCfgRateBox);
-
-            Directory.CreateDirectory(profileDir);
-            File.WriteAllText(activeProfilePath, json.Serialize(profile), new UTF8Encoding(false));
-            AddLauncherLog("已保存 active profile: " + activeProfilePath);
-            SetStatus("配置已保存，Tavo 重新挂载后生效。", Color.LightGreen);
+            string targetPath = DesiredProfilePathFromUi(sourcePath, false);
+            Dictionary<string, object> profile = ReadProfileFromConfigUi(sourcePath);
+            SaveProfileData(targetPath, profile);
+            if (!string.IsNullOrWhiteSpace(sourcePath) && !SamePath(sourcePath, targetPath) && File.Exists(sourcePath))
+            {
+                File.Delete(sourcePath);
+                UpdateAppliedSourceAfterRename(sourcePath, targetPath);
+            }
+            selectedProfilePath = targetPath;
+            RefreshProfileList(false);
+            AddLauncherLog("已保存 Profile: " + targetPath);
+            SetStatus("Profile 已保存；点应用后写入 active。", Color.LightGreen);
         }
         catch (Exception ex)
         {
-            AddLauncherLog("保存配置失败: " + ex.Message, "ERROR");
-            SetStatus("保存配置失败，请看日志。", Color.LightCoral);
+            AddLauncherLog("保存 Profile 失败: " + ex.Message, "ERROR");
+            SetStatus("保存 Profile 失败，请看日志。", Color.LightCoral);
+        }
+    }
+
+    private void SaveAsNewProfileFromUi()
+    {
+        try
+        {
+            EnsureDefaultProfileFiles();
+            string path = MakeCopyProfilePathFromUi(selectedProfilePath);
+            Dictionary<string, object> profile = ReadProfileFromConfigUi(selectedProfilePath);
+            if (profileNameBox != null && string.IsNullOrWhiteSpace(profileNameBox.Text))
+            {
+                profile["name"] = Path.GetFileNameWithoutExtension(path);
+            }
+            SaveProfileData(path, profile);
+            selectedProfilePath = path;
+            RefreshProfileList(false);
+            ApplyProfileToConfigUi(profile, path);
+            AddLauncherLog("已复制 Profile: " + path);
+            SetStatus("已复制为新 Profile；点应用后写入 active。", Color.LightGreen);
+        }
+        catch (Exception ex)
+        {
+            AddLauncherLog("复制 Profile 失败: " + ex.Message, "ERROR");
+            SetStatus("复制 Profile 失败，请看日志。", Color.LightCoral);
+        }
+    }
+
+    private void CreateNewProfileFromDefaults()
+    {
+        try
+        {
+            EnsureDefaultProfileFiles();
+            Dictionary<string, object> profile = DefaultProfileData();
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmm", System.Globalization.CultureInfo.InvariantCulture);
+            profile["name"] = "LEON profile " + stamp;
+            profile["description"] = "Local tuning profile managed by the LEON launcher.";
+            string path = MakeUniqueProfilePath(ProfileFileBaseFromName(GetStringValue(profile, "name", "leon-profile")));
+            SaveProfileData(path, profile);
+            selectedProfilePath = path;
+            RefreshProfileList(false);
+            ApplyProfileToConfigUi(profile, path);
+            AddLauncherLog("已新建 Profile: " + path);
+            SetStatus("已新建完整配置；改参数后保存或应用。", Color.LightGreen);
+        }
+        catch (Exception ex)
+        {
+            AddLauncherLog("新建 Profile 失败: " + ex.Message, "ERROR");
+            SetStatus("新建 Profile 失败，请看日志。", Color.LightCoral);
+        }
+    }
+
+    private void ApplySelectedProfileFromUi()
+    {
+        try
+        {
+            EnsureDefaultProfileFiles();
+            string sourcePath = selectedProfilePath;
+            if (string.IsNullOrWhiteSpace(sourcePath) || IsActiveProfilePath(sourcePath))
+            {
+                sourcePath = null;
+            }
+
+            string targetPath = DesiredProfilePathFromUi(sourcePath, false);
+            Dictionary<string, object> profile = ReadProfileFromConfigUi(sourcePath);
+            SaveProfileData(targetPath, profile);
+            if (!string.IsNullOrWhiteSpace(sourcePath) && !SamePath(sourcePath, targetPath) && File.Exists(sourcePath))
+            {
+                File.Delete(sourcePath);
+            }
+            Dictionary<string, object> active = CloneProfileData(profile);
+            active["appliedAt"] = DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+            active["appliedFrom"] = Path.GetFileName(targetPath);
+            SaveProfileData(activeProfilePath, active);
+            selectedProfilePath = targetPath;
+            RefreshProfileList(false);
+            AddLauncherLog("已应用 Profile: " + targetPath + " -> " + activeProfilePath);
+            SetStatus("Profile 已应用；Tavo 下一次生成前会重新读取 active。", Color.LightGreen);
+        }
+        catch (Exception ex)
+        {
+            AddLauncherLog("应用 Profile 失败: " + ex.Message, "ERROR");
+            SetStatus("应用 Profile 失败，请看日志。", Color.LightCoral);
         }
     }
 
     private void ResetConfigDefaults()
     {
-        SetComboValue(liveQualityBox, "balanced");
-        SetComboValue(generateQualityBox, "balanced");
-        SetQualityFields(DefaultQualityCustomData(), liveDiffusionBox, livePromptSecondsBox, liveSegmentTokensBox, liveFirstTokensBox, liveCfgRateBox);
-        SetQualityFields(DefaultQualityCustomData(), generateDiffusionBox, generatePromptSecondsBox, generateSegmentTokensBox, generateFirstTokensBox, generateCfgRateBox);
-        if (llmPromptBox != null) llmPromptBox.Text = "";
-        SetStatus("已恢复默认，点保存配置后写入。", Color.Khaki);
+        Dictionary<string, object> profile = DefaultProfileData();
+        ApplyProfileToConfigUi(profile, string.IsNullOrWhiteSpace(selectedProfilePath) ? DefaultProfilePath() : selectedProfilePath);
+        SetStatus("已恢复默认值；保存或应用后写入。", Color.Khaki);
+    }
+
+    private void ApplyProfileToConfigUi(Dictionary<string, object> profile, string path)
+    {
+        NormalizeProfileData(profile);
+        currentProfileData = CloneProfileData(profile);
+
+        if (profileNameBox != null) profileNameBox.Text = GetStringValue(profile, "name", Path.GetFileNameWithoutExtension(path));
+        if (profileFileNameBox != null) profileFileNameBox.Text = ProfileFileBaseFromName(Path.GetFileNameWithoutExtension(path));
+        if (profileDescriptionBox != null) profileDescriptionBox.Text = GetStringValue(profile, "description", "");
+        if (profilePathHintLabel != null) profilePathHintLabel.Text = "Profile 路径: " + path;
+
+        qualityUiLoading = true;
+        liveEditingPreset = "balanced";
+        generateEditingPreset = "balanced";
+        SetComboValue(liveQualityBox, liveEditingPreset);
+        SetComboValue(generateQualityBox, generateEditingPreset);
+        SetQualityFields(GetPresetQuality(currentProfileData, "live", liveEditingPreset), liveDiffusionBox, livePromptSecondsBox, liveSegmentTokensBox, liveFirstTokensBox, liveCfgRateBox);
+        SetQualityFields(GetPresetQuality(currentProfileData, "generate", generateEditingPreset), generateDiffusionBox, generatePromptSecondsBox, generateSegmentTokensBox, generateFirstTokensBox, generateCfgRateBox);
+        qualityUiLoading = false;
+
+        if (llmPromptBox != null) llmPromptBox.Text = GetStringValue(profile, "llmPrompt", "");
+    }
+
+    private void OnQualityPresetSelectionChanged(bool live)
+    {
+        if (qualityUiLoading) return;
+        if (currentProfileData == null) currentProfileData = DefaultProfileData();
+
+        string stream = live ? "live" : "generate";
+        string previous = live ? liveEditingPreset : generateEditingPreset;
+        string next = SelectedQualityValue(live ? liveQualityBox : generateQualityBox);
+
+        if (!string.IsNullOrWhiteSpace(previous))
+        {
+            SetPresetQuality(currentProfileData, stream, previous, ReadQualityFields(
+                live ? liveDiffusionBox : generateDiffusionBox,
+                live ? livePromptSecondsBox : generatePromptSecondsBox,
+                live ? liveSegmentTokensBox : generateSegmentTokensBox,
+                live ? liveFirstTokensBox : generateFirstTokensBox,
+                live ? liveCfgRateBox : generateCfgRateBox));
+        }
+
+        if (live) liveEditingPreset = next;
+        else generateEditingPreset = next;
+
+        qualityUiLoading = true;
+        SetQualityFields(GetPresetQuality(currentProfileData, stream, next),
+            live ? liveDiffusionBox : generateDiffusionBox,
+            live ? livePromptSecondsBox : generatePromptSecondsBox,
+            live ? liveSegmentTokensBox : generateSegmentTokensBox,
+            live ? liveFirstTokensBox : generateFirstTokensBox,
+            live ? liveCfgRateBox : generateCfgRateBox);
+        qualityUiLoading = false;
+    }
+
+    private void StoreCurrentQualityFields()
+    {
+        if (currentProfileData == null) currentProfileData = DefaultProfileData();
+        SetPresetQuality(currentProfileData, "live", NormalizeQualityMode(liveEditingPreset), ReadQualityFields(liveDiffusionBox, livePromptSecondsBox, liveSegmentTokensBox, liveFirstTokensBox, liveCfgRateBox));
+        SetPresetQuality(currentProfileData, "generate", NormalizeQualityMode(generateEditingPreset), ReadQualityFields(generateDiffusionBox, generatePromptSecondsBox, generateSegmentTokensBox, generateFirstTokensBox, generateCfgRateBox));
+    }
+
+    private Dictionary<string, object> ReadProfileFromConfigUi(string existingPath)
+    {
+        Dictionary<string, object> profile = null;
+        if (!string.IsNullOrWhiteSpace(existingPath) && File.Exists(existingPath))
+        {
+            profile = LoadProfileData(existingPath);
+        }
+        if (profile == null) profile = DefaultProfileData();
+        profile.Remove("appliedAt");
+        profile.Remove("appliedFrom");
+        currentProfileData = currentProfileData == null ? CloneProfileData(profile) : currentProfileData;
+        StoreCurrentQualityFields();
+
+        string profileName = profileNameBox == null ? "" : StringOrEmpty(profileNameBox.Text);
+        if (string.IsNullOrWhiteSpace(profileName)) profileName = GetStringValue(profile, "name", "LEON profile");
+        profile["version"] = 2;
+        profile["name"] = profileName;
+        profile["description"] = profileDescriptionBox == null ? "" : StringOrEmpty(profileDescriptionBox.Text);
+        profile["llmPromptId"] = "launcher_profile_prompt_template_v1";
+        string prompt = llmPromptBox == null ? "" : llmPromptBox.Text.Trim();
+        profile["llmPrompt"] = string.IsNullOrWhiteSpace(prompt) ? DefaultLlmPromptTemplate() : prompt;
+        profile["updatedAt"] = DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+
+        Dictionary<string, object> sourceQuality = GetObjectDict(currentProfileData, "quality");
+        Dictionary<string, object> sourcePresets = GetObjectDict(sourceQuality, "presets");
+        Dictionary<string, object> quality = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        quality["presets"] = CloneProfileData(sourcePresets);
+        profile["quality"] = quality;
+        NormalizeProfileData(profile);
+        return profile;
+    }
+
+    private void EnsureDefaultProfileFiles()
+    {
+        Directory.CreateDirectory(profileDir);
+        string defaultPath = DefaultProfilePath();
+        if (!File.Exists(defaultPath))
+        {
+            Dictionary<string, object> seed = null;
+            if (File.Exists(activeProfilePath))
+            {
+                try { seed = LoadProfileData(activeProfilePath); }
+                catch { seed = null; }
+            }
+            if (seed == null) seed = DefaultProfileData();
+            seed.Remove("appliedAt");
+            seed.Remove("appliedFrom");
+            if (string.IsNullOrWhiteSpace(GetStringValue(seed, "name", ""))) seed["name"] = "LEON default";
+            if (string.IsNullOrWhiteSpace(GetStringValue(seed, "description", ""))) seed["description"] = "Default local tuning profile managed by the LEON launcher.";
+            SaveProfileData(defaultPath, seed);
+        }
+
+        if (!File.Exists(activeProfilePath))
+        {
+            Dictionary<string, object> active = LoadProfileData(defaultPath);
+            active["appliedAt"] = DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+            active["appliedFrom"] = Path.GetFileName(defaultPath);
+            SaveProfileData(activeProfilePath, active);
+        }
     }
 
     private Dictionary<string, object> LoadActiveProfileData()
     {
-        EnsureActiveProfileFile();
-        string text = File.ReadAllText(activeProfilePath, Encoding.UTF8);
+        EnsureDefaultProfileFiles();
+        return LoadProfileData(activeProfilePath);
+    }
+
+    private Dictionary<string, object> LoadProfileData(string path)
+    {
+        string text = File.ReadAllText(path, Encoding.UTF8);
         object value = json.DeserializeObject(text);
         Dictionary<string, object> profile = value as Dictionary<string, object>;
-        if (profile == null) throw new InvalidDataException("active profile 不是 JSON object");
+        if (profile == null) throw new InvalidDataException("profile 不是 JSON object: " + path);
+        NormalizeProfileData(profile);
         return profile;
     }
 
-    private void EnsureActiveProfileFile()
+    private void SaveProfileData(string path, Dictionary<string, object> profile)
     {
-        if (File.Exists(activeProfilePath)) return;
-        Directory.CreateDirectory(profileDir);
-        File.WriteAllText(activeProfilePath, json.Serialize(DefaultProfileData()), new UTF8Encoding(false));
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        File.WriteAllText(path, json.Serialize(profile), new UTF8Encoding(false));
     }
 
     private Dictionary<string, object> DefaultProfileData()
     {
-        Dictionary<string, object> custom = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        custom["live"] = DefaultQualityCustomData();
-        custom["generate"] = DefaultQualityCustomData();
-
         Dictionary<string, object> quality = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        quality["live"] = "balanced";
-        quality["generate"] = "balanced";
-        quality["custom"] = custom;
+        quality["presets"] = DefaultQualityPresetsData();
 
         Dictionary<string, object> profile = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        profile["version"] = 1;
+        profile["version"] = 2;
         profile["name"] = "LEON default";
         profile["description"] = "Default local tuning profile managed by the LEON launcher.";
-        profile["llmPromptId"] = "builtin_backend_default";
-        profile["llmPrompt"] = "";
+        profile["llmPromptId"] = "launcher_profile_prompt_template_v1";
+        profile["llmPrompt"] = DefaultLlmPromptTemplate();
         profile["quality"] = quality;
         return profile;
     }
 
-    private Dictionary<string, object> DefaultQualityCustomData()
+    private string DefaultLlmPromptTemplate()
+    {
+        return string.Join("\n", new string[] {
+            "你是中文小说→TTS 片段拆分器。只返回严格 JSON，不要任何解释，不要 ``` 代码块。",
+            "",
+            "{{roles_hint}}",
+            "{{user_alias_hint}}",
+            "{{character_hint}}",
+            "输出格式:",
+            "{{output_contract}}",
+            "",
+            "拆段规则:",
+            "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
+            "   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。",
+            "   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。",
+            "   旁白连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。",
+            "2. 人物直接说出口的话 → role 用说话人的名字。",
+            "   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。",
+            "   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。",
+            "   - 其他人物优先从已知角色名单挑名字；名单外的新人物用原文里的名字。",
+            "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。",
+            "4. text 是要朗读的原文片段，保留标点和语气词。",
+            "{{style_rules}}",
+            "",
+            "{{emotion_rules}}",
+            "",
+            "完整性硬规则:",
+            "- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。",
+            "- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。",
+            "- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。",
+            "- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。",
+            "",
+            "示例输入:",
+            "她低着头，眼角有泪。「对不起，我真的撑不住了。」",
+            "{{example_user}}叹了口气，把手放在她肩上：「别哭。」",
+            "示例输出:",
+            "{{example_output}}"
+        });
+    }
+
+    private void NormalizeProfileData(Dictionary<string, object> profile)
+    {
+        profile["version"] = 2;
+        if (!profile.ContainsKey("name")) profile["name"] = "LEON profile";
+        if (!profile.ContainsKey("description")) profile["description"] = "";
+        profile["llmPromptId"] = "launcher_profile_prompt_template_v1";
+        if (!profile.ContainsKey("llmPrompt") || string.IsNullOrWhiteSpace(GetStringValue(profile, "llmPrompt", ""))) profile["llmPrompt"] = DefaultLlmPromptTemplate();
+        Dictionary<string, object> quality = GetObjectDict(profile, "quality");
+        Dictionary<string, object> presets = GetObjectDict(quality, "presets");
+        Dictionary<string, object> legacyCustom = GetObjectDict(quality, "custom");
+        NormalizePresetStream(presets, "live", legacyCustom.ContainsKey("live") ? GetObjectDict(legacyCustom, "live") : null);
+        NormalizePresetStream(presets, "generate", legacyCustom.ContainsKey("generate") ? GetObjectDict(legacyCustom, "generate") : null);
+        quality.Remove("live");
+        quality.Remove("generate");
+        quality.Remove("custom");
+    }
+
+    private Dictionary<string, object> CloneProfileData(Dictionary<string, object> profile)
+    {
+        object value = json.DeserializeObject(json.Serialize(profile));
+        Dictionary<string, object> clone = value as Dictionary<string, object>;
+        return clone == null ? DefaultProfileData() : clone;
+    }
+
+    private List<ProfileOption> ListProfileOptions()
+    {
+        List<ProfileOption> options = new List<ProfileOption>();
+        string[] files = Directory.GetFiles(profileDir, "*.json", SearchOption.TopDirectoryOnly);
+        foreach (string file in files)
+        {
+            if (IsActiveProfilePath(file)) continue;
+            try
+            {
+                Dictionary<string, object> profile = LoadProfileData(file);
+                string label = GetStringValue(profile, "name", Path.GetFileNameWithoutExtension(file));
+                if (IsAppliedProfileFile(file)) label += "  (active)";
+                options.Add(new ProfileOption(label, file));
+            }
+            catch (Exception ex)
+            {
+                AddLauncherLog("跳过损坏 Profile: " + file + " / " + ex.Message, "WARN");
+            }
+        }
+        options.Sort(delegate(ProfileOption a, ProfileOption b) { return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase); });
+        return options;
+    }
+
+    private void SelectProfileBoxPath(string path)
+    {
+        if (profileSelectBox == null || profileListLoading) return;
+        for (int i = 0; i < profileSelectBox.Items.Count; i++)
+        {
+            ProfileOption option = profileSelectBox.Items[i] as ProfileOption;
+            if (option != null && SamePath(option.FilePath, path))
+            {
+                if (profileSelectBox.SelectedIndex != i) profileSelectBox.SelectedIndex = i;
+                return;
+            }
+        }
+    }
+
+    private string GetAppliedSourceProfilePath()
+    {
+        if (!File.Exists(activeProfilePath)) return DefaultProfilePath();
+        try
+        {
+            Dictionary<string, object> active = LoadProfileData(activeProfilePath);
+            string appliedFrom = GetStringValue(active, "appliedFrom", "");
+            if (!string.IsNullOrWhiteSpace(appliedFrom))
+            {
+                string path = Path.Combine(profileDir, Path.GetFileName(appliedFrom));
+                if (File.Exists(path)) return path;
+            }
+        }
+        catch
+        {
+        }
+        return DefaultProfilePath();
+    }
+
+    private bool IsAppliedProfileFile(string file)
+    {
+        return SamePath(file, GetAppliedSourceProfilePath());
+    }
+
+    private string DefaultProfilePath()
+    {
+        return Path.Combine(profileDir, "leon-default.json");
+    }
+
+    private bool IsActiveProfilePath(string path)
+    {
+        return SamePath(path, activeProfilePath);
+    }
+
+    private string DesiredProfilePathFromUi(string sourcePath, bool allowExistingSource)
+    {
+        string baseName = profileFileNameBox == null ? "" : StringOrEmpty(profileFileNameBox.Text);
+        if (string.IsNullOrWhiteSpace(baseName)) baseName = profileNameBox == null ? "" : StringOrEmpty(profileNameBox.Text);
+        if (string.IsNullOrWhiteSpace(baseName) && !string.IsNullOrWhiteSpace(sourcePath)) baseName = Path.GetFileNameWithoutExtension(sourcePath);
+        baseName = ProfileFileBaseFromName(baseName);
+        string path = Path.Combine(profileDir, baseName + ".json");
+        if (IsActiveProfilePath(path)) throw new InvalidOperationException("Profile 文件名不能是 active。");
+        if (allowExistingSource && !string.IsNullOrWhiteSpace(sourcePath) && SamePath(path, sourcePath)) return sourcePath;
+        if (File.Exists(path) && (string.IsNullOrWhiteSpace(sourcePath) || !SamePath(path, sourcePath)))
+        {
+            throw new IOException("Profile 文件名已存在: " + Path.GetFileName(path));
+        }
+        return path;
+    }
+
+    private string MakeCopyProfilePathFromUi(string sourcePath)
+    {
+        string baseName = profileFileNameBox == null ? "" : StringOrEmpty(profileFileNameBox.Text);
+        if (string.IsNullOrWhiteSpace(baseName)) baseName = profileNameBox == null ? "" : StringOrEmpty(profileNameBox.Text);
+        if (string.IsNullOrWhiteSpace(baseName) && !string.IsNullOrWhiteSpace(sourcePath)) baseName = Path.GetFileNameWithoutExtension(sourcePath);
+        baseName = ProfileFileBaseFromName(baseName);
+        if (!string.IsNullOrWhiteSpace(sourcePath) && string.Equals(baseName, ProfileFileBaseFromName(Path.GetFileNameWithoutExtension(sourcePath)), StringComparison.OrdinalIgnoreCase))
+        {
+            baseName += "-copy";
+        }
+        return MakeUniqueProfilePath(baseName);
+    }
+
+    private void UpdateAppliedSourceAfterRename(string oldPath, string newPath)
+    {
+        if (!File.Exists(activeProfilePath)) return;
+        try
+        {
+            Dictionary<string, object> active = LoadProfileData(activeProfilePath);
+            string appliedFrom = GetStringValue(active, "appliedFrom", "");
+            if (string.Equals(Path.GetFileName(appliedFrom), Path.GetFileName(oldPath), StringComparison.OrdinalIgnoreCase))
+            {
+                active["appliedFrom"] = Path.GetFileName(newPath);
+                SaveProfileData(activeProfilePath, active);
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLauncherLog("更新 active appliedFrom 失败: " + ex.Message, "WARN");
+        }
+    }
+
+    private bool SamePath(string a, string b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+        try
+        {
+            return string.Equals(Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private string ProfileFileBaseFromName(string name)
+    {
+        string raw = StringOrEmpty(name).ToLowerInvariant();
+        StringBuilder sb = new StringBuilder();
+        foreach (char ch in raw)
+        {
+            if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) sb.Append(ch);
+            else if (ch == '-' || ch == '_' || ch == ' ') sb.Append('-');
+        }
+        string baseName = Regex.Replace(sb.ToString(), "-+", "-").Trim('-');
+        if (string.IsNullOrWhiteSpace(baseName)) baseName = "profile";
+        if (baseName == "active") baseName = "profile-active";
+        return baseName;
+    }
+
+    private string MakeUniqueProfilePath(string baseName)
+    {
+        baseName = ProfileFileBaseFromName(baseName);
+        string path = Path.Combine(profileDir, baseName + ".json");
+        if (!File.Exists(path) && !IsActiveProfilePath(path)) return path;
+        string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+        path = Path.Combine(profileDir, baseName + "-" + stamp + ".json");
+        int index = 2;
+        while (File.Exists(path) || IsActiveProfilePath(path))
+        {
+            path = Path.Combine(profileDir, baseName + "-" + stamp + "-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".json");
+            index++;
+        }
+        return path;
+    }
+
+    private Dictionary<string, object> DefaultQualityPresetsData()
+    {
+        Dictionary<string, object> presets = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, object> live = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, object> generate = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        foreach (string mode in QualityPresetNames())
+        {
+            live[mode] = DefaultQualityPresetData(mode);
+            generate[mode] = DefaultQualityPresetData(mode);
+        }
+        presets["live"] = live;
+        presets["generate"] = generate;
+        return presets;
+    }
+
+    private string[] QualityPresetNames()
+    {
+        return new string[] { "fast", "balanced", "expressive", "ultra", "custom" };
+    }
+
+    private Dictionary<string, object> DefaultQualityPresetData(string mode)
     {
         Dictionary<string, object> data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        data["diffusion_steps"] = 14;
-        data["prompt_audio_seconds"] = 10;
-        data["segment_tokens"] = 60;
-        data["first_tokens"] = 18;
+        mode = NormalizeQualityMode(mode);
+        if (mode == "fast")
+        {
+            data["diffusion_steps"] = 8;
+            data["prompt_audio_seconds"] = 6;
+            data["segment_tokens"] = 40;
+            data["first_tokens"] = 10;
+        }
+        else if (mode == "ultra")
+        {
+            data["diffusion_steps"] = 20;
+            data["prompt_audio_seconds"] = 14;
+            data["segment_tokens"] = 96;
+            data["first_tokens"] = 32;
+        }
+        else if (mode == "expressive")
+        {
+            data["diffusion_steps"] = 16;
+            data["prompt_audio_seconds"] = 12;
+            data["segment_tokens"] = 72;
+            data["first_tokens"] = 24;
+        }
+        else
+        {
+            data["diffusion_steps"] = 14;
+            data["prompt_audio_seconds"] = 10;
+            data["segment_tokens"] = 60;
+            data["first_tokens"] = 18;
+        }
         data["s2mel_cfg_rate"] = 0.7;
         return data;
+    }
+
+    private void NormalizePresetStream(Dictionary<string, object> presets, string stream, Dictionary<string, object> legacyCustom)
+    {
+        Dictionary<string, object> streamPresets = GetObjectDict(presets, stream);
+        foreach (string mode in QualityPresetNames())
+        {
+            Dictionary<string, object> existing = GetObjectDict(streamPresets, mode);
+            if (mode == "custom" && legacyCustom != null && existing.Count == 0) existing = legacyCustom;
+            streamPresets[mode] = NormalizeQualityData(existing, DefaultQualityPresetData(mode));
+        }
+    }
+
+    private Dictionary<string, object> NormalizeQualityData(Dictionary<string, object> data, Dictionary<string, object> fallback)
+    {
+        Dictionary<string, object> normalized = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        normalized["diffusion_steps"] = Math.Max(2, Math.Min(24, GetIntValue(data, "diffusion_steps", GetIntValue(fallback, "diffusion_steps", 14))));
+        normalized["prompt_audio_seconds"] = Math.Max(2, Math.Min(16, GetDoubleValue(data, "prompt_audio_seconds", GetDoubleValue(fallback, "prompt_audio_seconds", 10))));
+        normalized["segment_tokens"] = Math.Max(8, Math.Min(120, GetIntValue(data, "segment_tokens", GetIntValue(fallback, "segment_tokens", 60))));
+        normalized["first_tokens"] = Math.Max(4, Math.Min(GetIntValue(normalized, "segment_tokens", 60), GetIntValue(data, "first_tokens", GetIntValue(fallback, "first_tokens", 18))));
+        normalized["s2mel_cfg_rate"] = Math.Max(0, Math.Min(1.2, GetDoubleValue(data, "s2mel_cfg_rate", GetDoubleValue(fallback, "s2mel_cfg_rate", 0.7))));
+        return normalized;
+    }
+
+    private Dictionary<string, object> GetPresetQuality(Dictionary<string, object> profile, string stream, string mode)
+    {
+        if (profile == null) profile = DefaultProfileData();
+        NormalizeProfileData(profile);
+        Dictionary<string, object> quality = GetObjectDict(profile, "quality");
+        Dictionary<string, object> presets = GetObjectDict(quality, "presets");
+        Dictionary<string, object> streamPresets = GetObjectDict(presets, stream);
+        return GetObjectDict(streamPresets, NormalizeQualityMode(mode));
+    }
+
+    private void SetPresetQuality(Dictionary<string, object> profile, string stream, string mode, Dictionary<string, object> data)
+    {
+        if (profile == null) return;
+        NormalizeProfileData(profile);
+        Dictionary<string, object> quality = GetObjectDict(profile, "quality");
+        Dictionary<string, object> presets = GetObjectDict(quality, "presets");
+        Dictionary<string, object> streamPresets = GetObjectDict(presets, stream);
+        streamPresets[NormalizeQualityMode(mode)] = NormalizeQualityData(data, DefaultQualityPresetData(mode));
     }
 
     private void SetQualityFields(Dictionary<string, object> data, TextBox diffusion, TextBox promptSeconds, TextBox segmentTokens, TextBox firstTokens, TextBox cfgRate)
@@ -939,6 +1587,7 @@ internal sealed class LauncherForm : Form
     private void StartServiceWorker()
     {
         AddLauncherLog("启动按钮已响应，正在启动 LEON 服务...");
+        EnsureDefaultProfileFiles();
 
         if (!File.Exists(startupBat))
         {
@@ -1222,37 +1871,155 @@ internal sealed class LauncherForm : Form
             result["launcher"] = ReadLauncherLogTail(launcherLog, 160);
         }
 
-        string apiText = string.Empty;
-        try
-        {
-            string jsonText = HttpGet(ApiBase + "/server_log/tail?n=220", 1600);
-            apiText = ParseServerLogTail(jsonText);
-        }
-        catch
-        {
-            apiText = string.Empty;
-        }
-        if (string.IsNullOrWhiteSpace(apiText))
-        {
-            apiText = "服务日志暂无有效内容。已隐藏 /health 和 /server_log/tail 自检请求。";
-        }
-        result["api"] = NormalizeLogText(apiText);
-
         string stdoutText = string.Empty;
         if (!string.IsNullOrWhiteSpace(latestStartupLog) && File.Exists(latestStartupLog))
         {
             stdoutText = ReadLauncherLogTail(latestStartupLog, 160);
         }
-        result["stdout"] = string.IsNullOrWhiteSpace(stdoutText) ? "未发现当前服务启动日志。" : stdoutText;
 
         string stderrText = string.Empty;
         if (!string.IsNullOrWhiteSpace(latestStartupErr) && File.Exists(latestStartupErr))
         {
-            stderrText = ReadLauncherLogTail(latestStartupErr, 160);
+            stderrText = ReadLauncherLogTail(latestStartupErr, 220);
         }
-        result["stderr"] = string.IsNullOrWhiteSpace(stderrText) ? "未发现当前诊断日志。" : stderrText;
+
+        string apiText = string.Empty;
+        string apiError = string.Empty;
+        try
+        {
+            string jsonText = HttpGet(ApiBase + "/server_log/tail?n=220", 1600);
+            apiText = ParseServerLogTail(jsonText);
+        }
+        catch (Exception ex)
+        {
+            apiError = ex.Message;
+            apiText = string.Empty;
+        }
+        if (string.IsNullOrWhiteSpace(apiText))
+        {
+            apiText = BuildServiceLogFallback(apiError, stdoutText, stderrText);
+        }
+        result["api"] = NormalizeLogText(apiText);
+        result["stderr"] = BuildDiagnosticLogText(stderrText);
 
         return result;
+    }
+
+    private string BuildServiceLogFallback(string apiError, string stdoutText, string stderrText)
+    {
+        StringBuilder sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(apiError))
+        {
+            sb.AppendLine("服务日志读取失败: " + apiError);
+            sb.AppendLine("这通常表示服务未运行、正在启动，或 /server_log/tail 暂时不可用。");
+        }
+        else
+        {
+            sb.AppendLine("服务日志当前没有 API 业务内容。");
+            sb.AppendLine("已隐藏 /health 和 /server_log/tail 自检请求。");
+        }
+
+        string diagnostic = ExtractImportantLogLines(stderrText, 80);
+        if (string.IsNullOrWhiteSpace(diagnostic)) diagnostic = ExtractReadableLogTail(stderrText, 80);
+        if (!string.IsNullOrWhiteSpace(diagnostic))
+        {
+            sb.AppendLine();
+            sb.AppendLine("最近诊断/错误片段:");
+            sb.AppendLine(diagnostic);
+        }
+        else
+        {
+            string startup = ExtractImportantLogLines(stdoutText, 60);
+            if (string.IsNullOrWhiteSpace(startup)) startup = ExtractReadableLogTail(stdoutText, 60);
+            if (!string.IsNullOrWhiteSpace(startup))
+            {
+                sb.AppendLine();
+                sb.AppendLine("最近启动片段:");
+                sb.AppendLine(startup);
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private string BuildDiagnosticLogText(string stderrText)
+    {
+        if (string.IsNullOrWhiteSpace(stderrText))
+        {
+            return "未发现当前诊断/错误日志。\r\n诊断/错误页读取服务 stderr，用来显示模型库 warning、TTS traceback、启动异常和关键耗时。";
+        }
+
+        string filtered = FilterDiagnosticLog(stderrText);
+        if (string.IsNullOrWhiteSpace(filtered))
+        {
+            string path = string.IsNullOrWhiteSpace(latestStartupErr) ? "" : "\r\n原始文件: " + latestStartupErr;
+            return "诊断/错误日志里目前只有动态百分比进度或空白输出，已在页面隐藏。" + path;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine(filtered.TrimEnd());
+        sb.AppendLine();
+        sb.Append("[launcher] 诊断/错误来自服务 stderr；页面已隐藏动态百分比进度条。");
+        if (!string.IsNullOrWhiteSpace(latestStartupErr)) sb.Append(" 原始文件: ").Append(latestStartupErr);
+        return sb.ToString();
+    }
+
+    private string FilterDiagnosticLog(string text)
+    {
+        string normalized = NormalizeLogText(text);
+        string[] lines = Regex.Split(normalized, "\r?\n");
+        StringBuilder sb = new StringBuilder();
+        foreach (string line in lines)
+        {
+            if (IsDiagnosticProgressLine(line)) continue;
+            sb.Append(line).Append("\r\n");
+        }
+        return Regex.Replace(sb.ToString(), "(\r\n){3,}", "\r\n\r\n").TrimEnd();
+    }
+
+    private string ExtractImportantLogLines(string text, int maxLines)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        string filtered = FilterDiagnosticLog(text);
+        string[] lines = Regex.Split(filtered, "\r?\n");
+        List<string> important = new List<string>();
+        foreach (string raw in lines)
+        {
+            string line = raw.TrimEnd();
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            if (IsImportantLogLine(line)) important.Add(line);
+        }
+        if (important.Count == 0) return string.Empty;
+
+        StringBuilder sb = new StringBuilder();
+        int start = Math.Max(0, important.Count - maxLines);
+        for (int i = start; i < important.Count; i++)
+        {
+            sb.Append(important[i]).Append("\r\n");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    private string ExtractReadableLogTail(string text, int maxLines)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        string filtered = FilterDiagnosticLog(text);
+        string[] lines = Regex.Split(filtered, "\r?\n");
+        List<string> readable = new List<string>();
+        foreach (string raw in lines)
+        {
+            string line = raw.TrimEnd();
+            if (!string.IsNullOrWhiteSpace(line)) readable.Add(line);
+        }
+        if (readable.Count == 0) return string.Empty;
+
+        StringBuilder sb = new StringBuilder();
+        int start = Math.Max(0, readable.Count - maxLines);
+        for (int i = start; i < readable.Count; i++)
+        {
+            sb.Append(readable[i]).Append("\r\n");
+        }
+        return sb.ToString().TrimEnd();
     }
 
     private void RunWarmupWorker()
@@ -1849,7 +2616,6 @@ internal sealed class LauncherForm : Form
         activeLogTab = key;
         StyleLogTab(tabLauncherButton, key == "launcher");
         StyleLogTab(tabApiButton, key == "api");
-        StyleLogTab(tabStdoutButton, key == "stdout");
         StyleLogTab(tabStderrButton, key == "stderr");
         UpdateActiveLogBox(true);
     }
@@ -1864,7 +2630,51 @@ internal sealed class LauncherForm : Form
             if (!logTexts.TryGetValue(activeLogTab, out text)) text = string.Empty;
         }
         if (string.IsNullOrWhiteSpace(text)) text = "暂无日志。";
-        logBox.SetText(text, forceScroll);
+        SetLogBoxText(text, forceScroll);
+    }
+
+    private void SetLogBoxText(string text, bool forceScroll)
+    {
+        if (logBox == null || logBox.IsDisposed) return;
+        int previousStart = logBox.SelectionStart;
+        int previousLength = logBox.SelectionLength;
+        bool wasAtBottom = logBox.SelectionStart >= Math.Max(0, logBox.TextLength - 2);
+        if (string.Equals(logBox.Text, text, StringComparison.Ordinal)) return;
+
+        logBox.Text = text ?? string.Empty;
+        if (forceScroll || wasAtBottom)
+        {
+            logBox.SelectionStart = logBox.TextLength;
+            logBox.SelectionLength = 0;
+            logBox.ScrollToCaret();
+        }
+        else
+        {
+            logBox.SelectionStart = Math.Min(previousStart, logBox.TextLength);
+            logBox.SelectionLength = Math.Min(previousLength, Math.Max(0, logBox.TextLength - logBox.SelectionStart));
+        }
+    }
+
+    private void CopyActiveLogToClipboard(bool all)
+    {
+        if (logBox == null || logBox.IsDisposed) return;
+        string text = all || string.IsNullOrEmpty(logBox.SelectedText) ? logBox.Text : logBox.SelectedText;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            SetStatus("当前日志为空。", Color.Khaki);
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(text);
+            SetStatus(all ? "当前日志已复制。" : "选中日志已复制。", Color.LightGreen);
+        }
+        catch (Exception ex)
+        {
+            AddLauncherLog("复制日志失败: " + ex.Message, "WARN");
+            SetStatus("复制日志失败，请看启动器日志。", Color.LightCoral);
+        }
     }
 
     private void SetVersion(string key, bool userAction)
@@ -2451,6 +3261,26 @@ internal sealed class LauncherForm : Form
     {
         if (string.IsNullOrWhiteSpace(line)) return false;
         return Regex.IsMatch(line, "INFO:\\s+.*\"\\s*(GET|HEAD)\\s+/(health|server_log/tail)(\\?|\\s|/)", RegexOptions.IgnoreCase);
+    }
+
+    private bool IsDiagnosticProgressLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return false;
+        string trimmed = line.Trim();
+        if (Regex.IsMatch(trimmed, "^\\d{1,3}%\\s*$")) return true;
+        if (Regex.IsMatch(trimmed, "^\\d{1,3}%\\s+\\d+/", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(trimmed, "^\\d+%\\|.*\\|", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(trimmed, "\\b(it/s|s/it)\\b", RegexOptions.IgnoreCase) && Regex.IsMatch(trimmed, "\\d{1,3}%|\\d+/\\d+")) return true;
+        return false;
+    }
+
+    private bool IsImportantLogLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return false;
+        return Regex.IsMatch(
+            line,
+            "ERROR|WARN|Traceback|Exception|RuntimeError|ValueError|failed|failure|timeout|RTF|rtf|real[-_ ]?time|elapsed|duration|first[_ -]?audio|audio_duration|cache_key|job|synth|segment|metrics|错误|失败|异常|超时|耗时|生成|合成|保存|落盘|音频",
+            RegexOptions.IgnoreCase);
     }
 
     private void BeginUi(MethodInvoker action)
@@ -3090,6 +3920,23 @@ internal sealed class LauncherForm : Form
             Name = name;
             Status = status;
             Detail = detail;
+        }
+    }
+
+    private sealed class ProfileOption
+    {
+        public readonly string DisplayName;
+        public readonly string FilePath;
+
+        public ProfileOption(string displayName, string filePath)
+        {
+            DisplayName = displayName;
+            FilePath = filePath;
+        }
+
+        public override string ToString()
+        {
+            return DisplayName;
         }
     }
 

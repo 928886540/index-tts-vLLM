@@ -1,8 +1,8 @@
 # User Tuning Plan
 
-Updated: 2026-06-07
+Updated: 2026-06-09
 
-Status: P2 blueprint only, not started. P1 should let users run the author's default presets first; this folder only records later user-tuning ideas and does not mean implementation has begun.
+Status: first launcher profile slice implemented with schema v2 quality presets. This document still tracks the broader tuning roadmap.
 
 Priority: P1 = stable distribution with the author's defaults. P2 = optional user tuning, profile editing, and preset sharing.
 
@@ -20,6 +20,7 @@ Priority: P1 = stable distribution with the author's defaults. P2 = optional use
 - 配置可导入导出：用户调好的方案应该能保存为一个 profile，而不是散落在代码和 Tavo localStorage 里。
 - 启动器做调音台：复杂编辑、profile 管理、预检和导入导出优先放在 Windows 启动器里；Tavo 端保持轻量播放和少量快速设置。
 - 后端负责安全边界：前端负责好玩，后端负责 clamp、校验、报错和兼容旧配置。
+- 启动器视觉改造必须保持低环境门槛：优先继续产出可直接打开的本地 exe；若未来换 UI 技术栈，必须明确打包成本和安装成本，不能要求用户手动装复杂运行环境。
 
 ## Configuration Layers
 
@@ -94,21 +95,26 @@ Priority: P1 = stable distribution with the author's defaults. P2 = optional use
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "name": "耳语恋爱",
   "description": "偏低声、贴近、轻微气声的 Tavo 对话预设",
   "llmPromptId": "default_dialogue_v1",
   "llmPrompt": "...",
   "quality": {
-    "live": "balanced",
-    "generate": "expressive",
-    "custom": {
+    "presets": {
       "live": {
-        "diffusion_steps": 14,
-        "prompt_audio_seconds": 10,
-        "segment_tokens": 60,
-        "first_tokens": 18,
-        "s2mel_cfg_rate": 0.7
+        "fast": { "diffusion_steps": 8, "prompt_audio_seconds": 6, "segment_tokens": 40, "first_tokens": 10, "s2mel_cfg_rate": 0.7 },
+        "balanced": { "diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7 },
+        "expressive": { "diffusion_steps": 16, "prompt_audio_seconds": 12, "segment_tokens": 72, "first_tokens": 24, "s2mel_cfg_rate": 0.7 },
+        "ultra": { "diffusion_steps": 20, "prompt_audio_seconds": 14, "segment_tokens": 96, "first_tokens": 32, "s2mel_cfg_rate": 0.7 },
+        "custom": { "diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7 }
+      },
+      "generate": {
+        "fast": { "diffusion_steps": 8, "prompt_audio_seconds": 6, "segment_tokens": 40, "first_tokens": 10, "s2mel_cfg_rate": 0.7 },
+        "balanced": { "diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7 },
+        "expressive": { "diffusion_steps": 16, "prompt_audio_seconds": 12, "segment_tokens": 72, "first_tokens": 24, "s2mel_cfg_rate": 0.7 },
+        "ultra": { "diffusion_steps": 20, "prompt_audio_seconds": 14, "segment_tokens": 96, "first_tokens": 32, "s2mel_cfg_rate": 0.7 },
+        "custom": { "diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7 }
       }
     }
   },
@@ -224,6 +230,8 @@ Priority: P1 = stable distribution with the author's defaults. P2 = optional use
 - 在启动器里做一个调音台页面：style 列表、参考音频、默认强度、emo_vec、说明。
 - 角色页支持别名、默认音色、默认 style、允许/禁用 style。
 - 提供“复制当前配置为新 profile”。
+- 启动器视觉改造作为独立子项：参考 Windows Terminal 的暗色、低干扰、现代桌面工具风格，减少方框菜单感和粗糙滚动区；仍以“方便安装、双击即开”为硬约束。
+- Profile 管理交互参考 CC Switch：外层是配置列表，每条显示名称、文件名/说明、是否 active，并提供应用/启用、复制、编辑、删除等快捷动作；点进详情页后编辑名称、文件名、描述、LLM prompt 和档位参数，底部固定保存按钮。
 
 ### Phase 5: Expert Parameters
 
@@ -239,8 +247,8 @@ Priority: P1 = stable distribution with the author's defaults. P2 = optional use
 
 ## Open Questions
 
-- Profile 是只存在 Tavo storage，还是也落到本地 API 的 `profiles/` 目录？
-- 启动器 active profile 如何同步给 Tavo：由 API 提供 `/profiles/active`，还是由 `static/tavo.js` 在启动时拉取？
+- Profile first slice uses local JSON files in `config/profiles/`. Editable source profiles are `*.json`; `active.json` is the applied runtime snapshot.
+- Tavo first slice reads active profile through the API backend route `/profiles/active`. The launcher writes `active.json` and passes `LEON_ACTIVE_PROFILE_PATH` on startup.
 - 多设备使用时，profile 以本机 API 为准还是以 Tavo chat storage 为准？
 - 内置 profile 是否要区分 `vllm` 和 `fast6g` 推荐参数？
 - 用户上传声腔参考音频是否进入第一版，还是先只允许选择已有 `prompts/library`？
@@ -248,9 +256,10 @@ Priority: P1 = stable distribution with the author's defaults. P2 = optional use
 
 ## First Useful Slice
 
-最小可落地版本：
+已落地的第一版：
 
-1. 新增默认 profile JSON，复制当前 style catalog 和质量档位。
-2. 前端加载 profile，允许用户编辑 LLM prompt 和 LIVE/D 档位。
-3. 请求体继续只传展开后的安全字段，后端不直接执行 profile。
-4. Playwright 加 guard：默认 profile 不改变现有生成行为；LIVE/D 可以使用不同 quality mode。
+1. 新增 `config/profiles/leon-default.json` 和 `active.json` 运行快照。
+2. 启动器调音台可以新建/复制 profile、编辑名称/文件名/描述、分别编辑 LIVE/DISK 下每个档位的参数和 LLM prompt。
+3. 保存只写源 profile；应用写入 `active.json`，业务生成只消费 active snapshot。
+4. Tavo 端只保留“当前选择哪个档位”，生成前读取 active profile 并按 `quality.presets.live/generate[mode]` 展开安全字段。
+5. Playwright smoke 增加 guard：LIVE/DISK 都保留 Tavo 选择的档位名，但参数来自 active profile 对应 preset；profile LLM prompt 会作为 `parse_system_prompt` 提交。

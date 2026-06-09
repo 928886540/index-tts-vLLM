@@ -178,6 +178,9 @@ For root `LEON-Launcher.exe` and `launcher/LeonNativeLauncher.cs`:
 - Health checks, backend log refresh, startup waiting, warmup, and process scans must stay off the UI thread.
 - Closing the launcher or pressing stop must request `/control?command=exit`, then clean port `9880`, launcher wrapper processes, and LEON runtime Python parent/child processes.
 - API calls should use absolute `http://127.0.0.1:9880/...` URLs and short timeouts where appropriate, so local polling cannot freeze the UI.
+- Profile tuning console stores editable profiles under `config/profiles/*.json`; `active.json` is only the applied runtime snapshot. Saving a profile must not write active; applying a profile must write active and keep `appliedFrom` pointing back to the source profile.
+- Starting the service must ensure default profile files exist and pass `LEON_ACTIVE_PROFILE_PATH` to the API backend. Tavo should consume the active profile through `/profiles/active`, not through launcher UI state.
+- Tavo generation requests must honor active profile quality presets separately for LIVE and DISK/generate. The Tavo page selects only the mode name (`fast` / `balanced` / `expressive` / `ultra` / `custom`); request fields must come from `quality.presets.live[mode]` or `quality.presets.generate[mode]`, with code defaults only as fallback if the active profile is missing.
 
 ## Resource Guard
 

@@ -105,6 +105,8 @@
 
 - Packaging and startup hygiene:
   - one-click local startup;
+  - launcher visual refresh should target a Windows Terminal-like dark desktop style while preserving easy packaging and double-click startup;
+  - launcher profile UX should use a CC Switch-like structure: outer config list with active/apply/copy/edit actions, inner detail page for editing and saving;
   - no accidental ComfyUI/SD contention;
   - clear service status page;
   - clean shutdown / restart scripts.

@@ -133,32 +133,65 @@ ACTIVE_PROFILE_PATH = os.path.abspath(
 VOICE_LIB_EXTS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
 
 
+def _default_profile_prompt_template() -> str:
+    return "\n".join([
+        "你是中文小说→TTS 片段拆分器。只返回严格 JSON，不要任何解释，不要 ``` 代码块。",
+        "",
+        "{{roles_hint}}",
+        "{{user_alias_hint}}",
+        "{{character_hint}}",
+        "输出格式:",
+        "{{output_contract}}",
+        "",
+        "拆段规则:",
+        "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
+        "   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。",
+        "   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。",
+        "   旁白连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。",
+        "2. 人物直接说出口的话 → role 用说话人的名字。",
+        "   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。",
+        "   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。",
+        "   - 其他人物优先从已知角色名单挑名字；名单外的新人物用原文里的名字。",
+        "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。",
+        "4. text 是要朗读的原文片段，保留标点和语气词。",
+        "{{style_rules}}",
+        "",
+        "{{emotion_rules}}",
+        "",
+        "完整性硬规则:",
+        "- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。",
+        "- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。",
+        "- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。",
+        "- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。",
+        "",
+        "示例输入:",
+        "她低着头，眼角有泪。「对不起，我真的撑不住了。」",
+        "{{example_user}}叹了口气，把手放在她肩上：「别哭。」",
+        "示例输出:",
+        "{{example_output}}",
+    ])
+
+
+def _default_quality_presets() -> dict:
+    presets = {
+        "fast": {"diffusion_steps": 8, "prompt_audio_seconds": 6, "segment_tokens": 40, "first_tokens": 10, "s2mel_cfg_rate": 0.7},
+        "balanced": {"diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7},
+        "expressive": {"diffusion_steps": 16, "prompt_audio_seconds": 12, "segment_tokens": 72, "first_tokens": 24, "s2mel_cfg_rate": 0.7},
+        "ultra": {"diffusion_steps": 20, "prompt_audio_seconds": 14, "segment_tokens": 96, "first_tokens": 32, "s2mel_cfg_rate": 0.7},
+        "custom": {"diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7},
+    }
+    return {"live": dict(presets), "generate": dict(presets)}
+
+
 def _default_active_profile() -> dict:
     return {
-        "version": 1,
+        "version": 2,
         "name": "LEON default",
         "description": "Default local tuning profile managed by the LEON launcher.",
-        "llmPromptId": "builtin_backend_default",
-        "llmPrompt": "",
+        "llmPromptId": "launcher_profile_prompt_template_v1",
+        "llmPrompt": _default_profile_prompt_template(),
         "quality": {
-            "live": "balanced",
-            "generate": "balanced",
-            "custom": {
-                "live": {
-                    "diffusion_steps": 14,
-                    "prompt_audio_seconds": 10,
-                    "segment_tokens": 60,
-                    "first_tokens": 18,
-                    "s2mel_cfg_rate": 0.7,
-                },
-                "generate": {
-                    "diffusion_steps": 14,
-                    "prompt_audio_seconds": 10,
-                    "segment_tokens": 60,
-                    "first_tokens": 18,
-                    "s2mel_cfg_rate": 0.7,
-                },
-            },
+            "presets": _default_quality_presets(),
         },
     }
 
@@ -804,10 +837,65 @@ def _known_roles_for_parse(req: dict, voices: dict) -> List[str]:
     return roles
 
 
+def _render_profile_prompt_template(template: str, req: dict, voices: dict) -> str:
+    text_user = str(req.get("user_name") or "").strip()
+    character_name = str(req.get("character_name") or "").strip()
+    known_roles = _known_roles_for_parse(req, voices)
+    roles_hint = "已知角色名单(LLM 输出 role 字段必须从这里选，或者用剧情里出现的新人物名):\n  " + " / ".join(known_roles)
+    user_alias_hint = "用户身份名: " + (text_user or "未读取到") + "。只有原文中的「你」以及这个用户身份名明确指向玩家/读者时，role 才写 \"用户\"。"
+    character_hint = "当前角色名: " + (character_name or "未读取到") + "。原文第一人称「我」通常指当前角色或正在自述的人物，不要因为出现「我」就改成用户。"
+    example_user = text_user or "你"
+    if args.qwen_emo:
+        output_contract = "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"emo_text\":\"...\"}]}"
+        style_rules = "5. 当前后端启用 Qwen emotion。不要输出 style/style_alpha/emo_vec/emo_alpha，也不要输出声腔参考。"
+        emotion_rules = "重要: 必须给每段输出 emo_text，写成简短自然语言情绪提示，例如「低声、克制、带一点哽咽」「轻松笑意、语速自然」。后端会把 emo_text 交给 IndexTTS2 的 QwenEmotion 生成情绪向量。"
+        example_output = "\n".join([
+            "{\"segments\":[",
+            "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"emo_text\":\"低声叙述，情绪压抑，带一点心疼\"},",
+            "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"emo_text\":\"哽咽、低落、快哭出来，但声音不要尖\"},",
+            f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\",\"emo_text\":\"平静叙述，动作温柔\"}},",
+            "  {\"role\":\"用户\",\"text\":\"别哭。\",\"emo_text\":\"压低声音、温柔安慰、语速慢\"}",
+            "]}",
+        ])
+    else:
+        output_contract = "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2,\"emo_vec\":[h,a,s,f,d,l,u,n]}]}"
+        style_rules = "5. style 是段级声腔/呼吸参考，只能从这个枚举里选: " + _style_catalog_for_prompt()
+        emotion_rules = "\n".join([
+            "emo_vec 是 8 维向量，必须严格按模型顺序:",
+            "[0]=happy 高兴 [1]=angry 愤怒 [2]=sad 悲伤 [3]=fear 恐惧 [4]=hate 反感 [5]=low 低落 [6]=surprise 惊讶 [7]=neutral 自然。",
+            "每段只激活 1-2 个最匹配维度，其他写 0；平静叙述/客观描写用 [0,0,0,0,0,0,0,0.8]。",
+            "每段可加 emo_alpha 字段：旁白 0.12-0.22，平静对白 0.20-0.30，正常带情绪对白 0.32-0.44，强烈台词 0.46-0.52。",
+            "style_alpha: neutral=0.12-0.20；轻微声腔=0.34-0.46；明显 breath/moan/呻吟/喘息=0.50-0.70。",
+        ])
+        example_output = "\n".join([
+            "{\"segments\":[",
+            "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
+            "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.42,\"emo_vec\":[0,0,0.48,0.05,0,0.12,0,0.35]},",
+            f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]}},",
+            "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0.2,0,0.3,0,0,0.2,0,0.5]}",
+            "]}",
+        ])
+    replacements = {
+        "roles_hint": roles_hint,
+        "user_alias_hint": user_alias_hint,
+        "character_hint": character_hint,
+        "output_contract": output_contract,
+        "style_catalog": _style_catalog_for_prompt(),
+        "style_rules": style_rules,
+        "emotion_rules": emotion_rules,
+        "example_user": example_user,
+        "example_output": example_output,
+    }
+    rendered = str(template or "")
+    for key, value in replacements.items():
+        rendered = rendered.replace("{{" + key + "}}", value)
+    return rendered.strip()
+
+
 def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
     custom_prompt = str(req.get("parse_system_prompt") or "").strip()
     if custom_prompt:
-        return custom_prompt
+        return _render_profile_prompt_template(custom_prompt, req, voices)
 
     text_user = str(req.get("user_name") or "").strip()
     character_name = str(req.get("character_name") or "").strip()
