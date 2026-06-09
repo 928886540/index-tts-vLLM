@@ -208,27 +208,64 @@ def _default_quality_presets() -> dict:
     return {"live": dict(presets), "generate": dict(presets)}
 
 
+def _default_quality_modes() -> list:
+    return [
+        {"id": "fast", "label": "极速（流式推荐）"},
+        {"id": "balanced", "label": "平衡"},
+        {"id": "expressive", "label": "质量优先"},
+        {"id": "ultra", "label": "落盘高质量"},
+    ]
+
+
 def _default_active_profile() -> dict:
     return {
-        "version": 2,
+        "version": 3,
         "name": "LEON default",
         "description": "Default local tuning profile managed by the LEON launcher.",
         "llmPromptId": "launcher_profile_prompt_template_v1",
         "llmPrompt": _default_profile_prompt_template(),
         "quality": {
+            "defaultMode": "balanced",
+            "customLabel": "自定义",
+            "modes": _default_quality_modes(),
             "presets": _default_quality_presets(),
         },
+        "styles": _default_style_profiles(),
     }
 
 
 def _load_active_profile() -> dict:
     if not os.path.isfile(ACTIVE_PROFILE_PATH):
-        return _default_active_profile()
+        raise FileNotFoundError(f"Profile 配置错误: active profile 不存在: {ACTIVE_PROFILE_PATH}")
     with open(ACTIVE_PROFILE_PATH, "r", encoding="utf-8") as f:
         profile = json.load(f)
     if not isinstance(profile, dict):
-        raise ValueError("active profile must be a JSON object")
+        raise ValueError("Profile 配置错误: active profile 必须是 JSON object")
+    _validate_active_profile(profile)
     return profile
+
+
+def _validate_active_profile(profile: dict) -> None:
+    if int(profile.get("version") or 0) != 3:
+        raise ValueError("Profile 配置错误: version 必须是 3")
+    quality = profile.get("quality")
+    if not isinstance(quality, dict):
+        raise ValueError("Profile 配置错误: 缺少 quality object")
+    styles = profile.get("styles")
+    if not isinstance(styles, dict) or not styles:
+        raise ValueError("Profile 配置错误: 缺少 styles 声腔配置")
+    if "neutral" not in styles:
+        raise ValueError("Profile 配置错误: styles 必须包含 neutral")
+    validated = {}
+    for raw_id, value in styles.items():
+        style_id = str(raw_id or "").strip()
+        if not style_id:
+            raise ValueError("Profile 配置错误: styles 存在空 style id")
+        entry = _strict_style_entry(style_id, value)
+        if entry is not None:
+            validated[style_id] = entry
+    if "neutral" not in validated:
+        raise ValueError("Profile 配置错误: styles 必须启用 neutral")
 
 
 def _static_file_path(name: str) -> Optional[str]:
@@ -619,7 +656,7 @@ WARMUP_STATE = {
 WARMUP_PREFERRED_VOICES = (
     "400个火爆音色/短剧解说",
     "短剧解说",
-    "prompts/library/400个火爆音色/短剧解说.mp3",
+    "../prompts/library/400个火爆音色/短剧解说.mp3",
 )
 
 
@@ -1257,9 +1294,21 @@ def _dialogue_common_settings(req: dict) -> dict:
 
 
 def _style_catalog_for_prompt() -> str:
-    names = sorted(k for k in STYLE_VOICE_MAP.keys() if k not in ("none", "neutral"))
-    labels = ["neutral=普通/平静(建议0.15)"]
-    labels.extend(f"{name}=声腔参考(建议0.34-0.70)" for name in names)
+    styles = _active_style_profiles()
+    labels = []
+    for style_id in sorted(styles.keys(), key=lambda x: (x not in ("neutral", "none"), x)):
+        if style_id == "none":
+            continue
+        entry = styles[style_id]
+        desc = str(entry.get("description") or "").strip()
+        vec = ",".join(f"{float(v):.2g}" for v in (entry.get("emo_vec") or []))
+        labels.append(
+            f"{style_id}={entry.get('label')}; "
+            f"style_alpha默认{float(entry.get('style_alpha')):.2g}; "
+            f"emo_alpha默认{float(entry.get('emo_alpha')):.2g}; "
+            f"emo_vec默认[{vec}]"
+            + (f"; {desc}" if desc else "")
+        )
     return " / ".join(labels)
 
 
@@ -1644,6 +1693,7 @@ def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
     normalized = llm_proxy.normalize_segments(parsed).get("segments") or []
     user_name = str(req.get("user_name") or "").strip()
     character_name = str(req.get("character_name") or "").strip()
+    styles = _active_style_profiles()
     out: List[dict] = []
     for seg in normalized:
         text = str(seg.get("text") or "").strip()
@@ -1664,19 +1714,32 @@ def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
             })
             continue
         style = str(seg.get("style") or seg.get("style_ref") or "neutral").strip() or "neutral"
-        if style not in STYLE_VOICE_MAP:
-            style = "neutral"
-        style_alpha = _clamp_float(seg.get("style_alpha"), 0.15 if style == "neutral" else 0.42, 0.12, 0.70)
-        if style == "neutral":
-            style_alpha = max(0.12, min(0.20, style_alpha))
-        else:
-            style_alpha = max(0.30, min(0.70, style_alpha))
-        if role == "旁白":
-            style = "neutral"
-            style_alpha = 0.15
-        emo_alpha_default = 0.18 if role == "旁白" else (0.28 if style == "neutral" else float(req.get("emo_alpha") or 0.38))
-        emo_alpha = _clamp_float(seg.get("emo_alpha"), emo_alpha_default, 0.12 if role == "旁白" else 0.18, 0.22 if role == "旁白" else 0.52)
-        emo_vec = _stabilize_dialogue_emo_vec(role, seg.get("emo_vec")) or ([0, 0, 0, 0, 0, 0, 0, 0.8] if role == "旁白" else [0, 0, 0, 0, 0, 0, 0, 0.35])
+        if style not in styles:
+            raise ValueError(f"LLM 输出错误: 未知 style={style}，不在 active profile styles 中")
+        if role == "旁白" and style != "neutral":
+            raise ValueError(f"LLM 输出错误: 旁白 style 必须是 neutral，实际为 {style}")
+        style_entry = styles[style]
+        style_alpha = _segment_number(
+            seg.get("style_alpha"),
+            style_entry["style_alpha"],
+            "style_alpha",
+            0.12 if style == "neutral" else 0.30,
+            0.20 if style == "neutral" else 0.78,
+        )
+        emo_alpha_default = float(style_entry["emo_alpha"])
+        emo_alpha = _segment_number(
+            seg.get("emo_alpha"),
+            emo_alpha_default,
+            "emo_alpha",
+            0.12 if role == "旁白" else 0.18,
+            0.22 if role == "旁白" else 0.52,
+        )
+        emo_vec = _stabilize_dialogue_emo_vec(
+            role,
+            _segment_emo_vec(seg.get("emo_vec"), style_entry["emo_vec"]),
+        )
+        if emo_vec is None:
+            raise ValueError("LLM 输出错误: emo_vec 必须是 8 维数组")
         out.append({
             "role": role or "旁白",
             "text": text,
@@ -2462,6 +2525,250 @@ for _style_speaker in ("步非烟", "AD学姐", "JOK"):
         STYLE_VOICE_MAP[_style_id] = f"声腔/{_style_id}"
 
 
+_STYLE_PROFILE_HINTS = {
+    "neutral": {
+        "label": "普通/平静",
+        "style_alpha": 0.15,
+        "emo_alpha": 0.18,
+        "emo_vec": [0, 0, 0, 0, 0, 0, 0, 0.85],
+        "description": "稳定自然，不叠加声腔参考；旁白默认使用。",
+    },
+    "breath_soft": {
+        "label": "轻微气声",
+        "style_alpha": 0.42,
+        "emo_alpha": 0.36,
+        "emo_vec": [0.05, 0, 0.05, 0.03, 0, 0.22, 0, 0.68],
+        "description": "轻微呼吸感，适合贴近、低声、暧昧但不过度的对白。",
+    },
+    "breath_heavy": {
+        "label": "明显喘息",
+        "style_alpha": 0.58,
+        "emo_alpha": 0.42,
+        "emo_vec": [0.08, 0, 0.04, 0.08, 0, 0.28, 0.05, 0.52],
+        "description": "更明显的喘息和气口，适合高张力或体力消耗后的对白。",
+    },
+    "intimate_breath": {
+        "label": "亲密喘息",
+        "style_alpha": 0.60,
+        "emo_alpha": 0.42,
+        "emo_vec": [0.08, 0, 0.04, 0.06, 0, 0.30, 0.03, 0.52],
+        "description": "亲密、靠近、呼吸更重；不建议给旁白使用。",
+    },
+    "low_murmur": {
+        "label": "低吟",
+        "style_alpha": 0.46,
+        "emo_alpha": 0.38,
+        "emo_vec": [0.04, 0, 0.08, 0.02, 0, 0.30, 0, 0.62],
+        "description": "压低声线、贴近耳边的低声表达。",
+    },
+    "whisper_soft": {
+        "label": "耳语",
+        "style_alpha": 0.44,
+        "emo_alpha": 0.36,
+        "emo_vec": [0.08, 0, 0.08, 0.03, 0, 0.24, 0, 0.62],
+        "description": "轻声耳语，适合温柔、安抚、秘密感对白。",
+    },
+    "shy_whisper": {
+        "label": "害羞低语",
+        "style_alpha": 0.44,
+        "emo_alpha": 0.38,
+        "emo_vec": [0.10, 0, 0.10, 0.05, 0, 0.20, 0, 0.60],
+        "description": "更含蓄、害羞、吞吐的低语。",
+    },
+    "tense_breath": {
+        "label": "紧张惊喘",
+        "style_alpha": 0.50,
+        "emo_alpha": 0.42,
+        "emo_vec": [0, 0, 0.08, 0.34, 0, 0.20, 0.18, 0.42],
+        "description": "惊讶、紧张、突然被触动时的短促气口。",
+    },
+    "sob_soft": {
+        "label": "轻微哽咽",
+        "style_alpha": 0.42,
+        "emo_alpha": 0.42,
+        "emo_vec": [0, 0, 0.46, 0.06, 0, 0.16, 0, 0.36],
+        "description": "压抑、快哭但不爆发的对白。",
+    },
+    "cry_soft": {
+        "label": "哭腔",
+        "style_alpha": 0.48,
+        "emo_alpha": 0.46,
+        "emo_vec": [0, 0, 0.54, 0.08, 0, 0.20, 0, 0.30],
+        "description": "更明显的哭腔和破碎感。",
+    },
+    "tease_soft": {
+        "label": "挑逗",
+        "style_alpha": 0.46,
+        "emo_alpha": 0.38,
+        "emo_vec": [0.22, 0, 0.02, 0, 0, 0.16, 0, 0.58],
+        "description": "轻佻、笑意、靠近但不过度夸张。",
+    },
+    "laugh_soft": {
+        "label": "轻笑",
+        "style_alpha": 0.40,
+        "emo_alpha": 0.34,
+        "emo_vec": [0.34, 0, 0, 0, 0, 0.06, 0.08, 0.52],
+        "description": "轻笑、愉悦、调侃语气。",
+    },
+    "gasp_surprise": {
+        "label": "惊喘",
+        "style_alpha": 0.50,
+        "emo_alpha": 0.42,
+        "emo_vec": [0.02, 0, 0.05, 0.26, 0, 0.16, 0.28, 0.42],
+        "description": "惊讶或猝不及防的气声。",
+    },
+    "scream_peak": {
+        "label": "尖叫/高点",
+        "style_alpha": 0.58,
+        "emo_alpha": 0.50,
+        "emo_vec": [0, 0.08, 0.12, 0.36, 0, 0.12, 0.28, 0.24],
+        "description": "强烈高点或惊叫，默认不适合旁白和长句。",
+    },
+    "stage_warmup": {
+        "label": "阶段-开场",
+        "style_alpha": 0.36,
+        "emo_alpha": 0.34,
+        "emo_vec": [0.05, 0, 0.04, 0.02, 0, 0.18, 0, 0.72],
+        "description": "阶段曲线用：轻微升温。",
+    },
+    "stage_rising": {
+        "label": "阶段-升温",
+        "style_alpha": 0.50,
+        "emo_alpha": 0.40,
+        "emo_vec": [0.08, 0, 0.04, 0.06, 0, 0.26, 0.04, 0.56],
+        "description": "阶段曲线用：张力上升。",
+    },
+    "stage_peak": {
+        "label": "阶段-高点",
+        "style_alpha": 0.58,
+        "emo_alpha": 0.48,
+        "emo_vec": [0.02, 0.06, 0.10, 0.32, 0, 0.16, 0.24, 0.30],
+        "description": "阶段曲线用：强烈高点。",
+    },
+    "stage_afterglow": {
+        "label": "阶段-余韵",
+        "style_alpha": 0.42,
+        "emo_alpha": 0.36,
+        "emo_vec": [0.06, 0, 0.10, 0.02, 0, 0.24, 0, 0.66],
+        "description": "阶段曲线用：放松、余韵、低声。",
+    },
+}
+
+
+def _default_style_entry(style_id: str, ref: str) -> dict:
+    hint = _STYLE_PROFILE_HINTS.get(style_id, {})
+    label = hint.get("label") or _style_name_from_ref(ref) or style_id
+    return {
+        "label": label,
+        "ref": str(ref or ""),
+        "style_alpha": hint.get("style_alpha", 0.15 if style_id in ("neutral", "none") else 0.42),
+        "emo_alpha": hint.get("emo_alpha", 0.18 if style_id in ("neutral", "none") else 0.38),
+        "emo_vec": list(hint.get("emo_vec", [0, 0, 0, 0, 0, 0, 0, 0.85 if style_id in ("neutral", "none") else 0.55])),
+        "description": hint.get("description", "声腔参考，可在 profile 中调整默认强度和情绪向量。"),
+    }
+
+
+def _default_style_profiles() -> dict:
+    return {style_id: _default_style_entry(style_id, ref) for style_id, ref in STYLE_VOICE_MAP.items()}
+
+
+def _style_number(value, field: str, low: float, high: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Profile 配置错误: styles.{field} 必须是数字")
+    if parsed < low or parsed > high:
+        raise ValueError(f"Profile 配置错误: styles.{field} 超出范围 {low}-{high}: {parsed}")
+    return parsed
+
+
+def _strict_style_entry(style_id: str, value) -> Optional[dict]:
+    if not re.match(r"^[A-Za-z0-9_\-\u4e00-\u9fff]+$", style_id or ""):
+        raise ValueError(f"Profile 配置错误: 非法 style id: {style_id}")
+    if not isinstance(value, dict):
+        raise ValueError(f"Profile 配置错误: styles.{style_id} 必须是 object")
+    if value.get("enabled") is False:
+        return None
+    label = str(value.get("label") or "").strip()
+    if not label:
+        raise ValueError(f"Profile 配置错误: styles.{style_id}.label 不能为空")
+    ref = str(value.get("ref") or "").strip()
+    if style_id not in ("neutral", "none") and not ref:
+        raise ValueError(f"Profile 配置错误: styles.{style_id}.ref 不能为空")
+    style_alpha = _style_number(value.get("style_alpha"), f"{style_id}.style_alpha", 0.12, 0.78)
+    emo_alpha = _style_number(value.get("emo_alpha"), f"{style_id}.emo_alpha", 0.12, 0.62)
+    raw_vec = value.get("emo_vec")
+    if not isinstance(raw_vec, list) or len(raw_vec) != 8:
+        raise ValueError(f"Profile 配置错误: styles.{style_id}.emo_vec 必须是 8 维数组")
+    emo_vec = []
+    for index, item in enumerate(raw_vec):
+        emo_vec.append(_style_number(item, f"{style_id}.emo_vec[{index}]", 0.0, 1.0))
+    return {
+        "label": label,
+        "ref": ref,
+        "style_alpha": style_alpha,
+        "emo_alpha": emo_alpha,
+        "emo_vec": emo_vec,
+        "description": str(value.get("description") or "").strip(),
+    }
+
+
+def _active_style_profiles() -> dict:
+    raw_styles = _load_active_profile().get("styles")
+    if not isinstance(raw_styles, dict) or not raw_styles:
+        raise ValueError("Profile 配置错误: 缺少 styles 声腔配置")
+    styles = {}
+    for raw_id, value in raw_styles.items():
+        style_id = str(raw_id or "").strip()
+        if not style_id:
+            raise ValueError("Profile 配置错误: styles 存在空 style id")
+        entry = _strict_style_entry(style_id, value)
+        if entry is not None:
+            styles[style_id] = entry
+    if "neutral" not in styles:
+        raise ValueError("Profile 配置错误: styles 必须启用 neutral")
+    return styles
+
+
+def _style_entry(style: str) -> dict:
+    key = str(style or "").strip()
+    if not key:
+        raise ValueError("Profile 配置错误: style 不能为空")
+    styles = _active_style_profiles()
+    entry = styles.get(key)
+    if entry is None:
+        raise ValueError(f"Profile 配置错误: 未知 style={key}，不在 active profile styles 中")
+    return entry
+
+
+def _segment_number(value, default: float, field: str, low: float, high: float) -> float:
+    if value is None:
+        return float(default)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"LLM 输出错误: {field} 必须是数字")
+    if parsed < low or parsed > high:
+        raise ValueError(f"LLM 输出错误: {field} 超出范围 {low}-{high}: {parsed}")
+    return parsed
+
+
+def _segment_emo_vec(value, default) -> list:
+    raw_vec = default if value is None else value
+    if not isinstance(raw_vec, list) or len(raw_vec) != 8:
+        raise ValueError("LLM 输出错误: emo_vec 必须是 8 维数组")
+    out = []
+    for index, item in enumerate(raw_vec):
+        try:
+            parsed = float(item)
+        except (TypeError, ValueError):
+            raise ValueError(f"LLM 输出错误: emo_vec[{index}] 必须是数字")
+        if parsed < 0.0 or parsed > 1.0:
+            raise ValueError(f"LLM 输出错误: emo_vec[{index}] 超出范围 0-1: {parsed}")
+        out.append(parsed)
+    return out
+
+
 def _segment_style_name(seg: dict) -> str:
     return str(seg.get("style") or seg.get("style_ref") or "").strip()
 
@@ -2477,25 +2784,27 @@ def _style_name_from_ref(ref: str) -> str:
 
 def _style_voice_ref(style: str) -> str:
     key = str(style or "").strip()
-    return STYLE_VOICE_MAP.get(key) or STYLE_VOICE_MAP.get(key.lower()) or key
+    entry = _style_entry(key)
+    return str(entry.get("ref") or "").strip()
 
 
 def _resolve_segment_style_audio(seg: dict) -> Optional[str]:
     ref = str(seg.get("emo_ref_audio_path") or "").strip()
-    style = _segment_style_name(seg) or _style_name_from_ref(ref)
+    style = _segment_style_name(seg)
     if not style or style in ("neutral", "none"):
-        return _resolve_voice(ref) if ref else None
+        if not ref:
+            return None
+        resolved = _resolve_voice(ref)
+        if not resolved:
+            raise ValueError(f"LLM 输出错误: emo_ref_audio_path 不可用: {ref}")
+        return resolved
     mapped = _style_voice_ref(style)
     if not mapped:
-        return _resolve_voice(ref) if ref else None
+        return None
     resolved = _resolve_voice(mapped)
-    if resolved:
-        return resolved
-    if mapped != style:
-        resolved = _resolve_voice(style)
-        if resolved:
-            return resolved
-    return _resolve_voice(ref) if ref else None
+    if not resolved:
+        raise ValueError(f"Profile 配置错误: styles.{style}.ref 不可用: {mapped}")
+    return resolved
 
 
 def _style_cache_fragment(seg: dict) -> dict:

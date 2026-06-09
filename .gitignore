@@ -73,6 +73,7 @@ vllm/prompts/*.zip
 fast6g/prompts/*.zip
 vllm/prompts/library/
 fast6g/prompts/library/
+prompts/library/
 packages/
 
 # Local tool bundles and backups
