@@ -106,6 +106,7 @@ For long tasks, update `docs/AGENT_STATE.md` after each stable milestone. If con
 - Keep changes small and easy to diff.
 - Expose failures clearly when useful; do not hide bugs behind silent handling.
 - When multiple fixes are possible, prefer the one that helps future debugging.
+- User-facing profile/tuning configuration must not silently fall back to hidden code defaults. Missing profile fields, unknown style IDs, unavailable voice/style refs, invalid parameters, or failed active-profile reads must raise a clear configuration error in the API/launcher/Tavo surface. Default values are allowed only when creating or migrating an explicit profile file the user can inspect.
 
 ## Engineering Rules
 

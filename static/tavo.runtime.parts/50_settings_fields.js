@@ -13,12 +13,48 @@
     function getField(name, fallback) { var el = field(name); return el ? el.value : fallback; }
     function setCheckedField(name, value) { var el = field(name); if (el) el.checked = !!value; }
     function getCheckedField(name, fallback) { var el = field(name); return el ? !!el.checked : !!fallback; }
+    function syncQualityModeOptions() {
+      var select = field("qualityMode");
+      if (!select) return;
+      var desired = String(cfg.qualityMode || cfg.profileDefaultQualityMode || "").trim();
+      var entries = [];
+      var exists = {};
+      if (!cfg.profileConfigError) {
+        (Array.isArray(cfg.profileQualityModes) ? cfg.profileQualityModes : []).forEach(function (item) {
+          var id = String((item && item.id) || "").trim();
+          var label = String((item && item.label) || id).trim();
+          if (!id || exists[id]) return;
+          exists[id] = true;
+          entries.push({ value: id, label: label || id, disabled: false });
+        });
+        if (!exists.custom) {
+          exists.custom = true;
+          entries.push({ value: "custom", label: String(cfg.profileCustomQualityLabel || "自定义").trim() || "自定义", disabled: false });
+        }
+        if (!desired && cfg.profileDefaultQualityMode) desired = String(cfg.profileDefaultQualityMode || "").trim();
+        if (desired && !exists[desired]) {
+          entries.push({ value: desired, label: desired + "（配置缺失）", disabled: false });
+        }
+      } else {
+        entries.push({ value: "", label: "Profile 配置错误", disabled: true });
+        desired = "";
+      }
+      while (select.options.length) select.remove(0);
+      entries.forEach(function (item) {
+        var option = document.createElement("option");
+        option.value = item.value;
+        option.textContent = item.label;
+        option.disabled = !!item.disabled;
+        select.appendChild(option);
+      });
+      if (desired) select.value = desired;
+      cfg.qualityMode = desired;
+    }
     function readFields() {
       cfg.apiBase = String(getField("apiBase", cfg.apiBase || scriptOrigin())).trim() || scriptOrigin();
       cfg.intervalMs = Number(getField("intervalMs", cfg.intervalMs || 50) || 50);
       cfg.speedFactor = clampNumber(getField("speedFactor", cfg.speedFactor || 1.0), 1.0, 0.85, 1.25);
-      cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || "balanced") || "balanced").trim();
-      if (["fast", "balanced", "expressive", "ultra", "custom"].indexOf(cfg.qualityMode) < 0) cfg.qualityMode = "balanced";
+      cfg.qualityMode = String(getField("qualityMode", cfg.qualityMode || cfg.profileDefaultQualityMode || "") || "").trim();
       cfg.diffusionSteps = clampNumber(getField("diffusionSteps", cfg.diffusionSteps || 14), 14, 2, 24);
       cfg.promptAudioSeconds = clampNumber(getField("promptAudioSeconds", cfg.promptAudioSeconds || 10), 10, 2, 16);
       cfg.segmentTokens = Math.round(clampNumber(getField("segmentTokens", cfg.segmentTokens || 60), 60, 8, 120));
@@ -145,7 +181,8 @@
       setField("llmEndpoint", cfg.llmEndpoint || "");
       setField("llmApiKey", cfg.llmApiKey || "");
       setField("speedFactor", cfg.speedFactor || 1.0);
-      setField("qualityMode", cfg.qualityMode || "balanced");
+      syncQualityModeOptions();
+      setField("qualityMode", cfg.qualityMode || cfg.profileDefaultQualityMode || "");
       setField("diffusionSteps", cfg.diffusionSteps || 14);
       setField("promptAudioSeconds", cfg.promptAudioSeconds || 10);
       setField("segmentTokens", cfg.segmentTokens || 60);
@@ -167,6 +204,9 @@
         $all(panel, '.idx-normal-only').forEach(function (el) { el.style.display = aiShow ? "none" : ""; });
         $all(panel, '.idx-custom-quality').forEach(function (el) { el.style.display = cfg.qualityMode === "custom" ? "" : "none"; });
       } catch (_) {}
+      if (cfg.profileConfigError) {
+        try { setError(cfg.profileConfigError); } catch (_) {}
+      }
       // 当前 mode 按钮高亮
       try {
         $all(panel, '.idx-mode').forEach(function (b) {

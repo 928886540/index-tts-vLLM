@@ -642,8 +642,37 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
   const jobBodies = [];
   const wav = tinyWavBuffer();
 
+  const activeProfile = {
+    version: 3,
+    name: "Custom params profile",
+    quality: {
+      defaultMode: "balanced",
+      customLabel: "自定义",
+      modes: [{ id: "balanced", label: "平衡" }],
+      presets: {
+        live: {
+          balanced: {
+            diffusion_steps: 11,
+            prompt_audio_seconds: 7,
+            segment_tokens: 44,
+            first_tokens: 12,
+            s2mel_cfg_rate: 0.61
+          }
+        },
+        generate: {
+          balanced: {
+            diffusion_steps: 17,
+            prompt_audio_seconds: 12,
+            segment_tokens: 82,
+            first_tokens: 29,
+            s2mel_cfg_rate: 0.83
+          }
+        }
+      }
+    }
+  };
   await page.route("**/profiles/active", async (route) => {
-    await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "profile disabled in smoke" }) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(activeProfile) });
   });
   await page.route("**/tts_dialogue_stream_job", async (route) => {
     jobCount += 1;
@@ -764,8 +793,8 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
     if (/assistant message mock|IndexTTS Tavo 测试页|用户身份名|角色名/.test(body.text)) {
       throw new Error("message text should prefer Tavo API content over DOM chrome: " + JSON.stringify(body));
     }
-    if (body.performance_mode !== "custom" || body.diffusion_steps !== 14 || body.prompt_audio_seconds !== 10 || body.segment_tokens !== 60 || body.first_tokens !== 18 || body.s2mel_cfg_rate !== 0.7) {
-      throw new Error("without active profile, custom mode should use built-in fallback params instead of stale Tavo local fields: " + JSON.stringify(body));
+    if (body.performance_mode !== "custom" || body.diffusion_steps !== 16 || body.prompt_audio_seconds !== 12 || body.segment_tokens !== 72 || body.first_tokens !== 24 || body.s2mel_cfg_rate !== 0.7) {
+      throw new Error("custom mode should submit Tavo temporary params when active profile is valid: " + JSON.stringify(body));
     }
     if (pageErrors.length) throw new Error("normal explicit dialogue smoke page error: " + pageErrors.join(" | "));
     return { jobCount, body };
@@ -795,10 +824,15 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
     const jobBodies = [];
     const cacheKey = playbackMode === "generate" ? "d".repeat(40) : "c".repeat(40);
     const activeProfile = {
-      version: 2,
+      version: 3,
       name: "Smoke tuning profile",
       llmPrompt: "PROFILE PROMPT FROM ACTIVE",
       quality: {
+        defaultMode: "balanced",
+        customLabel: "临时自定义",
+        modes: [
+          { id: "balanced", label: "烟测平衡档" }
+        ],
         presets: {
           live: {
             balanced: {
@@ -807,13 +841,6 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
               segment_tokens: 44,
               first_tokens: 12,
               s2mel_cfg_rate: 0.61
-            },
-            custom: {
-              diffusion_steps: 21,
-              prompt_audio_seconds: 15,
-              segment_tokens: 99,
-              first_tokens: 40,
-              s2mel_cfg_rate: 0.95
             }
           },
           generate: {
@@ -823,13 +850,6 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
               segment_tokens: 82,
               first_tokens: 29,
               s2mel_cfg_rate: 0.83
-            },
-            custom: {
-              diffusion_steps: 19,
-              prompt_audio_seconds: 13,
-              segment_tokens: 88,
-              first_tokens: 31,
-              s2mel_cfg_rate: 0.9
             }
           }
         }
@@ -920,6 +940,10 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
       await remountTavoScript(page, "");
       await page.click('[data-role="lazy-open"]');
       await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
+      const qualityOptions = await page.evaluate(() => {
+        const select = document.querySelector('[data-field="qualityMode"]');
+        return select ? Array.from(select.options).map((o) => ({ value: o.value, text: o.textContent.trim() })) : [];
+      });
       await page.evaluate(() => {
         const add = document.querySelector('[data-role="add"]');
         if (!add) throw new Error("missing add button");
@@ -930,7 +954,7 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
       }, { timeout: 10000 });
       await page.waitForTimeout(250);
       if (pageErrors.length) throw new Error("active profile quality smoke page error: " + pageErrors.join(" | "));
-      return { playbackMode, profileFetches, jobCount, body: jobBodies[0] || {} };
+      return { playbackMode, profileFetches, jobCount, qualityOptions, body: jobBodies[0] || {} };
     } finally {
       await context.close();
     }
@@ -944,6 +968,9 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
   if (live.jobCount !== 1 || disk.jobCount !== 1) {
     throw new Error("active profile smoke should create one job per mode: " + JSON.stringify({ live, disk }));
   }
+  if (!live.qualityOptions.some((o) => o.value === "balanced" && o.text === "烟测平衡档") || !live.qualityOptions.some((o) => o.value === "custom" && o.text === "临时自定义")) {
+    throw new Error("Tavo quality dropdown should be rendered from active profile labels: " + JSON.stringify(live.qualityOptions));
+  }
   if (live.body.performance_mode !== "balanced" || live.body.diffusion_steps !== 11 || live.body.prompt_audio_seconds !== 7 || live.body.segment_tokens !== 44 || live.body.first_tokens !== 12 || live.body.s2mel_cfg_rate !== 0.61) {
     throw new Error("LIVE should keep Tavo-selected balanced mode and read active profile live balanced params: " + JSON.stringify(live.body));
   }
@@ -954,6 +981,91 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
     throw new Error("AI generation should submit llmPrompt from active profile: " + JSON.stringify({ live: live.body, disk: disk.body }));
   }
   return { live, disk };
+}
+
+async function runMissingActiveProfileBlocksGenerationSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|status of 404|Profile 配置错误/i.test(text)) pageErrors.push(text);
+  });
+
+  let jobCount = 0;
+  let profileFetches = 0;
+  await page.route("**/profiles/active", async (route) => {
+    profileFetches += 1;
+    await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "no active profile" }) });
+  });
+  await page.route("**/tts_dialogue_stream_job", async (route) => {
+    jobCount += 1;
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "profile error should block generation before POST" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(async () => {
+      const cfg = {
+        configVersion: 13,
+        mode: "normal",
+        playbackMode: "live",
+        qualityMode: "balanced",
+        intervalMs: 50,
+        topP: 0.8,
+        topK: 30,
+        temperature: 0.7,
+        repetitionPenalty: 1.2,
+        emoAlpha: 0.38,
+        speedFactor: 1.0,
+        subtitleLeadSec: 0.25,
+        offlineAudioEnabled: false
+      };
+      const charCfg = {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: [
+          { role: "旁白", voice: "女声/高圆圆.wav" },
+          { role: "对白", voice: "女声/单独对白.wav" }
+        ]
+      };
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify(cfg));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify(charCfg));
+      if (window.tavo && typeof window.tavo.set === "function") {
+        await window.tavo.set("indextts_tavo_config_v3", cfg, "global");
+        await window.tavo.set("indextts_tavo_character_v1:34", charCfg, "global");
+      }
+    });
+    await remountTavoScript(page, "");
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card:not([data-loader-shell])", { timeout: 10000 });
+    await page.evaluate(() => {
+      const add = document.querySelector('[data-role="add"]');
+      if (!add) throw new Error("missing add button");
+      add.click();
+    });
+    await page.waitForTimeout(500);
+    const errorText = await page.evaluate(() => {
+      const err = document.querySelector('[data-role="error"]');
+      return err ? err.textContent.trim() : "";
+    });
+    if (profileFetches < 1) throw new Error("missing profile smoke should fetch /profiles/active");
+    if (jobCount !== 0) throw new Error("missing active profile must block generation before POST: " + JSON.stringify({ jobCount, errorText }));
+    if (!/Profile 配置错误/.test(errorText) || !/profiles\/active|HTTP 404/.test(errorText)) {
+      throw new Error("missing active profile should show explicit profile error: " + JSON.stringify({ errorText }));
+    }
+    if (pageErrors.length) throw new Error("missing active profile smoke page error: " + pageErrors.join(" | "));
+    return { profileFetches, jobCount, errorText };
+  } finally {
+    await context.close();
+  }
 }
 
 async function runGroupRoleAvatarSmoke(browser, targetUrl) {
@@ -5806,6 +5918,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     const normalGenerateCancel = await runNormalGenerateCancelSmoke(browser, targetUrl);
     const normalExplicitDialogueMapping = await runNormalExplicitDialogueMappingSmoke(browser, targetUrl);
     const activeProfileQuality = await runActiveProfileQualitySmoke(browser, targetUrl);
+    const missingActiveProfileBlocksGeneration = await runMissingActiveProfileBlocksGenerationSmoke(browser, targetUrl);
     const groupRoleAvatar = await runGroupRoleAvatarSmoke(browser, targetUrl);
     const livePlayClick = await runLivePlayClickSmoke(browser, targetUrl);
     const defaultLiveMp3 = await runNativeLiveFlagSmoke(browser, targetUrl, "");
@@ -5841,6 +5954,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       normalGenerateCancel,
       normalExplicitDialogueMapping,
       activeProfileQuality,
+      missingActiveProfileBlocksGeneration,
       groupRoleAvatar,
       livePlayClick,
       defaultLiveMp3,

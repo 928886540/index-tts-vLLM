@@ -4,6 +4,7 @@ param(
     [int]$MaxWaitSeconds = 240,
     [int]$Retries = 3,
     [double]$VllmGpuMemoryUtilization = -1,
+    [string]$EnableMsvc = "",
     [string]$LeonRoot = ""
 )
 
@@ -49,6 +50,20 @@ if ($VllmGpuMemoryUtilization -le 0) {
     $VllmGpuMemoryUtilization = 0.15
 }
 $VllmGpuMemoryUtilizationText = $VllmGpuMemoryUtilization.ToString("0.###", $InvariantCulture)
+$enableMsvcText = $EnableMsvc
+if ([string]::IsNullOrWhiteSpace($enableMsvcText)) {
+    $enableMsvcText = $env:LEON_ENABLE_MSVC
+}
+$UseMsvcEnvironment = $true
+if (-not [string]::IsNullOrWhiteSpace($enableMsvcText)) {
+    $normalizedEnableMsvc = $enableMsvcText.Trim().ToLowerInvariant()
+    if (@("0", "false", "no", "off") -contains $normalizedEnableMsvc) {
+        $UseMsvcEnvironment = $false
+    }
+    elseif (@("1", "true", "yes", "on") -contains $normalizedEnableMsvc) {
+        $UseMsvcEnvironment = $true
+    }
+}
 
 function Write-Step {
     param([string]$Message)
@@ -203,6 +218,11 @@ function Initialize-ApiEnvironment {
     $env:LEON_STATIC_DIR = $StaticDir
     $env:HF_HOME = Join-Path $Root "checkpoints"
     $env:PATH = $scriptsPath + ";" + $env:PATH
+
+    if (-not $UseMsvcEnvironment) {
+        Write-Step "MSVC environment disabled; BigVGAN CUDA kernel may fall back to torch."
+        return
+    }
 
     $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
     $vsInstallPath = $null

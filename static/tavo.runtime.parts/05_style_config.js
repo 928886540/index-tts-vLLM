@@ -58,61 +58,126 @@
     ensureSkinStyle();
   }
 
+  function makeProfileConfigError(message) {
+    message = String(message || "未知错误");
+    var err = new Error(/^Profile 配置错误:/.test(message) ? message : ("Profile 配置错误: " + message));
+    err.name = "ProfileConfigError";
+    return err;
+  }
+  function profileConfigErrorMessage(err) {
+    var message = err && err.message ? err.message : String(err || "未知错误");
+    return /^Profile 配置错误:/.test(message) ? message : "Profile 配置错误: " + message;
+  }
   async function fetchActiveProfile() {
+    var url = cleanBase(scriptOrigin()) + "/profiles/active";
     try {
-      var r = await fetch(cleanBase(scriptOrigin()) + "/profiles/active", { cache: "no-store" });
-      if (!r.ok) return null;
+      var r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw makeProfileConfigError("/profiles/active 返回 HTTP " + r.status);
       var profile = await r.json();
-      return profile && typeof profile === "object" ? profile : null;
-    } catch (_) {
-      return null;
+      if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+        throw makeProfileConfigError("active profile 必须是 JSON object");
+      }
+      return profile;
+    } catch (e) {
+      if (e && e.name === "ProfileConfigError") throw e;
+      throw makeProfileConfigError("读取 /profiles/active 失败: " + (e && e.message ? e.message : String(e)));
     }
   }
-  function normalizeProfileQualityParams(item) {
-    if (!item || typeof item !== "object") return null;
-    var out = {};
-    if (item.diffusion_steps != null) out.diffusion_steps = Math.round(clampNumber(item.diffusion_steps, 14, 2, 24));
-    if (item.prompt_audio_seconds != null) out.prompt_audio_seconds = clampNumber(item.prompt_audio_seconds, 10, 2, 16);
-    if (item.segment_tokens != null) out.segment_tokens = Math.round(clampNumber(item.segment_tokens, 60, 8, 120));
-    if (item.first_tokens != null) out.first_tokens = Math.round(clampNumber(item.first_tokens, 18, 4, Math.max(4, out.segment_tokens || 120)));
-    if (item.s2mel_cfg_rate != null) out.s2mel_cfg_rate = clampNumber(item.s2mel_cfg_rate, 0.7, 0, 1.2);
-    return Object.keys(out).length ? out : null;
+  function profileOwn(obj, key) {
+    return !!(obj && Object.prototype.hasOwnProperty.call(obj, key));
   }
-  function collectProfilePresetStream(source) {
+  function normalizeProfileModeId(value, context) {
+    var id = String(value || "").trim();
+    if (!id) throw makeProfileConfigError(context + " 缺少 id");
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) throw makeProfileConfigError(context + " id 只能使用英文字母、数字、_、-: " + id);
+    if (id === "custom") throw makeProfileConfigError(context + " 不要写 custom；custom 是 Tavo 临时参数档位");
+    return id;
+  }
+  function collectProfileQualityModes(quality) {
+    if (!quality || typeof quality !== "object") throw makeProfileConfigError("缺少 quality object");
+    if (!Array.isArray(quality.modes) || !quality.modes.length) throw makeProfileConfigError("缺少 quality.modes 档位定义");
+    var used = {};
+    var modes = [];
+    quality.modes.forEach(function (item, index) {
+      var context = "quality.modes[" + index + "]";
+      if (!item || typeof item !== "object") throw makeProfileConfigError(context + " 必须是 object");
+      var id = normalizeProfileModeId(item.id, context);
+      if (used[id]) throw makeProfileConfigError("重复档位 id: " + id);
+      var label = String(item.tavoLabel || item.label || item.name || "").trim();
+      if (!label) throw makeProfileConfigError(context + " 缺少中文显示名 label/tavoLabel");
+      used[id] = true;
+      modes.push({ id: id, label: label });
+    });
+    var defaultMode = normalizeProfileModeId(quality.defaultMode, "quality.defaultMode");
+    if (!used[defaultMode]) throw makeProfileConfigError("quality.defaultMode 不在 quality.modes 中: " + defaultMode);
+    return { modes: modes, defaultMode: defaultMode, customLabel: String(quality.customLabel || "自定义").trim() || "自定义" };
+  }
+  function readProfileNumber(item, key, min, max, integer, context) {
+    if (!profileOwn(item, key)) throw makeProfileConfigError(context + " 缺少 " + key);
+    var n = Number(item[key]);
+    if (!isFinite(n)) throw makeProfileConfigError(context + "." + key + " 必须是数字");
+    if (integer && Math.round(n) !== n) throw makeProfileConfigError(context + "." + key + " 必须是整数");
+    if (n < min || n > max) throw makeProfileConfigError(context + "." + key + " 超出范围 " + min + "-" + max + ": " + n);
+    return integer ? Math.round(n) : n;
+  }
+  function normalizeProfileQualityParams(item, context) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw makeProfileConfigError(context + " 必须是 object");
+    var segmentTokens = readProfileNumber(item, "segment_tokens", 8, 120, true, context);
+    var firstTokens = readProfileNumber(item, "first_tokens", 4, 120, true, context);
+    if (firstTokens > segmentTokens) throw makeProfileConfigError(context + ".first_tokens 不能大于 segment_tokens");
+    return {
+      diffusion_steps: readProfileNumber(item, "diffusion_steps", 2, 24, true, context),
+      prompt_audio_seconds: readProfileNumber(item, "prompt_audio_seconds", 2, 16, false, context),
+      segment_tokens: segmentTokens,
+      first_tokens: firstTokens,
+      s2mel_cfg_rate: readProfileNumber(item, "s2mel_cfg_rate", 0, 1.2, false, context)
+    };
+  }
+  function collectProfilePresetStream(source, modes, stream) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) throw makeProfileConfigError("缺少 quality.presets." + stream + " object");
     var out = {};
-    if (!source || typeof source !== "object") return out;
-    ["fast", "balanced", "expressive", "ultra", "custom"].forEach(function (mode) {
-      var params = normalizeProfileQualityParams(source[mode]);
-      if (params) out[mode] = params;
+    modes.forEach(function (mode) {
+      out[mode.id] = normalizeProfileQualityParams(source[mode.id], "quality.presets." + stream + "." + mode.id);
     });
     return out;
   }
   function applyActiveProfile(cfg, profile) {
-    if (!profile || typeof profile !== "object") return cfg;
-    cfg.activeProfileName = String(profile.name || "").trim();
-    var quality = profile.quality && typeof profile.quality === "object" ? profile.quality : null;
+    cfg = cfg || {};
+    var quality = profile && profile.quality && typeof profile.quality === "object" ? profile.quality : null;
+    var modeInfo = collectProfileQualityModes(quality);
     var presets = quality && quality.presets && typeof quality.presets === "object" ? quality.presets : null;
-    var resolved = { live: {}, generate: {} };
-    if (presets) {
-      resolved.live = collectProfilePresetStream(presets.live);
-      resolved.generate = collectProfilePresetStream(presets.generate);
-    }
-    var legacyCustom = quality && quality.custom && typeof quality.custom === "object" ? quality.custom : null;
-    if (legacyCustom) {
-      var liveCustom = normalizeProfileQualityParams(legacyCustom.live);
-      var generateCustom = normalizeProfileQualityParams(legacyCustom.generate);
-      if (liveCustom && !resolved.live.custom) resolved.live.custom = liveCustom;
-      if (generateCustom && !resolved.generate.custom) resolved.generate.custom = generateCustom;
-    }
+    if (!presets) throw makeProfileConfigError("缺少 quality.presets object");
+    var resolved = {
+      live: collectProfilePresetStream(presets.live, modeInfo.modes, "live"),
+      generate: collectProfilePresetStream(presets.generate, modeInfo.modes, "generate")
+    };
+    cfg.profileConfigError = "";
+    cfg.activeProfileName = String(profile.name || "").trim();
+    cfg.profileQualityModes = modeInfo.modes;
+    cfg.profileDefaultQualityMode = modeInfo.defaultMode;
+    cfg.profileCustomQualityLabel = modeInfo.customLabel;
     cfg.profileQualityPresets = resolved;
+    if (!String(cfg.qualityMode || "").trim()) cfg.qualityMode = modeInfo.defaultMode;
     if (typeof profile.llmPrompt === "string") cfg.llmPrompt = profile.llmPrompt.trim();
     return cfg;
   }
   async function refreshActiveProfileConfig(cfg) {
-    return applyActiveProfile(cfg || {}, await fetchActiveProfile());
+    cfg = cfg || {};
+    try {
+      return applyActiveProfile(cfg, await fetchActiveProfile());
+    } catch (e) {
+      cfg.profileConfigError = profileConfigErrorMessage(e);
+      throw e;
+    }
   }
   async function getConfig() {
-    var activeProfile = await fetchActiveProfile();
+    var activeProfile = null;
+    var activeProfileError = "";
+    try {
+      activeProfile = await fetchActiveProfile();
+    } catch (e) {
+      activeProfileError = profileConfigErrorMessage(e);
+    }
     var saved = null;
     try { if (window.tavo && typeof tavo.get === "function") saved = await tavo.get(CONFIG_KEY, "global"); } catch (_) {}
     if (!saved) { try { saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null"); } catch (_) {} }
@@ -141,7 +206,19 @@
     if (!Array.isArray(cfg.roleVoiceList) || cfg.roleVoiceList.length === 0) {
       cfg.roleVoiceList = parseRoleVoiceText(cfg.roleVoicesText || "");
     }
-    applyActiveProfile(cfg, activeProfile);
+    if (activeProfileError) {
+      cfg.profileConfigError = activeProfileError;
+      cfg.profileQualityModes = [];
+      cfg.profileQualityPresets = null;
+    } else {
+      try {
+        applyActiveProfile(cfg, activeProfile);
+      } catch (e) {
+        cfg.profileConfigError = profileConfigErrorMessage(e);
+        cfg.profileQualityModes = [];
+        cfg.profileQualityPresets = null;
+      }
+    }
     return cfg;
   }
   function pickGlobalConfig(cfg) {

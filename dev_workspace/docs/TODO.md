@@ -88,8 +88,8 @@
 
 - User tuning blueprint:
   - planning folder: `dev_workspace/docs/USER_TUNING_PLAN/`;
-  - first launcher profile slice is implemented with schema v2 quality presets and active profile consumption;
-  - next slice should externalize voice-control/style catalog into profile schema v3;
+  - launcher profile slice is now schema v3: outer CC Switch-style profile list, inner quality-mode editor, active profile consumption, and strict Tavo parameter reads;
+  - next slice should externalize voice-control/style catalog into a later profile schema version;
   - launcher should be the main profile/tuning UI; Tavo should stay lightweight for playback and quick mode choices;
   - future work can expose LLM prompt templates, style catalogs, role strategies, LIVE buffer settings, expert quality parameters, and import/export profiles.
 
@@ -107,7 +107,7 @@
 - Packaging and startup hygiene:
   - one-click local startup;
   - launcher visual refresh should target a Windows Terminal-like dark desktop style while preserving easy packaging and double-click startup;
-  - launcher profile UX should use a CC Switch-like structure: outer config list with active/apply/copy/edit actions, inner detail page for editing and saving;
+  - launcher profile UX now uses a CC Switch-like structure; still needs real visual pass in the running launcher after `LEON-Launcher.exe` can be rebuilt;
   - no accidental ComfyUI/SD contention;
   - clear service status page;
   - clean shutdown / restart scripts.

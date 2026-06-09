@@ -25,7 +25,7 @@
         + '<div class="idx-modes"><button class="idx-mode" data-mode="ai" type="button"><strong>AI模式</strong><span>后端 LLM 拆旁白/人物</span></button><button class="idx-mode" data-mode="normal" type="button"><strong>普通模式</strong><span>后端规则拆旁白/对白</span></button></div>'
         + '<div class="idx-section-title">合成质量</div>'
         + '<div class="idx-grid">'
-          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"><option value="fast">极速（流式推荐）</option><option value="balanced">平衡</option><option value="expressive">质量优先</option><option value="ultra">落盘高质量</option><option value="custom">自定义</option></select></label>'
+          + '<label class="idx-field"><span class="idx-label">合成档位</span><select class="idx-input" data-field="qualityMode"></select></label>'
           + '<label class="idx-field"><span class="idx-label">播放语速</span><input class="idx-input" type="number" min="0.85" max="1.25" step="0.01" data-field="speedFactor" placeholder="1.00"></label>'
         + '</div>'
         + '<details class="idx-llm-details idx-custom-quality"><summary>自定义参数</summary><div class="idx-grid">'
@@ -379,6 +379,11 @@
       if (counter) counter.textContent = idx + "/" + total;
     }
     function setError(v) {
-      if (err) { err.textContent = ""; err.classList.add("idx-hidden"); }
-      if (v) showTrackNotice(currentTrack(), "发生错误", String(v));
+      var text = v == null ? "" : String(v);
+      if (err) {
+        err.textContent = text;
+        if (text) err.classList.remove("idx-hidden");
+        else err.classList.add("idx-hidden");
+      }
+      if (text) showTrackNotice(currentTrack(), "发生错误", text);
     }

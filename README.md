@@ -57,7 +57,7 @@ config/profiles/
 - `scripts/`：启动器调用的共享启动脚本。
 - `static/`：Tavo 注入前端、runtime 分片和测试页面。
 - `vllm/`：vLLM API 后端。
-- `fast6g/`：6 GB 友好 API 后端。
+- `fast6g/`：6 GB 显存友好 API 后端。
 - `config/profiles/`：启动器调音台配置。
 - `assets/readme/`：README 展示截图。
 - `dev_workspace/`：开发交接文档、回归记录和 smoke 测试。

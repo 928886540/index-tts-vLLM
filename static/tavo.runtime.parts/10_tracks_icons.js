@@ -177,43 +177,67 @@
   function formatTime(sec) { sec = Math.max(0, Number(sec || 0)); if (!isFinite(sec)) return "--:--"; return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.floor(sec % 60)).padStart(2, "0"); }
   function parseRoleVoices(text, voice) { var out = { default: voice }; String(text || "").split(/[\r\n,，;；]+/).forEach(function (line) { var m = line.trim().match(/^(.+?)[=:：]\s*(.+)$/); if (m) out[m[1].trim()] = m[2].trim(); }); return out; }
   async function listVoices(base) { try { var r = await fetch(cleanBase(base) + "/voices", { cache: "no-store" }); if (!r.ok) return []; var d = await r.json(); return Array.isArray(d.voices) ? d.voices : []; } catch (_) { return []; } }
-  function normalizeGenerationQualityMode(mode) {
-    mode = String(mode || "balanced").trim();
-    return ["fast", "balanced", "expressive", "ultra", "custom"].indexOf(mode) >= 0 ? mode : "balanced";
+  function profileQualityModeIds(cfg) {
+    return ((cfg && Array.isArray(cfg.profileQualityModes)) ? cfg.profileQualityModes : [])
+      .map(function (item) { return String((item && item.id) || "").trim(); })
+      .filter(Boolean);
+  }
+  function normalizeGenerationQualityMode(mode, cfg) {
+    mode = String(mode || "").trim();
+    if (mode === "custom") return "custom";
+    if (cfg && cfg.profileConfigError) throw makeProfileConfigError(cfg.profileConfigError);
+    var ids = profileQualityModeIds(cfg);
+    if (!ids.length) throw makeProfileConfigError("active profile 没有可用档位定义");
+    if (ids.indexOf(mode) < 0) throw makeProfileConfigError("Tavo 当前档位不在 active profile 中: " + (mode || "(空)"));
+    return mode;
   }
   function playbackQualityKey(playbackMode) {
     return normalizePlaybackMode(playbackMode) === "generate" ? "generate" : "live";
   }
   function effectiveQualityMode(cfg, playbackMode) {
     cfg = cfg || {};
-    return normalizeGenerationQualityMode(cfg.qualityMode || "balanced");
+    return normalizeGenerationQualityMode(cfg.qualityMode || cfg.profileDefaultQualityMode || "", cfg);
   }
   function profileQualityPreset(cfg, playbackMode, mode) {
     cfg = cfg || {};
     var key = playbackQualityKey(playbackMode || cfg.playbackMode);
     var presets = cfg.profileQualityPresets && typeof cfg.profileQualityPresets === "object" ? cfg.profileQualityPresets[key] : null;
-    var preset = presets && typeof presets === "object" ? presets[normalizeGenerationQualityMode(mode)] : null;
+    var preset = presets && typeof presets === "object" ? presets[normalizeGenerationQualityMode(mode, cfg)] : null;
     return preset && typeof preset === "object" ? preset : null;
   }
-  function defaultQualityPreset(mode) {
-    mode = normalizeGenerationQualityMode(mode);
-    if (mode === "fast") return { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7 };
-    if (mode === "balanced") return { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18, s2mel_cfg_rate: 0.7 };
-    if (mode === "ultra") return { diffusion_steps: 20, prompt_audio_seconds: 14, segment_tokens: 96, first_tokens: 32, s2mel_cfg_rate: 0.7 };
-    if (mode === "custom") return { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18, s2mel_cfg_rate: 0.7 };
-    return { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24, s2mel_cfg_rate: 0.7 };
+  function profileQualityModeLabel(cfg, mode) {
+    mode = String(mode || "").trim();
+    if (mode === "custom") return String((cfg && cfg.profileCustomQualityLabel) || "自定义").trim() || "自定义";
+    var modes = (cfg && Array.isArray(cfg.profileQualityModes)) ? cfg.profileQualityModes : [];
+    for (var i = 0; i < modes.length; i += 1) {
+      if (String((modes[i] && modes[i].id) || "").trim() === mode) {
+        return String(modes[i].label || mode).trim() || mode;
+      }
+    }
+    return mode || "(未选择)";
+  }
+  function customQualityOverrides(cfg) {
+    cfg = cfg || {};
+    var segmentTokens = Math.round(clampNumber(cfg.segmentTokens, 60, 8, 120));
+    return {
+      diffusion_steps: Math.round(clampNumber(cfg.diffusionSteps, 14, 2, 24)),
+      prompt_audio_seconds: clampNumber(cfg.promptAudioSeconds, 10, 2, 16),
+      segment_tokens: segmentTokens,
+      first_tokens: Math.round(clampNumber(cfg.firstTokens, 18, 4, Math.max(4, segmentTokens))),
+      s2mel_cfg_rate: clampNumber(cfg.s2melCfgRate, 0.7, 0, 1.2)
+    };
   }
   function generationQualityOverrides(mode, cfg, playbackMode) {
-    mode = normalizeGenerationQualityMode(mode);
-    var fallback = defaultQualityPreset(mode);
-    var profilePreset = profileQualityPreset(cfg, playbackMode, mode) || {};
-    var segmentTokens = Math.round(clampNumber(profilePreset.segment_tokens != null ? profilePreset.segment_tokens : fallback.segment_tokens, fallback.segment_tokens, 8, 120));
+    mode = normalizeGenerationQualityMode(mode, cfg);
+    if (mode === "custom") return customQualityOverrides(cfg);
+    var profilePreset = profileQualityPreset(cfg, playbackMode, mode);
+    if (!profilePreset) throw makeProfileConfigError("active profile 缺少 " + playbackQualityKey(playbackMode || (cfg && cfg.playbackMode)) + "." + mode + " 参数");
     return {
-      diffusion_steps: Math.round(clampNumber(profilePreset.diffusion_steps != null ? profilePreset.diffusion_steps : fallback.diffusion_steps, fallback.diffusion_steps, 2, 24)),
-      prompt_audio_seconds: clampNumber(profilePreset.prompt_audio_seconds != null ? profilePreset.prompt_audio_seconds : fallback.prompt_audio_seconds, fallback.prompt_audio_seconds, 2, 16),
-      segment_tokens: segmentTokens,
-      first_tokens: Math.round(clampNumber(profilePreset.first_tokens != null ? profilePreset.first_tokens : fallback.first_tokens, fallback.first_tokens, 4, Math.max(4, segmentTokens))),
-      s2mel_cfg_rate: clampNumber(profilePreset.s2mel_cfg_rate != null ? profilePreset.s2mel_cfg_rate : fallback.s2mel_cfg_rate, fallback.s2mel_cfg_rate, 0, 1.2)
+      diffusion_steps: profilePreset.diffusion_steps,
+      prompt_audio_seconds: profilePreset.prompt_audio_seconds,
+      segment_tokens: profilePreset.segment_tokens,
+      first_tokens: profilePreset.first_tokens,
+      s2mel_cfg_rate: profilePreset.s2mel_cfg_rate
     };
   }
   function applyGenerationParamsToSearchParams(p, cfg, playbackMode) {

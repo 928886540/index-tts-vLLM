@@ -2,26 +2,28 @@
 
 Updated: 2026-06-09
 
-Status: first launcher profile slice implemented with schema v2 quality presets. This document still tracks the broader tuning roadmap.
+Status: profile schema v3 is in progress. Quality presets and the first voice-cavity/style-control slice are now profile-owned; the broader tuning UI roadmap remains open.
 
 Priority: P1 = stable distribution with the author's defaults. P2 = optional user tuning, profile editing, and preset sharing.
 
 ## Current State 2026-06-09
 
-First slice is implemented and pushed:
+Implemented so far:
 
 - Source profiles live under `config/profiles/*.json`.
 - `config/profiles/active.json` is the applied runtime snapshot.
 - Launcher can create/copy/save/apply profiles and edit LIVE/DISK quality preset parameters.
 - Tavo fetches `/profiles/active` and keeps only the selected档位 name; request parameters come from active profile `quality.presets.live/generate[mode]`.
 - Active profile `llmPrompt` is submitted as `parse_system_prompt`; the API backend renders runtime placeholders before calling the LLM.
+- Profile schema v3 adds explicit `styles` entries to source profiles and the active snapshot.
+- vLLM and fast6g render `{{style_rules}}` from active profile `styles`, not from an implicit runtime style table.
+- LLM output with an unknown `style`, invalid alpha/emo_vec, non-neutral narration style, or unavailable style ref now raises a clear configuration/LLM-output error.
 
 Important limitation:
 
-- Voice-control / 声腔 is not fully profile-owned yet.
-- Current "声控" is backend-owned LLM parse outputting per-segment `style`, `style_alpha`, `emo_vec`, and `emo_alpha`.
+- Current "声控" is still backend-owned LLM parse outputting per-segment `style`, `style_alpha`, `emo_vec`, and `emo_alpha`.
 - The API backend injects `{{style_rules}}`, `{{emotion_rules}}`, and `{{output_contract}}` into the active prompt at runtime.
-- The style catalog and reference-audio mapping are still code-owned in `vllm/indextts2_api.py` and `fast6g/indextts2_api.py`.
+- Style catalog data is now stored in profile JSON, but launcher UI does not yet expose full style CRUD.
 - Launcher UI does not yet expose style catalog editing, role default style, allowed/disabled style, or stage curves.
 
 Real lifecycle validation:
@@ -43,7 +45,7 @@ Real lifecycle validation:
 - 专家可控：专家模式暴露推理参数和 LIVE 缓冲参数，但必须有硬上限、预设恢复和明显风险提示。
 - 配置可导入导出：用户调好的方案应该能保存为一个 profile，而不是散落在代码和 Tavo localStorage 里。
 - 启动器做调音台：复杂编辑、profile 管理、预检和导入导出优先放在 Windows 启动器里；Tavo 端保持轻量播放和少量快速设置。
-- 后端负责安全边界：前端负责好玩，后端负责 clamp、校验、报错和兼容旧配置。
+- 后端负责安全边界：前端负责好玩，后端负责范围校验、明确报错和显式迁移；运行期不能静默套用隐藏默认值。
 - 启动器视觉改造必须保持低环境门槛：优先继续产出可直接打开的本地 exe；若未来换 UI 技术栈，必须明确打包成本和安装成本，不能要求用户手动装复杂运行环境。
 
 ## Configuration Layers
@@ -70,7 +72,7 @@ Real lifecycle validation:
 - style 到本地参考音频的映射
 - style 默认强度：`style_alpha` / `emo_alpha`
 - style 默认情绪向量：`emo_vec`
-- 角色别名和 fallback 规则
+- 角色别名和未匹配角色的显式报错/策略规则
 - 角色默认声腔、禁用声腔、优先声腔
 - 阶段曲线：开场、升温、高点、余韵等 `stage -> style`
 
@@ -106,7 +108,7 @@ Real lifecycle validation:
 - 启动器管理 profile：新建、复制、重命名、导入、导出、恢复默认。
 - 启动器编辑 LLM prompt：提供模板变量、输出 JSON schema、测试拆段和恢复默认。
 - 启动器编辑声腔映射：style 列表、参考音频、默认强度、emo_vec、适用说明。
-- 启动器编辑角色策略：旁白、用户、当前角色、别名、fallback、默认 style、允许/禁用 style。
+- 启动器编辑角色策略：旁白、用户、当前角色、别名、未匹配角色策略、默认 style、允许/禁用 style。
 - 启动器编辑质量档位：LIVE 和 D 模式分别配置，专家参数折叠在高级区。
 - 启动器做预检：检查 voice/style 是否存在，参数是否越界，坏音频是否可解码。
 - Tavo 端消费配置：只读取当前 active profile，负责播放、切换 LIVE/D、选择基础档位和触发生成。
@@ -119,7 +121,7 @@ Real lifecycle validation:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "name": "耳语恋爱",
   "description": "偏低声、贴近、轻微气声的 Tavo 对话预设",
   "llmPromptId": "default_dialogue_v1",
@@ -207,15 +209,15 @@ Current backend behavior:
 - `style_alpha` controls how strongly the style reference audio influences the segment.
 - `emo_vec` is an 8-dimensional emotion vector in this order: `[happy, angry, sad, fear, hate, low, surprise, neutral]`.
 - `emo_alpha` controls emotion-vector strength.
-- Backend clamps values before calling the TTS service.
-- Narration is guarded toward `neutral`; high-arousal emotion dimensions are damped to avoid unstable or overacted output.
+- Backend validates values before calling the TTS service; invalid values fail the request instead of being silently repaired.
+- Narration must use `neutral`; non-neutral narration style is treated as LLM output error.
 - If `style` resolves to a reference audio, `style_alpha` can override the segment emotion strength for that synthesis call.
-- If no valid style reference exists, backend falls back to emotion/default behavior rather than silently inventing a reference.
+- If no valid style reference exists, backend raises `Profile 配置错误` or `LLM 输出错误` instead of silently inventing a reference.
 
 Prompt behavior:
 
 - The default profile prompt contains `{{style_rules}}` and `{{emotion_rules}}`, so the full prompt is only visible after backend rendering.
-- Users can currently influence style choice by editing `llmPrompt`, but they cannot yet edit the underlying style catalog through the launcher.
+- Users can currently influence style choice by editing `llmPrompt` and profile JSON `styles`, but they cannot yet edit the style catalog through a dedicated launcher page.
 - Directly deleting `{{style_rules}}` or `{{emotion_rules}}` from the prompt will remove the backend's generated voice-control guidance for the LLM.
 
 Desired profile-owned voice control:
@@ -256,7 +258,7 @@ Desired profile-owned voice control:
 
 Implementation target:
 
-- Profile schema v3 should move style catalog and role style policy out of code defaults.
+- Profile schema v3 moves style catalog out of runtime code defaults. Role style policy and stage curves are still future work.
 - API backend should expose the rendered active style catalog through `/profiles/active` or a related route for diagnostics.
 - Backend must still validate style names, file existence, alpha ranges, and emotion vector shape.
 - Launcher should provide style catalog CRUD, ref-audio picker, default strengths, and role policy editing.
@@ -287,7 +289,7 @@ Implementation target:
 - 缺失 voice/style 映射要清楚报错，不要悄悄换另一个音色。
 - 坏的参考音频要标记为不可用，不要静默 `uses_style_audio=false`。
 - LIVE 参数不能破坏 saved/cache audio 的原生 `<audio>` 播放边界。
-- Profile 版本必须可迁移，旧配置要能 fallback 到默认 profile。
+- Profile 版本允许在启动器创建/迁移时补全成可见 JSON；运行期缺字段、坏 ref、未知 style 必须报错。
 - 导入 profile 时先预检：字段、音色存在性、style ref 存在性、参数范围。
 
 ## Implementation Roadmap
@@ -301,10 +303,10 @@ Implementation target:
 
 ### Phase 2: Externalize Defaults
 
-- 把当前 `STYLE_PRESETS`、质量档位和 LLM prompt 复制成默认 profile。
-- 保持代码里的默认值作为 fallback。
-- 前端读取 profile 后覆盖默认 catalog。
-- 后端接受 profile 展开的请求体，不直接信任 profile 文件。
+- 把当前 style catalog、质量档位和 LLM prompt 复制成默认 profile。
+- 代码里的默认值只用于创建/迁移可见 profile JSON，不作为运行期兜底。
+- 前端读取 active profile 后使用显式 catalog 和档位配置。
+- 后端读取 active profile 并严格校验，不直接信任 profile 文件。
 
 ### Phase 3: Prompt Template Editor
 
@@ -354,8 +356,8 @@ Implementation target:
 
 下一片最有用：
 
-1. Profile schema v3 增加 `styles`、`roles.*.default_style`、`roles.*.allowed_styles`、`stageMap`。
-2. 把当前代码里的 style catalog 默认值迁移进 `leon-default.json`，代码只保留 fallback 和 clamp。
-3. 启动器调音台增加“声控/声腔”编辑页：外层 style 列表，详情页编辑名称、说明、参考音频、默认 `style_alpha`、`emo_vec`、`emo_alpha`。
-4. 启动器角色策略页支持给旁白、用户、当前角色配置默认 style、允许/禁用 style。
-5. 后端渲染 LLM prompt 时使用 active profile 的 style catalog 生成 `{{style_rules}}`，并在合成前校验每段 LLM 输出。
+1. 启动器调音台增加“声控/声腔”编辑页：外层 style 列表，详情页编辑名称、说明、参考音频、默认 `style_alpha`、`emo_vec`、`emo_alpha`。
+2. 启动器角色策略页支持给旁白、用户、当前角色配置默认 style、允许/禁用 style。
+3. Profile schema 后续增加 `roles.*.default_style`、`roles.*.allowed_styles`、`stageMap`。
+4. 增加导入/应用 profile 的预检报告：缺字段、坏 ref、未知 style、越界参数逐条列出。
+5. 保留当前后端严格校验：未知 style、缺 active profile、坏 ref、非法参数都直接失败。

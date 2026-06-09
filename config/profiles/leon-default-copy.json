@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "name": "LEON default",
+  "name": "LEON default copy",
   "description": "Default local tuning profile managed by the LEON launcher.",
   "llmPromptId": "launcher_profile_prompt_template_v1",
   "llmPrompt": "你是中文小说→TTS 片段拆分器。只返回严格 JSON，不要任何解释，不要 ``` 代码块。\n\n{{roles_hint}}\n{{user_alias_hint}}\n{{character_hint}}\n输出格式:\n{{output_contract}}\n\n拆段规则:\n1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。\n   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。\n   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。\n   旁白连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。\n2. 人物直接说出口的话 → role 用说话人的名字。\n   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。\n   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。\n   - 其他人物优先从已知角色名单挑名字；名单外的新人物用原文里的名字。\n3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。\n4. text 是要朗读的原文片段，保留标点和语气词。\n{{style_rules}}\n\n{{emotion_rules}}\n\n完整性硬规则:\n- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。\n- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。\n- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。\n- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。\n\n示例输入:\n她低着头，眼角有泪。「对不起，我真的撑不住了。」\n{{example_user}}叹了口气，把手放在她肩上：「别哭。」\n示例输出:\n{{example_output}}",
@@ -10,11 +10,11 @@
     "modes": [
       {
         "id": "fast",
-        "label": "极速模式"
+        "label": "极速（流式推荐）"
       },
       {
         "id": "balanced",
-        "label": "平衡模式"
+        "label": "平衡"
       },
       {
         "id": "expressive",
@@ -22,7 +22,7 @@
       },
       {
         "id": "ultra",
-        "label": "超高质量"
+        "label": "落盘高质量"
       }
     ],
     "presets": {
@@ -102,8 +102,7 @@
       }
     }
   },
-  "displayOrder": 20,
-  "updatedAt": "2026-06-09T13:21:04.3744206Z",
+  "displayOrder": 10,
   "styles": {
     "neutral": {
       "label": "普通/平静",

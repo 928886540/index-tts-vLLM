@@ -52,6 +52,10 @@ Current smoke must prove:
 - music-note is the only new-audio generation entry;
 - settings and picker render without double focus outline;
 - settings order is mode buttons, quality, voice mapping, playback/offline;
+- Tavo quality dropdown must be rendered from active profile `quality.modes` Chinese labels, plus the profile `customLabel` for the local temporary `custom` mode;
+- Tavo must fetch `/profiles/active` before generation. If the active profile is missing, invalid, missing the selected mode, or missing a LIVE/DISK preset, show `Profile 配置错误`, keep `[data-role="error"]` populated, and do not POST `/tts_dialogue_stream_job`;
+- non-`custom` quality modes must read params from `quality.presets.live[mode]` or `quality.presets.generate[mode]`; no JS code default should hide a broken profile;
+- `custom` is the only Tavo-local temporary parameter mode and may use the current settings fields;
 - normal mode shows only `旁白` and `对白`;
 - AI role mapping does not include normal dialogue rows and does not submit `voices.default`;
 - Default LIVE starts one generation POST then native `<audio>` GETs `/tts_dialogue_stream_job/<cache_key>/mp3` with sourceKind `live-mp3`;
@@ -181,7 +185,9 @@ For root `LEON-Launcher.exe` and `launcher/LeonNativeLauncher.cs`:
 - API calls should use absolute `http://127.0.0.1:9880/...` URLs and short timeouts where appropriate, so local polling cannot freeze the UI.
 - Profile tuning console stores editable profiles under `config/profiles/*.json`; `active.json` is only the applied runtime snapshot. Saving a profile must not write active; applying a profile must write active and keep `appliedFrom` pointing back to the source profile.
 - Starting the service must ensure default profile files exist and pass `LEON_ACTIVE_PROFILE_PATH` to the API backend. Tavo should consume the active profile through `/profiles/active`, not through launcher UI state.
-- Tavo generation requests must honor active profile quality presets separately for LIVE and DISK/generate. The Tavo page selects only the mode name (`fast` / `balanced` / `expressive` / `ultra` / `custom`); request fields must come from `quality.presets.live[mode]` or `quality.presets.generate[mode]`, with code defaults only as fallback if the active profile is missing.
+- Profile schema v3 must include `quality.defaultMode`, `quality.customLabel`, `quality.modes[]`, and `quality.presets.live/generate.<mode>` for every non-`custom` mode. The test button and enable/apply path must reject bad schema instead of writing a broken `active.json`.
+- Launcher profile list should keep the CC Switch-style outer list: avatar initial, profile name, active/default hints, enable, test, edit, copy, delete, and quick drag ordering. The editor should use a single quality-mode dropdown and edit that mode's LIVE and DISK parameters together.
+- Tavo generation requests must honor active profile quality presets separately for LIVE and DISK/generate. The Tavo page selects only the mode name; request fields must come from `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Missing active profile or preset is a hard configuration error, not a fallback path.
 
 ## Resource Guard
 

@@ -202,7 +202,14 @@
       }
       await refreshCharacterConfig({ skipIfEditing: true });
       readFields();
-      await refreshActiveProfileConfig(cfg);
+      try {
+        await refreshActiveProfileConfig(cfg);
+        syncUI();
+        readFields();
+      } catch (e) {
+        setError(profileConfigErrorMessage(e));
+        return;
+      }
       await saveConfig(cfg, characterId);
       setError("");
       if (!messageText) { setError("当前消息没有可朗读正文。"); return; }
@@ -220,6 +227,17 @@
       }
       var parseMode = normalizeModeName(cfg.mode);
       var playbackMode = normalizePlaybackMode(cfg.playbackMode);
+      var qualityModeForJob = "";
+      var qualityParamsForJob = null;
+      try {
+        qualityModeForJob = effectiveQualityMode(cfg, playbackMode);
+        qualityParamsForJob = generationQualityOverrides(qualityModeForJob, cfg, playbackMode);
+      } catch (e) {
+        var profileError = profileConfigErrorMessage(e);
+        setError(profileError);
+        showTrackNotice(null, "Profile 配置错误", profileError);
+        return;
+      }
       var backgroundDetached = playbackMode === "generate";
       var initialProgressTitle = parseMode === "ai" ? "准备分析文本" : "准备生成";
       var submittedProgressTitle = parseMode === "ai" ? "任务已提交，等待分析文本" : "任务已提交，等待合成";
@@ -292,12 +310,11 @@
       try {
         var base = cleanBase(cfg.apiBase);
         var t0 = Date.now();
-        var qualityMode = effectiveQualityMode(cfg, playbackMode);
         var body = Object.assign({
           text: messageText,
           voices: voicesMap,
           parse_mode: parseMode,
-          performance_mode: qualityMode,
+          performance_mode: qualityModeForJob,
           interval_ms: cfg.intervalMs,
           top_p: cfg.topP,
           top_k: cfg.topK,
@@ -306,7 +323,7 @@
           emo_alpha: cfg.emoAlpha,
           speed_factor: clampNumber(cfg.speedFactor || 1.0, 1.0, 0.85, 1.25),
           bypass_cache: !!force
-        }, generationQualityOverrides(qualityMode, cfg, playbackMode));
+        }, qualityParamsForJob);
         if (parseMode === "ai") {
           body.llm_endpoint = cfg.llmEndpoint;
           body.llm_model = cfg.llmModel;
