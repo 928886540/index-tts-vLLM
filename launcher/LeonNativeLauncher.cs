@@ -120,6 +120,7 @@ internal sealed class LauncherForm : Form
     private Button envRepairButton;
     private TextBox ratioBox;
     private CheckBox msvcCheckBox;
+    private Action updateSideLayout;
     private Panel profileListView;
     private Panel profileEditorView;
     private FlowLayoutPanel profileCardsPanel;
@@ -141,6 +142,15 @@ internal sealed class LauncherForm : Form
     private TextBox generateSegmentTokensBox;
     private TextBox generateFirstTokensBox;
     private TextBox generateCfgRateBox;
+    private ComboBox profileStyleBox;
+    private TextBox styleIdBox;
+    private TextBox styleLabelBox;
+    private TextBox styleRefBox;
+    private TextBox styleAlphaBox;
+    private TextBox styleEmoAlphaBox;
+    private TextBox styleEmoVecBox;
+    private TextBox styleDescriptionBox;
+    private CheckBox styleEnabledCheckBox;
     private TextBox llmPromptBox;
     private System.Windows.Forms.Timer logTimer;
     private System.Windows.Forms.Timer healthTimer;
@@ -150,6 +160,8 @@ internal sealed class LauncherForm : Form
     private bool profileListLoading;
     private bool qualityUiLoading;
     private string qualityEditingPreset = "balanced";
+    private bool styleUiLoading;
+    private string styleEditingId = "neutral";
     private Dictionary<string, object> currentProfileData;
     private bool envCheckRunning;
     private bool envRepairRunning;
@@ -356,8 +368,10 @@ internal sealed class LauncherForm : Form
         startButton.FlatAppearance.BorderColor = Color.FromArgb(95, 185, 140);
         bottomPanel.Controls.Add(startButton);
 
-        EventHandler resizeSideLayout = delegate
+        updateSideLayout = delegate
         {
+            bool showVllmOptions = string.Equals(versionKey, "vllm", StringComparison.OrdinalIgnoreCase);
+            bottomPanel.Height = showVllmOptions ? 160 : 130;
             int contentWidth = Math.Min(208, Math.Max(120, side.ClientSize.Width - 36));
             int left = Math.Max(0, (side.ClientSize.Width - contentWidth) / 2);
 
@@ -371,9 +385,16 @@ internal sealed class LauncherForm : Form
             navEnvButton.Size = new Size(contentWidth, 38);
 
             configRow.Location = new Point(Math.Max(0, (bottomPanel.ClientSize.Width - contentWidth) / 2), 0);
-            configRow.Size = new Size(contentWidth, 64);
-            if (msvcCheckBox != null) msvcCheckBox.Size = new Size(contentWidth, 24);
-            startButton.Location = new Point(Math.Max(0, (bottomPanel.ClientSize.Width - contentWidth) / 2), 76);
+            configRow.Size = new Size(contentWidth, showVllmOptions ? 64 : 34);
+            if (vllmButton != null) vllmButton.Location = new Point(0, 0);
+            if (fast6gButton != null) fast6gButton.Location = new Point(64, 0);
+            if (ratioBox != null) ratioBox.Location = new Point(Math.Max(140, contentWidth - 64), 7);
+            if (msvcCheckBox != null)
+            {
+                msvcCheckBox.Location = new Point(0, 38);
+                msvcCheckBox.Size = new Size(contentWidth, 24);
+            }
+            startButton.Location = new Point(Math.Max(0, (bottomPanel.ClientSize.Width - contentWidth) / 2), showVllmOptions ? 76 : 46);
             startButton.Size = new Size(contentWidth, 68);
 
             sideBackground.SendToBack();
@@ -383,9 +404,10 @@ internal sealed class LauncherForm : Form
             navEnvButton.BringToFront();
             bottomPanel.BringToFront();
         };
+        EventHandler resizeSideLayout = delegate { if (updateSideLayout != null) updateSideLayout(); };
         side.Resize += resizeSideLayout;
         bottomPanel.Resize += resizeSideLayout;
-        resizeSideLayout(side, EventArgs.Empty);
+        if (updateSideLayout != null) updateSideLayout();
 
         Panel content = new Panel();
         content.Dock = DockStyle.Fill;
@@ -571,7 +593,7 @@ internal sealed class LauncherForm : Form
         scroll.BackColor = view.BackColor;
         view.Controls.Add(scroll);
         scroll.BringToFront();
-        scroll.AutoScrollMinSize = new Size(860, 980);
+        scroll.AutoScrollMinSize = new Size(860, 1360);
 
         AddConfigSectionLabel(scroll, "当前配置", 0, 2, 840);
         AddConfigLabel(scroll, "名称", 0, 36, 120);
@@ -607,17 +629,64 @@ internal sealed class LauncherForm : Form
         AddQualityEditor(scroll, "LIVE 实时播放", 0, 260, true);
         AddQualityEditor(scroll, "DISK 完整生成", 424, 260, false);
 
-        AddConfigSectionLabel(scroll, "LLM 提示词", 0, 580, 840);
-        Label llmHint = AddConfigLabel(scroll, "这是 active profile 的完整拆段提示词；保存并应用后，下一次 AI 拆段会使用这里的内容。", 0, 610, 840);
+        AddConfigSectionLabel(scroll, "声腔配置", 0, 580, 840);
+        Label styleHint = AddConfigLabel(scroll, "LLM 输出 style 后，API 会从这里解析参考音频、声腔强度和 8 维情绪向量。", 0, 610, 840);
+        styleHint.ForeColor = Color.FromArgb(160, 172, 184);
+        AddConfigLabel(scroll, "正在编辑声腔", 0, 646, 140);
+        profileStyleBox = CreateQualityComboBox(scroll, 0, 672, 180);
+        profileStyleBox.SelectedIndexChanged += delegate { OnStyleSelectionChanged(); };
+        AddConfigLabel(scroll, "style id", 204, 646, 140);
+        styleIdBox = CreateConfigTextBox(scroll, 204, 672, 180, 32);
+        AddConfigLabel(scroll, "中文名称", 404, 646, 140);
+        styleLabelBox = CreateConfigTextBox(scroll, 404, 672, 200, 32);
+        styleEnabledCheckBox = new CheckBox();
+        styleEnabledCheckBox.Text = "启用";
+        styleEnabledCheckBox.Location = new Point(622, 674);
+        styleEnabledCheckBox.Size = new Size(70, 26);
+        styleEnabledCheckBox.BackColor = scroll.BackColor;
+        styleEnabledCheckBox.ForeColor = Color.FromArgb(205, 214, 224);
+        styleEnabledCheckBox.Font = NewFont(10.0f, FontStyle.Regular);
+        scroll.Controls.Add(styleEnabledCheckBox);
+        Button addStyleButton = CreateFlatButton("新增", 698, 670, 58, 34, Color.FromArgb(48, 68, 88), delegate { AddStyleFromUi(); });
+        Button copyStyleButton = CreateFlatButton("复制", 764, 670, 58, 34, Color.FromArgb(48, 68, 88), delegate { CopyStyleFromUi(); });
+        StyleConfigActionButton(addStyleButton);
+        StyleConfigActionButton(copyStyleButton);
+        scroll.Controls.Add(addStyleButton);
+        scroll.Controls.Add(copyStyleButton);
+
+        AddConfigLabel(scroll, "参考音频 ref", 0, 720, 160);
+        styleRefBox = CreateConfigTextBox(scroll, 0, 746, 480, 32);
+        AddConfigLabel(scroll, "style_alpha", 500, 720, 120);
+        styleAlphaBox = CreateConfigTextBox(scroll, 500, 746, 100, 32);
+        styleAlphaBox.TextAlign = HorizontalAlignment.Center;
+        AddConfigLabel(scroll, "emo_alpha", 620, 720, 120);
+        styleEmoAlphaBox = CreateConfigTextBox(scroll, 620, 746, 100, 32);
+        styleEmoAlphaBox.TextAlign = HorizontalAlignment.Center;
+        Button deleteStyleButton = CreateFlatButton("删除", 746, 744, 76, 34, Color.FromArgb(118, 46, 52), delegate { DeleteStyleFromUi(); });
+        StyleConfigActionButton(deleteStyleButton);
+        scroll.Controls.Add(deleteStyleButton);
+
+        AddConfigLabel(scroll, "emo_vec", 0, 794, 160);
+        styleEmoVecBox = CreateConfigTextBox(scroll, 0, 820, 820, 32);
+        AddConfigLabel(scroll, "描述", 0, 868, 160);
+        styleDescriptionBox = CreateConfigTextBox(scroll, 0, 894, 700, 60);
+        styleDescriptionBox.Multiline = true;
+        styleDescriptionBox.ScrollBars = ScrollBars.Vertical;
+        Button resetStylesButton = CreateFlatButton("恢复默认声腔", 714, 918, 106, 34, Color.FromArgb(118, 78, 42), delegate { ResetStylesFromUi(); });
+        StyleConfigActionButton(resetStylesButton);
+        scroll.Controls.Add(resetStylesButton);
+
+        AddConfigSectionLabel(scroll, "LLM 提示词", 0, 990, 840);
+        Label llmHint = AddConfigLabel(scroll, "这是 active profile 的完整拆段提示词；保存并应用后，下一次 AI 拆段会使用这里的内容。", 0, 1020, 840);
         llmHint.ForeColor = Color.FromArgb(160, 172, 184);
-        llmPromptBox = CreateConfigTextBox(scroll, 0, 638, 820, 240);
+        llmPromptBox = CreateConfigTextBox(scroll, 0, 1048, 820, 240);
         llmPromptBox.Multiline = true;
         llmPromptBox.ScrollBars = ScrollBars.Vertical;
         llmPromptBox.AcceptsReturn = true;
         llmPromptBox.AcceptsTab = true;
         llmPromptBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        Label pathHint = AddConfigLabel(scroll, "Active 快照路径: " + activeProfilePath, 0, 900, 820);
+        Label pathHint = AddConfigLabel(scroll, "Active 快照路径: " + activeProfilePath, 0, 1310, 820);
         pathHint.ForeColor = Color.FromArgb(138, 154, 170);
         return view;
     }
@@ -1253,6 +1322,13 @@ internal sealed class LauncherForm : Form
         SetQualityModeUi(qualityEditingPreset);
         qualityUiLoading = false;
 
+        styleUiLoading = true;
+        PopulateStyleBox(currentProfileData);
+        styleEditingId = HasStyleId(currentProfileData, "neutral") ? "neutral" : FirstStyleId(currentProfileData);
+        SetStyleComboValue(profileStyleBox, styleEditingId);
+        SetStyleUi(styleEditingId);
+        styleUiLoading = false;
+
         if (llmPromptBox != null) llmPromptBox.Text = GetStringValue(profile, "llmPrompt", "");
     }
 
@@ -1361,6 +1437,238 @@ internal sealed class LauncherForm : Form
         }
     }
 
+    private void OnStyleSelectionChanged()
+    {
+        if (styleUiLoading) return;
+        if (currentProfileData == null) currentProfileData = DefaultProfileData();
+
+        try
+        {
+            string previous = styleEditingId;
+            string next = SelectedStyleValue(profileStyleBox);
+            string stored = previous;
+
+            if (!string.IsNullOrWhiteSpace(previous))
+            {
+                stored = StoreStyleFields(previous);
+            }
+            if (!string.Equals(stored, previous, StringComparison.OrdinalIgnoreCase))
+            {
+                styleUiLoading = true;
+                PopulateStyleBox(currentProfileData);
+                SetStyleComboValue(profileStyleBox, next);
+                styleUiLoading = false;
+            }
+
+            styleEditingId = next;
+            styleUiLoading = true;
+            SetStyleUi(next);
+            styleUiLoading = false;
+        }
+        catch (Exception ex)
+        {
+            styleUiLoading = false;
+            SetStatus("切换声腔失败：" + ex.Message, Color.LightCoral);
+        }
+    }
+
+    private void StoreCurrentStyleFields()
+    {
+        if (currentProfileData == null) currentProfileData = DefaultProfileData();
+        styleEditingId = StoreStyleFields(styleEditingId);
+    }
+
+    private string StoreStyleFields(string currentId)
+    {
+        if (currentProfileData == null) currentProfileData = DefaultProfileData();
+        currentId = StyleIdOrFallback(currentId, "neutral");
+        Dictionary<string, object> styles = GetObjectDict(currentProfileData, "styles");
+        if (styles.Count == 0) currentProfileData["styles"] = DefaultStyleProfilesData();
+
+        string newId = currentId;
+        if (!string.Equals(currentId, "neutral", StringComparison.OrdinalIgnoreCase))
+        {
+            newId = ReadStyleIdFromBox();
+            if (!string.Equals(newId, currentId, StringComparison.OrdinalIgnoreCase) && HasStyleId(currentProfileData, newId))
+            {
+                throw new InvalidOperationException("声腔 id 已存在: " + newId);
+            }
+        }
+        else if (styleIdBox != null)
+        {
+            styleIdBox.Text = "neutral";
+        }
+
+        Dictionary<string, object> data = ReadStyleFields(newId);
+        if (string.Equals(newId, "neutral", StringComparison.OrdinalIgnoreCase))
+        {
+            data["enabled"] = true;
+            data["ref"] = "";
+        }
+
+        if (!string.Equals(newId, currentId, StringComparison.OrdinalIgnoreCase))
+        {
+            RemoveStyleId(currentProfileData, currentId);
+        }
+        SetStyleData(currentProfileData, newId, data);
+        return newId;
+    }
+
+    private Dictionary<string, object> ReadStyleFields(string styleId)
+    {
+        Dictionary<string, object> data = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        bool enabled = styleEnabledCheckBox == null || styleEnabledCheckBox.Checked;
+        data["enabled"] = enabled;
+        data["label"] = styleLabelBox == null ? styleId : StringOrEmpty(styleLabelBox.Text);
+        data["ref"] = styleRefBox == null ? "" : StringOrEmpty(styleRefBox.Text);
+        data["style_alpha"] = ReadRequiredDoubleBox(styleAlphaBox, "styles." + styleId + ".style_alpha");
+        data["emo_alpha"] = ReadRequiredDoubleBox(styleEmoAlphaBox, "styles." + styleId + ".emo_alpha");
+        data["emo_vec"] = ParseEmoVecBox(styleEmoVecBox, "styles." + styleId + ".emo_vec");
+        data["description"] = styleDescriptionBox == null ? "" : StringOrEmpty(styleDescriptionBox.Text);
+        return data;
+    }
+
+    private void SetStyleUi(string styleId)
+    {
+        if (currentProfileData == null) currentProfileData = DefaultProfileData();
+        styleId = StyleIdOrFallback(styleId, "neutral");
+        Dictionary<string, object> data = GetStyleData(currentProfileData, styleId);
+        bool isNeutral = string.Equals(styleId, "neutral", StringComparison.OrdinalIgnoreCase);
+
+        if (styleIdBox != null)
+        {
+            styleIdBox.Text = styleId;
+            styleIdBox.Enabled = !isNeutral;
+        }
+        if (styleLabelBox != null) styleLabelBox.Text = GetStringValue(data, "label", styleId);
+        if (styleRefBox != null)
+        {
+            styleRefBox.Text = isNeutral ? "" : GetStringValue(data, "ref", "");
+            styleRefBox.Enabled = !isNeutral;
+        }
+        if (styleAlphaBox != null) styleAlphaBox.Text = FormatDouble(GetDoubleValue(data, "style_alpha", 0.15));
+        if (styleEmoAlphaBox != null) styleEmoAlphaBox.Text = FormatDouble(GetDoubleValue(data, "emo_alpha", 0.18));
+        if (styleEmoVecBox != null) styleEmoVecBox.Text = FormatEmoVec(data);
+        if (styleDescriptionBox != null) styleDescriptionBox.Text = GetStringValue(data, "description", "");
+        if (styleEnabledCheckBox != null)
+        {
+            object rawEnabled;
+            bool enabled = !data.TryGetValue("enabled", out rawEnabled) || rawEnabled == null || Convert.ToBoolean(rawEnabled);
+            styleEnabledCheckBox.Checked = isNeutral || enabled;
+            styleEnabledCheckBox.Enabled = !isNeutral;
+        }
+    }
+
+    private void PopulateStyleBox(Dictionary<string, object> profile)
+    {
+        if (profileStyleBox == null) return;
+        profileStyleBox.Items.Clear();
+        foreach (string id in GetStyleIds(profile))
+        {
+            profileStyleBox.Items.Add(id);
+        }
+    }
+
+    private void AddStyleFromUi()
+    {
+        try
+        {
+            if (currentProfileData == null) currentProfileData = DefaultProfileData();
+            StoreCurrentStyleFields();
+            string id = MakeUniqueStyleId(currentProfileData, "style");
+            Dictionary<string, object> seed = CloneStyleData(GetStyleData(currentProfileData, styleEditingId));
+            seed["label"] = "新声腔";
+            seed["ref"] = "";
+            seed["enabled"] = false;
+            SetStyleData(currentProfileData, id, seed);
+            styleEditingId = id;
+            styleUiLoading = true;
+            PopulateStyleBox(currentProfileData);
+            SetStyleComboValue(profileStyleBox, id);
+            SetStyleUi(id);
+            styleUiLoading = false;
+            SetStatus("已新增声腔；填 ref 并启用后保存。", Color.Khaki);
+        }
+        catch (Exception ex)
+        {
+            styleUiLoading = false;
+            SetStatus("新增声腔失败：" + ex.Message, Color.LightCoral);
+        }
+    }
+
+    private void CopyStyleFromUi()
+    {
+        try
+        {
+            if (currentProfileData == null) currentProfileData = DefaultProfileData();
+            StoreCurrentStyleFields();
+            string id = MakeUniqueStyleId(currentProfileData, styleEditingId + "_copy");
+            Dictionary<string, object> copy = CloneStyleData(GetStyleData(currentProfileData, styleEditingId));
+            copy["label"] = GetStringValue(copy, "label", styleEditingId) + " 复制";
+            SetStyleData(currentProfileData, id, copy);
+            styleEditingId = id;
+            styleUiLoading = true;
+            PopulateStyleBox(currentProfileData);
+            SetStyleComboValue(profileStyleBox, id);
+            SetStyleUi(id);
+            styleUiLoading = false;
+            SetStatus("已复制声腔；保存后写入 profile。", Color.Khaki);
+        }
+        catch (Exception ex)
+        {
+            styleUiLoading = false;
+            SetStatus("复制声腔失败：" + ex.Message, Color.LightCoral);
+        }
+    }
+
+    private void DeleteStyleFromUi()
+    {
+        try
+        {
+            if (currentProfileData == null) currentProfileData = DefaultProfileData();
+            string id = StyleIdOrFallback(styleEditingId, "neutral");
+            if (string.Equals(id, "neutral", StringComparison.OrdinalIgnoreCase))
+            {
+                SetStatus("neutral 是必需声腔，不能删除。", Color.Khaki);
+                return;
+            }
+            List<string> ids = GetStyleIds(currentProfileData);
+            if (ids.Count <= 1)
+            {
+                SetStatus("至少保留一个声腔。", Color.Khaki);
+                return;
+            }
+            DialogResult result = MessageBox.Show(this, "确认删除声腔？\n" + id, "删除声腔", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (result != DialogResult.Yes) return;
+            RemoveStyleId(currentProfileData, id);
+            styleEditingId = HasStyleId(currentProfileData, "neutral") ? "neutral" : GetStyleIds(currentProfileData)[0];
+            styleUiLoading = true;
+            PopulateStyleBox(currentProfileData);
+            SetStyleComboValue(profileStyleBox, styleEditingId);
+            SetStyleUi(styleEditingId);
+            styleUiLoading = false;
+            SetStatus("声腔已删除；保存后写入 profile。", Color.Khaki);
+        }
+        catch (Exception ex)
+        {
+            styleUiLoading = false;
+            SetStatus("删除声腔失败：" + ex.Message, Color.LightCoral);
+        }
+    }
+
+    private void ResetStylesFromUi()
+    {
+        if (currentProfileData == null) currentProfileData = DefaultProfileData();
+        currentProfileData["styles"] = DefaultStyleProfilesData();
+        styleEditingId = "neutral";
+        styleUiLoading = true;
+        PopulateStyleBox(currentProfileData);
+        SetStyleComboValue(profileStyleBox, styleEditingId);
+        SetStyleUi(styleEditingId);
+        styleUiLoading = false;
+        SetStatus("声腔已恢复默认；保存后写入 profile。", Color.Khaki);
+    }
+
     private Dictionary<string, object> ReadProfileFromConfigUi(string existingPath)
     {
         Dictionary<string, object> profile = null;
@@ -1373,6 +1681,7 @@ internal sealed class LauncherForm : Form
         profile.Remove("appliedFrom");
         currentProfileData = currentProfileData == null ? CloneProfileData(profile) : currentProfileData;
         StoreCurrentQualityFields();
+        StoreCurrentStyleFields();
 
         string profileName = profileNameBox == null ? "" : StringOrEmpty(profileNameBox.Text);
         if (string.IsNullOrWhiteSpace(profileName)) profileName = GetStringValue(profile, "name", "LEON profile");
@@ -2226,6 +2535,223 @@ internal sealed class LauncherForm : Form
         data["first_tokens"] = ReadIntBox(firstTokens, 18, 4, ReadIntBox(segmentTokens, 60, 8, 120));
         data["s2mel_cfg_rate"] = ReadDoubleBox(cfgRate, 0.7, 0, 1.2);
         return data;
+    }
+
+    private List<string> GetStyleIds(Dictionary<string, object> profile)
+    {
+        if (profile == null) profile = DefaultProfileData();
+        Dictionary<string, object> styles = GetObjectDict(profile, "styles");
+        if (styles.Count == 0)
+        {
+            profile["styles"] = DefaultStyleProfilesData();
+            styles = GetObjectDict(profile, "styles");
+        }
+
+        List<string> ids = new List<string>();
+        foreach (string key in styles.Keys)
+        {
+            string id = StyleIdOrFallback(key, "");
+            if (!string.IsNullOrWhiteSpace(id) && !ids.Contains(id)) ids.Add(id);
+        }
+        if (ids.Count == 0)
+        {
+            profile["styles"] = DefaultStyleProfilesData();
+            return GetStyleIds(profile);
+        }
+
+        int neutralIndex = ids.FindIndex(delegate(string id) { return string.Equals(id, "neutral", StringComparison.OrdinalIgnoreCase); });
+        if (neutralIndex > 0)
+        {
+            string neutral = ids[neutralIndex];
+            ids.RemoveAt(neutralIndex);
+            ids.Insert(0, neutral);
+        }
+        return ids;
+    }
+
+    private string FirstStyleId(Dictionary<string, object> profile)
+    {
+        List<string> ids = GetStyleIds(profile);
+        return ids.Count == 0 ? "neutral" : ids[0];
+    }
+
+    private bool HasStyleId(Dictionary<string, object> profile, string styleId)
+    {
+        styleId = StyleIdOrFallback(styleId, "");
+        if (string.IsNullOrWhiteSpace(styleId)) return false;
+        foreach (string id in GetStyleIds(profile))
+        {
+            if (string.Equals(id, styleId, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    private Dictionary<string, object> GetStyleData(Dictionary<string, object> profile, string styleId)
+    {
+        if (profile == null) profile = DefaultProfileData();
+        styleId = StyleIdOrFallback(styleId, "neutral");
+        Dictionary<string, object> styles = GetObjectDict(profile, "styles");
+        object raw;
+        if (styles.TryGetValue(styleId, out raw))
+        {
+            Dictionary<string, object> data = raw as Dictionary<string, object>;
+            if (data != null) return data;
+        }
+        if (styles.Count == 0)
+        {
+            profile["styles"] = DefaultStyleProfilesData();
+            styles = GetObjectDict(profile, "styles");
+            if (styles.TryGetValue(styleId, out raw))
+            {
+                Dictionary<string, object> data = raw as Dictionary<string, object>;
+                if (data != null) return data;
+            }
+        }
+        Dictionary<string, object> created = StyleProfileData(styleId, "", 0.15, 0.18, new double[] { 0, 0, 0, 0, 0, 0, 0, 0.85 }, "");
+        created["enabled"] = false;
+        styles[styleId] = created;
+        return created;
+    }
+
+    private void SetStyleData(Dictionary<string, object> profile, string styleId, Dictionary<string, object> data)
+    {
+        if (profile == null) return;
+        styleId = StyleIdOrFallback(styleId, "neutral");
+        GetObjectDict(profile, "styles")[styleId] = data;
+    }
+
+    private void RemoveStyleId(Dictionary<string, object> profile, string styleId)
+    {
+        if (profile == null) return;
+        styleId = StyleIdOrFallback(styleId, "");
+        if (string.IsNullOrWhiteSpace(styleId)) return;
+        GetObjectDict(profile, "styles").Remove(styleId);
+    }
+
+    private Dictionary<string, object> CloneStyleData(Dictionary<string, object> source)
+    {
+        object value = json.DeserializeObject(json.Serialize(source));
+        Dictionary<string, object> clone = value as Dictionary<string, object>;
+        return clone == null ? StyleProfileData("新声腔", "", 0.15, 0.18, new double[] { 0, 0, 0, 0, 0, 0, 0, 0.85 }, "") : clone;
+    }
+
+    private string MakeUniqueStyleId(Dictionary<string, object> profile, string baseId)
+    {
+        baseId = MakeStyleIdCandidate(baseId, "style");
+        string id = baseId;
+        int index = 2;
+        while (HasStyleId(profile, id))
+        {
+            id = baseId + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            index++;
+        }
+        return id;
+    }
+
+    private string ReadStyleIdFromBox()
+    {
+        string id = styleIdBox == null ? "" : StringOrEmpty(styleIdBox.Text);
+        if (string.IsNullOrWhiteSpace(id)) throw new InvalidDataException("声腔 id 不能为空");
+        if (!Regex.IsMatch(id, "^[A-Za-z0-9_\\-\u4e00-\u9fff]{1,80}$")) throw new InvalidDataException("声腔 id 只能使用字母、数字、中文、_、-");
+        if (string.Equals(id, "neutral", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("neutral 是内置声腔 id，不能复用");
+        return id;
+    }
+
+    private string StyleIdOrFallback(string value, string fallback)
+    {
+        value = StringOrEmpty(value);
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
+
+    private string MakeStyleIdCandidate(string value, string fallback)
+    {
+        value = StringOrEmpty(value);
+        if (string.IsNullOrWhiteSpace(value)) return fallback;
+        StringBuilder sb = new StringBuilder();
+        foreach (char ch in value)
+        {
+            bool ascii = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
+            bool chinese = ch >= '\u4e00' && ch <= '\u9fff';
+            if (ascii || chinese || ch == '_' || ch == '-') sb.Append(ch);
+        }
+        string normalized = sb.ToString();
+        return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
+    }
+
+    private string SelectedStyleValue(ComboBox box)
+    {
+        return StyleIdOrFallback(box == null ? null : Convert.ToString(box.SelectedItem), styleEditingId);
+    }
+
+    private void SetStyleComboValue(ComboBox box, string value)
+    {
+        if (box == null) return;
+        value = StyleIdOrFallback(value, "neutral");
+        foreach (object item in box.Items)
+        {
+            if (string.Equals(Convert.ToString(item), value, StringComparison.OrdinalIgnoreCase))
+            {
+                box.SelectedItem = item;
+                return;
+            }
+        }
+        if (box.Items.Count > 0) box.SelectedIndex = 0;
+    }
+
+    private double ReadRequiredDoubleBox(TextBox box, string path)
+    {
+        double parsed;
+        string text = box == null ? "" : StringOrEmpty(box.Text);
+        if (!double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed))
+        {
+            throw new InvalidDataException(path + " 必须是数字");
+        }
+        return parsed;
+    }
+
+    private object[] ParseEmoVecBox(TextBox box, string path)
+    {
+        string text = box == null ? "" : StringOrEmpty(box.Text);
+        string[] parts = Regex.Split(text.Replace('，', ','), "[,\\s]+");
+        List<object> values = new List<object>();
+        foreach (string raw in parts)
+        {
+            string part = raw.Trim();
+            if (part.Length == 0) continue;
+            double parsed;
+            if (!double.TryParse(part, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed))
+            {
+                throw new InvalidDataException(path + " 必须是 8 个数字");
+            }
+            values.Add(parsed);
+        }
+        if (values.Count != 8) throw new InvalidDataException(path + " 必须是 8 维数组");
+        return values.ToArray();
+    }
+
+    private string FormatEmoVec(Dictionary<string, object> style)
+    {
+        object raw;
+        if (style == null || !style.TryGetValue("emo_vec", out raw) || raw == null)
+        {
+            return "0, 0, 0, 0, 0, 0, 0, 0.85";
+        }
+        List<string> parts = new List<string>();
+        try
+        {
+            foreach (object item in EnumerateJsonArray(raw))
+            {
+                double parsed;
+                if (double.TryParse(Convert.ToString(item), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed))
+                {
+                    parts.Add(FormatDouble(parsed));
+                }
+            }
+        }
+        catch
+        {
+        }
+        return parts.Count == 8 ? string.Join(", ", parts.ToArray()) : "0, 0, 0, 0, 0, 0, 0, 0.85";
     }
 
     private Dictionary<string, object> GetObjectDict(Dictionary<string, object> parent, string key)
@@ -3574,6 +4100,7 @@ internal sealed class LauncherForm : Form
             msvcCheckBox.Enabled = msvcCheckBox.Visible;
             msvcCheckBox.Checked = useMsvcEnvironment;
         }
+        if (updateSideLayout != null) updateSideLayout();
 
         SyncVersionUi();
         if (userAction)
@@ -3603,6 +4130,7 @@ internal sealed class LauncherForm : Form
             msvcCheckBox.Enabled = msvcCheckBox.Visible;
             msvcCheckBox.Checked = useMsvcEnvironment;
         }
+        if (updateSideLayout != null) updateSideLayout();
     }
 
     private void SyncNavButtons()

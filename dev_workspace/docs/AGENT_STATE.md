@@ -23,8 +23,8 @@ Working tree update after the launcher/Tavo profile pass:
 - Tavo no longer treats non-`custom` quality params as code-owned defaults. It fetches `/profiles/active` on load and immediately before generation; missing/invalid active profile, missing mode, or missing preset surfaces `Profile 配置错误` and blocks the generation POST.
 - Runtime tuning config must not silently fall back to hidden code defaults. Missing active profile, missing `styles`, unknown style IDs, invalid style params, unavailable style refs, or invalid LLM style output should raise a clear `Profile 配置错误` / `LLM 输出错误`.
 - `custom` remains the only Tavo-local temporary parameter mode.
-- Launcher tuning UI is now a profile list plus editor: list cards show avatar initial, name, active/default info, enable/test/edit/copy/delete actions, and drag ordering; editor uses one quality-mode dropdown and edits LIVE plus DISK params for that mode. The LLM prompt box is taller.
-- Validation passed with syntax checks, manifest concat check, backend py_compile, Playwright smoke, and launcher temp smoke. Root `LEON-Launcher.exe` could not be overwritten in this run because it was already running as PID `32228`; the source and `LEON-Launcher.profile-smoke.exe` are validated.
+- Launcher tuning UI is now a profile list plus editor: list cards show avatar initial, name, active/default info, enable/test/edit/copy/delete actions, and drag ordering. The editor uses one quality-mode dropdown for LIVE/DISK params, exposes profile `styles` voice-cavity CRUD, and keeps the LLM prompt box below the style section.
+- Latest launcher validation passed with temp exe compile/smoke and root `LEON-Launcher.exe` compile/smoke. Root `LEON-Launcher.exe` was overwritten successfully after closing the old launcher UI process.
 
 Runtime state after validation:
 
@@ -50,8 +50,8 @@ Current voice-control reality:
 
 Next best task:
 
-- Expose the style catalog / voice-cavity controls in the launcher tuning console. The runtime profile shape exists, but users should not need to hand-edit JSON.
-- Keep Tavo lightweight: it should select mode/d档位 and trigger generation; the launcher owns profile creation/copy/edit/apply and future style catalog editing.
+- Add role-level style policy editing later: role default style, allowed/disabled styles, and stage curves. The current launcher slice edits the shared style catalog itself.
+- Keep Tavo lightweight: it should select mode/d档位 and trigger generation; the launcher owns profile creation/copy/edit/apply and style catalog editing.
 
 ## Current Goal
 
@@ -84,7 +84,7 @@ Current code state:
 
 - Root `README.md`, `dev_workspace/README.md`, and `dev_workspace/AGENTS.md` now point Tavo playback/generation work to `dev_workspace/docs/LOGIC.md`.
 - `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260609-mp3-cache-v63`.
-- Launcher tuning first slice now uses profile schema v3: `config/profiles/*.json` are editable source profiles, `config/profiles/active.json` is the applied runtime snapshot, `quality.presets.live/generate` stores parameters for every Tavo quality mode, and `styles` stores voice-cavity defaults/ref audio. Saving writes the selected profile; applying writes `active.json`; backend startup receives `LEON_ACTIVE_PROFILE_PATH` pointing at the active snapshot.
+- Launcher tuning first slice now uses profile schema v3: `config/profiles/*.json` are editable source profiles, `config/profiles/active.json` is the applied runtime snapshot, `quality.presets.live/generate` stores parameters for every Tavo quality mode, and `styles` stores voice-cavity defaults/ref audio. The launcher editor can now edit style id, label, enabled flag, ref, `style_alpha`, `emo_alpha`, `emo_vec`, and description. Saving writes the selected profile; applying writes `active.json`; backend startup receives `LEON_ACTIVE_PROFILE_PATH` pointing at the active snapshot.
 - Tavo generation now reads `/profiles/active` at config load and again immediately before generation. Tavo only stores/selects the quality mode name; request parameters are taken from active profile `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Profile `llmPrompt` is submitted as `parse_system_prompt` and rendered by the API backend as a template with runtime role/user/style placeholders.
 - vLLM and fast6g LLM proxy requests now send a stable LEON user-agent. This fixes real OpenAI-compatible gateways that reject urllib's default Python user-agent with Cloudflare 1010 while direct keyed requests succeed.
 - `ttsDebug=1` now keeps debug output in the Tavo console/server tail only. The in-page debug overlay is opt-in with `debugPanel=1`, so normal native-audio testing does not cover the player controls.

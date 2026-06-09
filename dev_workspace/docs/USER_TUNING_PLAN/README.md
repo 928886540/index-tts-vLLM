@@ -12,7 +12,7 @@ Implemented so far:
 
 - Source profiles live under `config/profiles/*.json`.
 - `config/profiles/active.json` is the applied runtime snapshot.
-- Launcher can create/copy/save/apply profiles and edit LIVE/DISK quality preset parameters.
+- Launcher can create/copy/save/apply profiles, edit LIVE/DISK quality preset parameters, and edit profile `styles` voice-cavity entries.
 - Tavo fetches `/profiles/active` and keeps only the selected档位 name; request parameters come from active profile `quality.presets.live/generate[mode]`.
 - Active profile `llmPrompt` is submitted as `parse_system_prompt`; the API backend renders runtime placeholders before calling the LLM.
 - Profile schema v3 adds explicit `styles` entries to source profiles and the active snapshot.
@@ -23,8 +23,8 @@ Important limitation:
 
 - Current "声控" is still backend-owned LLM parse outputting per-segment `style`, `style_alpha`, `emo_vec`, and `emo_alpha`.
 - The API backend injects `{{style_rules}}`, `{{emotion_rules}}`, and `{{output_contract}}` into the active prompt at runtime.
-- Style catalog data is now stored in profile JSON, but launcher UI does not yet expose full style CRUD.
-- Launcher UI does not yet expose style catalog editing, role default style, allowed/disabled style, or stage curves.
+- Style catalog data is now stored in profile JSON, and launcher UI exposes basic style CRUD.
+- Launcher UI does not yet expose role default style, allowed/disabled style, stage curves, or a ref-audio picker.
 
 Real lifecycle validation:
 
@@ -107,7 +107,7 @@ Real lifecycle validation:
 
 - 启动器管理 profile：新建、复制、重命名、导入、导出、恢复默认。
 - 启动器编辑 LLM prompt：提供模板变量、输出 JSON schema、测试拆段和恢复默认。
-- 启动器编辑声腔映射：style 列表、参考音频、默认强度、emo_vec、适用说明。
+- 启动器编辑声腔映射：style 列表、参考音频、默认强度、emo_vec、适用说明。当前 WinForms 启动器已覆盖基础 CRUD；ref-audio 选择器后续再补。
 - 启动器编辑角色策略：旁白、用户、当前角色、别名、未匹配角色策略、默认 style、允许/禁用 style。
 - 启动器编辑质量档位：LIVE 和 D 模式分别配置，专家参数折叠在高级区。
 - 启动器做预检：检查 voice/style 是否存在，参数是否越界，坏音频是否可解码。
@@ -217,7 +217,7 @@ Current backend behavior:
 Prompt behavior:
 
 - The default profile prompt contains `{{style_rules}}` and `{{emotion_rules}}`, so the full prompt is only visible after backend rendering.
-- Users can currently influence style choice by editing `llmPrompt` and profile JSON `styles`, but they cannot yet edit the style catalog through a dedicated launcher page.
+- Users can influence style choice by editing `llmPrompt`, and can edit profile JSON `styles` through the launcher profile editor.
 - Directly deleting `{{style_rules}}` or `{{emotion_rules}}` from the prompt will remove the backend's generated voice-control guidance for the LLM.
 
 Desired profile-owned voice control:
@@ -261,7 +261,7 @@ Implementation target:
 - Profile schema v3 moves style catalog out of runtime code defaults. Role style policy and stage curves are still future work.
 - API backend should expose the rendered active style catalog through `/profiles/active` or a related route for diagnostics.
 - Backend must still validate style names, file existence, alpha ranges, and emotion vector shape.
-- Launcher should provide style catalog CRUD, ref-audio picker, default strengths, and role policy editing.
+- Launcher now provides basic style catalog CRUD, default strengths, and `emo_vec` editing. Ref-audio picker and role policy editing are still future work.
 - Tavo should not own this complexity; it only sends selected mode/档位 and active profile-derived request fields.
 
 ## User-Editable Areas
@@ -356,7 +356,7 @@ Implementation target:
 
 下一片最有用：
 
-1. 启动器调音台增加“声控/声腔”编辑页：外层 style 列表，详情页编辑名称、说明、参考音频、默认 `style_alpha`、`emo_vec`、`emo_alpha`。
+1. 启动器调音台继续补 ref-audio 选择器和预检反馈；基础声腔 CRUD 已可用。
 2. 启动器角色策略页支持给旁白、用户、当前角色配置默认 style、允许/禁用 style。
 3. Profile schema 后续增加 `roles.*.default_style`、`roles.*.allowed_styles`、`stageMap`。
 4. 增加导入/应用 profile 的预检报告：缺字段、坏 ref、未知 style、越界参数逐条列出。
