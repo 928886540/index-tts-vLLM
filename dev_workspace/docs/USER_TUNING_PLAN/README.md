@@ -6,6 +6,30 @@ Status: first launcher profile slice implemented with schema v2 quality presets.
 
 Priority: P1 = stable distribution with the author's defaults. P2 = optional user tuning, profile editing, and preset sharing.
 
+## Current State 2026-06-09
+
+First slice is implemented and pushed:
+
+- Source profiles live under `config/profiles/*.json`.
+- `config/profiles/active.json` is the applied runtime snapshot.
+- Launcher can create/copy/save/apply profiles and edit LIVE/DISK quality preset parameters.
+- Tavo fetches `/profiles/active` and keeps only the selected档位 name; request parameters come from active profile `quality.presets.live/generate[mode]`.
+- Active profile `llmPrompt` is submitted as `parse_system_prompt`; the API backend renders runtime placeholders before calling the LLM.
+
+Important limitation:
+
+- Voice-control / 声腔 is not fully profile-owned yet.
+- Current "声控" is backend-owned LLM parse outputting per-segment `style`, `style_alpha`, `emo_vec`, and `emo_alpha`.
+- The API backend injects `{{style_rules}}`, `{{emotion_rules}}`, and `{{output_contract}}` into the active prompt at runtime.
+- The style catalog and reference-audio mapping are still code-owned in `vllm/indextts2_api.py` and `fast6g/indextts2_api.py`.
+- Launcher UI does not yet expose style catalog editing, role default style, allowed/disabled style, or stage curves.
+
+Real lifecycle validation:
+
+- `fast6g` + active profile + real liangjie `grok-4.1` completed one backend-owned AI dialogue job on 2026-06-09.
+- The job produced 4 LLM segments, wrote MP3 cache, and `/cache_audio/<key>` returned `200 audio/mpeg`.
+- A discovered Cloudflare 1010 failure was fixed by adding a stable LEON user-agent to both vLLM and fast6g LLM proxy requests.
+
 ## Goal
 
 把 LEON 从“作者写死的一套声腔/档位口味”，逐步变成用户可以调教、保存、分享的本地语音工作台。
@@ -174,6 +198,70 @@ Priority: P1 = stable distribution with the author's defaults. P2 = optional use
 
 输出仍然必须是结构化 JSON。LLM 可以推荐 `role`、`text`、`style`、`style_alpha`、`emo_vec`、`emo_alpha`、`stage`、`pause_ms`，但后端最终负责校验。
 
+## Voice Control Model
+
+Current backend behavior:
+
+- LLM decides segment-level voice-control fields.
+- `style` selects a voice-cavity / breath / delivery preset.
+- `style_alpha` controls how strongly the style reference audio influences the segment.
+- `emo_vec` is an 8-dimensional emotion vector in this order: `[happy, angry, sad, fear, hate, low, surprise, neutral]`.
+- `emo_alpha` controls emotion-vector strength.
+- Backend clamps values before calling the TTS service.
+- Narration is guarded toward `neutral`; high-arousal emotion dimensions are damped to avoid unstable or overacted output.
+- If `style` resolves to a reference audio, `style_alpha` can override the segment emotion strength for that synthesis call.
+- If no valid style reference exists, backend falls back to emotion/default behavior rather than silently inventing a reference.
+
+Prompt behavior:
+
+- The default profile prompt contains `{{style_rules}}` and `{{emotion_rules}}`, so the full prompt is only visible after backend rendering.
+- Users can currently influence style choice by editing `llmPrompt`, but they cannot yet edit the underlying style catalog through the launcher.
+- Directly deleting `{{style_rules}}` or `{{emotion_rules}}` from the prompt will remove the backend's generated voice-control guidance for the LLM.
+
+Desired profile-owned voice control:
+
+```json
+{
+  "styles": {
+    "whisper_soft": {
+      "label": "轻声耳语",
+      "ref": "声腔/轻声耳语.mp3",
+      "style_alpha": 0.42,
+      "emo_vec": [0.1, 0, 0.15, 0.05, 0, 0.25, 0, 0.65],
+      "emo_alpha": 0.36,
+      "description": "低声、贴近、轻微气声"
+    }
+  },
+  "roles": {
+    "旁白": {
+      "default_style": "neutral",
+      "allowed_styles": ["neutral"]
+    },
+    "用户": {
+      "default_style": "neutral",
+      "allowed_styles": ["neutral", "whisper_soft"]
+    },
+    "current_character": {
+      "default_style": "whisper_soft",
+      "allowed_styles": ["neutral", "whisper_soft", "sob_soft"],
+      "blocked_styles": ["scream_peak"]
+    }
+  },
+  "stageMap": {
+    "opening": { "style": "neutral", "style_alpha": 0.18 },
+    "close": { "style": "whisper_soft", "style_alpha": 0.42 }
+  }
+}
+```
+
+Implementation target:
+
+- Profile schema v3 should move style catalog and role style policy out of code defaults.
+- API backend should expose the rendered active style catalog through `/profiles/active` or a related route for diagnostics.
+- Backend must still validate style names, file existence, alpha ranges, and emotion vector shape.
+- Launcher should provide style catalog CRUD, ref-audio picker, default strengths, and role policy editing.
+- Tavo should not own this complexity; it only sends selected mode/档位 and active profile-derived request fields.
+
 ## User-Editable Areas
 
 优先开放：
@@ -263,3 +351,11 @@ Priority: P1 = stable distribution with the author's defaults. P2 = optional use
 3. 保存只写源 profile；应用写入 `active.json`，业务生成只消费 active snapshot。
 4. Tavo 端只保留“当前选择哪个档位”，生成前读取 active profile 并按 `quality.presets.live/generate[mode]` 展开安全字段。
 5. Playwright smoke 增加 guard：LIVE/DISK 都保留 Tavo 选择的档位名，但参数来自 active profile 对应 preset；profile LLM prompt 会作为 `parse_system_prompt` 提交。
+
+下一片最有用：
+
+1. Profile schema v3 增加 `styles`、`roles.*.default_style`、`roles.*.allowed_styles`、`stageMap`。
+2. 把当前代码里的 style catalog 默认值迁移进 `leon-default.json`，代码只保留 fallback 和 clamp。
+3. 启动器调音台增加“声控/声腔”编辑页：外层 style 列表，详情页编辑名称、说明、参考音频、默认 `style_alpha`、`emo_vec`、`emo_alpha`。
+4. 启动器角色策略页支持给旁白、用户、当前角色配置默认 style、允许/禁用 style。
+5. 后端渲染 LLM prompt 时使用 active profile 的 style catalog 生成 `{{style_rules}}`，并在合成前校验每段 LLM 输出。

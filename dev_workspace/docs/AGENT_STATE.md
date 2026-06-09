@@ -8,6 +8,40 @@ This is the active handoff summary. Full historical state was archived on 2026-0
 
 Read the archive only when investigating old decisions, benchmark history, or fixed regressions.
 
+## Restart Handoff 2026-06-09
+
+Latest pushed commits on `master`:
+
+- `98cb188` / `origin/master`: launcher tuning console first slice. Adds profile schema v2, source profiles under `config/profiles/*.json`, active runtime snapshot `config/profiles/active.json`, Tavo active-profile fetch, README rewrite with launcher screenshot, and removes stale generated launcher poster assets.
+- `574576a` / `origin/master`: LLM proxy user-agent fix for both vLLM and fast6g. Real OpenAI-compatible gateway test showed direct `grok-4.1` worked, but backend-owned LLM parse was blocked by Cloudflare 1010 when urllib used the default Python user-agent.
+
+Runtime state after validation:
+
+- Temporary `fast6g` lifecycle test service was stopped with `/control?command=exit`; no Codex-started API service should be left running on `9880`.
+- No API keys were committed or documented. The authorized local key was read only from `D:\apiWorkSpace\cpa\config.yaml` during the real LLM smoke.
+- Generated lifecycle cache remains local under `fast6g/outputs/cache/` for evidence; do not commit generated cache/audio.
+
+Real lifecycle result:
+
+- Started `fast6g` with `LEON_ACTIVE_PROFILE_PATH=config/profiles/active.json`.
+- `/health`, `/profiles/active`, `/voices`, and `/static/tavo.js` were OK.
+- Direct liangjie `grok-4.1` `/chat/completions` smoke returned `200 OK`.
+- Backend-owned AI dialogue job `bc3845c69e36ddedd6a4c828c677c463204357be` completed: `llm_stage=done`, `segments_done=4/4`, `audio_duration_s=4.817`, `total_wall_s=13.564`, `rtf=2.816`.
+- `/cache_audio/bc3845c69e36ddedd6a4c828c677c463204357be` returned `200 audio/mpeg`, `X-IndexTTS-Audio-Format: mp3`, `Content-Length: 78158`.
+
+Current voice-control reality:
+
+- "声控" currently means backend-owned LLM parse outputs per-segment control fields, not a separate launcher UI page yet.
+- The active profile `llmPrompt` contains placeholders such as `{{style_rules}}`, `{{emotion_rules}}`, and `{{output_contract}}`. The API backend renders those placeholders at runtime before sending the prompt to LLM.
+- LLM may output `style`, `style_alpha`, `emo_vec`, and `emo_alpha` per segment. The API backend then normalizes/clamps them, resolves style reference audio when available, and sends the resulting controls into the TTS service.
+- `qwen_emo` is intentionally forced off on the launcher path. The mainline is LLM-provided `style/emo_vec`, not QwenEmotion.
+- The style catalog/reference-audio mapping itself is still code-owned in `vllm/indextts2_api.py` and `fast6g/indextts2_api.py`; it is not yet externalized into `config/profiles/*.json` or editable in the launcher.
+
+Next best task:
+
+- Externalize the style catalog / voice-cavity controls into profile schema v3 and expose them in the launcher tuning console. The user wants to configure a full set of generation behavior from the launcher, not hand-edit JSON or rely on hidden code defaults.
+- Keep Tavo lightweight: it should select mode/d档位 and trigger generation; the launcher owns profile creation/copy/edit/apply and future style catalog editing.
+
 ## Current Goal
 
 Keep LEON IndexTTS2 as the Tavo mainline with stable local startup, explicit role mapping, durable Tavo storage, and predictable LIVE/saved playback.
