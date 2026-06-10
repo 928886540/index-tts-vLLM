@@ -1562,8 +1562,8 @@ ${completenessRules}`;
         }
 
         (snapshot.lines || []).filter(line => !isSelfPollLogLine(line)).forEach(line => {
-            const level = logLevelForLine(line);
-            this.addLog(level, line);
+            const parsed = parseLogSnapshotLine(line);
+            this.addLog(parsed.level, parsed.message, parsed.timestamp);
         });
     }
 
@@ -1632,9 +1632,9 @@ ${completenessRules}`;
         this.renderLogEntries();
     }
 
-    addLog(level, message) {
+    addLog(level, message, timestampOverride = null) {
         const normalizedLevel = ['info', 'success', 'warning', 'error'].includes(level) ? level : 'info';
-        const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        const timestamp = timestampOverride || new Date().toLocaleTimeString('zh-CN', { hour12: false });
         this.logEntries.push({
             level: normalizedLevel,
             message: String(message ?? ''),
@@ -1863,6 +1863,31 @@ function isSelfPollLogLine(line) {
         || text.includes('get /health?')
         || text.includes('/server_log/tail')
         || text.includes('error sending request for url') && text.includes('/health');
+}
+
+function parseLogSnapshotLine(line) {
+    const text = String(line ?? '').trimEnd();
+    const launcherMatch = text.match(/^\[(\d{2}:\d{2}:\d{2})\]\s+\[(INFO|SUCCESS|WARNING|ERROR)\]\s*(.*)$/i);
+    if (launcherMatch) {
+        return {
+            timestamp: launcherMatch[1],
+            level: launcherMatch[2].toLowerCase(),
+            message: launcherMatch[3]
+        };
+    }
+    const backendMatch = text.match(/^(INFO|WARNING|ERROR)\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(.*)$/i);
+    if (backendMatch) {
+        return {
+            timestamp: backendMatch[2],
+            level: backendMatch[1].toLowerCase(),
+            message: backendMatch[3]
+        };
+    }
+    return {
+        timestamp: null,
+        level: logLevelForLine(text),
+        message: text
+    };
 }
 
 function logLevelForLine(line) {
