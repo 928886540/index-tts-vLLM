@@ -1,12 +1,68 @@
 # Agent State
 
-Updated: 2026-06-09
+Updated: 2026-06-10
 
 This is the active handoff summary. Full historical state was archived on 2026-06-07:
 
 - `dev_workspace/docs/archive/AGENT_STATE_ARCHIVE_20260607.md`
 
 Read the archive only when investigating old decisions, benchmark history, or fixed regressions.
+
+## Tauri Launcher Migration 2026-06-10
+
+Current Tauri status:
+
+- New independent Tauri project lives under `launcher-tauri/`; existing WinForms launcher code was not modified.
+- Root artifact path is `D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe`; source release exe is `launcher-tauri/src-tauri/target/release/leon-launcher-tauri.exe`.
+- 2026-06-10 visual parity/polish fix: Tauri shell now uses the WinForms proportions for the three launcher images (132px `head.png`, 244px `left.png`, cover-filled `home.png`), keeps vLLM MSVC/GPU settings above a full-width `vLLM`/`6G` segmented selector, fixes the broken sidebar DOM on the logs page, hides raw `/health` connection errors as `服务未运行`, syncs the logs version selector with the selected launcher mode, modernizes controls/scrollbars, narrows numeric tuning fields, lays each style row on one line, fixes unreadable native select options, captures startup script stdout/stderr into `logs/<version>/launcher-YYYYMMDD.log`, merges recent `.log/.err` tails on the logs page so launch failures are visible, and passes frontend build, JS checks, Rust check, release build, Playwright visual/behavior smoke, and root exe smoke.
+- Tauri backend now uses real LEON contracts:
+  - Profile list reads `config/profiles/*.json` and excludes `active.json`;
+  - applying writes `config/profiles/active.json` with `appliedAt` / `appliedFrom`;
+  - service start calls `scripts/start-vllm-api.bat` or `scripts/start-fast6g-api.bat`;
+  - start env includes `LEON_ACTIVE_PROFILE_PATH`, `LEON_LAUNCHER_VERSION`, `LEON_ENABLE_QWEN_EMO=0`, UTF-8 settings, and vLLM GPU/MSVC env;
+  - stop calls `GET http://127.0.0.1:9880/control?command=exit`;
+  - health checks use `GET http://127.0.0.1:9880/health`.
+- P1 basics are in place:
+  - Profile create/copy/delete and schema v3 preflight;
+  - create clones `leon-default.json` or `active.json` into `leon-new-profile*.json` and opens the editor;
+  - Profile editor basics for name, description, default quality mode, current default mode's LIVE/DISK core quality parameters, `llmPrompt`, existing style label/ref/alpha fields, plus full JSON escape hatch;
+  - save writes only the source Profile; save-and-apply explicitly writes source Profile then `active.json`;
+  - warmup button calls `POST /warmup` only when API health is reachable and never auto-starts the service;
+  - logs page polls latest `logs/<version>/` tail every 5 seconds only while the logs page is active;
+  - environment page reports OS, Python, GPU, port/PID, and root.
+- P2 basics:
+  - `Ctrl+R` refreshes the current page;
+  - `Ctrl+L` clears logs;
+  - shortcuts do not intercept while input/select/textarea/contenteditable is focused.
+  - logs page now has level filtering, search, visible-count, search highlighting, and stronger warning/error row styling.
+- `LEON_LAUNCHER_SMOKE_TEST=1` provides a no-window smoke path that checks root discovery, profiles, profile validation, log snapshot, and active profile existence without starting the API.
+
+Latest Tauri handoff completed 2026-06-10:
+
+- See `dev_workspace/docs/TAURI_HANDOFF_20260610.md` for full context.
+- After adding log filtering/search/highlighting UI, full validation passed:
+
+```powershell
+npm --prefix launcher-tauri run frontend:build
+cargo fmt --manifest-path launcher-tauri\src-tauri\Cargo.toml --check
+cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
+cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
+Copy-Item launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe LEON-Launcher-Tauri.exe -Force
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+git diff --check
+```
+
+- Vite build: `dist/index.html` 16.24 kB, `dist/assets/index-BLucUzJX.css` 14.74 kB, `dist/assets/index-BtLC2hHC.js` 27.32 kB.
+- Cargo release build completed in 57.99s.
+- Root `LEON-Launcher-Tauri.exe` updated successfully.
+- Smoke test exited cleanly (PID 18216).
+- `git diff --check` only reports Windows LF→CRLF warnings, no whitespace errors.
+
+Still needed:
+
+- Real GUI manual smoke: confirm no auto-start, profile create/editor save/apply, copy/delete/test, logs page level filter/search/highlight, warmup stopped-service message, shortcuts, and service status.
+- Real `/warmup` validation requires starting an API service.
+- Do not run `npm --prefix launcher-tauri run frontend:build` in parallel with Cargo checks/builds; Vite clears `dist/` and Tauri can read transient stale asset hashes.
 
 ## Restart Handoff 2026-06-09
 

@@ -1,0 +1,1051 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use chrono::{Local, Utc};
+use serde::Serialize;
+use serde_json::{json, Value};
+use std::{
+    fs,
+    io::{BufRead, BufReader, Write},
+    net::TcpListener,
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::Mutex,
+    time::Duration,
+};
+use tauri::State;
+
+const API_BASE: &str = "http://127.0.0.1:9880";
+
+struct AppState {
+    service_process: Mutex<Option<Child>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfileListItem {
+    file: String,
+    name: String,
+    description: String,
+    display_order: i64,
+    updated_at: Option<String>,
+    active: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServiceHealth {
+    reachable: bool,
+    status: String,
+    version: Option<String>,
+    message: Option<String>,
+    raw: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServiceStatus {
+    running: bool,
+    state: String,
+    health: ServiceHealth,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnvironmentInfo {
+    os: String,
+    python: String,
+    cuda: String,
+    port: String,
+    root: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LogFileInfo {
+    file: String,
+    bytes: u64,
+    modified: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LogSnapshot {
+    version: String,
+    files: Vec<LogFileInfo>,
+    active_file: Option<String>,
+    lines: Vec<String>,
+}
+
+fn main() {
+    if std::env::var("LEON_LAUNCHER_SMOKE_TEST").ok().as_deref() == Some("1") {
+        if let Err(error) = smoke_test() {
+            eprintln!("LEON Tauri smoke failed: {}", error);
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
+
+    tauri::Builder::default()
+        .manage(AppState {
+            service_process: Mutex::new(None),
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_profiles,
+            get_profile,
+            create_profile,
+            save_profile,
+            apply_profile,
+            copy_profile,
+            delete_profile,
+            validate_profile,
+            start_service,
+            stop_service,
+            warmup_service,
+            health_check,
+            get_service_status,
+            get_environment,
+            get_log_snapshot
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+fn smoke_test() -> Result<(), String> {
+    let root = leon_root()?;
+    let profile_dir = root.join("config").join("profiles");
+    let profiles = get_profiles()?;
+    if profiles.is_empty() {
+        return Err(format!("未找到可用 Profile: {}", profile_dir.display()));
+    }
+    validate_profile(profiles[0].file.clone())?;
+    get_log_snapshot("fast6g".to_string(), Some(5))?;
+    let active_path = profile_dir.join("active.json");
+    if !active_path.exists() {
+        return Err(format!("缺少 active profile: {}", active_path.display()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_profiles() -> Result<Vec<ProfileListItem>, String> {
+    let root = leon_root()?;
+    let profile_dir = root.join("config").join("profiles");
+    let active_from = active_profile_source(&profile_dir);
+    let mut profiles = Vec::new();
+
+    let entries = fs::read_dir(&profile_dir)
+        .map_err(|e| format!("读取 Profile 目录失败 {}: {}", profile_dir.display(), e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取 Profile 文件失败: {}", e))?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+
+        let file = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if file.eq_ignore_ascii_case("active.json") {
+            continue;
+        }
+
+        let value = read_json(&path)?;
+        let name = value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(file.as_str())
+            .to_string();
+        let description = value
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let display_order = value
+            .get("displayOrder")
+            .or_else(|| value.get("display_order"))
+            .and_then(Value::as_i64)
+            .unwrap_or(9999);
+        let updated_at = value
+            .get("updatedAt")
+            .or_else(|| value.get("updated_at"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        profiles.push(ProfileListItem {
+            active: active_from
+                .as_deref()
+                .map(|active| active.eq_ignore_ascii_case(&file))
+                .unwrap_or(false),
+            file,
+            name,
+            description,
+            display_order,
+            updated_at,
+        });
+    }
+
+    profiles.sort_by(|a, b| {
+        a.display_order
+            .cmp(&b.display_order)
+            .then_with(|| a.file.to_lowercase().cmp(&b.file.to_lowercase()))
+    });
+    Ok(profiles)
+}
+
+#[tauri::command]
+fn get_profile(file: String) -> Result<Value, String> {
+    let profile_path = profile_file_path(&file)?;
+    read_json(&profile_path)
+}
+
+#[tauri::command]
+fn create_profile() -> Result<String, String> {
+    let root = leon_root()?;
+    let profile_dir = root.join("config").join("profiles");
+    let template_path = preferred_profile_template(&profile_dir)?;
+    let mut profile = read_json(&template_path)?;
+
+    let Some(object) = profile.as_object_mut() else {
+        return Err("Profile 模板根节点必须是 JSON object".to_string());
+    };
+    object.remove("appliedAt");
+    object.remove("appliedFrom");
+    object.insert("name".to_string(), json!("New LEON Profile"));
+    object.insert(
+        "description".to_string(),
+        json!("New profile created by the Tauri launcher."),
+    );
+    object.insert("displayOrder".to_string(), json!(9999));
+    object.insert("updatedAt".to_string(), json!(Utc::now().to_rfc3339()));
+
+    validate_profile_value(&profile)?;
+
+    let target_name = next_new_profile_file_name(&profile_dir)?;
+    let target_path = profile_dir.join(&target_name);
+    let content = serde_json::to_string_pretty(&profile)
+        .map_err(|e| format!("序列化 Profile 失败: {}", e))?;
+    fs::write(&target_path, content)
+        .map_err(|e| format!("写入 {} 失败: {}", target_path.display(), e))?;
+
+    Ok(target_name)
+}
+
+#[tauri::command]
+fn save_profile(file: String, mut profile: Value) -> Result<String, String> {
+    let safe_name = safe_profile_file_name(&file)?;
+    validate_profile_value(&profile)?;
+    let Some(object) = profile.as_object_mut() else {
+        return Err("Profile 根节点必须是 JSON object".to_string());
+    };
+
+    object.remove("appliedAt");
+    object.remove("appliedFrom");
+    object.insert("updatedAt".to_string(), json!(Utc::now().to_rfc3339()));
+
+    let profile_path = profile_file_path(&safe_name)?;
+    let content = serde_json::to_string_pretty(&profile)
+        .map_err(|e| format!("序列化 Profile 失败: {}", e))?;
+    fs::write(&profile_path, content)
+        .map_err(|e| format!("写入 {} 失败: {}", profile_path.display(), e))?;
+
+    Ok(format!("已保存 Profile：{}", safe_name))
+}
+
+#[tauri::command]
+fn apply_profile(file: String) -> Result<String, String> {
+    let root = leon_root()?;
+    let profile_dir = root.join("config").join("profiles");
+    let source_path = profile_file_path(&file)?;
+    let mut profile = read_json(&source_path)?;
+
+    profile["appliedAt"] = json!(Utc::now().to_rfc3339());
+    profile["appliedFrom"] = json!(safe_profile_file_name(&file)?);
+
+    let active_path = profile_dir.join("active.json");
+    let content = serde_json::to_string_pretty(&profile)
+        .map_err(|e| format!("序列化 active profile 失败: {}", e))?;
+    fs::write(&active_path, content)
+        .map_err(|e| format!("写入 {} 失败: {}", active_path.display(), e))?;
+
+    Ok(format!("已启用配置：{}", safe_profile_file_name(&file)?))
+}
+
+#[tauri::command]
+fn copy_profile(file: String) -> Result<String, String> {
+    let source_path = profile_file_path(&file)?;
+    let source_name = safe_profile_file_name(&file)?;
+    let mut profile = read_json(&source_path)?;
+    profile.as_object_mut().map(|object| {
+        object.remove("appliedAt");
+        object.remove("appliedFrom");
+    });
+
+    if let Some(object) = profile.as_object_mut() {
+        if let Some(name) = object.get("name").and_then(Value::as_str) {
+            object.insert("name".to_string(), json!(format!("{} copy", name)));
+        }
+        object.insert("updatedAt".to_string(), json!(Utc::now().to_rfc3339()));
+    }
+
+    let root = leon_root()?;
+    let profile_dir = root.join("config").join("profiles");
+    let target_name = next_copy_file_name(&profile_dir, &source_name)?;
+    let target_path = profile_dir.join(&target_name);
+    let content = serde_json::to_string_pretty(&profile)
+        .map_err(|e| format!("序列化 Profile 失败: {}", e))?;
+    fs::write(&target_path, content)
+        .map_err(|e| format!("写入 {} 失败: {}", target_path.display(), e))?;
+
+    Ok(format!("已复制为：{}", target_name))
+}
+
+#[tauri::command]
+fn delete_profile(file: String) -> Result<String, String> {
+    let safe_name = safe_profile_file_name(&file)?;
+    let root = leon_root()?;
+    let profile_dir = root.join("config").join("profiles");
+    if active_profile_source(&profile_dir)
+        .as_deref()
+        .map(|active| active.eq_ignore_ascii_case(&safe_name))
+        .unwrap_or(false)
+    {
+        return Err("不能删除当前启用的 Profile，请先启用其他配置".to_string());
+    }
+
+    let path = profile_dir.join(&safe_name);
+    fs::remove_file(&path).map_err(|e| format!("删除 {} 失败: {}", path.display(), e))?;
+    Ok(format!("已删除：{}", safe_name))
+}
+
+#[tauri::command]
+fn validate_profile(file: String) -> Result<String, String> {
+    let value = read_json(&profile_file_path(&file)?)?;
+    validate_profile_value(&value)?;
+    Ok(format!(
+        "Profile 测试通过：{}",
+        safe_profile_file_name(&file)?
+    ))
+}
+
+#[tauri::command]
+async fn start_service(
+    version: String,
+    gpu_ratio: Option<f32>,
+    enable_msvc: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let root = leon_root()?;
+    let normalized = normalize_version(&version);
+    let script_name = if normalized == "fast6g" {
+        "start-fast6g-api.bat"
+    } else {
+        "start-vllm-api.bat"
+    };
+    let script = root.join("scripts").join(script_name);
+    if !script.exists() {
+        return Err(format!("缺少启动脚本: {}", script.display()));
+    }
+
+    if health_check_internal().await.reachable {
+        return Ok(format!("LEON 服务已在运行：{}", API_BASE));
+    }
+
+    {
+        let mut guard = state
+            .service_process
+            .lock()
+            .map_err(|_| "服务状态锁已损坏".to_string())?;
+        if let Some(child) = guard.as_mut() {
+            if child
+                .try_wait()
+                .map_err(|e| format!("检查启动进程失败: {}", e))?
+                .is_none()
+            {
+                return Err("服务启动进程仍在运行，请稍后再试".to_string());
+            }
+            *guard = None;
+        }
+    }
+
+    let version_root = root.join(&normalized);
+    let active_profile = root.join("config").join("profiles").join("active.json");
+    let script_arg = script.to_string_lossy().to_string();
+    let launcher_log = launcher_log_path(&root, &normalized)?;
+    append_launcher_log(
+        &launcher_log,
+        "INFO",
+        &format!("调用启动入口: {}", script.display()),
+    )?;
+    if normalized == "vllm" {
+        let ratio = gpu_ratio.unwrap_or(0.15).clamp(0.05, 0.95);
+        let use_msvc = enable_msvc.unwrap_or(true);
+        append_launcher_log(
+            &launcher_log,
+            "INFO",
+            &format!(
+                "启动配置: vLLM, gpu_memory_utilization={}, MSVC={}",
+                format_ratio(ratio),
+                if use_msvc { "on" } else { "off" }
+            ),
+        )?;
+    } else {
+        append_launcher_log(&launcher_log, "INFO", "启动配置: Fast6G")?;
+    }
+    let stdout = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&launcher_log)
+        .map_err(|e| format!("打开启动日志失败 {}: {}", launcher_log.display(), e))?;
+    let stderr = stdout
+        .try_clone()
+        .map_err(|e| format!("复制启动日志句柄失败: {}", e))?;
+
+    let mut cmd = Command::new("cmd.exe");
+    cmd.args(["/d", "/c", &script_arg])
+        .current_dir(&version_root)
+        .env("LEON_LAUNCHER_NO_PAUSE", "1")
+        .env("LEON_LAUNCHER_VERSION", &normalized)
+        .env("LEON_ENABLE_QWEN_EMO", "0")
+        .env("LEON_ACTIVE_PROFILE_PATH", active_profile)
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+
+    if normalized == "vllm" {
+        let ratio = gpu_ratio.unwrap_or(0.15).clamp(0.05, 0.95);
+        cmd.env("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION", format_ratio(ratio));
+        let use_msvc = enable_msvc.unwrap_or(true);
+        cmd.env("LEON_ENABLE_MSVC", if use_msvc { "1" } else { "0" });
+    }
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            let message = format!("启动 {} 服务失败: {}", normalized, e);
+            let _ = append_launcher_log(&launcher_log, "ERROR", &message);
+            return Err(message);
+        }
+    };
+    let pid = child.id();
+    append_launcher_log(&launcher_log, "INFO", &format!("启动 wrapper PID: {}", pid))?;
+
+    std::thread::sleep(Duration::from_millis(700));
+    if let Some(status) = child
+        .try_wait()
+        .map_err(|e| format!("检查启动进程失败: {}", e))?
+    {
+        if !status.success() {
+            let tail = read_tail_lines(&launcher_log, 40)
+                .unwrap_or_else(|_| vec!["启动日志读取失败".to_string()])
+                .join("\n");
+            let _ = append_launcher_log(
+                &launcher_log,
+                "ERROR",
+                &format!("启动 wrapper 异常退出，exit={}", status),
+            );
+            return Err(format!(
+                "{} 启动进程已退出，exit={}。\n{}",
+                normalized, status, tail
+            ));
+        }
+        append_launcher_log(
+            &launcher_log,
+            "INFO",
+            &format!("启动 wrapper 已退出，exit={}", status),
+        )?;
+    }
+
+    let mut guard = state
+        .service_process
+        .lock()
+        .map_err(|_| "服务状态锁已损坏".to_string())?;
+    *guard = Some(child);
+
+    Ok(format!(
+        "{} 启动命令已发送，wrapper PID: {}，日志: {}",
+        normalized,
+        pid,
+        launcher_log.display()
+    ))
+}
+
+#[tauri::command]
+async fn stop_service(state: State<'_, AppState>) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
+
+    let _ = client
+        .get(format!("{}/control?command=exit", API_BASE))
+        .send()
+        .await;
+
+    let mut killed_wrapper = false;
+    {
+        let mut guard = state
+            .service_process
+            .lock()
+            .map_err(|_| "服务状态锁已损坏".to_string())?;
+        if let Some(mut child) = guard.take() {
+            if child
+                .try_wait()
+                .map_err(|e| format!("检查启动进程失败: {}", e))?
+                .is_none()
+            {
+                let _ = child.kill();
+                killed_wrapper = true;
+            }
+        }
+    }
+
+    if killed_wrapper {
+        Ok("已发送退出请求，并清理启动 wrapper".to_string())
+    } else {
+        Ok("已发送退出请求".to_string())
+    }
+}
+
+#[tauri::command]
+async fn warmup_service(force: Option<bool>) -> Result<String, String> {
+    let health = health_check_internal().await;
+    if !health.reachable {
+        return Err("LEON 服务未运行，无法预热模型".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
+
+    let body = json!({
+        "voice": "400个火爆音色/短剧解说",
+        "text": "你好。",
+        "force": force.unwrap_or(false),
+    });
+
+    let resp = client
+        .post(format!("{}/warmup", API_BASE))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("预热请求失败: {}", e))?;
+    let status = resp.status();
+    let value = resp
+        .json::<Value>()
+        .await
+        .map_err(|e| format!("预热响应不是 JSON: {}", e))?;
+
+    if !status.is_success() {
+        return Err(format!("预热失败 HTTP {}: {}", status, value));
+    }
+
+    let state = value
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let voice = value
+        .get("voice")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    Ok(format!("模型预热返回：status={} voice={}", state, voice))
+}
+
+#[tauri::command]
+async fn health_check() -> Result<ServiceHealth, String> {
+    Ok(health_check_internal().await)
+}
+
+#[tauri::command]
+async fn get_service_status(state: State<'_, AppState>) -> Result<ServiceStatus, String> {
+    let health = health_check_internal().await;
+    let mut has_wrapper = false;
+    {
+        let mut guard = state
+            .service_process
+            .lock()
+            .map_err(|_| "服务状态锁已损坏".to_string())?;
+        if let Some(child) = guard.as_mut() {
+            has_wrapper = child
+                .try_wait()
+                .map_err(|e| format!("检查启动进程失败: {}", e))?
+                .is_none();
+            if !has_wrapper {
+                *guard = None;
+            }
+        }
+    }
+
+    let state = if health.reachable {
+        "running"
+    } else if has_wrapper {
+        "starting"
+    } else {
+        "stopped"
+    };
+
+    Ok(ServiceStatus {
+        running: health.reachable,
+        state: state.to_string(),
+        health,
+    })
+}
+
+#[tauri::command]
+fn get_environment() -> Result<EnvironmentInfo, String> {
+    let root = leon_root()?;
+    Ok(EnvironmentInfo {
+        os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        python: command_first_line("python", &["--version"])
+            .unwrap_or_else(|| "未检测到".to_string()),
+        cuda: command_first_line(
+            "nvidia-smi",
+            &[
+                "--query-gpu=name,memory.total,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+        )
+        .unwrap_or_else(|| "未检测到 NVIDIA GPU".to_string()),
+        port: check_port_text(9880),
+        root: root.display().to_string(),
+    })
+}
+
+#[tauri::command]
+fn get_log_snapshot(version: String, max_lines: Option<usize>) -> Result<LogSnapshot, String> {
+    let root = leon_root()?;
+    let normalized = normalize_version(&version);
+    let log_dir = root.join("logs").join(&normalized);
+    let max_lines = max_lines.unwrap_or(220).clamp(20, 1000);
+
+    if !log_dir.is_dir() {
+        return Ok(LogSnapshot {
+            version: normalized,
+            files: Vec::new(),
+            active_file: None,
+            lines: vec![format!("日志目录不存在：{}", log_dir.display())],
+        });
+    }
+
+    let mut files = Vec::new();
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&log_dir)
+        .map_err(|e| format!("读取日志目录失败 {}: {}", log_dir.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("读取日志文件失败: {}", e))?;
+        let path = entry.path();
+        if !path.is_file() || !is_log_file(&path) {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("读取日志元数据失败 {}: {}", path.display(), e))?;
+        let modified = metadata.modified().ok();
+        let file = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        files.push(LogFileInfo {
+            file: file.clone(),
+            bytes: metadata.len(),
+            modified: modified.and_then(system_time_to_rfc3339),
+        });
+        candidates.push((path, modified));
+    }
+
+    files.sort_by(|a, b| {
+        b.modified
+            .cmp(&a.modified)
+            .then_with(|| b.file.cmp(&a.file))
+    });
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let Some((active_path, _)) = candidates.first() else {
+        return Ok(LogSnapshot {
+            version: normalized,
+            files,
+            active_file: None,
+            lines: vec![format!("没有找到日志文件：{}", log_dir.display())],
+        });
+    };
+
+    let selected: Vec<&(PathBuf, Option<std::time::SystemTime>)> =
+        candidates.iter().take(5).collect();
+    let per_file = (max_lines / selected.len().max(1)).clamp(20, 220);
+    let mut lines = Vec::new();
+    for (index, item) in selected.iter().enumerate() {
+        let path = &item.0;
+        if index > 0 {
+            lines.push(String::new());
+        }
+        let file = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+        lines.push(format!("===== {} =====", file));
+        lines.extend(read_tail_lines(path, per_file)?);
+    }
+
+    Ok(LogSnapshot {
+        version: normalized,
+        files,
+        active_file: active_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(str::to_string),
+        lines,
+    })
+}
+
+async fn health_check_internal() -> ServiceHealth {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            return ServiceHealth {
+                reachable: false,
+                status: "error".to_string(),
+                version: None,
+                message: Some(format!("创建 HTTP client 失败: {}", e)),
+                raw: None,
+            }
+        }
+    };
+
+    match client.get(format!("{}/health", API_BASE)).send().await {
+        Ok(resp) if resp.status().is_success() => match resp.json::<Value>().await {
+            Ok(value) => ServiceHealth {
+                reachable: true,
+                status: "healthy".to_string(),
+                version: value
+                    .get("version")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                message: Some("服务运行中".to_string()),
+                raw: Some(value),
+            },
+            Err(e) => ServiceHealth {
+                reachable: true,
+                status: "healthy".to_string(),
+                version: None,
+                message: Some(format!("健康检查返回非 JSON: {}", e)),
+                raw: None,
+            },
+        },
+        Ok(resp) => ServiceHealth {
+            reachable: false,
+            status: "unhealthy".to_string(),
+            version: None,
+            message: Some(format!("HTTP {}", resp.status())),
+            raw: None,
+        },
+        Err(_) => ServiceHealth {
+            reachable: false,
+            status: "stopped".to_string(),
+            version: None,
+            message: Some("服务未运行".to_string()),
+            raw: None,
+        },
+    }
+}
+
+fn leon_root() -> Result<PathBuf, String> {
+    if let Ok(raw) = std::env::var("LEON_ROOT") {
+        let path = PathBuf::from(raw);
+        if is_leon_root(&path) {
+            return canonical(path);
+        }
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.extend(ancestors(&current_dir));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.extend(ancestors(parent));
+        }
+    }
+    candidates.extend(ancestors(Path::new(env!("CARGO_MANIFEST_DIR"))));
+
+    for candidate in candidates {
+        if is_leon_root(&candidate) {
+            return canonical(candidate);
+        }
+    }
+
+    Err("无法定位 LEON 根目录：需要包含 config/profiles 和 scripts".to_string())
+}
+
+fn ancestors(path: &Path) -> Vec<PathBuf> {
+    path.ancestors().map(Path::to_path_buf).collect()
+}
+
+fn is_leon_root(path: &Path) -> bool {
+    path.join("config").join("profiles").is_dir() && path.join("scripts").is_dir()
+}
+
+fn canonical(path: PathBuf) -> Result<PathBuf, String> {
+    path.canonicalize()
+        .map_err(|e| format!("解析路径 {} 失败: {}", path.display(), e))
+}
+
+fn profile_file_path(file: &str) -> Result<PathBuf, String> {
+    let root = leon_root()?;
+    Ok(root
+        .join("config")
+        .join("profiles")
+        .join(safe_profile_file_name(file)?))
+}
+
+fn safe_profile_file_name(file: &str) -> Result<String, String> {
+    let name = Path::new(file)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "Profile 文件名无效".to_string())?;
+    if !name.ends_with(".json") || name.eq_ignore_ascii_case("active.json") {
+        return Err("Profile 文件必须是非 active.json 的 .json 文件".to_string());
+    }
+    Ok(name.to_string())
+}
+
+fn next_copy_file_name(profile_dir: &Path, source_name: &str) -> Result<String, String> {
+    let stem = source_name.trim_end_matches(".json");
+    for index in 1..1000 {
+        let suffix = if index == 1 {
+            "-copy".to_string()
+        } else {
+            format!("-copy-{}", index)
+        };
+        let candidate = format!("{}{}.json", stem, suffix);
+        if !profile_dir.join(&candidate).exists() {
+            return Ok(candidate);
+        }
+    }
+    Err("无法生成可用的复制文件名".to_string())
+}
+
+fn next_new_profile_file_name(profile_dir: &Path) -> Result<String, String> {
+    for index in 1..1000 {
+        let candidate = if index == 1 {
+            "leon-new-profile.json".to_string()
+        } else {
+            format!("leon-new-profile-{}.json", index)
+        };
+        if !profile_dir.join(&candidate).exists() {
+            return Ok(candidate);
+        }
+    }
+    Err("无法生成可用的新 Profile 文件名".to_string())
+}
+
+fn preferred_profile_template(profile_dir: &Path) -> Result<PathBuf, String> {
+    let default_path = profile_dir.join("leon-default.json");
+    if default_path.is_file() {
+        return Ok(default_path);
+    }
+
+    let active_path = profile_dir.join("active.json");
+    if active_path.is_file() {
+        return Ok(active_path);
+    }
+
+    Err("无法创建 Profile：缺少 leon-default.json 或 active.json 模板".to_string())
+}
+
+fn validate_profile_value(value: &Value) -> Result<(), String> {
+    if value.get("version").and_then(Value::as_i64).unwrap_or(0) < 3 {
+        return Err("Profile version 必须 >= 3".to_string());
+    }
+    required_str(value, "name")?;
+    let quality = value
+        .get("quality")
+        .ok_or_else(|| "缺少 quality".to_string())?;
+    let default_mode = required_str(quality, "defaultMode")?;
+    let presets = quality
+        .get("presets")
+        .ok_or_else(|| "缺少 quality.presets".to_string())?;
+    let live = presets
+        .get("live")
+        .ok_or_else(|| "缺少 quality.presets.live".to_string())?;
+    let generate = presets
+        .get("generate")
+        .ok_or_else(|| "缺少 quality.presets.generate".to_string())?;
+    validate_preset(live, default_mode, "live")?;
+    validate_preset(generate, default_mode, "generate")?;
+    let styles = value
+        .get("styles")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "缺少 styles".to_string())?;
+    if styles.is_empty() {
+        return Err("styles 不能为空".to_string());
+    }
+    Ok(())
+}
+
+fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| format!("缺少字段 {}", key))
+}
+
+fn validate_preset(value: &Value, mode: &str, group: &str) -> Result<(), String> {
+    let preset = value
+        .get(mode)
+        .ok_or_else(|| format!("缺少 quality.presets.{}.{}", group, mode))?;
+    for key in [
+        "diffusion_steps",
+        "prompt_audio_seconds",
+        "segment_tokens",
+        "first_tokens",
+        "s2mel_cfg_rate",
+    ] {
+        if !preset.get(key).is_some_and(Value::is_number) {
+            return Err(format!(
+                "quality.presets.{}.{}.{} 缺少或不是数字",
+                group, mode, key
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn read_json(path: &Path) -> Result<Value, String> {
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
+    serde_json::from_str(&content).map_err(|e| format!("解析 {} 失败: {}", path.display(), e))
+}
+
+fn active_profile_source(profile_dir: &Path) -> Option<String> {
+    let active_path = profile_dir.join("active.json");
+    let value = read_json(&active_path).ok()?;
+    value
+        .get("appliedFrom")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn normalize_version(version: &str) -> String {
+    if version.eq_ignore_ascii_case("fast6g") {
+        "fast6g".to_string()
+    } else {
+        "vllm".to_string()
+    }
+}
+
+fn format_ratio(ratio: f32) -> String {
+    let mut text = format!("{:.3}", ratio);
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
+
+fn command_first_line(program: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stdout
+        .lines()
+        .chain(stderr.lines())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+fn check_port_text(port: u16) -> String {
+    if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        format!("{} 可用", port)
+    } else {
+        let pids = listening_pids(port);
+        if pids.is_empty() {
+            format!("{} 已被占用或服务运行中", port)
+        } else {
+            format!("{} 已监听，PID: {}", port, pids.join(", "))
+        }
+    }
+}
+
+fn listening_pids(port: u16) -> Vec<String> {
+    let output = Command::new("netstat").args(["-ano"]).output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let needle = format!(":{}", port);
+    let mut pids = Vec::new();
+    for line in text.lines() {
+        if line.contains(&needle) && line.contains("LISTENING") {
+            if let Some(pid) = line.split_whitespace().last() {
+                if !pids.iter().any(|existing| existing == pid) {
+                    pids.push(pid.to_string());
+                }
+            }
+        }
+    }
+    pids
+}
+
+fn is_log_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|s| s.to_str()),
+        Some("log" | "err" | "txt")
+    )
+}
+
+fn launcher_log_path(root: &Path, version: &str) -> Result<PathBuf, String> {
+    let log_dir = root.join("logs").join(version);
+    fs::create_dir_all(&log_dir)
+        .map_err(|e| format!("创建日志目录失败 {}: {}", log_dir.display(), e))?;
+    Ok(log_dir.join(format!("launcher-{}.log", Local::now().format("%Y%m%d"))))
+}
+
+fn append_launcher_log(path: &Path, level: &str, message: &str) -> Result<(), String> {
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("打开启动器日志失败 {}: {}", path.display(), e))?;
+    writeln!(
+        file,
+        "[{}] [{}] {}",
+        Local::now().format("%H:%M:%S"),
+        level,
+        message
+    )
+    .map_err(|e| format!("写入启动器日志失败 {}: {}", path.display(), e))
+}
+
+fn read_tail_lines(path: &Path, max_lines: usize) -> Result<Vec<String>, String> {
+    let file =
+        fs::File::open(path).map_err(|e| format!("打开日志失败 {}: {}", path.display(), e))?;
+    let reader = BufReader::new(file);
+    let mut lines = Vec::new();
+    for line in reader.lines() {
+        lines.push(line.unwrap_or_else(|_| "<invalid utf8 line>".to_string()));
+        if lines.len() > max_lines {
+            lines.remove(0);
+        }
+    }
+    Ok(lines)
+}
+
+fn system_time_to_rfc3339(time: std::time::SystemTime) -> Option<String> {
+    let datetime: chrono::DateTime<Utc> = time.into();
+    Some(datetime.to_rfc3339())
+}

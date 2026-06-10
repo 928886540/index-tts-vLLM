@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEON 启动器</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="styles/components.css">
+</head>
+<body>
+    <header class="top-bar">
+        <img src="assets/head.png" alt="Characters" class="top-banner">
+    </header>
+    <div class="main-container">
+        <nav class="sidebar">
+            <div class="sidebar-character-art">
+                <img src="assets/left.png" alt="Characters" class="character-bg">
+            </div>
+            <div class="nav-items">
+                <div class="nav-item active" data-page="home">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                    </svg>
+                    <span class="nav-label">首页</span>
+                </div>
+                <div class="nav-item" data-page="logs">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <line x1="10" y1="9" x2="8" y2="9"></line>
+                    </svg>
+                    <span class="nav-label">日志</span>
+                </div>
+                <div class="nav-item" data-page="mixer">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="4" y1="21" x2="4" y2="14"></line>
+                        <line x1="4" y1="10" x2="4" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12" y2="3"></line>
+                        <line x1="20" y1="21" x2="20" y2="16"></line>
+                        <line x1="20" y1="12" x2="20" y2="3"></line>
+                        <circle cx="4" cy="14" r="2"></circle>
+                        <circle cx="12" cy="8" r="2"></circle>
+                        <circle cx="20" cy="16" r="2"></circle>
+                    </svg>
+                    <span class="nav-label">调音台</span>
+                </div>
+                <div class="nav-item" data-page="environment">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                        <line x1="8" y1="21" x2="16" y2="21"></line>
+                        <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                    <span class="nav-label">环境检测</span>
+                </div>
+            </div>
+            <div class="bottom-panel">
+                <div class="config-row vllm-options">
+                    <label class="msvc-toggle">
+                        <input type="checkbox" id="enable-msvc" checked>
+                        <span>启用 MSVC</span>
+                    </label>
+                    <label class="gpu-ratio-label">
+                        <span>GPU占比</span>
+                        <input type="number" id="gpu-ratio" value="0.15" step="0.05" min="0.1" max="1.0">
+                    </label>
+                </div>
+                <div class="version-selector">
+                    <button class="btn-version active" id="btn-version-vllm" data-version="vllm">vLLM</button>
+                    <button class="btn-version" id="btn-version-fast6g" data-version="fast6g">6G</button>
+                </div>
+                <div class="system-status">
+                    <span class="status-dot" data-state="stopped"></span>
+                    <span class="status-text">系统就绪</span>
+                </div>
+                <button class="btn-launch" id="btn-start">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z"></path>
+                    </svg>
+                    <span>启动 LEON 服务</span>
+                </button>
+            </div>
+        </nav>
+
+        <main class="content-area">
+            <div id="page-home" class="page active">
+                <div class="hero-section">
+                    <div class="hero-background">
+                        <div class="gradient-overlay"></div>
+                    </div>
+                    <div class="hero-content">
+                        <h1 class="hero-title">LEON 启动器</h1>
+                        <p class="hero-subtitle">智能语音助理系统</p>
+                        <div class="quick-stats">
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-profiles">0</div>
+                                <div class="stat-label">配置文件</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-active">0</div>
+                                <div class="stat-label">激活数</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-uptime">00:00</div>
+                                <div class="stat-label">运行时间</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-mixer" class="page">
+                <div class="page-header">
+                    <h2 class="page-title">调音台</h2>
+                    <div class="page-actions">
+                        <button class="btn-secondary" id="btn-create-profile">新建 Profile</button>
+                    </div>
+                </div>
+                <div class="profiles-grid" id="profiles-container"></div>
+            </div>
+
+            <div id="page-editor" class="page">
+                <div class="page-header">
+                    <button class="btn-secondary" id="btn-back-to-mixer">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="19" y1="12" x2="5" y2="12"></line>
+                            <polyline points="12 19 5 12 12 5"></polyline>
+                        </svg>
+                        返回列表
+                    </button>
+                    <h2 class="page-title" id="editor-title">Profile 详情</h2>
+                    <div class="editor-file" id="editor-file"></div>
+                </div>
+                <section class="profile-editor">
+                    <div class="editor-grid">
+                        <label class="field">
+                            <span>名称</span>
+                            <input id="editor-name" type="text" autocomplete="off">
+                        </label>
+                        <label class="field">
+                            <span>描述</span>
+                            <input id="editor-description" type="text" autocomplete="off">
+                        </label>
+                        <label class="field">
+                            <span>默认档位</span>
+                            <select id="editor-default-mode"></select>
+                        </label>
+                        <label class="field">
+                            <span>声腔数量</span>
+                            <input id="editor-style-count" type="text" disabled>
+                        </label>
+                        <div class="field full">
+                            <span>质量参数（当前默认档位）</span>
+                            <div class="preset-editor" id="editor-preset-fields"></div>
+                        </div>
+                        <div class="field full">
+                            <span>LLM 拆段规则（用户可编辑）</span>
+                            <textarea id="editor-segment-rules" rows="6" spellcheck="false" placeholder="1. 旁白...&#10;2. 人物对白...&#10;3. 引导句..."></textarea>
+                        </div>
+                        <div class="field full">
+                            <span>完整性规则（用户可编辑）</span>
+                            <textarea id="editor-completeness-rules" rows="4" spellcheck="false" placeholder="- 必须覆盖输入原文 100%...&#10;- 不确定说话人时用旁白..."></textarea>
+                        </div>
+                        <div class="field full">
+                            <span>自定义补充说明（可选）</span>
+                            <textarea id="editor-custom-notes" rows="2" spellcheck="false" placeholder="额外规则或注意事项"></textarea>
+                        </div>
+                        <div class="field full">
+                            <div class="style-toolbar">
+                                <span>声腔映射</span>
+                                <button class="btn-secondary compact" id="btn-add-style">+ 新增声腔</button>
+                            </div>
+                            <div class="style-list" id="editor-styles"></div>
+                        </div>
+                        <label class="field full">
+                            <span>完整 JSON</span>
+                            <textarea id="editor-json" rows="12" spellcheck="false"></textarea>
+                        </label>
+                    </div>
+                    <div class="editor-actions">
+                        <button class="btn-secondary" id="btn-sync-json">同步表单到 JSON</button>
+                        <button class="btn-secondary" id="btn-save-profile">保存 Profile</button>
+                        <button class="btn-secondary" id="btn-apply-edited-profile">保存并启用</button>
+                    </div>
+                </section>
+            </div>
+
+            <div id="page-logs" class="page">
+                <div class="page-header">
+                    <h2 class="page-title">系统日志</h2>
+                    <div class="page-actions">
+                        <select id="log-version-select" class="select-version compact">
+                            <option value="vllm">vLLM</option>
+                            <option value="fast6g">Fast6G</option>
+                        </select>
+                        <select id="log-level-filter" class="select-version compact">
+                            <option value="all">全部</option>
+                            <option value="issues">错误+警告</option>
+                            <option value="error">错误</option>
+                            <option value="warning">警告</option>
+                            <option value="success">成功</option>
+                            <option value="info">信息</option>
+                        </select>
+                        <input
+                            id="log-search"
+                            class="log-search"
+                            type="search"
+                            placeholder="搜索日志"
+                            spellcheck="false"
+                        >
+                        <span id="log-visible-count" class="log-count">0/0</span>
+                        <button class="btn-secondary" id="btn-refresh-logs">读取日志</button>
+                        <button class="btn-secondary" id="btn-clear-logs">清空</button>
+                    </div>
+                </div>
+                <div class="log-container">
+                    <div class="log-output" id="log-output">
+                        <div class="log-entry log-info">[INFO] LEON 启动器已初始化</div>
+                        <div class="log-entry log-info">[INFO] 等待用户操作...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-environment" class="page">
+                <div class="page-header">
+                    <h2 class="page-title">环境检测</h2>
+                    <button class="btn-secondary" id="btn-check-env">重新检测</button>
+                </div>
+                <div class="env-grid">
+                    <div class="env-card">
+                        <div class="env-header">
+                            <svg class="env-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                <line x1="8" y1="21" x2="16" y2="21"></line>
+                                <line x1="12" y1="17" x2="12" y2="21"></line>
+                            </svg>
+                            <h3 class="env-title">操作系统</h3>
+                        </div>
+                        <div class="env-value" id="env-os">检测中...</div>
+                    </div>
+                    <div class="env-card">
+                        <div class="env-header">
+                            <svg class="env-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                                <rect x="9" y="9" width="6" height="6"></rect>
+                                <line x1="9" y1="1" x2="9" y2="4"></line>
+                                <line x1="15" y1="1" x2="15" y2="4"></line>
+                                <line x1="9" y1="20" x2="9" y2="23"></line>
+                                <line x1="15" y1="20" x2="15" y2="23"></line>
+                                <line x1="20" y1="9" x2="23" y2="9"></line>
+                                <line x1="20" y1="14" x2="23" y2="14"></line>
+                                <line x1="1" y1="9" x2="4" y2="9"></line>
+                                <line x1="1" y1="14" x2="4" y2="14"></line>
+                            </svg>
+                            <h3 class="env-title">Python 版本</h3>
+                        </div>
+                        <div class="env-value" id="env-python">检测中...</div>
+                    </div>
+                    <div class="env-card">
+                        <div class="env-header">
+                            <svg class="env-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="2" y1="12" x2="22" y2="12"></line>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                            </svg>
+                            <h3 class="env-title">网络连接</h3>
+                        </div>
+                        <div class="env-value" id="env-network">检测中...</div>
+                    </div>
+                    <div class="env-card">
+                        <div class="env-header">
+                            <svg class="env-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                            </svg>
+                            <h3 class="env-title">CUDA 可用</h3>
+                        </div>
+                        <div class="env-value" id="env-cuda">检测中...</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script type="module" src="scripts/mock-api.js"></script>
+    <script type="module" src="scripts/app.js"></script>
+</body>
+</html>

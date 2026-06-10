@@ -1,0 +1,438 @@
+/* ==================== 全局样式 ==================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #252525;
+    --bg-tertiary: #2f2f2f;
+    --text-primary: #ffffff;
+    --text-secondary: #a0a0a0;
+    --text-muted: #666666;
+
+    --accent-gold: #ffd700;
+    --accent-cyan: #00d4ff;
+    --accent-pink: #ff6ba9;
+    --accent-purple: #b794f6;
+
+    --border-radius-sm: 6px;
+    --border-radius-md: 8px;
+    --border-radius-lg: 10px;
+
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #0c1015;
+    color: var(--text-primary);
+}
+
+/* ==================== 顶部横幅 ==================== */
+
+.top-bar {
+    height: 132px;
+    background: #0b0f14;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+}
+
+.top-banner {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center;
+}
+
+/* ==================== 主布局 ==================== */
+
+.main-container {
+    display: flex;
+    height: calc(100vh - 132px);
+    min-height: 0;
+    overflow: hidden;
+    background: #0c1015;
+}
+
+/* ==================== 侧边栏 ==================== */
+
+.sidebar {
+    position: relative;
+    flex: 0 0 244px;
+    width: 244px;
+    padding: 18px;
+    background: #11171e;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sidebar-character-art {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.character-bg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center;
+}
+
+.nav-items {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.nav-item {
+    width: 100%;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    cursor: pointer;
+    border: 1px solid #34404e;
+    border-radius: 0;
+    color: #ffffff;
+    background: #1e2731;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.nav-item:hover {
+    background: #26323e;
+    border-color: #52657a;
+}
+
+.nav-item.active {
+    background: #304458;
+    border-color: #6991b0;
+    color: #ffffff;
+}
+
+.nav-icon {
+    display: none;
+}
+
+.nav-label {
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* ==================== 底部启动区 ==================== */
+
+.bottom-panel {
+    position: relative;
+    z-index: 1;
+    margin-top: auto;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 6px;
+}
+
+.config-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.vllm-options.hidden {
+    display: none;
+}
+
+.msvc-toggle {
+    flex: 0 0 96px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: #cdd6e0;
+    font-size: 13px;
+    line-height: 1;
+    user-select: none;
+}
+
+.msvc-toggle input {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    accent-color: var(--accent-gold);
+}
+
+.gpu-ratio-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #cdd6e0;
+}
+
+.gpu-ratio-label span {
+    flex: 0 0 auto;
+}
+
+.gpu-ratio-label input {
+    width: 58px;
+    height: 24px;
+    padding: 2px 6px;
+    color: #ffffff;
+    background: #19212a;
+    border: 1px solid #34404e;
+    border-radius: 0;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.gpu-ratio-label input:focus {
+    outline: none;
+    border-color: #6991b0;
+}
+
+.version-selector {
+    display: flex;
+    align-items: center;
+    gap: 0;
+}
+
+.btn-version {
+    width: 64px;
+    height: 32px;
+    padding: 0 8px;
+    color: #cdd6e0;
+    background: #181f27;
+    border: 1px solid #2e3844;
+    border-radius: 0;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-version:hover {
+    color: #ffffff;
+    background: #26323e;
+    border-color: #52657a;
+}
+
+.btn-version.active {
+    color: #ffffff;
+    background: #304458;
+    border-color: #6991b0;
+}
+
+.system-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 18px;
+    color: #cdd6e0;
+    font-size: 12px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #858585;
+    flex: 0 0 auto;
+}
+
+.status-dot[data-state="running"] {
+    background: #4ade80;
+    box-shadow: 0 0 12px rgba(74, 222, 128, 0.6);
+}
+
+.status-dot[data-state="starting"] {
+    background: #fbbf24;
+    box-shadow: 0 0 12px rgba(251, 191, 36, 0.6);
+}
+
+.status-dot[data-state="error"] {
+    background: #ef4444;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+}
+
+.status-dot[data-state="stopped"] {
+    background: #858585;
+    box-shadow: none;
+}
+
+.bottom-panel .btn-launch {
+    width: 100%;
+    height: 68px;
+    padding: 0 16px;
+    color: #ffffff;
+    background: #197e59;
+    border: 1px solid #5fb98c;
+    border-radius: 0;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.bottom-panel .btn-launch:hover {
+    background: #1a8f65;
+    border-color: #74d1a2;
+}
+
+.bottom-panel .btn-launch.running {
+    background: #8e3e36;
+    border-color: #cd7364;
+}
+
+.bottom-panel .btn-launch .btn-icon {
+    width: 18px;
+    height: 18px;
+}
+
+/* ==================== 内容区域 ==================== */
+
+.content-area {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-primary);
+}
+
+.page {
+    display: none;
+    height: 100%;
+    min-width: 0;
+    padding: 32px;
+    overflow: auto;
+    animation: fadeIn 0.2s ease;
+}
+
+.page.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 24px;
+}
+
+.page-title {
+    font-size: 28px;
+    font-weight: 700;
+}
+
+/* ==================== 首页 ==================== */
+
+#page-home {
+    padding: 0;
+    overflow: hidden;
+    background: #05070b;
+}
+
+.hero-section {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.hero-background {
+    position: absolute;
+    inset: 0;
+    background-image: url('../assets/home.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+.gradient-overlay,
+.hero-content {
+    display: none;
+}
+
+.launch-controls,
+.quick-stats {
+    display: none;
+}
+
+/* ==================== 日志页布局 ==================== */
+
+#page-logs.active {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+#page-logs .page-header {
+    flex: 0 0 auto;
+}
+
+#page-logs .log-container {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#page-logs .log-output {
+    height: 100%;
+}
+
+/* ==================== 滚动条 ==================== */
+
+.page::-webkit-scrollbar,
+.content-area::-webkit-scrollbar {
+    width: 8px;
+}
+
+.page::-webkit-scrollbar-track,
+.content-area::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+.page::-webkit-scrollbar-thumb,
+.content-area::-webkit-scrollbar-thumb {
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+}
+
+.page::-webkit-scrollbar-thumb:hover,
+.content-area::-webkit-scrollbar-thumb:hover {
+    background: #404040;
+}

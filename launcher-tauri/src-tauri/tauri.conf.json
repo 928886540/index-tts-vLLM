@@ -1,0 +1,40 @@
+{
+  "productName": "LEON Launcher",
+  "version": "1.0.0",
+  "identifier": "com.leon.launcher",
+  "build": {
+    "beforeDevCommand": "npm run frontend:dev",
+    "beforeBuildCommand": "npm run frontend:build",
+    "devUrl": "http://127.0.0.1:5173",
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    },
+    "icon": ["icons/icon.ico"]
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "LEON 启动器 - IndexTTS2",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 1120,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
