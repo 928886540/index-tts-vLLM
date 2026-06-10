@@ -974,9 +974,7 @@ def _select_style_voice_ref(style: str, text: str, refs: list) -> str:
         return ""
     if len(refs) == 1:
         return refs[0]
-    seed = f"{style}\n{text or ''}".encode("utf-8", "ignore")
-    index = int(hashlib.sha1(seed).hexdigest()[:8], 16) % len(refs)
-    return refs[index]
+    return str(secrets.choice(refs))
 
 
 def _resolve_segment_style_audio(seg: dict) -> Optional[str]:
@@ -992,6 +990,7 @@ def _resolve_segment_style_audio(seg: dict) -> Optional[str]:
     mapped = _select_style_voice_ref(style, str(seg.get("text") or ""), _style_voice_refs(style))
     if not mapped:
         return None
+    seg["emo_ref_audio_path"] = mapped
     resolved = _resolve_voice(mapped)
     if not resolved:
         raise ValueError(f"Profile 配置错误: styles.{style}.ref 不可用: {mapped}")
@@ -1002,8 +1001,8 @@ def _style_cache_fragment(seg: dict) -> dict:
     if args.qwen_emo:
         return {"style": None, "style_alpha": None, "emo_ref_audio_path": None, "style_audio": None, "style_meta": {}}
     style = _segment_style_name(seg)
-    explicit = str(seg.get("emo_ref_audio_path") or "").strip()
     style_audio = _resolve_segment_style_audio(seg)
+    explicit = str(seg.get("emo_ref_audio_path") or "").strip()
     return {
         "style": style or None,
         "style_alpha": seg.get("style_alpha"),

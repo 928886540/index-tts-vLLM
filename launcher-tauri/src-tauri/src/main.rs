@@ -398,12 +398,14 @@ async fn start_service(
 
     let version_root = root.join(&normalized);
     let active_profile = root.join("config").join("profiles").join("active.json");
-    let script_arg = script.to_string_lossy().to_string();
+    let version_root_arg = shell_path(&version_root);
+    let script_arg = shell_path(&script);
+    let script_command = format!("\"{}\"", script_arg);
     let launcher_log = launcher_log_path(&root, &normalized)?;
     append_launcher_log(
         &launcher_log,
         "INFO",
-        &format!("调用启动入口: {}", script.display()),
+        &format!("调用启动入口: {}", script_arg),
     )?;
     if normalized == "vllm" {
         let ratio = gpu_ratio.unwrap_or(0.15);
@@ -430,12 +432,13 @@ async fn start_service(
         .map_err(|e| format!("复制启动日志句柄失败: {}", e))?;
 
     let mut cmd = Command::new("cmd.exe");
-    cmd.args(["/d", "/c", &script_arg])
-        .current_dir(&version_root)
+    cmd.args(["/d", "/s", "/c"])
+        .arg(&script_command)
+        .current_dir(&version_root_arg)
         .env("LEON_LAUNCHER_NO_PAUSE", "1")
         .env("LEON_LAUNCHER_VERSION", &normalized)
         .env("LEON_ENABLE_QWEN_EMO", "0")
-        .env("LEON_ACTIVE_PROFILE_PATH", active_profile)
+        .env("LEON_ACTIVE_PROFILE_PATH", shell_path(&active_profile))
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::from(stdout))
@@ -821,6 +824,17 @@ fn is_leon_root(path: &Path) -> bool {
 fn canonical(path: PathBuf) -> Result<PathBuf, String> {
     path.canonicalize()
         .map_err(|e| format!("解析路径 {} 失败: {}", path.display(), e))
+}
+
+fn shell_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{}", rest)
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        text.to_string()
+    }
 }
 
 fn profile_file_path(file: &str) -> Result<PathBuf, String> {
