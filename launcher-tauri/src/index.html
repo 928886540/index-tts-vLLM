@@ -116,7 +116,7 @@
                 <div class="page-header">
                     <h2 class="page-title">调音台</h2>
                     <div class="page-actions">
-                        <button class="btn-secondary" id="btn-create-profile">新建 Profile</button>
+                        <button class="btn-secondary" id="btn-create-profile">新建配置</button>
                     </div>
                 </div>
                 <div class="profiles-grid" id="profiles-container"></div>
@@ -131,10 +131,31 @@
                         </svg>
                         返回列表
                     </button>
-                    <h2 class="page-title" id="editor-title">Profile 详情</h2>
+                    <h2 class="page-title" id="editor-title">配置详情</h2>
                     <div class="editor-file" id="editor-file"></div>
                 </div>
                 <section class="profile-editor">
+                    <div class="mixer-flow">
+                        <div class="flow-step">
+                            <b>输入文本</b>
+                            <span>Tavo 把当前消息交给后端分析。</span>
+                        </div>
+                        <div class="flow-step">
+                            <b>规则拆段</b>
+                            <span>下面的规则决定每段的 role、text 和 style。</span>
+                        </div>
+                        <div class="flow-step">
+                            <b>声腔映射</b>
+                            <span>LLM 输出 style ID，后端按 ID 找参考音频。</span>
+                        </div>
+                        <div class="flow-step">
+                            <b>逐段合成</b>
+                            <span>角色音色负责说话人，声腔参考负责气声和情绪。</span>
+                        </div>
+                    </div>
+                    <div class="mixer-note">
+                        你主要改两件事：规则里“什么时候选哪个声腔”，以及下方每个声腔 ID 指向的参考音频和强度。
+                    </div>
                     <div class="editor-grid">
                         <label class="field">
                             <span>名称</span>
@@ -144,45 +165,58 @@
                             <span>描述</span>
                             <input id="editor-description" type="text" autocomplete="off">
                         </label>
-                        <label class="field">
-                            <span>默认档位</span>
-                            <select id="editor-default-mode"></select>
-                        </label>
+                        <select id="editor-default-mode" hidden></select>
                         <label class="field">
                             <span>声腔数量</span>
                             <input id="editor-style-count" type="text" disabled>
                         </label>
                         <div class="field full">
-                            <span>质量参数（当前默认档位）</span>
+                            <span>档位与参数</span>
                             <div class="preset-editor" id="editor-preset-fields"></div>
                         </div>
                         <div class="field full">
-                            <span>LLM 拆段规则（用户可编辑）</span>
-                            <textarea id="editor-segment-rules" rows="6" spellcheck="false" placeholder="1. 旁白...&#10;2. 人物对白...&#10;3. 引导句..."></textarea>
-                        </div>
-                        <div class="field full">
-                            <span>完整性规则（用户可编辑）</span>
-                            <textarea id="editor-completeness-rules" rows="4" spellcheck="false" placeholder="- 必须覆盖输入原文 100%...&#10;- 不确定说话人时用旁白..."></textarea>
-                        </div>
-                        <div class="field full">
-                            <span>自定义补充说明（可选）</span>
-                            <textarea id="editor-custom-notes" rows="2" spellcheck="false" placeholder="额外规则或注意事项"></textarea>
+                            <div class="rules-panel">
+                                <label class="field">
+                                    <span>拆段与说话人规则</span>
+                                    <textarea id="editor-segment-rules" rows="6" spellcheck="false" placeholder="旁白、对白、引导句怎么拆。"></textarea>
+                                </label>
+                                <label class="field">
+                                    <span>声腔选择规则</span>
+                                    <textarea id="editor-style-selection-rules" rows="5" spellcheck="false" placeholder="什么时候用 neutral、耳语、哭腔、惊喘等声腔。"></textarea>
+                                </label>
+                                <label class="field">
+                                    <span>段级情绪补充规则</span>
+                                    <textarea id="editor-emotion-rules" rows="5" spellcheck="false" placeholder="仅在 style 没配置情绪向量时，才让 LLM 补 emo_vec。"></textarea>
+                                </label>
+                                <label class="field">
+                                    <span>完整性规则</span>
+                                    <textarea id="editor-completeness-rules" rows="5" spellcheck="false" placeholder="必须覆盖原文、不漏段、不乱合并。"></textarea>
+                                </label>
+                                <label class="field full">
+                                    <span>补充说明</span>
+                                    <textarea id="editor-custom-notes" rows="2" spellcheck="false" placeholder="额外规则或注意事项。"></textarea>
+                                </label>
+                            </div>
                         </div>
                         <div class="field full">
                             <div class="style-toolbar">
                                 <span>声腔映射</span>
                                 <button class="btn-secondary compact" id="btn-add-style">+ 新增声腔</button>
                             </div>
+                            <div class="style-help">
+                                每一段音频会先拿到一个 <code>style</code>。例如某段输出 <code>style="whisper_soft"</code>，后端就读取下方 <code>whisper_soft</code> 这一行的参考音频和强度来合成该段。
+                            </div>
+                            <datalist id="voice-ref-options"></datalist>
                             <div class="style-list" id="editor-styles"></div>
                         </div>
-                        <label class="field full">
-                            <span>完整 JSON</span>
+                        <details class="field full json-details">
+                            <summary>高级：完整 JSON</summary>
                             <textarea id="editor-json" rows="12" spellcheck="false"></textarea>
-                        </label>
+                        </details>
                     </div>
                     <div class="editor-actions">
                         <button class="btn-secondary" id="btn-sync-json">同步表单到 JSON</button>
-                        <button class="btn-secondary" id="btn-save-profile">保存 Profile</button>
+                        <button class="btn-secondary" id="btn-save-profile">保存配置</button>
                         <button class="btn-secondary" id="btn-apply-edited-profile">保存并启用</button>
                     </div>
                 </section>
@@ -192,11 +226,15 @@
                 <div class="page-header">
                     <h2 class="page-title">系统日志</h2>
                     <div class="page-actions">
-                        <select id="log-version-select" class="select-version compact">
+                        <select id="log-version-select" class="select-version compact" hidden>
                             <option value="vllm">vLLM</option>
                             <option value="fast6g">Fast6G</option>
                         </select>
-                        <select id="log-level-filter" class="select-version compact">
+                        <div class="segmented compact" aria-label="日志版本">
+                            <button type="button" data-log-version="vllm" class="active">vLLM</button>
+                            <button type="button" data-log-version="fast6g">6G</button>
+                        </div>
+                        <select id="log-level-filter" class="select-version compact" hidden>
                             <option value="all">全部</option>
                             <option value="issues">错误+警告</option>
                             <option value="error">错误</option>
@@ -204,6 +242,14 @@
                             <option value="success">成功</option>
                             <option value="info">信息</option>
                         </select>
+                        <div class="segmented wide" aria-label="日志级别">
+                            <button type="button" data-log-level="all" class="active">全部</button>
+                            <button type="button" data-log-level="issues">问题</button>
+                            <button type="button" data-log-level="error">错误</button>
+                            <button type="button" data-log-level="warning">警告</button>
+                            <button type="button" data-log-level="success">成功</button>
+                            <button type="button" data-log-level="info">信息</button>
+                        </div>
                         <input
                             id="log-search"
                             class="log-search"
@@ -284,6 +330,10 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <div class="modal-backdrop" id="modal-backdrop" hidden>
+        <div class="modal-panel" id="modal-panel"></div>
     </div>
 
     <script type="module" src="scripts/mock-api.js"></script>

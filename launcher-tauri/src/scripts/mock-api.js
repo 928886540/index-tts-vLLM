@@ -32,6 +32,7 @@ const mockProfiles = [
             neutral: {
                 label: "普通/平静",
                 ref: "",
+                refs: [],
                 style_alpha: 0.15,
                 emo_alpha: 0.18,
                 emo_vec: [0, 0, 0, 0, 0, 0, 0, 0.85],
@@ -40,6 +41,7 @@ const mockProfiles = [
             whisper_soft: {
                 label: "耳语",
                 ref: "声腔/耳语-AD学姐",
+                refs: ["声腔/耳语-AD学姐", "声腔/低语-AD学姐"],
                 style_alpha: 0.44,
                 emo_alpha: 0.36,
                 emo_vec: [0.08, 0, 0.08, 0.03, 0, 0.24, 0, 0.62],
@@ -72,6 +74,7 @@ const mockProfiles = [
             whisper_soft: {
                 label: "耳语",
                 ref: "声腔/耳语-AD学姐",
+                refs: ["声腔/耳语-AD学姐"],
                 style_alpha: 0.44,
                 emo_alpha: 0.36,
                 emo_vec: [0.08, 0, 0.08, 0.03, 0, 0.24, 0, 0.62],
@@ -102,6 +105,44 @@ window.tauri_mock = {
         const profile = mockProfiles.find(item => item.file === filename) || mockProfiles[0];
         return Promise.resolve(structuredClone(profile));
     },
+
+    getVoiceRefs: () => Promise.resolve([
+        {
+            name: "声腔/耳语-AD学姐",
+            relativePath: "prompts/library/声腔/耳语-AD学姐.MP3",
+            subdir: "声腔"
+        },
+        {
+            name: "声腔/轻喘-AD学姐",
+            relativePath: "prompts/library/声腔/轻喘-AD学姐.MP3",
+            subdir: "声腔"
+        },
+        {
+            name: "声腔/低语-AD学姐",
+            relativePath: "prompts/library/声腔/低语-AD学姐.MP3",
+            subdir: "声腔"
+        },
+        {
+            name: "声腔/哭腔-AD学姐",
+            relativePath: "prompts/library/声腔/哭腔-AD学姐.MP3",
+            subdir: "声腔"
+        },
+        {
+            name: "声腔/耳语-步非烟",
+            relativePath: "prompts/library/声腔/耳语-步非烟.wav",
+            subdir: "声腔"
+        },
+        {
+            name: "声腔/惊喘-步非烟",
+            relativePath: "prompts/library/声腔/惊喘-步非烟.wav",
+            subdir: "声腔"
+        },
+        {
+            name: "声腔/轻笑-JOK",
+            relativePath: "prompts/library/声腔/轻笑-JOK.flac",
+            subdir: "声腔"
+        }
+    ]),
 
     createProfile: () => {
         const template = structuredClone(mockProfiles[0]);

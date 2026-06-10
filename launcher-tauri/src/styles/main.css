@@ -339,6 +339,8 @@ body {
 
 .page.active {
     display: block;
+    opacity: 1;
+    transform: translateY(0);
 }
 
 @keyframes fadeIn {

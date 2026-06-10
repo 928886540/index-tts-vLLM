@@ -610,6 +610,7 @@ def _default_style_entry(style_id: str, ref: str) -> dict:
     return {
         "label": label,
         "ref": str(ref or ""),
+        "refs": [str(ref or "")] if ref else [],
         "style_alpha": hint.get("style_alpha", 0.15 if style_id in ("neutral", "none") else 0.42),
         "emo_alpha": hint.get("emo_alpha", 0.18 if style_id in ("neutral", "none") else 0.38),
         "emo_vec": list(hint.get("emo_vec", [0, 0, 0, 0, 0, 0, 0, 0.85 if style_id in ("neutral", "none") else 0.55])),
@@ -641,20 +642,32 @@ def _strict_style_entry(style_id: str, value) -> Optional[dict]:
     label = str(value.get("label") or "").strip()
     if not label:
         raise ValueError(f"Profile 配置错误: styles.{style_id}.label 不能为空")
+    refs = []
+    raw_refs = value.get("refs")
+    if isinstance(raw_refs, list):
+        for item in raw_refs:
+            ref_item = str(item or "").strip()
+            if ref_item and ref_item not in refs:
+                refs.append(ref_item)
     ref = str(value.get("ref") or "").strip()
-    if style_id not in ("neutral", "none") and not ref:
-        raise ValueError(f"Profile 配置错误: styles.{style_id}.ref 不能为空")
+    if ref and ref not in refs:
+        refs.append(ref)
+    if style_id not in ("neutral", "none") and not refs:
+        raise ValueError(f"Profile 配置错误: styles.{style_id}.refs 至少选择 1 个参考音频")
     style_alpha = _style_number(value.get("style_alpha"), f"{style_id}.style_alpha", 0.12, 0.78)
     emo_alpha = _style_number(value.get("emo_alpha"), f"{style_id}.emo_alpha", 0.12, 0.62)
     raw_vec = value.get("emo_vec")
-    if not isinstance(raw_vec, list) or len(raw_vec) != 8:
-        raise ValueError(f"Profile 配置错误: styles.{style_id}.emo_vec 必须是 8 维数组")
-    emo_vec = []
-    for index, item in enumerate(raw_vec):
-        emo_vec.append(_style_number(item, f"{style_id}.emo_vec[{index}]", 0.0, 1.0))
+    emo_vec = None
+    if raw_vec not in (None, ""):
+        if not isinstance(raw_vec, list) or len(raw_vec) != 8:
+            raise ValueError(f"Profile 配置错误: styles.{style_id}.emo_vec 必须是 8 维数组")
+        emo_vec = []
+        for index, item in enumerate(raw_vec):
+            emo_vec.append(_style_number(item, f"{style_id}.emo_vec[{index}]", 0.0, 1.0))
     return {
         "label": label,
-        "ref": ref,
+        "ref": refs[0] if refs else "",
+        "refs": refs,
         "style_alpha": style_alpha,
         "emo_alpha": emo_alpha,
         "emo_vec": emo_vec,
@@ -939,10 +952,31 @@ def _style_name_from_ref(ref: str) -> str:
     return leaf
 
 
-def _style_voice_ref(style: str) -> str:
+def _style_voice_refs(style: str) -> list:
     key = str(style or "").strip()
     entry = _style_entry(key)
-    return str(entry.get("ref") or "").strip()
+    refs = []
+    raw_refs = entry.get("refs")
+    if isinstance(raw_refs, list):
+        refs.extend(str(item or "").strip() for item in raw_refs)
+    ref = str(entry.get("ref") or "").strip()
+    if ref:
+        refs.append(ref)
+    out = []
+    for ref_item in refs:
+        if ref_item and ref_item not in out:
+            out.append(ref_item)
+    return out
+
+
+def _select_style_voice_ref(style: str, text: str, refs: list) -> str:
+    if not refs:
+        return ""
+    if len(refs) == 1:
+        return refs[0]
+    seed = f"{style}\n{text or ''}".encode("utf-8", "ignore")
+    index = int(hashlib.sha1(seed).hexdigest()[:8], 16) % len(refs)
+    return refs[index]
 
 
 def _resolve_segment_style_audio(seg: dict) -> Optional[str]:
@@ -955,7 +989,7 @@ def _resolve_segment_style_audio(seg: dict) -> Optional[str]:
         if not resolved:
             raise ValueError(f"LLM 输出错误: emo_ref_audio_path 不可用: {ref}")
         return resolved
-    mapped = _style_voice_ref(style)
+    mapped = _select_style_voice_ref(style, str(seg.get("text") or ""), _style_voice_refs(style))
     if not mapped:
         return None
     resolved = _resolve_voice(mapped)
@@ -988,7 +1022,7 @@ def _segment_cache_payload(seg: dict) -> dict:
         item["emo_text"] = seg.get("emo_text") or None
     else:
         item.update(_style_cache_fragment(seg))
-        item["emo_vec"] = seg.get("emo_vec") or None
+        item["emo_vec"] = _effective_segment_emo_vec_for_cache(seg)
         item["emo_text"] = seg.get("emo_text") or None
         item["emo_alpha"] = seg.get("emo_alpha")
     return item
@@ -1097,12 +1131,14 @@ def _style_catalog_for_prompt() -> str:
             continue
         entry = styles[style_id]
         desc = str(entry.get("description") or "").strip()
-        vec = ",".join(f"{float(v):.2g}" for v in (entry.get("emo_vec") or []))
+        emo_vec = entry.get("emo_vec")
+        vec = ",".join(f"{float(v):.2g}" for v in (emo_vec or []))
+        vec_text = f"emo_vec配置[{vec}]，后端强制优先使用" if emo_vec else "emo_vec未配置，LLM 必须输出"
         labels.append(
             f"{style_id}={entry.get('label')}; "
             f"style_alpha默认{float(entry.get('style_alpha')):.2g}; "
             f"emo_alpha默认{float(entry.get('emo_alpha')):.2g}; "
-            f"emo_vec默认[{vec}]"
+            f"{vec_text}"
             + (f"; {desc}" if desc else "")
         )
     return " / ".join(labels)
@@ -1152,21 +1188,20 @@ def _render_profile_prompt_template(template: str, req: dict, voices: dict) -> s
             "]}",
         ])
     else:
-        output_contract = "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2,\"emo_vec\":[h,a,s,f,d,l,u,n]}]}"
+        output_contract = "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2}]}"
         style_rules = "5. style 是段级声腔/呼吸参考，只能从这个枚举里选: " + _style_catalog_for_prompt()
         emotion_rules = "\n".join([
-            "emo_vec 是 8 维向量，必须严格按模型顺序:",
-            "[0]=happy 高兴 [1]=angry 愤怒 [2]=sad 悲伤 [3]=fear 恐惧 [4]=hate 反感 [5]=low 低落 [6]=surprise 惊讶 [7]=neutral 自然。",
-            "每段只激活 1-2 个最匹配维度，其他写 0；平静叙述/客观描写用 [0,0,0,0,0,0,0,0.8]。",
-            "每段可加 emo_alpha 字段：旁白 0.12-0.22，平静对白 0.20-0.30，正常带情绪对白 0.32-0.44，强烈台词 0.46-0.52。",
+            "声腔情绪向量由 active profile 的 style 配置优先决定；style 已配置 emo_vec 时，不要输出 emo_vec，后端会强制使用配置值。",
+            "只有 style 枚举里明确写着 emo_vec未配置 时，才输出 8 维 emo_vec，顺序为 [happy,angry,sad,fear,hate,low,surprise,neutral]。",
+            "每段可加 emo_alpha 字段做强度微调：旁白 0.12-0.22，平静对白 0.20-0.30，正常带情绪对白 0.32-0.44，强烈台词 0.46-0.52。",
             "style_alpha: neutral=0.12-0.20；轻微声腔=0.34-0.46；明显 breath/moan/呻吟/喘息=0.50-0.70。",
         ])
         example_output = "\n".join([
             "{\"segments\":[",
-            "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]},",
-            "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.42,\"emo_vec\":[0,0,0.48,0.05,0,0.12,0,0.35]},",
-            f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15,\"emo_vec\":[0,0,0,0,0,0,0,1]}},",
-            "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45,\"emo_vec\":[0.2,0,0.3,0,0,0.2,0,0.5]}",
+            "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15},",
+            "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.42},",
+            f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15}},",
+            "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45}",
             "]}",
         ])
     replacements = {
@@ -1231,18 +1266,19 @@ def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
         user_alias_hint,
         character_hint,
         "输出格式:",
-        "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2,\"emo_vec\":[h,a,s,f,d,l,u,n]}]}",
+        "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2}]}",
         "",
         "拆段规则:",
         "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
-        "   旁白 style 永远写 neutral，style_alpha 写 0.15，emo_vec 写 [0,0,0,0,0,0,0,1]。",
+        "   旁白 style 永远写 neutral，style_alpha 写 0.15；不要输出 emo_vec，除非该 style 在枚举里写着 emo_vec未配置。",
         "2. 人物直接说出口的话 → role 用说话人的名字；如果说话人是「你」或用户身份名，role 统一写 \"用户\"。",
         "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。",
         "4. text 是要朗读的原文片段，保留标点和语气词。",
         "5. style 是段级声腔/呼吸参考，只能从这个枚举里选: " + _style_catalog_for_prompt(),
         "",
-        "emo_vec 是 8 维向量，顺序必须是 [happy,angry,sad,fear,hate,low,surprise,neutral]。",
-        "每段可加 emo_alpha 字段：旁白 0.12-0.22，平静对白 0.20-0.30，正常带情绪对白 0.32-0.44，强烈台词 0.46-0.52。",
+        "声腔情绪向量由 active profile 的 style 配置优先决定；style 已配置 emo_vec 时，不要输出 emo_vec，后端会强制使用配置值。",
+        "只有 style 枚举里明确写着 emo_vec未配置 时，才输出 8 维 emo_vec，顺序为 [happy,angry,sad,fear,hate,low,surprise,neutral]。",
+        "每段可加 emo_alpha 字段做强度微调：旁白 0.12-0.22，平静对白 0.20-0.30，正常带情绪对白 0.32-0.44，强烈台词 0.46-0.52。",
         "完整性硬规则: 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。",
     ])
 
@@ -1309,6 +1345,35 @@ def _stabilize_dialogue_emo_vec(role: str, emo_vec):
     return vals
 
 
+def _coerce_dialogue_emo_vec(emo_vec):
+    if not isinstance(emo_vec, list) or len(emo_vec) != 8:
+        return None
+    vals = []
+    for value in emo_vec[:8]:
+        try:
+            vals.append(max(0.0, min(1.0, float(value))))
+        except (TypeError, ValueError):
+            return None
+    return vals
+
+
+def _style_profile_emo_vec_for_segment(seg: dict):
+    style = _segment_style_name(seg) or "neutral"
+    try:
+        entry = _style_entry(style)
+    except ValueError:
+        return None
+    emo_vec = entry.get("emo_vec")
+    return list(emo_vec) if isinstance(emo_vec, list) and len(emo_vec) == 8 else None
+
+
+def _effective_segment_emo_vec_for_cache(seg: dict):
+    if args.qwen_emo:
+        return None
+    profile_vec = _style_profile_emo_vec_for_segment(seg)
+    return profile_vec if profile_vec is not None else (seg.get("emo_vec") or None)
+
+
 def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
     from indextts import llm_proxy
 
@@ -1350,13 +1415,26 @@ def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
             0.12 if role == "旁白" else 0.18,
             0.22 if role == "旁白" else 0.52,
         )
-        emo_vec = _stabilize_dialogue_emo_vec(
-            role,
-            _segment_emo_vec(seg.get("emo_vec"), style_entry["emo_vec"]),
-        )
+        if style_entry.get("emo_vec") is not None:
+            emo_vec = list(style_entry["emo_vec"])
+            emo_vec_source = "style_profile"
+        else:
+            emo_vec = _stabilize_dialogue_emo_vec(
+                role,
+                _segment_emo_vec(seg.get("emo_vec"), None),
+            )
+            emo_vec_source = "llm"
         if emo_vec is None:
-            raise ValueError("LLM 输出错误: emo_vec 必须是 8 维数组")
-        out.append({"role": role or "旁白", "text": text, "style": style, "style_alpha": style_alpha, "emo_vec": emo_vec, "emo_alpha": emo_alpha})
+            raise ValueError(f"LLM 输出错误: style={style} 未配置声腔情绪向量，必须输出 8 维 emo_vec")
+        out.append({
+            "role": role or "旁白",
+            "text": text,
+            "style": style,
+            "style_alpha": style_alpha,
+            "emo_vec": emo_vec,
+            "emo_vec_source": emo_vec_source,
+            "emo_alpha": emo_alpha,
+        })
     if not out:
         raise RuntimeError("LLM 没有返回可用片段")
     return out
@@ -2389,7 +2467,13 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
                 if not voice_path:
                     raise RuntimeError(f"role voice unresolved: {role}")
                 style_audio = _resolve_segment_style_audio(seg)
-                emo_vec = _stabilize_dialogue_emo_vec(role, seg.get("emo_vec"))
+                profile_emo_vec = _style_profile_emo_vec_for_segment(seg)
+                if profile_emo_vec is not None:
+                    emo_vec = _coerce_dialogue_emo_vec(profile_emo_vec)
+                    emo_vec_source = "style_profile"
+                else:
+                    emo_vec = _stabilize_dialogue_emo_vec(role, seg.get("emo_vec"))
+                    emo_vec_source = seg.get("emo_vec_source")
                 emo_text_seg = str(seg.get("emo_text") or "").strip() or None
                 seg_alpha = seg.get("emo_alpha")
                 seg_alpha = float(seg_alpha) if seg_alpha is not None else float(req.get("emo_alpha", 1.0))
@@ -2401,7 +2485,7 @@ async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
                     emo_vec = None
                     emo_text_seg = str(seg.get("emo_text") or "").strip() or text
                     seg_alpha = 1.0
-                elif style_audio:
+                elif style_audio and emo_vec_source != "style_profile":
                     emo_vec = None
                     emo_text_seg = None
                 elif emo_vec:

@@ -76,6 +76,14 @@ struct LogSnapshot {
     lines: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoiceRefItem {
+    name: String,
+    relative_path: String,
+    subdir: String,
+}
+
 fn main() {
     if std::env::var("LEON_LAUNCHER_SMOKE_TEST").ok().as_deref() == Some("1") {
         if let Err(error) = smoke_test() {
@@ -92,6 +100,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_profiles,
             get_profile,
+            get_voice_refs,
             create_profile,
             save_profile,
             apply_profile,
@@ -199,6 +208,23 @@ fn get_profiles() -> Result<Vec<ProfileListItem>, String> {
 fn get_profile(file: String) -> Result<Value, String> {
     let profile_path = profile_file_path(&file)?;
     read_json(&profile_path)
+}
+
+#[tauri::command]
+fn get_voice_refs() -> Result<Vec<VoiceRefItem>, String> {
+    let root = leon_root()?;
+    let mut items = Vec::new();
+    for library_root in voice_library_roots(&root) {
+        let cavity_root = library_root.join("声腔");
+        collect_voice_refs(&root, &library_root, &cavity_root, &mut items)?;
+    }
+    items.sort_by(|a, b| {
+        (a.subdir != "声腔")
+            .cmp(&(b.subdir != "声腔"))
+            .then_with(|| a.subdir.cmp(&b.subdir))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(items)
 }
 
 #[tauri::command]
@@ -887,6 +913,7 @@ fn validate_profile_value(value: &Value) -> Result<(), String> {
     if styles.is_empty() {
         return Err("styles 不能为空".to_string());
     }
+    validate_styles(styles)?;
     Ok(())
 }
 
@@ -917,6 +944,258 @@ fn validate_preset(value: &Value, mode: &str, group: &str) -> Result<(), String>
         }
     }
     Ok(())
+}
+
+fn validate_styles(styles: &serde_json::Map<String, Value>) -> Result<(), String> {
+    let root = leon_root()?;
+    let mut neutral_enabled = false;
+    for (style_id, value) in styles {
+        let id = style_id.trim();
+        if !valid_style_id(id) {
+            return Err(format!("非法 style id: {}", style_id));
+        }
+        let style = value
+            .as_object()
+            .ok_or_else(|| format!("styles.{} 必须是 object", id))?;
+        let enabled = style
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        if !enabled {
+            if id.eq_ignore_ascii_case("neutral") {
+                return Err("styles.neutral 不能禁用".to_string());
+            }
+            continue;
+        }
+        if id.eq_ignore_ascii_case("neutral") {
+            neutral_enabled = true;
+        }
+
+        required_str(value, "label").map_err(|_| format!("styles.{}.label 不能为空", id))?;
+        let refs = style_refs(style);
+        if !id.eq_ignore_ascii_case("neutral") && !id.eq_ignore_ascii_case("none") {
+            if refs.is_empty() {
+                return Err(format!("styles.{}.refs 至少选择 1 个参考音频", id));
+            }
+            for ref_path in refs {
+                if resolve_voice_ref(&root, &ref_path).is_none() {
+                    return Err(format!("styles.{}.refs 不可用: {}", id, ref_path));
+                }
+            }
+        }
+
+        validate_number(
+            style.get("style_alpha"),
+            0.12,
+            0.78,
+            &format!("styles.{}.style_alpha", id),
+        )?;
+        validate_number(
+            style.get("emo_alpha"),
+            0.12,
+            0.62,
+            &format!("styles.{}.emo_alpha", id),
+        )?;
+        if let Some(vec_value) = style.get("emo_vec") {
+            let vec = vec_value
+                .as_array()
+                .ok_or_else(|| format!("styles.{}.emo_vec 必须是 8 维数组", id))?;
+            if vec.len() != 8 {
+                return Err(format!("styles.{}.emo_vec 必须是 8 维数组", id));
+            }
+            for (index, item) in vec.iter().enumerate() {
+                validate_number(
+                    Some(item),
+                    0.0,
+                    1.0,
+                    &format!("styles.{}.emo_vec[{}]", id, index),
+                )?;
+            }
+        }
+    }
+    if !neutral_enabled {
+        return Err("styles 必须启用 neutral".to_string());
+    }
+    Ok(())
+}
+
+fn style_refs(style: &serde_json::Map<String, Value>) -> Vec<String> {
+    let mut refs = Vec::new();
+    if let Some(items) = style.get("refs").and_then(Value::as_array) {
+        for item in items {
+            if let Some(text) = item.as_str() {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() && !refs.iter().any(|value| value == trimmed) {
+                    refs.push(trimmed.to_string());
+                }
+            }
+        }
+    }
+    if let Some(text) = style.get("ref").and_then(Value::as_str) {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() && !refs.iter().any(|value| value == trimmed) {
+            refs.push(trimmed.to_string());
+        }
+    }
+    refs
+}
+
+fn valid_style_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().count() <= 80
+        && value.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || ch == '_'
+                || ch == '-'
+                || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+        })
+}
+
+fn validate_number(value: Option<&Value>, low: f64, high: f64, field: &str) -> Result<(), String> {
+    let parsed = value
+        .and_then(Value::as_f64)
+        .ok_or_else(|| format!("{} 必须是数字", field))?;
+    if parsed < low || parsed > high {
+        return Err(format!("{} 超出范围 {}-{}: {}", field, low, high, parsed));
+    }
+    Ok(())
+}
+
+fn collect_voice_refs(
+    root: &Path,
+    library_root: &Path,
+    scan_root: &Path,
+    items: &mut Vec<VoiceRefItem>,
+) -> Result<(), String> {
+    collect_voice_refs_inner(root, library_root, scan_root, items)
+}
+
+fn collect_voice_refs_inner(
+    root: &Path,
+    library_root: &Path,
+    current_dir: &Path,
+    items: &mut Vec<VoiceRefItem>,
+) -> Result<(), String> {
+    if !library_root.is_dir() || !current_dir.is_dir() {
+        return Ok(());
+    }
+    let entries = fs::read_dir(current_dir)
+        .map_err(|e| format!("读取参考音频目录失败 {}: {}", current_dir.display(), e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取参考音频失败: {}", e))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_voice_refs_inner(root, library_root, &path, items)?;
+            continue;
+        }
+        if !is_voice_file(&path) {
+            continue;
+        }
+        let rel_from_library = path.strip_prefix(library_root).unwrap_or(path.as_path());
+        let rel_name = strip_extension(rel_from_library).replace('\\', "/");
+        let rel_from_root = path.strip_prefix(root).unwrap_or(path.as_path());
+        let relative_path = rel_from_root.to_string_lossy().replace('\\', "/");
+        let subdir = rel_from_library
+            .components()
+            .next()
+            .map(|component| component.as_os_str().to_string_lossy().to_string())
+            .unwrap_or_default();
+        items.push(VoiceRefItem {
+            name: rel_name,
+            relative_path,
+            subdir,
+        });
+    }
+    Ok(())
+}
+
+fn strip_extension(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) if !ext.is_empty() => {
+            let suffix_len = ext.len() + 1;
+            text[..text.len().saturating_sub(suffix_len)].to_string()
+        }
+        _ => text.to_string(),
+    }
+}
+
+fn resolve_voice_ref(root: &Path, ref_path: &str) -> Option<PathBuf> {
+    let raw = ref_path.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let normalized: String = raw
+        .chars()
+        .map(|ch| {
+            if ch == '/' || ch == '\\' {
+                std::path::MAIN_SEPARATOR
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let raw_path = PathBuf::from(&normalized);
+
+    let mut candidates = Vec::new();
+    candidates.push(PathBuf::from(raw));
+    candidates.push(root.join(&raw_path));
+    for library_root in voice_library_roots(root) {
+        candidates.push(library_root.join(&raw_path));
+    }
+
+    for candidate in candidates {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        if candidate.extension().is_none() {
+            for extension in voice_extensions() {
+                let mut with_ext = candidate.clone();
+                with_ext.set_extension(extension);
+                if with_ext.is_file() {
+                    return Some(with_ext);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn voice_library_roots(root: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for candidate in [
+        root.join("prompts").join("library"),
+        root.join("vllm").join("prompts").join("library"),
+        root.join("fast6g").join("prompts").join("library"),
+    ] {
+        add_unique_existing_dir(&mut roots, candidate);
+    }
+    roots
+}
+
+fn add_unique_existing_dir(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if !candidate.is_dir() {
+        return;
+    }
+    let canonical = candidate.canonicalize().unwrap_or(candidate);
+    if !roots.iter().any(|item| item == &canonical) {
+        roots.push(canonical);
+    }
+}
+
+fn is_voice_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            voice_extensions()
+                .iter()
+                .any(|item| ext.eq_ignore_ascii_case(item))
+        })
+        .unwrap_or(false)
+}
+
+fn voice_extensions() -> &'static [&'static str] {
+    &["wav", "mp3", "flac", "ogg", "m4a"]
 }
 
 fn read_json(path: &Path) -> Result<Value, String> {
