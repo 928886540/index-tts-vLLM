@@ -351,7 +351,7 @@ fn validate_profile(file: String) -> Result<String, String> {
     let value = read_json(&profile_file_path(&file)?)?;
     validate_profile_value(&value)?;
     Ok(format!(
-        "Profile 测试通过：{}",
+        "Profile 校验通过：{}",
         safe_profile_file_name(&file)?
     ))
 }
@@ -406,7 +406,7 @@ async fn start_service(
         &format!("调用启动入口: {}", script.display()),
     )?;
     if normalized == "vllm" {
-        let ratio = gpu_ratio.unwrap_or(0.15).clamp(0.05, 0.95);
+        let ratio = gpu_ratio.unwrap_or(0.15);
         let use_msvc = enable_msvc.unwrap_or(true);
         append_launcher_log(
             &launcher_log,
@@ -442,7 +442,7 @@ async fn start_service(
         .stderr(Stdio::from(stderr));
 
     if normalized == "vllm" {
-        let ratio = gpu_ratio.unwrap_or(0.15).clamp(0.05, 0.95);
+        let ratio = gpu_ratio.unwrap_or(0.15);
         cmd.env("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION", format_ratio(ratio));
         let use_msvc = enable_msvc.unwrap_or(true);
         cmd.env("LEON_ENABLE_MSVC", if use_msvc { "1" } else { "0" });

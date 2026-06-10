@@ -1025,6 +1025,16 @@ def _media_type_for_audio_path(path: str) -> str:
     return "audio/mpeg" if os.path.splitext(str(path or ""))[1].lower() == ".mp3" else "audio/wav"
 
 
+def _model_to_dict(value):
+    if value is None:
+        return {}
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if hasattr(value, "dict"):
+        return value.dict()
+    return dict(value or {})
+
+
 def _cached_audio_response_with_start_offset(path: str, cache_key: str, start_s: float):
     media_type = _media_type_for_audio_path(path)
     headers = {
@@ -1458,7 +1468,7 @@ def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
         "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
         "   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。",
         "   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。",
-        "   旁白 style 永远写 neutral，style_alpha 写 0.15；不要输出 emo_vec，除非该 style 在枚举里写着 emo_vec未配置。",
+        "   旁白默认 style 写 neutral；如果用户规则明确要求旁白使用某个声腔 style，可以按规则输出该 style。",
         "   旁白连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。",
         "2. 人物直接说出口的话 → role 用说话人的名字。",
         "   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。",
@@ -1716,8 +1726,6 @@ def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
         style = str(seg.get("style") or seg.get("style_ref") or "neutral").strip() or "neutral"
         if style not in styles:
             raise ValueError(f"LLM 输出错误: 未知 style={style}，不在 active profile styles 中")
-        if role == "旁白" and style != "neutral":
-            raise ValueError(f"LLM 输出错误: 旁白 style 必须是 neutral，实际为 {style}")
         style_entry = styles[style]
         style_alpha = _segment_number(
             seg.get("style_alpha"),
@@ -1731,8 +1739,8 @@ def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
             seg.get("emo_alpha"),
             emo_alpha_default,
             "emo_alpha",
-            0.12 if role == "旁白" else 0.18,
-            0.22 if role == "旁白" else 0.52,
+            0.12 if style == "neutral" else 0.18,
+            0.22 if style == "neutral" else 0.52,
         )
         if style_entry.get("emo_vec") is not None:
             emo_vec = list(style_entry["emo_vec"])
@@ -2015,8 +2023,6 @@ async def _prepare_dialogue_for_streaming(req: dict):
 
 def _stabilize_dialogue_emo_vec(role: str, emo_vec):
     """Keep LLM-provided emotion vectors from hitting the model at full force."""
-    if role == "旁白":
-        return [0.0] * 7 + [0.85]
     if not isinstance(emo_vec, list) or len(emo_vec) != 8:
         return None
     vals = []
@@ -2077,12 +2083,12 @@ def _effective_segment_emo_vec_for_cache(seg: dict):
     return profile_vec if profile_vec is not None else (seg.get("emo_vec") or None)
 
 
-def _clamp_dialogue_alpha(role: str, value, *, style_audio: bool = False) -> float:
+def _clamp_dialogue_alpha(role: str, value, *, style_audio: bool = False, neutral_style: bool = False) -> float:
     try:
         alpha = float(value)
     except (TypeError, ValueError):
         alpha = 0.55
-    if role == "旁白":
+    if neutral_style:
         return max(0.12, min(0.25, alpha))
     if style_audio:
         # 情色/亲密的质感全在声腔参考音频里；让它真正盖上去，而不是只贴一半。
@@ -2187,7 +2193,12 @@ async def _run_dialogue_inference_to_job(job: "_LiveStreamingJob", prepared: dic
                 style_alpha = seg.get("style_alpha")
                 if style_audio and style_alpha is not None:
                     seg_alpha = float(style_alpha)
-                seg_alpha = _clamp_dialogue_alpha(role, seg_alpha, style_audio=bool(style_audio))
+                seg_alpha = _clamp_dialogue_alpha(
+                    role,
+                    seg_alpha,
+                    style_audio=bool(style_audio),
+                    neutral_style=(_segment_style_name(seg) or "neutral") in ("neutral", "none"),
+                )
                 if emo_vec_source == "style_profile":
                     emo_vec = _coerce_dialogue_emo_vec(emo_vec)
                 else:
@@ -3308,7 +3319,12 @@ async def tts_dialogue_stream_handle(req: dict):
                     style_alpha = seg.get("style_alpha")
                     if style_audio and style_alpha is not None:
                         seg_alpha = float(style_alpha)
-                    seg_alpha = _clamp_dialogue_alpha(role, seg_alpha, style_audio=bool(style_audio))
+                    seg_alpha = _clamp_dialogue_alpha(
+                        role,
+                        seg_alpha,
+                        style_audio=bool(style_audio),
+                        neutral_style=(_segment_style_name(seg) or "neutral") in ("neutral", "none"),
+                    )
                     if emo_vec_source == "style_profile":
                         emo_vec = _coerce_dialogue_emo_vec(emo_vec)
                     else:
@@ -3507,7 +3523,12 @@ async def tts_dialogue_cache_stream_handle(req: dict):
                     style_alpha = seg.get("style_alpha")
                     if style_audio and style_alpha is not None:
                         seg_alpha = float(style_alpha)
-                    seg_alpha = _clamp_dialogue_alpha(role, seg_alpha, style_audio=bool(style_audio))
+                    seg_alpha = _clamp_dialogue_alpha(
+                        role,
+                        seg_alpha,
+                        style_audio=bool(style_audio),
+                        neutral_style=(_segment_style_name(seg) or "neutral") in ("neutral", "none"),
+                    )
                     if emo_vec_source == "style_profile":
                         emo_vec = _coerce_dialogue_emo_vec(emo_vec)
                     else:
@@ -3641,7 +3662,7 @@ async def warmup_status():
 @APP.post("/warmup")
 async def warmup_endpoint(request: Optional[Warmup_Request] = None):
     """Run one tiny inference to absorb first-use CUDA/vLLM/BigVGAN overhead."""
-    req = request.dict() if request is not None else {}
+    req = _model_to_dict(request)
     result = await _run_model_warmup(
         voice=req.get("voice"),
         text=req.get("text"),
@@ -4130,7 +4151,7 @@ async def tts_get_endpoint(
 
 @APP.post("/tts")
 async def tts_post_endpoint(request: TTS_Request):
-    req = request.dict()
+    req = _model_to_dict(request)
     return await tts_handle(req)
 
 
@@ -4170,7 +4191,7 @@ async def tts_stream_get_endpoint(
 
 @APP.post("/tts_stream")
 async def tts_stream_post_endpoint(request: TTS_Request):
-    req = request.dict()
+    req = _model_to_dict(request)
     return await tts_stream_handle(req)
 
 
@@ -4206,14 +4227,14 @@ async def tts_cache_stream_get_endpoint(
 
 @APP.post("/tts_cache_stream")
 async def tts_cache_stream_post_endpoint(request: TTS_Request):
-    req = request.dict()
+    req = _model_to_dict(request)
     return await tts_cache_stream_handle(req)
 
 
 @APP.post("/tts_stream_job")
 async def tts_stream_job_endpoint(request: TTS_Request):
     """Create a short-lived GET URL for streaming a POST-sized TTS request."""
-    req = request.dict()
+    req = _model_to_dict(request)
     check_res = check_params(req)
     if check_res is not None:
         return check_res
@@ -4264,7 +4285,7 @@ async def tts_dialogue_stream_job_endpoint(request: TTS_Dialogue_Request):
        从 buffer 0 开始读，任何时候断开/重连都不丢
     5) cache_key 立即随响应返回,前端可立刻写 tavo.set 永久持久化
     """
-    req = request.dict()
+    req = _model_to_dict(request)
     prepared, err = await _prepare_dialogue_for_streaming(req)
     if err is not None:
         return err
@@ -4669,14 +4690,14 @@ async def tts_dialogue_stream_endpoint(request: TTS_Dialogue_Request):
     segment's first chunk is decoded; later segments are inserted after a
     configurable silence gap.
     """
-    req = request.dict()
+    req = _model_to_dict(request)
     return await tts_dialogue_stream_handle(req)
 
 
 @APP.post("/tts_dialogue_cache_stream")
 async def tts_dialogue_cache_stream_endpoint(request: TTS_Dialogue_Request):
     """Multi-voice + emotion streaming with local whole-dialogue cache."""
-    req = request.dict()
+    req = _model_to_dict(request)
     return await tts_dialogue_cache_stream_handle(req)
 
 

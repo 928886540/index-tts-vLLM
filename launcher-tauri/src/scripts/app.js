@@ -214,10 +214,6 @@ class LeonLauncher {
             this.switchPage('mixer');
         });
 
-        document.getElementById('btn-sync-json').addEventListener('click', () => {
-            this.syncEditorToJson(true);
-        });
-
         document.getElementById('btn-save-profile').addEventListener('click', () => {
             this.saveEditedProfile(false);
         });
@@ -280,6 +276,13 @@ class LeonLauncher {
             if (e.target?.dataset?.styleField === 'ref') {
                 const row = e.target.closest('.style-row');
                 if (row) this.updateStyleRefHint(row);
+            }
+        });
+
+        document.getElementById('page-editor')?.addEventListener('change', (e) => {
+            if (!this.editorProfile || e.target?.id === 'editor-json') return;
+            if (e.target?.matches?.('input, textarea, select')) {
+                this.syncEditorToJson(false, { silent: true });
             }
         });
 
@@ -460,11 +463,10 @@ class LeonLauncher {
     readVllmGpuRatio() {
         const input = document.getElementById('gpu-ratio');
         const raw = input?.value?.trim() || '';
-        const value = Number.parseFloat(raw);
-        if (!Number.isFinite(value) || value <= 0 || value > 1) {
-            throw new Error('vLLM GPU 占比必须是 0 到 1 之间的数字');
+        const value = Number(raw);
+        if (!Number.isFinite(value)) {
+            throw new Error('vLLM GPU 占比需要填写数字，例如 0.15');
         }
-        input.value = formatRatio(value);
         return value;
     }
 
@@ -597,7 +599,7 @@ class LeonLauncher {
             hint.textContent = `未找到：${missing.slice(0, 2).join('、')}`;
             hint.className = 'style-ref-hint warn';
         } else {
-            hint.textContent = '保存后可用“测试”校验参考音频是否存在。';
+            hint.textContent = '保存配置时会校验参考音频是否存在。';
             hint.className = 'style-ref-hint muted';
         }
     }
@@ -668,7 +670,6 @@ class LeonLauncher {
                 ${updated}
                 <div class="profile-actions">
                     ${!profile.active ? `<button class="btn-profile btn-activate" data-file="${file}">启用</button>` : ''}
-                    <button class="btn-profile btn-test" data-file="${file}">测试</button>
                     <button class="btn-profile btn-copy" data-file="${file}">复制</button>
                     ${!profile.active ? `<button class="btn-profile btn-delete" data-file="${file}">删除</button>` : ''}
                     <button class="btn-profile btn-edit" data-file="${file}">详情</button>
@@ -687,12 +688,6 @@ class LeonLauncher {
             editBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.openProfileEditor(profile.file);
-            });
-
-            const testBtn = card.querySelector('.btn-test');
-            testBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.validateProfile(profile.file);
             });
 
             const copyBtn = card.querySelector('.btn-copy');
@@ -1333,18 +1328,13 @@ ${completenessRules}`;
         return prompt;
     }
 
-    syncEditorToJson(logResult) {
+    syncEditorToJson(logResult, options = {}) {
         if (!this.editorProfile) {
             return null;
         }
 
-        let profile;
-        try {
-            profile = JSON.parse(document.getElementById('editor-json').value || '{}');
-        } catch (error) {
-            this.addLog('error', `JSON 解析失败: ${formatError(error)}`);
-            return null;
-        }
+        const silent = Boolean(options.silent);
+        const profile = structuredClone(this.editorProfile || {});
 
         profile.name = document.getElementById('editor-name').value.trim();
         profile.description = document.getElementById('editor-description').value.trim();
@@ -1390,14 +1380,14 @@ ${completenessRules}`;
                 profile.styles[id] = style;
             });
         } catch (error) {
-            this.addLog('error', formatError(error));
+            if (!silent) this.addLog('error', formatError(error));
             return null;
         }
         this.syncPresetFieldsIntoProfile(profile);
 
         this.editorProfile = profile;
         document.getElementById('editor-json').value = JSON.stringify(profile, null, 2);
-        if (logResult) {
+        if (logResult && !silent) {
             this.addLog('info', `已同步 ${this.editorFile} 表单到 JSON`);
         }
         return profile;
@@ -1435,7 +1425,7 @@ ${completenessRules}`;
                 this.addLog('success', normalizeMessage(applyMessage));
             }
             await this.loadProfiles();
-            await this.openProfileEditor(this.editorFile);
+            this.closeProfileEditor();
         } catch (error) {
             this.addLog('error', `保存失败: ${formatError(error)}`);
         }
@@ -1446,7 +1436,7 @@ ${completenessRules}`;
             const message = await api.validateProfile(filename);
             this.addLog('success', normalizeMessage(message));
         } catch (error) {
-            this.addLog('error', `Profile 测试失败: ${formatError(error)}`);
+            this.addLog('error', `Profile 校验失败: ${formatError(error)}`);
         }
     }
 

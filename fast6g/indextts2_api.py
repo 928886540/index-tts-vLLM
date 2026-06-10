@@ -1099,7 +1099,7 @@ def _normal_segments_from_request(req: dict) -> list[dict]:
     segments = req.get("segments") or []
     out = []
     for seg in segments:
-        data = seg.dict() if hasattr(seg, "dict") else dict(seg or {})
+        data = _model_to_dict(seg)
         text = str(data.get("text") or "").strip()
         if not text:
             continue
@@ -1270,7 +1270,7 @@ def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
         "",
         "拆段规则:",
         "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
-        "   旁白 style 永远写 neutral，style_alpha 写 0.15；不要输出 emo_vec，除非该 style 在枚举里写着 emo_vec未配置。",
+        "   旁白默认 style 写 neutral；如果用户规则明确要求旁白使用某个声腔 style，可以按规则输出该 style。",
         "2. 人物直接说出口的话 → role 用说话人的名字；如果说话人是「你」或用户身份名，role 统一写 \"用户\"。",
         "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。",
         "4. text 是要朗读的原文片段，保留标点和语气词。",
@@ -1324,8 +1324,6 @@ def _put_parse_cache(key: str, segments: list) -> None:
 
 
 def _stabilize_dialogue_emo_vec(role: str, emo_vec):
-    if role == "旁白":
-        return [0.0] * 7 + [0.85]
     if not isinstance(emo_vec, list) or len(emo_vec) != 8:
         return None
     vals = []
@@ -1398,8 +1396,6 @@ def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
         style = str(seg.get("style") or seg.get("style_ref") or "neutral").strip() or "neutral"
         if style not in styles:
             raise ValueError(f"LLM 输出错误: 未知 style={style}，不在 active profile styles 中")
-        if role == "旁白" and style != "neutral":
-            raise ValueError(f"LLM 输出错误: 旁白 style 必须是 neutral，实际为 {style}")
         style_entry = styles[style]
         style_alpha = _segment_number(
             seg.get("style_alpha"),
@@ -1412,8 +1408,8 @@ def _normalize_backend_parsed_segments(parsed: dict, req: dict) -> List[dict]:
             seg.get("emo_alpha"),
             style_entry["emo_alpha"],
             "emo_alpha",
-            0.12 if role == "旁白" else 0.18,
-            0.22 if role == "旁白" else 0.52,
+            0.12 if style == "neutral" else 0.18,
+            0.22 if style == "neutral" else 0.52,
         )
         if style_entry.get("emo_vec") is not None:
             emo_vec = list(style_entry["emo_vec"])
@@ -1559,6 +1555,16 @@ def _wav_bytes_to_pcm_bytes(wav_bytes: bytes) -> tuple[int, bytes]:
 
 def _media_type_for_audio_path(path: str) -> str:
     return "audio/mpeg" if os.path.splitext(str(path or ""))[1].lower() == ".mp3" else "audio/wav"
+
+
+def _model_to_dict(value):
+    if value is None:
+        return {}
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if hasattr(value, "dict"):
+        return value.dict()
+    return dict(value or {})
 
 
 def _cache_audio_headers(key: str, path: str, extra: Optional[dict] = None) -> dict:
@@ -2717,7 +2723,7 @@ async def _prepare_dialogue_job(req: dict):
 
 @APP.post("/tts_dialogue_stream_job")
 async def tts_dialogue_stream_job_endpoint(request: TTS_Dialogue_Request):
-    req = request.dict()
+    req = _model_to_dict(request)
     prepared, err = await _prepare_dialogue_job(req)
     if err is not None:
         return err
@@ -3070,7 +3076,7 @@ async def tts_get_endpoint(
 
 @APP.post("/tts")
 async def tts_post_endpoint(request: TTS_Request):
-    req = request.dict()
+    req = _model_to_dict(request)
     return await tts_handle(req)
 
 

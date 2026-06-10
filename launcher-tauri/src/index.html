@@ -64,8 +64,18 @@
                         <span>启用 MSVC</span>
                     </label>
                     <label class="gpu-ratio-label">
-                        <span>GPU占比</span>
-                        <input type="number" id="gpu-ratio" value="0.15" step="0.05" min="0.1" max="1.0">
+                        <span>
+                            <b>GPU占比</b>
+                            <em>vLLM 显存比例</em>
+                        </span>
+                        <input
+                            type="text"
+                            id="gpu-ratio"
+                            value="0.15"
+                            inputmode="decimal"
+                            autocomplete="off"
+                            title="传给 vLLM 的 gpu_memory_utilization；0.15 表示大约使用 15% 显存预算。"
+                        >
                     </label>
                 </div>
                 <div class="version-selector">
@@ -210,14 +220,13 @@
                             <div class="style-list" id="editor-styles"></div>
                         </div>
                         <details class="field full json-details">
-                            <summary>高级：完整 JSON</summary>
-                            <textarea id="editor-json" rows="12" spellcheck="false"></textarea>
+                            <summary>高级：生成后的 JSON 预览</summary>
+                            <textarea id="editor-json" rows="12" spellcheck="false" readonly></textarea>
                         </details>
                     </div>
                     <div class="editor-actions">
-                        <button class="btn-secondary" id="btn-sync-json">同步表单到 JSON</button>
-                        <button class="btn-secondary" id="btn-save-profile">保存配置</button>
-                        <button class="btn-secondary" id="btn-apply-edited-profile">保存并启用</button>
+                        <button class="btn-secondary" id="btn-save-profile">保存并返回</button>
+                        <button class="btn-secondary" id="btn-apply-edited-profile">保存启用并返回</button>
                     </div>
                 </section>
             </div>

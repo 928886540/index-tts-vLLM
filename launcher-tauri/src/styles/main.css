@@ -55,7 +55,7 @@ body {
     height: 100%;
     display: block;
     object-fit: cover;
-    object-position: center;
+    object-position: 34% center;
 }
 
 /* ==================== 主布局 ==================== */
@@ -158,7 +158,8 @@ body {
 .config-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .vllm-options.hidden {
@@ -166,14 +167,14 @@ body {
 }
 
 .msvc-toggle {
-    flex: 0 0 96px;
+    flex: 1 1 88px;
     display: flex;
     align-items: center;
     gap: 6px;
     min-width: 0;
     color: #cdd6e0;
-    font-size: 13px;
-    line-height: 1;
+    font-size: 12px;
+    line-height: 1.15;
     user-select: none;
 }
 
@@ -185,21 +186,45 @@ body {
 }
 
 .gpu-ratio-label {
-    flex: 1 1 auto;
+    flex: 1 1 106px;
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 12px;
+    justify-content: flex-end;
+    gap: 5px;
+    font-size: 11px;
     color: #cdd6e0;
 }
 
 .gpu-ratio-label span {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.gpu-ratio-label b,
+.gpu-ratio-label em {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gpu-ratio-label b {
+    font-size: 11px;
+    line-height: 1.1;
+}
+
+.gpu-ratio-label em {
+    margin-top: 1px;
+    color: rgba(205, 214, 224, 0.62);
+    font-style: normal;
+    font-size: 10px;
+    line-height: 1.05;
 }
 
 .gpu-ratio-label input {
-    width: 58px;
+    flex: 0 0 54px;
+    width: 54px;
     height: 24px;
     padding: 2px 6px;
     color: #ffffff;
@@ -214,6 +239,12 @@ body {
 .gpu-ratio-label input:focus {
     outline: none;
     border-color: #6991b0;
+}
+
+@media (max-width: 900px) {
+    .top-banner {
+        object-position: 24% center;
+    }
 }
 
 .version-selector {

@@ -267,12 +267,6 @@
     background: #3a3a3a;
 }
 
-.btn-test {
-    background: rgba(0, 212, 255, 0.16);
-    color: var(--accent-cyan);
-    border: 1px solid rgba(0, 212, 255, 0.22);
-}
-
 .btn-copy {
     background: rgba(183, 148, 246, 0.16);
     color: var(--accent-purple);
@@ -644,6 +638,11 @@
     width: 100%;
 }
 
+.json-details textarea[readonly] {
+    color: rgba(234, 241, 249, 0.78);
+    cursor: default;
+}
+
 .editor-actions {
     display: flex;
     justify-content: flex-end;
@@ -821,14 +820,6 @@
 /* ==================== 响应式设计 ==================== */
 
 @media (max-width: 768px) {
-    .sidebar {
-        width: 80px;
-    }
-
-    .nav-label {
-        display: none;
-    }
-
     .hero-title {
         font-size: 36px;
     }
@@ -923,15 +914,18 @@
 }
 
 .msvc-toggle {
-    flex: 0 0 auto;
+    flex: 1 1 88px;
 }
 
 .gpu-ratio-label {
+    flex: 1 1 106px;
+    min-width: 0;
     justify-content: flex-end;
 }
 
 .gpu-ratio-label input {
-    width: 64px;
+    flex-basis: 54px;
+    width: 54px;
     height: 28px;
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.08);
