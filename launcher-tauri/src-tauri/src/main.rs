@@ -86,6 +86,27 @@ struct LogSnapshot {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct RecentGenerationItem {
+    version: String,
+    key: String,
+    created_at: Option<String>,
+    modified: Option<String>,
+    audio_format: Option<String>,
+    audio_bytes: Option<u64>,
+    duration_s: Option<f64>,
+    wall_s: Option<f64>,
+    rtf: Option<f64>,
+    segments_done: Option<u64>,
+    segments_total: Option<u64>,
+    parse_mode: Option<String>,
+    performance_mode: Option<String>,
+    role: Option<String>,
+    first_text: Option<String>,
+    status: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct VoiceRefItem {
     name: String,
     relative_path: String,
@@ -185,6 +206,7 @@ fn main() {
             get_service_status,
             get_environment,
             get_log_snapshot,
+            get_recent_generations,
             upload_voice,
             delete_voice,
             move_voice,
@@ -203,6 +225,7 @@ fn smoke_test() -> Result<(), String> {
     }
     validate_profile(profiles[0].file.clone())?;
     get_log_snapshot("fast6g".to_string(), Some(5))?;
+    get_recent_generations("fast6g".to_string(), Some(3))?;
     let active_path = profile_dir.join("active.json");
     if !active_path.exists() {
         return Err(format!("缺少 active profile: {}", active_path.display()));
@@ -879,6 +902,51 @@ fn get_log_snapshot(version: String, max_lines: Option<usize>) -> Result<LogSnap
     })
 }
 
+#[tauri::command]
+fn get_recent_generations(
+    version: String,
+    max_items: Option<usize>,
+) -> Result<Vec<RecentGenerationItem>, String> {
+    let root = leon_root()?;
+    let normalized = normalize_version(&version);
+    let cache_dir = root.join(&normalized).join("outputs").join("cache");
+    let max_items = max_items.unwrap_or(12).clamp(1, 50);
+
+    if !cache_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&cache_dir)
+        .map_err(|e| format!("读取生成记录目录失败 {}: {}", cache_dir.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("读取生成记录失败: {}", e))?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("读取生成记录元数据失败 {}: {}", path.display(), e))?;
+        candidates.push((path, metadata.modified().ok()));
+    }
+
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut items = Vec::new();
+    for (path, modified_time) in candidates.into_iter().take(max_items * 3) {
+        match recent_generation_from_json(&normalized, &cache_dir, &path, modified_time) {
+            Ok(item) => items.push(item),
+            Err(_) => continue,
+        }
+        if items.len() >= max_items {
+            break;
+        }
+    }
+
+    Ok(items)
+}
+
 async fn health_check_internal() -> ServiceHealth {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -1545,6 +1613,116 @@ fn normalize_version(version: &str) -> String {
     } else {
         "vllm".to_string()
     }
+}
+
+fn recent_generation_from_json(
+    version: &str,
+    cache_dir: &Path,
+    path: &Path,
+    modified_time: Option<std::time::SystemTime>,
+) -> Result<RecentGenerationItem, String> {
+    let value = read_json(path)?;
+    let metrics = value.get("metrics").unwrap_or(&Value::Null);
+    let key = value
+        .get("key")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string)
+        })
+        .ok_or_else(|| format!("生成记录文件名无效: {}", path.display()))?;
+
+    let (audio_format, audio_bytes) = generation_audio_info(cache_dir, &key, &value);
+    let status = value_string(metrics, "state")
+        .or_else(|| value_string(metrics, "phase"))
+        .unwrap_or_else(|| "done".to_string());
+
+    Ok(RecentGenerationItem {
+        version: version.to_string(),
+        key,
+        created_at: value_string(&value, "created_at"),
+        modified: modified_time.and_then(system_time_to_rfc3339),
+        audio_format,
+        audio_bytes,
+        duration_s: value_f64(&value, "duration_s")
+            .or_else(|| value_f64(metrics, "audio_duration_s")),
+        wall_s: value_f64(metrics, "total_wall_s").or_else(|| value_f64(metrics, "infer_total_s")),
+        rtf: value_f64(metrics, "rtf"),
+        segments_done: value_u64(metrics, "segments_done")
+            .or_else(|| array_len_u64(value.get("segments_meta"))),
+        segments_total: value_u64(metrics, "segments_total")
+            .or_else(|| array_len_u64(value.get("segments_plan")))
+            .or_else(|| array_len_u64(value.get("segments_meta"))),
+        parse_mode: value_string(metrics, "parse_mode"),
+        performance_mode: value_string(metrics, "performance_mode"),
+        role: first_segment_string(&value, "role"),
+        first_text: first_segment_string(&value, "text"),
+        status,
+    })
+}
+
+fn generation_audio_info(
+    cache_dir: &Path,
+    key: &str,
+    value: &Value,
+) -> (Option<String>, Option<u64>) {
+    let mut extensions = Vec::new();
+    if let Some(ext) = value.get("audio_ext").and_then(Value::as_str) {
+        extensions.push(ext.trim_start_matches('.').to_ascii_lowercase());
+    }
+    if let Some(format) = value.get("audio_format").and_then(Value::as_str) {
+        extensions.push(format.trim_start_matches('.').to_ascii_lowercase());
+    }
+    extensions.extend(["mp3", "wav", "flac", "ogg", "m4a"].map(str::to_string));
+    extensions.dedup();
+
+    let known_format = extensions.first().cloned();
+    for ext in extensions {
+        let candidate = cache_dir.join(format!("{}.{}", key, ext));
+        if let Ok(metadata) = fs::metadata(&candidate) {
+            return (Some(ext), Some(metadata.len()));
+        }
+    }
+
+    (known_format, None)
+}
+
+fn value_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+fn value_f64(value: &Value, key: &str) -> Option<f64> {
+    value.get(key).and_then(Value::as_f64)
+}
+
+fn value_u64(value: &Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(Value::as_u64)
+}
+
+fn array_len_u64(value: Option<&Value>) -> Option<u64> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| items.len() as u64)
+}
+
+fn first_segment_string(value: &Value, key: &str) -> Option<String> {
+    let metrics = value.get("metrics").unwrap_or(&Value::Null);
+    [
+        value.get("segments_meta"),
+        metrics.get("segments"),
+        value.get("segments_plan"),
+    ]
+    .iter()
+    .filter_map(|section| section.and_then(Value::as_array))
+    .filter_map(|items| items.first())
+    .filter_map(|item| value_string(item, key))
+    .next()
 }
 
 fn format_ratio(ratio: f32) -> String {

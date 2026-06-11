@@ -8,6 +8,31 @@ This is the active handoff summary. Full historical state was archived on 2026-0
 
 Read the archive only when investigating old decisions, benchmark history, or fixed regressions.
 
+## Tauri Launcher UX Cleanup 2026-06-12
+
+Current launcher UX slice:
+
+- Logs page now defaults to a useful operational view with explicit `重点` / `启动` / `错误` / `RTF` / `全部` filters. The frontend classifies startup, error, warning, and timing/RTF lines while continuing to hide checkpoint/tqdm/self-poll noise.
+- Tauri backend exposes `get_recent_generations`, reading top-level `vllm/outputs/cache/*.json` or `fast6g/outputs/cache/*.json` plus matching audio file metadata. The monitor page now shows recent generation records with RTF, audio duration, total wall time, segment count, format, and size instead of a hard-coded placeholder.
+- Monitor page now separates service/API status, local resource facts, recent generation records, RTF/timing log lines, and error log lines. It also fixes the missing `formatUptime()` call that could break monitor refresh after the service started.
+- Voice library UI is now a denser scan-friendly list with group counts, stable row sizing, search across name/group/path, and cleaner preview/move/delete controls.
+- Quick test voice/style picker uses a shared searchable modal with group counts, current selection, row preview, and selected state. Quick test generation now submits the selected item `name` instead of an undefined `.path`.
+
+Validation for this slice:
+
+```powershell
+node --check launcher-tauri\src\scripts\app.js
+node --check launcher-tauri\src\scripts\mock-api.js
+node --check launcher-tauri\src\scripts\main.js
+npm --prefix launcher-tauri run frontend:build
+cargo fmt --manifest-path launcher-tauri\src-tauri\Cargo.toml --check
+cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
+cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+```
+
+Note: copying the release exe over root `LEON-Launcher-Tauri.exe` failed because the root launcher was open as PID `20500`. The release exe smoke passed from `launcher-tauri/src-tauri/target/release/leon-launcher-tauri.exe`. Close the running launcher before overwriting the root exe.
+
 ## Package Split Handoff 2026-06-12
 
 User's next requested direction: split LEON into a common package plus optional `vllm` and `fast6g` engine packages.

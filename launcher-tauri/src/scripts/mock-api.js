@@ -306,10 +306,35 @@ window.tauri_mock = {
             ],
             activeFile: `launcher-preview-${version}.log`,
             lines: [
-                'Mock 日志预览模式',
-                `${version} 服务日志会在 Tauri 环境中读取 logs/${version}/ 最新文件`
+                '[12:00:01] [INFO] 启动配置: Fast6G',
+                '[12:00:04] [SUCCESS] API ready on port 9880',
+                'metrics: audio_duration_s=4.817 total_wall_s=13.564 rtf=2.816 s2mel_s=1.928 bigvgan_s=0.577',
+                'WARNING 06-12 12:00:07 prompt audio was clipped'
             ]
         });
+    },
+
+    getRecentGenerations: (version) => {
+        return Promise.resolve([
+            {
+                version,
+                key: 'bc3845c69e36ddedd6a4c828c677c463204357be',
+                createdAt: new Date().toISOString(),
+                modified: new Date().toISOString(),
+                audioFormat: 'mp3',
+                audioBytes: 78158,
+                durationS: 4.817,
+                wallS: 13.564,
+                rtf: 2.816,
+                segmentsDone: 4,
+                segmentsTotal: 4,
+                parseMode: 'ai',
+                performanceMode: 'fast',
+                role: '用户',
+                firstText: '白夜雨停在门口，轻声说：',
+                status: 'done'
+            }
+        ]);
     }
 };
 

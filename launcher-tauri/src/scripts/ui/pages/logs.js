@@ -2,7 +2,7 @@ export function logsPage() {
     return `
         <div id="page-logs" class="page">
             <div class="page-header">
-                <h2 class="page-title">系统日志</h2>
+                <h2 class="page-title">日志</h2>
                 <div class="page-actions">
                     <select id="log-version-select" class="select-version compact" hidden>
                         <option value="vllm">vLLM</option>
@@ -11,6 +11,20 @@ export function logsPage() {
                     <div class="segmented compact" aria-label="日志版本">
                         <button type="button" data-log-version="vllm" class="active">vLLM</button>
                         <button type="button" data-log-version="fast6g">6G</button>
+                    </div>
+                    <select id="log-category-filter" class="select-version compact" hidden>
+                        <option value="useful">重点</option>
+                        <option value="startup">启动</option>
+                        <option value="error">错误</option>
+                        <option value="rtf">RTF</option>
+                        <option value="all">全部</option>
+                    </select>
+                    <div class="segmented log-kind" aria-label="日志分类">
+                        <button type="button" data-log-category="useful" class="active">重点</button>
+                        <button type="button" data-log-category="startup">启动</button>
+                        <button type="button" data-log-category="error">错误</button>
+                        <button type="button" data-log-category="rtf">RTF</button>
+                        <button type="button" data-log-category="all">全部</button>
                     </div>
                     <select id="log-level-filter" class="select-version compact" hidden>
                         <option value="all">全部</option>
@@ -40,6 +54,7 @@ export function logsPage() {
                     <button class="btn-secondary" id="btn-clear-logs">清空</button>
                 </div>
             </div>
+            <div class="log-summary" id="log-summary"></div>
             <div class="log-container">
                 <div class="log-output" id="log-output">
                     <div class="log-entry log-info">[INFO] LEON 启动器已初始化</div>

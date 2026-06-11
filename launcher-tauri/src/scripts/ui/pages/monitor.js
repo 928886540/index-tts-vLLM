@@ -2,7 +2,7 @@ export function monitorPage() {
     return `
         <div id="page-monitor" class="page">
             <div class="page-header">
-                <h2 class="page-title">实时监控</h2>
+                <h2 class="page-title">监控</h2>
                 <div class="page-actions">
                     <button class="btn-secondary" id="btn-refresh-monitor">刷新</button>
                 </div>
@@ -17,6 +17,10 @@ export function monitorPage() {
                         <div class="stat-row">
                             <span>版本</span>
                             <span id="monitor-version">-</span>
+                        </div>
+                        <div class="stat-row">
+                            <span>API 状态</span>
+                            <span id="monitor-api-message">-</span>
                         </div>
                         <div class="stat-row">
                             <span>运行时间</span>
@@ -47,10 +51,20 @@ export function monitorPage() {
 
                 <section class="monitor-card full-width">
                     <div class="card-header">
-                        <h3>最近生成</h3>
+                        <h3>最近生成记录</h3>
+                        <span id="monitor-generation-count" class="card-count">0 条</span>
                     </div>
                     <div class="card-body">
                         <div id="monitor-recent-tasks"></div>
+                    </div>
+                </section>
+
+                <section class="monitor-card full-width">
+                    <div class="card-header">
+                        <h3>RTF / 耗时日志</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="monitor-rtf-logs"></div>
                     </div>
                 </section>
 

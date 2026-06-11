@@ -17,7 +17,7 @@ export function voicesPage() {
                 </aside>
                 <section class="voices-content">
                     <div class="voices-toolbar">
-                        <input id="voice-search" type="search" placeholder="搜索音色" spellcheck="false">
+                        <input id="voice-search" type="search" placeholder="搜索名称、分组或路径" spellcheck="false">
                         <span id="voice-count">0 个音色</span>
                     </div>
                     <div class="voices-grid" id="voices-grid"></div>

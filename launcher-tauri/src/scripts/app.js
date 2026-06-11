@@ -137,6 +137,11 @@ const api = {
         return window.tauri_mock.getLogSnapshot(version, maxLines);
     },
 
+    async getRecentGenerations(version, maxItems) {
+        if (tauriInvoke) return tauriInvoke('get_recent_generations', { version, maxItems });
+        return window.tauri_mock.getRecentGenerations(version, maxItems);
+    },
+
     async uploadVoice(name, data, ext) {
         if (tauriInvoke) return tauriInvoke('upload_voice', { name, data, ext });
         return Promise.resolve('prompts/library/' + name + ext);
@@ -171,6 +176,8 @@ class LeonLauncher {
         this.editorProfile = null;
         this.editorPresetMode = null;
         this.logEntries = [];
+        this.logSnapshotDropped = 0;
+        this.logSnapshotFiles = [];
         this.selectedVersion = 'vllm';
         this.voiceRefs = [];
         this.voiceRefMap = new Map();
@@ -180,6 +187,7 @@ class LeonLauncher {
         this.selectedGroup = null;
         this.testHistory = [];
         this.currentAudio = null;
+        this.currentAudioName = null;
         this.monitorInterval = null;
         this.selectedTestVoice = null;
         this.selectedTestStyle = null;
@@ -327,6 +335,10 @@ class LeonLauncher {
             if (logLevelButton) {
                 this.setLogLevel(logLevelButton.dataset.logLevel);
             }
+            const logCategoryButton = e.target.closest('[data-log-category]');
+            if (logCategoryButton) {
+                this.setLogCategory(logCategoryButton.dataset.logCategory);
+            }
         });
 
         document.addEventListener('input', (e) => {
@@ -359,6 +371,11 @@ class LeonLauncher {
         });
 
         document.getElementById('log-level-filter')?.addEventListener('change', () => {
+            this.syncLogButtonState();
+            this.renderLogEntries();
+        });
+
+        document.getElementById('log-category-filter')?.addEventListener('change', () => {
             this.syncLogButtonState();
             this.renderLogEntries();
         });
@@ -479,14 +496,26 @@ class LeonLauncher {
         this.renderLogEntries();
     }
 
+    setLogCategory(category) {
+        const normalized = ['useful', 'startup', 'error', 'rtf', 'all'].includes(category) ? category : 'useful';
+        const select = document.getElementById('log-category-filter');
+        if (select) select.value = normalized;
+        this.syncLogButtonState();
+        this.renderLogEntries();
+    }
+
     syncLogButtonState() {
         const version = document.getElementById('log-version-select')?.value || this.selectedVersion;
         const level = document.getElementById('log-level-filter')?.value || 'all';
+        const category = document.getElementById('log-category-filter')?.value || 'useful';
         document.querySelectorAll('[data-log-version]').forEach(button => {
             button.classList.toggle('active', button.dataset.logVersion === version);
         });
         document.querySelectorAll('[data-log-level]').forEach(button => {
             button.classList.toggle('active', button.dataset.logLevel === level);
+        });
+        document.querySelectorAll('[data-log-category]').forEach(button => {
+            button.classList.toggle('active', button.dataset.logCategory === category);
         });
     }
 
@@ -1895,25 +1924,29 @@ ${completenessRules}`;
     }
 
     renderLogSnapshot(snapshot) {
-        const logOutput = document.getElementById('log-output');
         this.replaceLogs([]);
+        this.logSnapshotFiles = snapshot.files || [];
 
         const fileLabel = snapshot.activeFile || '无日志文件';
-        this.addLog('info', `${snapshot.version} · ${fileLabel}`);
+        this.addLog('info', `${snapshot.version} · ${fileLabel}`, null, { category: 'startup' });
 
         if (snapshot.files?.length) {
-            const summary = snapshot.files.slice(0, 5).map(file => `${file.file} (${file.bytes} B)`).join(' · ');
-            this.addLog('info', `最近日志: ${summary}`);
+            const summary = snapshot.files.slice(0, 5).map(file => `${file.file} (${formatBytes(file.bytes)})`).join(' · ');
+            this.addLog('info', `日志文件: ${summary}`, null, { category: 'startup' });
         }
 
         let lastSnapshotTimestamp = null;
-        (snapshot.lines || []).filter(line => !isNoisySnapshotLogLine(line)).forEach(line => {
+        const rawLines = snapshot.lines || [];
+        const usefulLines = rawLines.filter(line => !isNoisySnapshotLogLine(line));
+        this.logSnapshotDropped = rawLines.length - usefulLines.length;
+        usefulLines.forEach(line => {
             const parsed = parseLogSnapshotLine(line);
             if (parsed.timestamp) {
                 lastSnapshotTimestamp = parsed.timestamp;
             }
             this.addLog(parsed.level, parsed.message, parsed.timestamp || lastSnapshotTimestamp || '历史');
         });
+        this.renderLogSummary();
     }
 
     updateStats() {
@@ -1981,13 +2014,15 @@ ${completenessRules}`;
         this.renderLogEntries();
     }
 
-    addLog(level, message, timestampOverride = null) {
+    addLog(level, message, timestampOverride = null, options = {}) {
         const normalizedLevel = ['info', 'success', 'warning', 'error'].includes(level) ? level : 'info';
         const timestamp = timestampOverride || new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        const text = String(message ?? '');
         this.logEntries.push({
             level: normalizedLevel,
-            message: String(message ?? ''),
-            timestamp
+            message: text,
+            timestamp,
+            category: options.category || logCategoryForLine(text, normalizedLevel)
         });
         if (this.logEntries.length > 1200) {
             this.logEntries.splice(0, this.logEntries.length - 1200);
@@ -1998,14 +2033,15 @@ ${completenessRules}`;
     renderLogEntries() {
         const logOutput = document.getElementById('log-output');
         const levelFilter = document.getElementById('log-level-filter')?.value || 'all';
+        const categoryFilter = document.getElementById('log-category-filter')?.value || 'useful';
         const query = (document.getElementById('log-search')?.value || '').trim();
-        const visibleEntries = this.logEntries.filter(entry => this.logEntryMatches(entry, levelFilter, query));
+        const visibleEntries = this.logEntries.filter(entry => this.logEntryMatches(entry, levelFilter, categoryFilter, query));
 
         logOutput.innerHTML = '';
         visibleEntries.forEach(entry => {
             const line = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`;
             const row = document.createElement('div');
-            row.className = `log-entry log-${entry.level}`;
+            row.className = `log-entry log-${entry.level} log-kind-${entry.category || 'other'}`;
             row.innerHTML = highlightQuery(line, query);
             logOutput.appendChild(row);
         });
@@ -2021,20 +2057,52 @@ ${completenessRules}`;
         if (count) {
             count.textContent = `${visibleEntries.length}/${this.logEntries.length}`;
         }
+        this.renderLogSummary();
         logOutput.scrollTop = logOutput.scrollHeight;
     }
 
-    logEntryMatches(entry, levelFilter, query) {
+    renderLogSummary() {
+        const container = document.getElementById('log-summary');
+        if (!container) return;
+        const counts = this.logEntries.reduce((acc, entry) => {
+            const category = entry.category || 'other';
+            acc[category] = (acc[category] || 0) + 1;
+            if (entry.level === 'error') acc.errorLevel = (acc.errorLevel || 0) + 1;
+            if (entry.level === 'warning') acc.warningLevel = (acc.warningLevel || 0) + 1;
+            return acc;
+        }, {});
+        container.innerHTML = [
+            ['启动', counts.startup || 0],
+            ['错误', counts.error || counts.errorLevel || 0],
+            ['警告', counts.warningLevel || 0],
+            ['RTF', counts.rtf || 0],
+            ['隐藏噪声', this.logSnapshotDropped || 0]
+        ].map(([label, value]) => `
+            <span class="log-summary-chip">
+                <b>${escapeHtml(label)}</b>
+                <strong>${escapeHtml(value)}</strong>
+            </span>
+        `).join('');
+    }
+
+    logEntryMatches(entry, levelFilter, categoryFilter, query) {
         const levelMatches = levelFilter === 'all'
             || (levelFilter === 'issues' && ['warning', 'error'].includes(entry.level))
             || entry.level === levelFilter;
+        const category = entry.category || 'other';
+        const categoryMatches = categoryFilter === 'all'
+            || (categoryFilter === 'useful' && (category !== 'other' || ['warning', 'error', 'success'].includes(entry.level)))
+            || category === categoryFilter
+            || (categoryFilter === 'error' && entry.level === 'error');
         const text = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`.toLowerCase();
-        return levelMatches && (!query || text.includes(query.toLowerCase()));
+        return levelMatches && categoryMatches && (!query || text.includes(query.toLowerCase()));
     }
 
     clearLogs() {
+        this.logSnapshotDropped = 0;
+        this.logSnapshotFiles = [];
         this.replaceLogs([]);
-        this.addLog('info', '日志已清空');
+        this.addLog('info', '日志已清空', null, { category: 'startup' });
     }
 
     async loadVoices() {
@@ -2060,9 +2128,11 @@ ${completenessRules}`;
     renderVoiceGroups() {
         const container = document.getElementById('voice-groups');
         if (!container) return;
+        const counts = this.voiceGroupCounts();
         container.innerHTML = this.voiceGroups.map(group => `
-            <div class="group-item ${!this.selectedGroup || this.selectedGroup === group ? 'active' : ''}" data-group="${escapeAttribute(group)}">
-                ${escapeHtml(group)}
+            <div class="group-item ${((!this.selectedGroup && group === '全部') || this.selectedGroup === group) ? 'active' : ''}" data-group="${escapeAttribute(group)}">
+                <span>${escapeHtml(group)}</span>
+                <b>${counts.get(group) || 0}</b>
             </div>
         `).join('');
         container.querySelectorAll('.group-item').forEach(item => {
@@ -2074,16 +2144,26 @@ ${completenessRules}`;
         });
     }
 
+    voiceGroupCounts() {
+        const counts = new Map([['全部', this.voices.length]]);
+        this.voices.forEach(voice => {
+            const group = voice.subdir || '根目录';
+            counts.set(group, (counts.get(group) || 0) + 1);
+        });
+        return counts;
+    }
+
     renderVoices() {
         const container = document.getElementById('voices-grid');
         const search = document.getElementById('voice-search')?.value.toLowerCase() || '';
         const filtered = this.voices.filter(voice => {
             if (this.selectedGroup && voice.subdir !== this.selectedGroup) return false;
-            if (search && !voice.name.toLowerCase().includes(search)) return false;
+            const haystack = [voice.name, voice.subdir, voice.relativePath].join(' ').toLowerCase();
+            if (search && !haystack.includes(search)) return false;
             return true;
         });
 
-        document.getElementById('voice-count').textContent = `${filtered.length} 个音色`;
+        document.getElementById('voice-count').textContent = `${filtered.length}/${this.voices.length} 个音色`;
 
         if (!filtered.length) {
             container.innerHTML = '<div class="empty-state">未找到音色</div>';
@@ -2091,9 +2171,15 @@ ${completenessRules}`;
         }
 
         container.innerHTML = filtered.map(voice => `
-            <div class="voice-card" data-voice="${escapeAttribute(voice.name)}">
-                <div class="voice-name">${escapeHtml(stripAudioExt(voice.name.split('/').pop()))}</div>
-                <div class="voice-path">${escapeHtml(voice.relativePath)}</div>
+            <div class="voice-item" data-voice="${escapeAttribute(voice.name)}">
+                <div class="voice-main">
+                    <div class="voice-name">${escapeHtml(stripAudioExt(voice.name.split('/').pop()))}</div>
+                    <div class="voice-path">${escapeHtml(voice.relativePath || voice.name)}</div>
+                </div>
+                <div class="voice-meta">
+                    <span>${escapeHtml(voice.subdir || '根目录')}</span>
+                    <b>${escapeHtml(voiceFileExt(voice))}</b>
+                </div>
                 <div class="voice-actions">
                     <button class="btn-icon" data-action="play" title="试听">▶</button>
                     <button class="btn-icon" data-action="move" title="移动">→</button>
@@ -2102,7 +2188,7 @@ ${completenessRules}`;
             </div>
         `).join('');
 
-        container.querySelectorAll('.voice-card').forEach(card => {
+        container.querySelectorAll('.voice-item').forEach(card => {
             const voiceName = card.dataset.voice;
             card.querySelector('[data-action="play"]')?.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -2121,24 +2207,33 @@ ${completenessRules}`;
 
     async playVoice(name) {
         try {
-            if (this.currentAudio && !this.currentAudio.paused) {
+            if (this.currentAudio && !this.currentAudio.paused && this.currentAudioName === name) {
                 this.currentAudio.pause();
                 this.currentAudio = null;
+                this.currentAudioName = null;
                 this.updatePlayButtons();
                 return;
+            }
+            if (this.currentAudio) {
+                this.currentAudio.pause();
+                this.currentAudio = null;
+                this.currentAudioName = null;
             }
 
             const dataUrl = await api.getVoiceRefAudio(name);
             const audio = new Audio(dataUrl);
             this.currentAudio = audio;
+            this.currentAudioName = name;
 
             audio.addEventListener('ended', () => {
                 this.currentAudio = null;
+                this.currentAudioName = null;
                 this.updatePlayButtons();
             });
 
             audio.addEventListener('error', () => {
                 this.currentAudio = null;
+                this.currentAudioName = null;
                 this.updatePlayButtons();
             });
 
@@ -2146,14 +2241,15 @@ ${completenessRules}`;
             this.updatePlayButtons(name);
         } catch (error) {
             this.currentAudio = null;
+            this.currentAudioName = null;
             this.updatePlayButtons();
             this.addLog('error', `试听失败: ${formatError(error)}`);
         }
     }
 
     updatePlayButtons(playingName = null) {
-        document.querySelectorAll('.voice-card [data-action="play"]').forEach(btn => {
-            const card = btn.closest('.voice-card');
+        document.querySelectorAll('.voice-item [data-action="play"]').forEach(btn => {
+            const card = btn.closest('.voice-item');
             const voiceName = card?.dataset.voice;
             if (voiceName === playingName && this.currentAudio && !this.currentAudio.paused) {
                 btn.textContent = '⏸';
@@ -2367,7 +2463,7 @@ ${completenessRules}`;
                 result.textContent = '生成中...';
                 try {
                     const audioData = await api.testVoiceGeneration(voice, style, text, '');
-                    result.innerHTML = `<audio controls src="${audioData}" autoplay></audio>`;
+                    result.innerHTML = `<audio controls src="${escapeAttribute(audioData)}" autoplay></audio>`;
                     this.addLog('success', '生成成功');
                 } catch (error) {
                     result.textContent = '';
@@ -2375,11 +2471,6 @@ ${completenessRules}`;
                 }
             });
         });
-    }
-
-    clearLogs() {
-        this.replaceLogs([]);
-        this.addLog('info', '日志已清空');
     }
 
     async loadTestPage() {
@@ -2410,8 +2501,8 @@ ${completenessRules}`;
         result.innerHTML = '<div class="test-loading">生成中...</div>';
         try {
             const audioData = await api.testVoiceGeneration(
-                this.selectedTestVoice.path || '',
-                this.selectedTestStyle.path || '',
+                this.selectedTestVoice.name || '',
+                this.selectedTestStyle.name || '',
                 text,
                 ''
             );
@@ -2420,10 +2511,10 @@ ${completenessRules}`;
                 <div class="test-result-card">
                     <div class="result-info">
                         <span>${timestamp}</span>
-                        <span>音色: ${this.selectedTestVoice.name}</span>
-                        <span>声腔: ${this.selectedTestStyle.name}</span>
+                        <span>音色: ${escapeHtml(this.selectedTestVoice.name)}</span>
+                        <span>声腔: ${escapeHtml(this.selectedTestStyle.name)}</span>
                     </div>
-                    <audio controls src="${audioData}" autoplay></audio>
+                    <audio controls src="${escapeAttribute(audioData)}" autoplay></audio>
                 </div>
             `;
             this.testHistory.unshift({
@@ -2465,7 +2556,7 @@ ${completenessRules}`;
                     <div>声腔: ${escapeHtml(item.style)}</div>
                 </div>
                 <div class="history-text">${escapeHtml(item.text.substring(0, 50))}${item.text.length > 50 ? '...' : ''}</div>
-                <audio controls src="${item.audioData}"></audio>
+                <audio controls src="${escapeAttribute(item.audioData)}"></audio>
             </div>
         `).join('');
 
@@ -2474,8 +2565,10 @@ ${completenessRules}`;
                 const index = parseInt(btn.dataset.index);
                 const item = this.testHistory[index];
                 if (item) {
-                    document.getElementById('test-voice-select').value = item.voice;
-                    document.getElementById('test-style-input').value = item.style;
+                    this.selectedTestVoice = this.voices.find(voice => voice.name === item.voice) || { name: item.voice };
+                    this.selectedTestStyle = this.voices.find(voice => voice.name === item.style) || { name: item.style };
+                    document.getElementById('selected-voice-name').textContent = item.voice;
+                    document.getElementById('selected-style-name').textContent = item.style;
                     document.getElementById('test-text-input').value = item.text;
                 }
             });
@@ -2497,20 +2590,23 @@ ${completenessRules}`;
 
     async refreshMonitor() {
         try {
-            const status = await api.getServiceStatus();
-            const env = await api.getEnvironment();
+            const [status, env, generations] = await Promise.all([
+                api.getServiceStatus(),
+                api.getEnvironment(),
+                api.getRecentGenerations(this.selectedVersion, 8)
+            ]);
 
             document.getElementById('monitor-service-status').textContent = status.running ? '运行中' : '已停止';
             document.getElementById('monitor-service-status').className = 'status-indicator ' + (status.running ? 'running' : 'stopped');
             document.getElementById('monitor-version').textContent = status.health.version || '-';
-            document.getElementById('monitor-uptime').textContent = this.isRunning ? this.formatUptime(this.uptime) : '-';
+            document.getElementById('monitor-api-message').textContent = cleanStatusMessage(status.health.message || status.health.status || '-');
+            document.getElementById('monitor-uptime').textContent = this.isRunning ? formatUptime(this.uptime) : '-';
             document.getElementById('monitor-port').textContent = env.port || '9880';
             document.getElementById('monitor-gpu').textContent = env.cuda || '-';
             document.getElementById('monitor-pid').textContent = this.extractPID(env.port) || '-';
 
-            await this.loadMonitorErrors();
-
-            document.getElementById('monitor-recent-tasks').innerHTML = '<div class="empty-state compact">暂无生成记录</div>';
+            this.renderMonitorRecentGenerations(generations || []);
+            await this.loadMonitorLogInsights();
         } catch (error) {
             this.addLog('error', `刷新监控数据失败: ${formatError(error)}`);
         }
@@ -2521,212 +2617,243 @@ ${completenessRules}`;
         return match ? match[1] : null;
     }
 
-    async loadMonitorErrors() {
+    renderMonitorRecentGenerations(items) {
+        const container = document.getElementById('monitor-recent-tasks');
+        const count = document.getElementById('monitor-generation-count');
+        if (!container) return;
+        if (count) count.textContent = `${items.length} 条`;
+
+        if (!items.length) {
+            container.innerHTML = '<div class="empty-state compact">没有生成记录</div>';
+            return;
+        }
+
+        container.innerHTML = items.map(item => {
+            const segmentText = item.segmentsTotal
+                ? `${item.segmentsDone || 0}/${item.segmentsTotal}`
+                : `${item.segmentsDone || 0}`;
+            return `
+                <div class="generation-row">
+                    <div class="generation-main">
+                        <div class="generation-title">
+                            <b>${escapeHtml(item.role || item.parseMode || '生成')}</b>
+                            <span>${escapeHtml(shortKey(item.key))}</span>
+                        </div>
+                        <p>${escapeHtml(truncateText(item.firstText || '-', 88))}</p>
+                    </div>
+                    <div class="generation-metrics">
+                        <span>RTF <b>${escapeHtml(formatRtf(item.rtf))}</b></span>
+                        <span>音频 <b>${escapeHtml(formatSeconds(item.durationS))}</b></span>
+                        <span>总耗时 <b>${escapeHtml(formatSeconds(item.wallS))}</b></span>
+                        <span>分段 <b>${escapeHtml(segmentText)}</b></span>
+                        <span>${escapeHtml((item.audioFormat || '-').toUpperCase())} <b>${escapeHtml(formatBytes(item.audioBytes))}</b></span>
+                    </div>
+                    <div class="generation-time">${escapeHtml(formatDateTime(item.createdAt || item.modified))}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async loadMonitorLogInsights() {
         try {
-            const snapshot = await api.getLogSnapshot(this.selectedVersion, 200);
-            const errors = snapshot.lines.filter(line =>
-                line.toLowerCase().includes('error') ||
-                line.toLowerCase().includes('exception') ||
-                line.toLowerCase().includes('failed')
-            ).slice(-10);
+            const snapshot = await api.getLogSnapshot(this.selectedVersion, 320);
+            const entries = (snapshot.lines || [])
+                .filter(line => !isNoisySnapshotLogLine(line))
+                .map(line => parseLogSnapshotLine(line));
+            const errors = entries.filter(entry => logCategoryForLine(entry.message, entry.level) === 'error').slice(-10);
+            const timings = entries.filter(entry => logCategoryForLine(entry.message, entry.level) === 'rtf').slice(-10);
 
-            const container = document.getElementById('monitor-errors');
-            if (!errors.length) {
-                container.innerHTML = '<div class="empty-state compact">无错误日志</div>';
-                return;
-            }
-
-            container.innerHTML = errors.map(line => `
-                <div class="error-line">${escapeHtml(line)}</div>
-            `).join('');
+            this.renderMonitorLogList('monitor-rtf-logs', timings, '没有 RTF/耗时日志');
+            this.renderMonitorLogList('monitor-errors', errors, '没有错误日志');
         } catch (error) {
-            document.getElementById('monitor-errors').innerHTML = '<div class="empty-state compact">加载失败</div>';
+            this.renderMonitorLogList('monitor-rtf-logs', [], '加载失败');
+            this.renderMonitorLogList('monitor-errors', [], '加载失败');
         }
     }
 
+    renderMonitorLogList(id, entries, emptyText) {
+        const container = document.getElementById(id);
+        if (!container) return;
+        if (!entries.length) {
+            container.innerHTML = `<div class="empty-state compact">${escapeHtml(emptyText)}</div>`;
+            return;
+        }
+
+        container.innerHTML = entries.map(entry => `
+            <div class="monitor-log-line log-${escapeAttribute(entry.level)}">
+                <span>${escapeHtml(entry.timestamp || '历史')}</span>
+                <p>${escapeHtml(entry.message)}</p>
+            </div>
+        `).join('');
+    }
+
     openSelectVoiceModal() {
-        let selectedGroup = null;
-        let selectedVoice = null;
-        let currentAudio = null;
-
-        this.openModal(`
-            <div class="modal-header">
-                <h3>选择音色</h3>
-                <button type="button" class="modal-close">×</button>
-            </div>
-            <div class="modal-body modal-select">
-                <div class="select-sidebar">
-                    <div id="select-voice-groups"></div>
-                </div>
-                <div class="select-content">
-                    <input type="search" id="select-voice-search" placeholder="搜索音色">
-                    <div class="select-grid" id="select-voice-grid"></div>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn-secondary modal-close">取消</button>
-                <button type="button" class="btn-secondary primary" id="btn-confirm-voice">确定</button>
-            </div>
-        `, (panel) => {
-            const renderGroups = () => {
-                const container = panel.querySelector('#select-voice-groups');
-                container.innerHTML = ['全部', ...this.voiceGroups.filter(g => g !== '全部')].map(g => `
-                    <div class="select-group-item ${!selectedGroup || selectedGroup === g ? 'active' : ''}" data-group="${escapeAttribute(g)}">
-                        ${escapeHtml(g)}
-                    </div>
-                `).join('');
-                container.querySelectorAll('.select-group-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        selectedGroup = item.dataset.group === '全部' ? null : item.dataset.group;
-                        renderGroups();
-                        renderVoices();
-                    });
-                });
-            };
-
-            const renderVoices = () => {
-                const search = panel.querySelector('#select-voice-search')?.value.toLowerCase() || '';
-                const filtered = this.voices.filter(v => {
-                    if (selectedGroup && v.subdir !== selectedGroup) return false;
-                    if (search && !v.name.toLowerCase().includes(search)) return false;
-                    return true;
-                });
-
-                const container = panel.querySelector('#select-voice-grid');
-                if (!filtered.length) {
-                    container.innerHTML = '<div class="empty-state">未找到音色</div>';
-                    return;
-                }
-
-                container.innerHTML = filtered.map(v => `
-                    <div class="select-card ${selectedVoice?.name === v.name ? 'selected' : ''}" data-name="${escapeAttribute(v.name)}">
-                        <div class="select-name">${escapeHtml(stripAudioExt(v.name.split('/').pop()))}</div>
-                        <button class="btn-icon-small">▶</button>
-                    </div>
-                `).join('');
-
-                container.querySelectorAll('.select-card').forEach(card => {
-                    card.addEventListener('click', () => {
-                        const name = card.dataset.name;
-                        selectedVoice = this.voices.find(v => v.name === name);
-                        renderVoices();
-                    });
-
-                    card.querySelector('.btn-icon-small')?.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        if (currentAudio) currentAudio.pause();
-                        const name = card.dataset.name;
-                        const dataUrl = await api.getVoiceRefAudio(name);
-                        currentAudio = new Audio(dataUrl);
-                        await currentAudio.play();
-                    });
-                });
-            };
-
-            panel.querySelector('#select-voice-search')?.addEventListener('input', renderVoices);
-            panel.querySelector('#btn-confirm-voice')?.addEventListener('click', () => {
-                if (selectedVoice) {
-                    this.selectedTestVoice = selectedVoice;
-                    document.getElementById('selected-voice-name').textContent = selectedVoice.name;
-                    this.closeModal();
-                }
-            });
-
-            renderGroups();
-            renderVoices();
+        this.openAudioRefSelectModal({
+            title: '选择音色',
+            searchPlaceholder: '搜索音色、分组或路径',
+            current: this.selectedTestVoice,
+            confirmId: 'btn-confirm-voice',
+            onConfirm: (selected) => {
+                this.selectedTestVoice = selected;
+                document.getElementById('selected-voice-name').textContent = selected.name;
+            }
         });
     }
 
     openSelectStyleModal() {
-        let selectedGroup = null;
-        let selectedStyle = null;
+        this.openAudioRefSelectModal({
+            title: '选择声腔',
+            searchPlaceholder: '搜索声腔、分组或路径',
+            current: this.selectedTestStyle,
+            confirmId: 'btn-confirm-style',
+            onConfirm: (selected) => {
+                this.selectedTestStyle = selected;
+                document.getElementById('selected-style-name').textContent = selected.name;
+            }
+        });
+    }
+
+    openAudioRefSelectModal({ title, searchPlaceholder, current, confirmId, onConfirm }) {
+        let selectedGroup = current?.subdir || null;
+        let selected = current || null;
         let currentAudio = null;
+        let currentAudioName = null;
+        const counts = this.voiceGroupCounts();
 
         this.openModal(`
             <div class="modal-header">
-                <h3>选择声腔</h3>
+                <h3>${escapeHtml(title)}</h3>
                 <button type="button" class="modal-close">×</button>
             </div>
-            <div class="modal-body modal-select">
-                <div class="select-sidebar">
-                    <div id="select-style-groups"></div>
-                </div>
-                <div class="select-content">
-                    <input type="search" id="select-style-search" placeholder="搜索声腔">
-                    <div class="select-grid" id="select-style-grid"></div>
-                </div>
+            <div class="modal-body modal-select refined-select">
+                <aside class="select-sidebar">
+                    <div id="select-audio-groups"></div>
+                </aside>
+                <section class="select-content">
+                    <input type="search" id="select-audio-search" placeholder="${escapeAttribute(searchPlaceholder)}" spellcheck="false">
+                    <div class="select-current" id="select-audio-current"></div>
+                    <div class="select-list" id="select-audio-list"></div>
+                </section>
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn-secondary modal-close">取消</button>
-                <button type="button" class="btn-secondary primary" id="btn-confirm-style">确定</button>
+                <button type="button" class="btn-secondary primary" id="${escapeAttribute(confirmId)}">确定</button>
             </div>
         `, (panel) => {
+            const confirmButton = panel.querySelector(`#${confirmId}`);
+
+            const stopAudio = () => {
+                if (currentAudio) currentAudio.pause();
+                currentAudio = null;
+                currentAudioName = null;
+            };
+
             const renderGroups = () => {
-                const container = panel.querySelector('#select-style-groups');
-                container.innerHTML = ['全部', ...this.voiceGroups.filter(g => g !== '全部')].map(g => `
-                    <div class="select-group-item ${!selectedGroup || selectedGroup === g ? 'active' : ''}" data-group="${escapeAttribute(g)}">
-                        ${escapeHtml(g)}
-                    </div>
+                const container = panel.querySelector('#select-audio-groups');
+                container.innerHTML = this.voiceGroups.map(group => `
+                    <button type="button" class="select-group-item ${((!selectedGroup && group === '全部') || selectedGroup === group) ? 'active' : ''}" data-group="${escapeAttribute(group)}">
+                        <span>${escapeHtml(group)}</span>
+                        <b>${counts.get(group) || 0}</b>
+                    </button>
                 `).join('');
                 container.querySelectorAll('.select-group-item').forEach(item => {
                     item.addEventListener('click', () => {
                         selectedGroup = item.dataset.group === '全部' ? null : item.dataset.group;
                         renderGroups();
-                        renderStyles();
+                        renderList();
                     });
                 });
             };
 
-            const renderStyles = () => {
-                const search = panel.querySelector('#select-style-search')?.value.toLowerCase() || '';
-                const filtered = this.voices.filter(v => {
-                    if (selectedGroup && v.subdir !== selectedGroup) return false;
-                    if (search && !v.name.toLowerCase().includes(search)) return false;
-                    return true;
-                });
+            const renderCurrent = () => {
+                const currentBox = panel.querySelector('#select-audio-current');
+                currentBox.innerHTML = selected
+                    ? `<b>${escapeHtml(stripAudioExt(selected.name.split('/').pop()))}</b><span>${escapeHtml(selected.relativePath || selected.name)}</span>`
+                    : '<b>未选择</b><span>-</span>';
+                if (confirmButton) confirmButton.disabled = !selected;
+            };
 
-                const container = panel.querySelector('#select-style-grid');
+            const filteredItems = () => {
+                const search = panel.querySelector('#select-audio-search')?.value.toLowerCase() || '';
+                return this.voices.filter(item => {
+                    if (selectedGroup && item.subdir !== selectedGroup) return false;
+                    const haystack = [item.name, item.subdir, item.relativePath].join(' ').toLowerCase();
+                    return !search || haystack.includes(search);
+                });
+            };
+
+            const renderList = () => {
+                const container = panel.querySelector('#select-audio-list');
+                const filtered = filteredItems();
                 if (!filtered.length) {
-                    container.innerHTML = '<div class="empty-state">未找到声腔</div>';
+                    container.innerHTML = '<div class="empty-state compact">未找到匹配项</div>';
+                    renderCurrent();
                     return;
                 }
 
-                container.innerHTML = filtered.map(v => `
-                    <div class="select-card ${selectedStyle?.name === v.name ? 'selected' : ''}" data-name="${escapeAttribute(v.name)}">
-                        <div class="select-name">${escapeHtml(stripAudioExt(v.name.split('/').pop()))}</div>
-                        <button class="btn-icon-small">▶</button>
+                container.innerHTML = filtered.map(item => `
+                    <div class="select-row ${selected?.name === item.name ? 'selected' : ''}" data-name="${escapeAttribute(item.name)}">
+                        <div class="select-row-main">
+                            <b>${escapeHtml(stripAudioExt(item.name.split('/').pop()))}</b>
+                            <span>${escapeHtml(item.relativePath || item.name)}</span>
+                        </div>
+                        <div class="select-row-meta">
+                            <span>${escapeHtml(item.subdir || '根目录')}</span>
+                            <em>${escapeHtml(voiceFileExt(item))}</em>
+                        </div>
+                        <button type="button" class="btn-icon-small" data-action="preview" title="试听">${currentAudioName === item.name ? '⏸' : '▶'}</button>
                     </div>
                 `).join('');
 
-                container.querySelectorAll('.select-card').forEach(card => {
-                    card.addEventListener('click', () => {
-                        const name = card.dataset.name;
-                        selectedStyle = this.voices.find(v => v.name === name);
-                        renderStyles();
+                container.querySelectorAll('.select-row').forEach(row => {
+                    row.addEventListener('click', () => {
+                        selected = this.voices.find(item => item.name === row.dataset.name) || selected;
+                        renderCurrent();
+                        renderList();
                     });
-
-                    card.querySelector('.btn-icon-small')?.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        if (currentAudio) currentAudio.pause();
-                        const name = card.dataset.name;
-                        const dataUrl = await api.getVoiceRefAudio(name);
-                        currentAudio = new Audio(dataUrl);
-                        await currentAudio.play();
+                    row.querySelector('[data-action="preview"]')?.addEventListener('click', async (event) => {
+                        event.stopPropagation();
+                        const name = row.dataset.name;
+                        if (currentAudio && currentAudioName === name && !currentAudio.paused) {
+                            stopAudio();
+                            renderList();
+                            return;
+                        }
+                        stopAudio();
+                        try {
+                            const dataUrl = await api.getVoiceRefAudio(name);
+                            currentAudio = new Audio(dataUrl);
+                            currentAudioName = name;
+                            currentAudio.addEventListener('ended', () => {
+                                stopAudio();
+                                renderList();
+                            });
+                            currentAudio.addEventListener('error', () => {
+                                stopAudio();
+                                renderList();
+                            });
+                            await currentAudio.play();
+                            renderList();
+                        } catch (error) {
+                            stopAudio();
+                            this.addLog('error', `试听失败: ${formatError(error)}`);
+                            renderList();
+                        }
                     });
                 });
+                renderCurrent();
             };
 
-            panel.querySelector('#select-style-search')?.addEventListener('input', renderStyles);
-            panel.querySelector('#btn-confirm-style')?.addEventListener('click', () => {
-                if (selectedStyle) {
-                    this.selectedTestStyle = selectedStyle;
-                    document.getElementById('selected-style-name').textContent = selectedStyle.name;
-                    this.closeModal();
-                }
+            panel.querySelector('#select-audio-search')?.addEventListener('input', renderList);
+            confirmButton?.addEventListener('click', () => {
+                if (!selected) return;
+                onConfirm(selected);
+                this.closeModal();
             });
 
             renderGroups();
-            renderStyles();
+            renderList();
+            return stopAudio;
         });
     }
 }
@@ -2899,11 +3026,41 @@ function stripAudioExt(value) {
     return String(value ?? '').replace(/\.(wav|mp3|flac|ogg|m4a)$/i, '');
 }
 
+function voiceFileExt(item) {
+    const source = String(item?.relativePath || item?.name || '');
+    const match = source.match(/\.([a-z0-9]+)$/i);
+    return match ? match[1].toUpperCase() : '-';
+}
+
+function truncateText(value, maxLength) {
+    const text = String(value ?? '');
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function shortKey(value) {
+    const text = String(value ?? '');
+    if (text.length <= 12) return text || '-';
+    return `${text.slice(0, 8)}…${text.slice(-4)}`;
+}
+
+function formatUptime(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const rest = total % 60;
+    return hours > 0
+        ? `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${rest.toString().padStart(2, '0')}`
+        : `${minutes.toString().padStart(2, '0')}:${rest.toString().padStart(2, '0')}`;
+}
+
 function isSelfPollLogLine(line) {
     const text = String(line ?? '').toLowerCase();
     return text.includes('get /health ')
         || text.includes('get /health?')
         || text.includes('/server_log/tail')
+        || text.includes('/tts_dialogue_job_status/')
+        || text.includes('get /favicon.ico')
         || text.includes('error sending request for url') && text.includes('/health');
 }
 
@@ -2963,6 +3120,86 @@ function logLevelForLine(line) {
     if (text.includes('warn') || text.includes('timeout') || text.includes('retry')) return 'warning';
     if (text.includes('ready') || text.includes('success') || text.includes('ok')) return 'success';
     return 'info';
+}
+
+function logCategoryForLine(line, level = 'info') {
+    const text = stripAnsi(String(line ?? '')).toLowerCase();
+    if (level === 'error'
+        || /\b(error|traceback|exception|failed|fatal|panic)\b/i.test(text)
+        || text.includes('配置错误')
+        || text.includes('启动失败')) {
+        return 'error';
+    }
+    if (isRtfLogLine(text)) return 'rtf';
+    if (isStartupLogLine(text)) return 'startup';
+    return 'other';
+}
+
+function isRtfLogLine(line) {
+    const text = String(line ?? '').toLowerCase();
+    return /\brtf\b/.test(text)
+        || text.includes('real-time factor')
+        || text.includes('audio_duration')
+        || text.includes('total_wall')
+        || text.includes('first_pcm')
+        || text.includes('first audio')
+        || text.includes('infer_total')
+        || text.includes('infer_rtf')
+        || text.includes('s2mel')
+        || text.includes('bigvgan')
+        || text.includes('gpt_gen')
+        || text.includes('mp3_bytes')
+        || text.includes('音频已保存')
+        || text.includes('耗时');
+}
+
+function isStartupLogLine(line) {
+    const text = String(line ?? '').toLowerCase();
+    return text.includes('launcher')
+        || text.includes('启动')
+        || text.includes('wrapper pid')
+        || text.includes('restart-leon-api')
+        || text.includes('leon root')
+        || text.includes('active profile')
+        || text.includes('启动配置')
+        || text.includes('gpu')
+        || text.includes('cuda')
+        || text.includes('port')
+        || text.includes('9880')
+        || text.includes('uvicorn')
+        || text.includes('application startup')
+        || text.includes('模型')
+        || text.includes('加载')
+        || text.includes('warmup')
+        || text.includes('预热');
+}
+
+function formatBytes(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value < 0) return '-';
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatSeconds(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    if (number < 10) return `${number.toFixed(2)}s`;
+    return `${number.toFixed(1)}s`;
+}
+
+function formatRtf(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    return number.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function formatDateTime(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('zh-CN', { hour12: false });
 }
 
 function isTextEditingTarget(target) {
