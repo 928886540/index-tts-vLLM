@@ -1,6 +1,6 @@
 # Agent State
 
-Updated: 2026-06-10
+Updated: 2026-06-11
 
 This is the active handoff summary. Full historical state was archived on 2026-06-07:
 
@@ -8,13 +8,61 @@ This is the active handoff summary. Full historical state was archived on 2026-0
 
 Read the archive only when investigating old decisions, benchmark history, or fixed regressions.
 
+## Package Split Handoff 2026-06-11
+
+User's next requested direction: split LEON into a common package plus optional `vllm` and `fast6g` engine packages.
+
+Primary plan doc:
+
+- `dev_workspace/docs/LEON_PACKAGE_SPLIT_PLAN.md`
+
+Start the next Codex session in `D:\apiWorkSpace\leon_api\dev_workspace` and read, in order:
+
+1. `C:\Users\Administrator\.codex\AGENTS.md`
+2. `C:\Users\Administrator\.codex\instruction.md`
+3. `dev_workspace/AGENTS.md`
+4. `dev_workspace/README.md`
+5. `dev_workspace/docs/LOGIC.md`
+6. `dev_workspace/docs/AGENT_STATE.md`
+7. `dev_workspace/docs/BUGS.md`
+8. `dev_workspace/docs/LEON_PACKAGE_SPLIT_PLAN.md`
+9. `dev_workspace/docs/REGRESSION.md`
+
+Recommended first implementation slice:
+
+- Create the shared startup entry `scripts/restart-leon-api.ps1 -Version vllm|fast6g`.
+- Move only startup/profile/env/log/port checks into the shared path first.
+- Keep `vllm/` and `fast6g/` existing entrypoints runnable while the shared path is introduced.
+- Do not begin by deleting duplicated backend route code; first prove both engines can start/stop, read `config/profiles/active.json`, resolve shared `prompts/library` refs, and expose `/health`, `/profiles/active`, `/voices`, logs, and port checks through the same contracts.
+
+Current Tauri launcher state to preserve:
+
+- Root executable `LEON-Launcher-Tauri.exe` was rebuilt and smoke-tested on 2026-06-11.
+- Style editor fixes are in `launcher-tauri/src/scripts/app.js`: reference picker/emotion modal return to the first-level style editor, selected refs write `style.ref` and `style.refs`, and saving an active source profile refreshes `active.json`.
+- Log-noise fixes are split between `launcher-tauri/src-tauri/src/main.rs` and `launcher-tauri/src/scripts/app.js`: stderr carriage-return progress updates are split, and checkpoint/tqdm progress-only lines are hidden in the UI.
+- vLLM and fast6g backend style flow already resolves style refs and passes the resolved path to IndexTTS as `emo_audio_prompt`; do not regress that during commonization.
+
+Worktree caution for the next session:
+
+- The repo may still contain unrelated/untracked local artifacts such as `tauri_debug.log`, `dev_workspace/screenshots/`, and old Tauri handoff docs. Do not commit logs or screenshots unless the user explicitly asks.
+- Do not run long TTS jobs or restart the API while the user may be using it unless explicitly requested.
+- Use D-drive Rust first:
+
+```powershell
+$env:PATH='D:\Rust\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin;D:\Rust\.cargo\bin;' + $env:PATH
+```
+
 ## Tauri Launcher Migration 2026-06-10
 
 Current Tauri status:
 
 - New independent Tauri project lives under `launcher-tauri/`; existing WinForms launcher code was not modified.
 - Root artifact path is `D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe`; source release exe is `launcher-tauri/src-tauri/target/release/leon-launcher-tauri.exe`.
+- 2026-06-11 log-noise fix: Tauri log tail reading now splits carriage-return progress updates, skips empty fragments, and the logs UI filters checkpoint/tqdm progress-only lines such as `0/14 ... it/s` while keeping warnings, timing, RTF, and real errors. Validation passed: JS check, sample filter check, frontend build, D-drive Rust fmt/check/release build, root exe copy, smoke exit code `0`.
+- 2026-06-11 style-reference editor fix: the first-level style editor now commits current fields before opening the reference picker/emotion editor, secondary modal saves return to the first-level style editor, selected refs write `style.ref` plus `style.refs`, and saving an already-active source profile reapplies it to `config/profiles/active.json`. Validation passed: `node --check launcher-tauri\src\scripts\app.js`, `npm --prefix launcher-tauri run frontend:build`, D-drive Rust `cargo fmt --check`, `cargo check`, `cargo build --release`, root `LEON-Launcher-Tauri.exe` copy, smoke exit code `0`, and active style refs resolved under shared `prompts/library`.
+- Package split plan added at `dev_workspace/docs/LEON_PACKAGE_SPLIT_PLAN.md`: keep `leon-common` as launcher/static/profile/voice/script/common API package, and make `vllm` / `fast6g` optional engine packages behind shared startup, profile, env, route, job, cache, and style-ref contracts.
 - 2026-06-10 visual parity/polish fix: Tauri shell now uses the WinForms proportions for the three launcher images (132px `head.png`, 244px `left.png`, cover-filled `home.png`), keeps vLLM MSVC/GPU settings above a full-width `vLLM`/`6G` segmented selector, fixes the broken sidebar DOM on the logs page, hides raw `/health` connection errors as `服务未运行`, syncs the logs version selector with the selected launcher mode, modernizes controls/scrollbars, narrows numeric tuning fields, lays each style row on one line, fixes unreadable native select options, captures startup script stdout/stderr into `logs/<version>/launcher-YYYYMMDD.log`, merges recent `.log/.err` tails on the logs page so launch failures are visible, and passes frontend build, JS checks, Rust check, release build, Playwright visual/behavior smoke, and root exe smoke.
+- 2026-06-10 follow-up Tauri mixer UX fix: profile editor now shows the actual text -> rules -> style ID -> reference audio -> per-segment synthesis flow; prompt editing is split into concrete user-facing rule sections instead of exposing `{{style_rules}}` / `{{emotion_rules}}` as editable concepts; style rows show style ID, label, reference audio, resolved `prompts/library` hint, description, strength, emotion weight, and 8D emotion vector; Tauri backend exposes reference-audio options and validates non-neutral style refs / style ranges / `emo_vec` before save/test; health polling is 15s, logs refresh is 12s, and `/health` / `/server_log/tail` self-poll lines are filtered from the logs UI.
 - Tauri backend now uses real LEON contracts:
   - Profile list reads `config/profiles/*.json` and excludes `active.json`;
   - applying writes `config/profiles/active.json` with `appliedAt` / `appliedFrom`;

@@ -5,14 +5,14 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::Write,
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
     time::Duration,
 };
-use tauri::State;
+use tauri::{Manager, State};
 
 const API_BASE: &str = "http://127.0.0.1:9880";
 
@@ -84,6 +84,53 @@ struct VoiceRefItem {
     subdir: String,
 }
 
+#[cfg(windows)]
+struct SingleInstanceGuard(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for SingleInstanceGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.0);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn acquire_single_instance() -> Result<Option<SingleInstanceGuard>, String> {
+    use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+    use windows_sys::Win32::{
+        Foundation::{GetLastError, ERROR_ALREADY_EXISTS},
+        System::Threading::CreateMutexW,
+    };
+
+    let name: Vec<u16> = OsStr::new(r"Local\LEON.Launcher.Tauri.IndexTTS2")
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let handle = unsafe { CreateMutexW(std::ptr::null_mut(), 1, name.as_ptr()) };
+    if handle.is_null() {
+        return Err("创建启动器单实例锁失败".to_string());
+    }
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(handle);
+        }
+        return Ok(None);
+    }
+    Ok(Some(SingleInstanceGuard(handle)))
+}
+
+#[cfg(not(windows))]
+struct SingleInstanceGuard;
+
+#[cfg(not(windows))]
+fn acquire_single_instance() -> Result<Option<SingleInstanceGuard>, String> {
+    Ok(Some(SingleInstanceGuard))
+}
+
 fn main() {
     if std::env::var("LEON_LAUNCHER_SMOKE_TEST").ok().as_deref() == Some("1") {
         if let Err(error) = smoke_test() {
@@ -93,9 +140,24 @@ fn main() {
         std::process::exit(0);
     }
 
+    let _single_instance = match acquire_single_instance() {
+        Ok(Some(guard)) => guard,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("LEON Tauri single-instance failed: {}", error);
+            std::process::exit(1);
+        }
+    };
+
     tauri::Builder::default()
         .manage(AppState {
             service_process: Mutex::new(None),
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                let state = window.state::<AppState>();
+                let _ = cleanup_service_wrapper(&state);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_profiles,
@@ -365,15 +427,6 @@ async fn start_service(
 ) -> Result<String, String> {
     let root = leon_root()?;
     let normalized = normalize_version(&version);
-    let script_name = if normalized == "fast6g" {
-        "start-fast6g-api.bat"
-    } else {
-        "start-vllm-api.bat"
-    };
-    let script = root.join("scripts").join(script_name);
-    if !script.exists() {
-        return Err(format!("缺少启动脚本: {}", script.display()));
-    }
 
     if health_check_internal().await.reachable {
         return Ok(format!("LEON 服务已在运行：{}", API_BASE));
@@ -398,18 +451,16 @@ async fn start_service(
 
     let version_root = root.join(&normalized);
     let active_profile = root.join("config").join("profiles").join("active.json");
-    let version_root_arg = shell_path(&version_root);
-    let script_arg = shell_path(&script);
-    let script_command = format!("\"{}\"", script_arg);
     let launcher_log = launcher_log_path(&root, &normalized)?;
-    append_launcher_log(
-        &launcher_log,
-        "INFO",
-        &format!("调用启动入口: {}", script_arg),
-    )?;
     if normalized == "vllm" {
         let ratio = gpu_ratio.unwrap_or(0.15);
         let use_msvc = enable_msvc.unwrap_or(true);
+        let entry = version_root.join("tools").join("restart_indextts_api.ps1");
+        append_launcher_log(
+            &launcher_log,
+            "INFO",
+            &format!("调用启动入口: {}", shell_path(&entry)),
+        )?;
         append_launcher_log(
             &launcher_log,
             "INFO",
@@ -420,6 +471,14 @@ async fn start_service(
             ),
         )?;
     } else {
+        append_launcher_log(
+            &launcher_log,
+            "INFO",
+            &format!(
+                "调用启动入口: {}",
+                shell_path(&version_root.join("indextts2_api.py"))
+            ),
+        )?;
         append_launcher_log(&launcher_log, "INFO", "启动配置: Fast6G")?;
     }
     let stdout = fs::OpenOptions::new()
@@ -431,14 +490,64 @@ async fn start_service(
         .try_clone()
         .map_err(|e| format!("复制启动日志句柄失败: {}", e))?;
 
-    let mut cmd = Command::new("cmd.exe");
-    cmd.args(["/d", "/s", "/c"])
-        .arg(&script_command)
-        .current_dir(&version_root_arg)
+    let mut cmd = if normalized == "vllm" {
+        let entry = version_root.join("tools").join("restart_indextts_api.ps1");
+        if !entry.exists() {
+            return Err(format!("缺少启动脚本: {}", entry.display()));
+        }
+        let mut command = Command::new("powershell.exe");
+        command
+            .args([
+                "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(shell_path(&entry))
+            .args(["-Port", "9880", "-HostAddress", "0.0.0.0", "-LeonRoot"])
+            .arg(shell_path(&root))
+            .args(["-VllmGpuMemoryUtilization"])
+            .arg(format_ratio(gpu_ratio.unwrap_or(0.15)))
+            .args([
+                "-EnableMsvc",
+                if enable_msvc.unwrap_or(true) {
+                    "1"
+                } else {
+                    "0"
+                },
+            ]);
+        command
+    } else {
+        let python = version_root.join("indextts2runtime").join("python.exe");
+        let entry = version_root.join("indextts2_api.py");
+        if !python.exists() {
+            return Err(format!("缺少 Python runtime: {}", python.display()));
+        }
+        if !entry.exists() {
+            return Err(format!("缺少 API 入口: {}", entry.display()));
+        }
+        let mut command = Command::new(shell_path(&python));
+        command.arg(shell_path(&entry)).args([
+            "-a",
+            "0.0.0.0",
+            "-p",
+            "9880",
+            "--fp16",
+            "--no_qwen_emo",
+        ]);
+        command
+    };
+    cmd.current_dir(shell_path(&version_root))
         .env("LEON_LAUNCHER_NO_PAUSE", "1")
+        .env("LEON_ROOT", shell_path(&root))
+        .env("LEON_VERSION_ROOT", shell_path(&version_root))
+        .env("LEON_STATIC_DIR", shell_path(&root.join("static")))
         .env("LEON_LAUNCHER_VERSION", &normalized)
         .env("LEON_ENABLE_QWEN_EMO", "0")
         .env("LEON_ACTIVE_PROFILE_PATH", shell_path(&active_profile))
+        .env("HF_HOME", shell_path(&version_root.join("checkpoints")))
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::from(stdout))
@@ -449,7 +558,15 @@ async fn start_service(
         cmd.env("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION", format_ratio(ratio));
         let use_msvc = enable_msvc.unwrap_or(true);
         cmd.env("LEON_ENABLE_MSVC", if use_msvc { "1" } else { "0" });
+    } else {
+        let scripts_path = version_root.join("indextts2runtime").join("Scripts");
+        let old_path = std::env::var("PATH").unwrap_or_default();
+        cmd.env(
+            "PATH",
+            format!("{};{}", shell_path(&scripts_path), old_path),
+        );
     }
+    hide_child_window(&mut cmd);
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
@@ -514,23 +631,7 @@ async fn stop_service(state: State<'_, AppState>) -> Result<String, String> {
         .send()
         .await;
 
-    let mut killed_wrapper = false;
-    {
-        let mut guard = state
-            .service_process
-            .lock()
-            .map_err(|_| "服务状态锁已损坏".to_string())?;
-        if let Some(mut child) = guard.take() {
-            if child
-                .try_wait()
-                .map_err(|e| format!("检查启动进程失败: {}", e))?
-                .is_none()
-            {
-                let _ = child.kill();
-                killed_wrapper = true;
-            }
-        }
-    }
+    let killed_wrapper = cleanup_service_wrapper(&state)?;
 
     if killed_wrapper {
         Ok("已发送退出请求，并清理启动 wrapper".to_string())
@@ -1325,17 +1426,80 @@ fn append_launcher_log(path: &Path, level: &str, message: &str) -> Result<(), St
 }
 
 fn read_tail_lines(path: &Path, max_lines: usize) -> Result<Vec<String>, String> {
-    let file =
-        fs::File::open(path).map_err(|e| format!("打开日志失败 {}: {}", path.display(), e))?;
-    let reader = BufReader::new(file);
+    let bytes = fs::read(path).map_err(|e| format!("读取日志失败 {}: {}", path.display(), e))?;
     let mut lines = Vec::new();
-    for line in reader.lines() {
-        lines.push(line.unwrap_or_else(|_| "<invalid utf8 line>".to_string()));
+    for raw_line in bytes.split(|byte| *byte == b'\n' || *byte == b'\r') {
+        if raw_line.is_empty() {
+            continue;
+        }
+        lines.push(decode_log_bytes(raw_line));
         if lines.len() > max_lines {
             lines.remove(0);
         }
     }
     Ok(lines)
+}
+
+fn decode_log_bytes(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => {
+            let (text, _, _) = encoding_rs::GBK.decode(bytes);
+            text.into_owned()
+        }
+    }
+}
+
+fn cleanup_service_wrapper(state: &AppState) -> Result<bool, String> {
+    let mut guard = state
+        .service_process
+        .lock()
+        .map_err(|_| "服务状态锁已损坏".to_string())?;
+    let Some(mut child) = guard.take() else {
+        return Ok(false);
+    };
+    if child
+        .try_wait()
+        .map_err(|e| format!("检查启动进程失败: {}", e))?
+        .is_none()
+    {
+        kill_process_tree(child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+    }
+}
+
+fn hide_child_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
 }
 
 fn system_time_to_rfc3339(time: std::time::SystemTime) -> Option<String> {

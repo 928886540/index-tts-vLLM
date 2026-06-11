@@ -214,11 +214,14 @@ class LeonLauncher {
             this.switchPage('mixer');
         });
 
-        document.getElementById('btn-save-profile').addEventListener('click', () => {
+        const saveBtn = document.getElementById('btn-save-profile');
+        const applyBtn = document.getElementById('btn-apply-edited-profile');
+
+        saveBtn?.addEventListener('click', () => {
             this.saveEditedProfile(false);
         });
 
-        document.getElementById('btn-apply-edited-profile').addEventListener('click', () => {
+        applyBtn?.addEventListener('click', () => {
             this.saveEditedProfile(true);
         });
 
@@ -227,9 +230,12 @@ class LeonLauncher {
         });
 
         document.addEventListener('click', (e) => {
-            if (e.target.closest('.btn-delete-style')) {
+            if (e.target.closest('.btn-delete-style') || e.target.closest('.btn-delete-style-mini')) {
+                e.preventDefault();
+                e.stopPropagation();
                 const row = e.target.closest('.style-row');
                 if (row) this.confirmDeleteStyle(row);
+                return;
             }
             const pickRefButton = e.target.closest('.btn-pick-ref');
             if (pickRefButton) {
@@ -257,6 +263,21 @@ class LeonLauncher {
             if (editEmoButton) {
                 const row = editEmoButton.closest('.style-row');
                 if (row) this.openEmotionModal(row);
+            }
+            const styleMiniCard = e.target.closest('.style-mini-card');
+            if (styleMiniCard) {
+                const row = styleMiniCard.closest('.style-row');
+                if (row) this.openStyleEditorModal(row);
+            }
+            const expandButton = e.target.closest('.btn-expand-style');
+            if (expandButton) {
+                const row = expandButton.closest('.style-row');
+                if (row) {
+                    const detail = row.querySelector('.style-card-detail');
+                    const isExpanded = !detail.hidden;
+                    detail.hidden = isExpanded;
+                    expandButton.textContent = isExpanded ? '展开' : '收起';
+                }
             }
             const modeButton = e.target.closest('.preset-mode-button');
             if (modeButton && this.editorProfile) {
@@ -654,7 +675,21 @@ class LeonLauncher {
             const name = escapeHtml(profile.name || profile.file);
             const description = escapeHtml(profile.description || '无描述');
             const file = escapeHtml(profile.file);
-            const updated = profile.updatedAt ? `<div class="profile-updated">${escapeHtml(profile.updatedAt)}</div>` : '';
+
+            // 格式化时间为人类可读格式（东八区）
+            let timeDisplay = '';
+            const timestamp = profile.appliedAt || profile.updatedAt;
+            if (timestamp) {
+                const date = new Date(timestamp);
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hour = String(date.getHours()).padStart(2, '0');
+                const minute = String(date.getMinutes()).padStart(2, '0');
+                const second = String(date.getSeconds()).padStart(2, '0');
+                timeDisplay = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+            }
+            const updated = timeDisplay ? `<div class="profile-updated">${timeDisplay}</div>` : '';
 
             card.innerHTML = `
                 <div class="profile-header">
@@ -774,7 +809,7 @@ class LeonLauncher {
         document.getElementById('editor-emotion-rules').value = promptConfig.emotionRules;
         document.getElementById('editor-completeness-rules').value = promptConfig.completenessRules;
         document.getElementById('editor-custom-notes').value = promptConfig.customNotes;
-        document.getElementById('editor-style-count').value = `${Object.keys(styles).length} 个声腔`;
+        document.getElementById('editor-style-count').textContent = `${Object.keys(styles).length} 个`;
 
         const defaultMode = document.getElementById('editor-default-mode');
         defaultMode.innerHTML = '';
@@ -805,52 +840,23 @@ class LeonLauncher {
             const emoVec = Array.isArray(style?.emo_vec) ? style.emo_vec : EMO_VEC_DEFAULT;
             const refs = normalizeStyleRefs(style);
             row.innerHTML = `
-                <div class="style-main">
-                    <div class="style-title-row">
-                        <span class="style-id">style="${escapeHtml(id)}"</span>
-                        <label class="style-enabled">
+                <div class="style-mini-card" data-style-id="${escapeAttribute(id)}">
+                    <div class="style-mini-header">
+                        <div class="style-mini-id">${escapeHtml(id)}</div>
+                        <label class="style-mini-toggle" onclick="event.stopPropagation()">
                             <input data-style-field="enabled" type="checkbox" ${enabled ? 'checked' : ''}>
-                            <span>启用</span>
                         </label>
                     </div>
-                    <div class="style-row-grid">
-                        <label>
-                            <span>显示名</span>
-                            <input data-style-field="label" value="${escapeAttribute(style?.label || '')}">
-                        </label>
-                        <label class="style-ref-field">
-                            <span>参考音频</span>
-                            <input data-style-field="refs" type="hidden" value="${escapeAttribute(JSON.stringify(refs))}">
-                            <div class="style-ref-list" data-ref-list></div>
-                            <div class="style-ref-actions">
-                                <button type="button" class="btn-mini btn-pick-ref">选择声腔音频</button>
-                                <button type="button" class="btn-mini btn-clear-refs">清空</button>
-                            </div>
-                            <em class="style-ref-hint" data-ref-hint></em>
-                        </label>
-                        <label class="style-description-field">
-                            <span>适用场景</span>
-                            <textarea data-style-field="description" rows="2" spellcheck="false">${escapeHtml(style?.description || '')}</textarea>
-                        </label>
-                    </div>
+                    <div class="style-mini-label">${escapeHtml(style?.label || '未命名')}</div>
+                    <div class="style-mini-meta">${refs.length} 个参考音频</div>
+                    <button type="button" class="btn-delete-style-mini" title="删除">×</button>
                 </div>
-                <div class="style-tuning">
-                    <label>
-                        <span>声腔强度</span>
-                        <input data-style-field="style_alpha" type="number" step="0.01" min="0" max="1" value="${Number(style?.style_alpha ?? 0)}">
-                    </label>
-                    <label>
-                        <span>声腔情绪权重</span>
-                        <input data-style-field="emo_alpha" type="number" step="0.01" min="0" max="1" value="${Number(style?.emo_alpha ?? 0)}">
-                    </label>
-                    <label class="style-emo-vec-field">
-                        <span>声腔情绪向量</span>
-                        <input data-style-field="emo_vec" type="hidden" value="${escapeAttribute(formatEmoVec(emoVec))}">
-                        <div class="emotion-summary" data-emo-summary>${escapeHtml(summarizeEmoVec(emoVec))}</div>
-                        <button type="button" class="btn-mini btn-edit-emo">编辑情绪向量</button>
-                    </label>
-                    <button class="btn-delete-style">删除</button>
-                </div>
+                <input data-style-field="label" type="hidden" value="${escapeAttribute(style?.label || '')}">
+                <input data-style-field="refs" type="hidden" value="${escapeAttribute(JSON.stringify(refs))}">
+                <input data-style-field="style_alpha" type="hidden" value="${style?.style_alpha ?? ''}">
+                <input data-style-field="emo_alpha" type="hidden" value="${style?.emo_alpha ?? ''}">
+                <input data-style-field="emo_vec" type="hidden" value="${escapeAttribute(formatEmoVec(emoVec))}">
+                <textarea data-style-field="description" hidden>${escapeHtml(style?.description || '')}</textarea>
             `;
             styleList.appendChild(row);
             this.renderRowRefs(row);
@@ -987,12 +993,18 @@ class LeonLauncher {
         });
     }
 
-    async openRefPicker(row) {
+    async openRefPicker(row, options = {}) {
         if (!row) return;
         if (!this.voiceRefs.length) await this.loadVoiceRefs();
 
         const styleId = row.dataset.styleId || '';
         const selected = new Set(this.getRowRefs(row));
+        const reopenStyleEditor = Boolean(options.reopenStyleEditor);
+        const reopenParent = () => {
+            if (reopenStyleEditor && row.isConnected) {
+                setTimeout(() => this.openStyleEditorModal(row), 0);
+            }
+        };
         this.openModal(`
             <div class="modal-header">
                 <div>
@@ -1017,6 +1029,9 @@ class LeonLauncher {
             const list = panel.querySelector('#ref-picker-list');
             const count = panel.querySelector('#ref-selected-count');
             const order = new Map(this.voiceRefs.map((item, index) => [item.name, index]));
+            panel.querySelectorAll('.modal-close').forEach(button => {
+                button.addEventListener('click', reopenParent);
+            });
 
             const updateCount = () => {
                 count.textContent = selected.size
@@ -1082,17 +1097,152 @@ class LeonLauncher {
             search?.addEventListener('input', renderList);
             panel.querySelector('#btn-apply-refs')?.addEventListener('click', () => {
                 this.setRowRefs(row, sortedSelected());
-                this.syncEditorToJson(false);
+                this.syncEditorToJson(false, { silent: true });
                 this.closeModal();
+                reopenParent();
             });
             renderList();
             search?.focus();
         });
     }
 
-    openEmotionModal(row) {
+    async openStyleEditorModal(row) {
+        if (!row) return;
+        const styleId = row.dataset.styleId || '';
+        const profile = this.editorProfile;
+        if (!profile?.styles?.[styleId]) return;
+
+        const style = profile.styles[styleId];
+        const refs = normalizeStyleRefs(style);
+        const emoVec = Array.isArray(style?.emo_vec) ? style.emo_vec : EMO_VEC_DEFAULT;
+
+        if (!this.voiceRefs.length) await this.loadVoiceRefs();
+
+        this.openModal(`
+            <div class="modal-header">
+                <div>
+                    <h3>编辑声腔：${escapeHtml(styleId)}</h3>
+                    <p>配置该声腔的显示名、参考音频、强度和情绪参数</p>
+                </div>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body style-editor-modal">
+                <label class="field">
+                    <span>显示名</span>
+                    <input id="style-edit-label" type="text" value="${escapeAttribute(style?.label || '')}" placeholder="例如：耳语">
+                </label>
+                <label class="field">
+                    <span>适用场景</span>
+                    <textarea id="style-edit-desc" rows="2" placeholder="例如：耳语、哭腔、惊喘...">${escapeHtml(style?.description || '')}</textarea>
+                </label>
+                <div class="field">
+                    <span>参考音频 <small id="style-edit-ref-count">${refs.length} 个</small></span>
+                    <div class="style-ref-list" id="style-edit-refs"></div>
+                    <button type="button" class="btn-secondary compact" id="btn-pick-refs-modal">选择参考音频</button>
+                </div>
+                <div class="style-params-grid">
+                    <label>
+                        <span>强度</span>
+                        <input id="style-edit-alpha" type="number" step="0.01" min="0" max="1" value="${Number(style?.style_alpha ?? 0)}">
+                    </label>
+                    <label>
+                        <span>情绪权重</span>
+                        <input id="style-edit-emo-alpha" type="number" step="0.01" min="0" max="1" value="${Number(style?.emo_alpha ?? 0)}">
+                    </label>
+                </div>
+                <div class="field">
+                    <span>情绪向量</span>
+                    <div class="emotion-summary" id="style-edit-emo-summary">${escapeHtml(summarizeEmoVec(emoVec))}</div>
+                    <button type="button" class="btn-secondary compact" id="btn-edit-emo-modal">编辑情绪向量</button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">取消</button>
+                <button type="button" class="btn-secondary primary" id="btn-save-style-edit">保存</button>
+            </div>
+        `, (panel) => {
+            let currentRefs = [...refs];
+            let currentEmoVec = [...emoVec];
+
+            const renderRefs = () => {
+                const container = panel.querySelector('#style-edit-refs');
+                const count = panel.querySelector('#style-edit-ref-count');
+                count.textContent = `${currentRefs.length} 个`;
+                if (!currentRefs.length) {
+                    container.innerHTML = '<div class="empty-state compact">未选择参考音频</div>';
+                    return;
+                }
+                container.innerHTML = currentRefs.map(ref => `
+                    <div class="ref-chip">
+                        <span>${escapeHtml(stripAudioExt(ref).split('/').pop() || ref)}</span>
+                        <button type="button" class="ref-chip-remove" data-ref="${escapeAttribute(ref)}">×</button>
+                    </div>
+                `).join('');
+            };
+
+            renderRefs();
+
+            const commitStyleEditor = ({ sync = true, close = false } = {}) => {
+                const nextRefs = [...currentRefs];
+                style.label = panel.querySelector('#style-edit-label')?.value.trim() || '';
+                style.description = panel.querySelector('#style-edit-desc')?.value.trim() || '';
+                style.ref = nextRefs[0] || '';
+                style.refs = nextRefs;
+                style.style_alpha = Number(panel.querySelector('#style-edit-alpha')?.value ?? 0);
+                style.emo_alpha = Number(panel.querySelector('#style-edit-emo-alpha')?.value ?? 0);
+                style.emo_vec = currentEmoVec;
+
+                row.querySelector('[data-style-field="label"]').value = style.label;
+                row.querySelector('[data-style-field="refs"]').value = JSON.stringify(nextRefs);
+                row.querySelector('[data-style-field="style_alpha"]').value = style.style_alpha;
+                row.querySelector('[data-style-field="emo_alpha"]').value = style.emo_alpha;
+                row.querySelector('[data-style-field="emo_vec"]').value = formatEmoVec(currentEmoVec);
+                row.querySelector('[data-style-field="description"]').value = style.description;
+
+                const card = row.querySelector('.style-mini-card');
+                if (card) {
+                    card.querySelector('.style-mini-label').textContent = style.label || '未命名';
+                    card.querySelector('.style-mini-meta').textContent = `${nextRefs.length} 个参考音频`;
+                }
+
+                if (sync) this.syncEditorToJson(false, { silent: true });
+                if (close) this.closeModal();
+            };
+
+            panel.querySelector('#btn-pick-refs-modal')?.addEventListener('click', async () => {
+                commitStyleEditor({ sync: true });
+                await this.openRefPicker(row, { reopenStyleEditor: true });
+            });
+
+            panel.querySelector('#style-edit-refs')?.addEventListener('click', (e) => {
+                const removeBtn = e.target.closest('.ref-chip-remove');
+                if (removeBtn) {
+                    const ref = removeBtn.dataset.ref;
+                    currentRefs = currentRefs.filter(r => r !== ref);
+                    renderRefs();
+                }
+            });
+
+            panel.querySelector('#btn-edit-emo-modal')?.addEventListener('click', () => {
+                commitStyleEditor({ sync: true });
+                this.openEmotionModal(row, { reopenStyleEditor: true });
+            });
+
+            panel.querySelector('#btn-save-style-edit')?.addEventListener('click', () => {
+                commitStyleEditor({ sync: true, close: true });
+            });
+        });
+    }
+
+    openEmotionModal(row, options = {}) {
         const input = row?.querySelector('[data-style-field="emo_vec"]');
         if (!input) return;
+        const reopenStyleEditor = Boolean(options.reopenStyleEditor);
+        const reopenParent = () => {
+            if (reopenStyleEditor && row.isConnected) {
+                setTimeout(() => this.openStyleEditorModal(row), 0);
+            }
+        };
 
         let values;
         try {
@@ -1136,6 +1286,9 @@ class LeonLauncher {
             </div>
         `, (panel) => {
             const current = panel.querySelector('#emotion-current');
+            panel.querySelectorAll('.modal-close').forEach(button => {
+                button.addEventListener('click', reopenParent);
+            });
             const clamp = value => Math.max(0, Math.min(1, Number(value) || 0));
             const updateValue = (index, value) => {
                 values[index] = Number(clamp(value).toFixed(2));
@@ -1161,8 +1314,9 @@ class LeonLauncher {
                 input.value = formatEmoVec(values);
                 const summary = row.querySelector('[data-emo-summary]');
                 if (summary) summary.textContent = summarizeEmoVec(values);
-                this.syncEditorToJson(false);
+                this.syncEditorToJson(false, { silent: true });
                 this.closeModal();
+                reopenParent();
             });
         });
     }
@@ -1361,20 +1515,34 @@ ${completenessRules}`;
             document.querySelectorAll('#editor-styles .style-row').forEach(row => {
                 const id = row.dataset.styleId;
                 const style = profile.styles[id] || {};
+                const originalStyle = this.editorProfile?.styles?.[id] || {};
                 row.querySelectorAll('[data-style-field]').forEach(input => {
                     const field = input.dataset.styleField;
-                    if (input.type === 'checkbox') {
-                        style[field] = input.checked;
-                    } else if (input.type === 'number') {
-                        style[field] = Number(input.value);
-                    } else if (field === 'refs') {
-                        const refs = parseRefs(input.value, `styles.${id}.refs`);
-                        style.refs = refs;
-                        style.ref = refs[0] || '';
-                    } else if (field === 'emo_vec') {
-                        style[field] = parseEmoVec(input.value, `styles.${id}.emo_vec`);
-                    } else {
-                        style[field] = input.value;
+                    try {
+                        if (input.type === 'checkbox') {
+                            style[field] = input.checked;
+                        } else if (input.type === 'number' || field === 'style_alpha' || field === 'emo_alpha') {
+                            const val = input.value?.trim();
+                            if (val === '' || val === undefined || val === null) {
+                                // 空值：保持原始值
+                                if (originalStyle[field] !== undefined) {
+                                    style[field] = originalStyle[field];
+                                }
+                            } else {
+                                const num = Number(val);
+                                style[field] = Number.isFinite(num) ? num : (originalStyle[field] || 0);
+                            }
+                        } else if (field === 'refs') {
+                            const refs = parseRefs(input.value, `styles.${id}.refs`);
+                            style.refs = refs;
+                            style.ref = refs[0] || '';
+                        } else if (field === 'emo_vec') {
+                            style[field] = parseEmoVec(input.value, `styles.${id}.emo_vec`);
+                        } else {
+                            style[field] = input.value;
+                        }
+                    } catch (err) {
+                        if (!silent) this.addLog('error', `解析 ${id}.${field} 失败: ${formatError(err)}`);
                     }
                 });
                 profile.styles[id] = style;
@@ -1418,9 +1586,10 @@ ${completenessRules}`;
         }
 
         try {
+            const editedProfileWasActive = this.profiles.some(item => item.file === this.editorFile && item.active);
             const message = await api.saveProfile(this.editorFile, profile);
             this.addLog('success', normalizeMessage(message));
-            if (applyAfterSave) {
+            if (applyAfterSave || editedProfileWasActive) {
                 const applyMessage = await api.applyProfile(this.editorFile);
                 this.addLog('success', normalizeMessage(applyMessage));
             }
@@ -1561,9 +1730,13 @@ ${completenessRules}`;
             this.addLog('info', `最近日志: ${summary}`);
         }
 
-        (snapshot.lines || []).filter(line => !isSelfPollLogLine(line)).forEach(line => {
+        let lastSnapshotTimestamp = null;
+        (snapshot.lines || []).filter(line => !isNoisySnapshotLogLine(line)).forEach(line => {
             const parsed = parseLogSnapshotLine(line);
-            this.addLog(parsed.level, parsed.message, parsed.timestamp);
+            if (parsed.timestamp) {
+                lastSnapshotTimestamp = parsed.timestamp;
+            }
+            this.addLog(parsed.level, parsed.message, parsed.timestamp || lastSnapshotTimestamp || '历史');
         });
     }
 
@@ -1830,7 +2003,7 @@ function formatEmoVec(value) {
 function parseEmoVec(value, fieldName) {
     const text = String(value ?? '').trim();
     if (!text) {
-        throw new Error(`${fieldName} 不能为空，必须是 8 维数组`);
+        return EMO_VEC_DEFAULT;
     }
     const parsed = text
         .replace(/^\[/, '')
@@ -1863,6 +2036,31 @@ function isSelfPollLogLine(line) {
         || text.includes('get /health?')
         || text.includes('/server_log/tail')
         || text.includes('error sending request for url') && text.includes('/health');
+}
+
+function isProgressBarLogLine(line) {
+    const text = stripAnsi(String(line ?? '')).replace(/\r/g, '\n');
+    return text
+        .split('\n')
+        .map(part => part.trim())
+        .filter(Boolean)
+        .every(isProgressBarLogPart);
+}
+
+function isProgressBarLogPart(part) {
+    if (/^\(?EngineCore_[^)]+\)?$/i.test(part)) return true;
+    if (/loading .*checkpoint shards:/i.test(part)) return true;
+    return /^\d{1,3}%\|.+\|\s+\d+\/\d+\s+\[.*(?:\?|[\d.]+)it\/s\]/i.test(part);
+}
+
+function isNoisySnapshotLogLine(line) {
+    const text = stripAnsi(String(line ?? '')).trim();
+    if (!text) return true;
+    return isSelfPollLogLine(text) || isProgressBarLogLine(text);
+}
+
+function stripAnsi(value) {
+    return String(value ?? '').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
 }
 
 function parseLogSnapshotLine(line) {

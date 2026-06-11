@@ -1721,12 +1721,14 @@ name = "leon-launcher-tauri"
 version = "1.0.0"
 dependencies = [
  "chrono",
+ "encoding_rs",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

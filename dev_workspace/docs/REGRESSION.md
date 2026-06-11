@@ -189,6 +189,45 @@ For root `LEON-Launcher.exe` and `launcher/LeonNativeLauncher.cs`:
 - Launcher profile list should keep the CC Switch-style outer list: avatar initial, profile name, active/default hints, enable, test, edit, copy, delete, and quick drag ordering. The editor should use a single quality-mode dropdown and edit that mode's LIVE and DISK parameters together.
 - Tavo generation requests must honor active profile quality presets separately for LIVE and DISK/generate. The Tavo page selects only the mode name; request fields must come from `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Missing active profile or preset is a hard configuration error, not a fallback path.
 
+## Tauri Launcher Guard
+
+For `launcher-tauri/` and root `LEON-Launcher-Tauri.exe`:
+
+```powershell
+node --check launcher-tauri\src\scripts\app.js
+node --check launcher-tauri\src\scripts\mock-api.js
+npm --prefix launcher-tauri run frontend:build
+cargo fmt --manifest-path launcher-tauri\src-tauri\Cargo.toml --check
+cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
+cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
+Copy-Item launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe LEON-Launcher-Tauri.exe -Force
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+git diff --check
+```
+
+Latest validation passed 2026-06-11 after style-reference editor and log-noise fixes. See `dev_workspace/docs/AGENT_STATE.md` for full context.
+
+- Opening the Tauri launcher must not start the API backend.
+- Service start must use the current version-specific entrypoint (`vllm/tools/restart_indextts_api.ps1` or `fast6g/indextts2runtime/python.exe fast6g/indextts2_api.py`), set `LEON_ACTIVE_PROFILE_PATH=config/profiles/active.json`, and keep `LEON_ENABLE_QWEN_EMO=0`.
+- Stop must request `GET http://127.0.0.1:9880/control?command=exit` before clearing the launcher wrapper.
+- Profile list must read source files under `config/profiles/*.json` and exclude `active.json`.
+- Creating a Profile must clone an explicit schema v3 template (`leon-default.json` preferred, then `active.json`) into a non-conflicting `leon-new-profile*.json`; it must not create an incomplete hidden-default profile.
+- Applying a Profile writes only `config/profiles/active.json` and preserves `appliedFrom`.
+- Saving a Profile writes only the selected source Profile and must not silently write `active.json`; “保存并启用” is the explicit two-step save + apply path.
+- Profile test/save must reject schema v3 breakage instead of falling back to code defaults.
+- Copy/delete must not delete or mutate the active profile; deleting the active source must be blocked.
+- Style mini-card editing must keep a real parent/child modal flow: choosing reference audio or editing emotion from the first-level style editor must return to that style editor after the secondary modal saves.
+- Saving a style must write `style.ref` as the first selected reference and `style.refs` as the full selected array, then update the mini-card reference count and editor JSON.
+- `保存并返回` on an active source profile must save the source profile and refresh `config/profiles/active.json`; on a non-active source profile it should save only the source profile. `保存启用并返回` remains the explicit apply path for non-active profiles.
+- Non-neutral style refs in the active profile must resolve through shared `prompts/library`, and both `vllm` and `fast6g` must pass the resolved style audio to IndexTTS as `emo_audio_prompt`.
+- Warmup must not auto-start the API. It may call `POST /warmup` only after health is reachable, and service-not-running must be visible to the user.
+- Logs page tail refresh should poll only while the logs page is active and should read `logs/<version>/` latest log file.
+- Logs page filter/search should keep the in-memory log list intact, show visible/total count, highlight the search term, and classify `fatal` / `panic` / `exception` as error and `retry` as warning.
+- Logs page should not display progress-only backend noise: checkpoint shard progress and tqdm bars such as `0/14 ... ?it/s` or `100%|...| 14/14 ... it/s` must be hidden even when stderr stores them with carriage returns. Useful diagnostics such as `RuntimeWarning`, `s2mel input`, timing, RTF, and actual error/traceback lines must stay visible.
+- `Ctrl+R` should refresh the current page, `Ctrl+L` should clear logs, and shortcuts must not intercept while an input/select/textarea/contenteditable field is focused.
+- GUI manual smoke should verify no auto-start, profile list, create, details/editor, save, save-and-apply, test, copy, delete, logs, shortcuts, status, and warmup error when the API is stopped.
+- Run `npm --prefix launcher-tauri run frontend:build` before Cargo checks/builds, not in parallel. Vite clears `launcher-tauri/dist/`; Tauri `generate_context!` can fail if Cargo reads assets while the dist directory is being rebuilt.
+
 ## Resource Guard
 
 Before long generation or benchmarks:

@@ -145,26 +145,26 @@
                     <div class="editor-file" id="editor-file"></div>
                 </div>
                 <section class="profile-editor">
-                    <div class="mixer-flow">
-                        <div class="flow-step">
+                    <div class=”mixer-flow”>
+                        <div class=”flow-step”>
                             <b>输入文本</b>
-                            <span>Tavo 把当前消息交给后端分析。</span>
+                            <span>Tavo 把消息发给后端</span>
                         </div>
-                        <div class="flow-step">
-                            <b>规则拆段</b>
-                            <span>下面的规则决定每段的 role、text 和 style。</span>
+                        <div class=”flow-step”>
+                            <b>AI 分析</b>
+                            <span>按下面的规则拆段、选角色和声腔</span>
                         </div>
-                        <div class="flow-step">
-                            <b>声腔映射</b>
-                            <span>LLM 输出 style ID，后端按 ID 找参考音频。</span>
+                        <div class=”flow-step”>
+                            <b>声腔查找</b>
+                            <span>AI 输出声腔 ID，匹配参考音频</span>
                         </div>
-                        <div class="flow-step">
-                            <b>逐段合成</b>
-                            <span>角色音色负责说话人，声腔参考负责气声和情绪。</span>
+                        <div class=”flow-step”>
+                            <b>合成播放</b>
+                            <span>角色音色 + 声腔情绪 = 最终效果</span>
                         </div>
                     </div>
-                    <div class="mixer-note">
-                        你主要改两件事：规则里“什么时候选哪个声腔”，以及下方每个声腔 ID 指向的参考音频和强度。
+                    <div class=”mixer-note”>
+                        💡 <b>快速上手：</b>调整声腔选择规则（教 AI 什么时候用哪种声腔），然后在声腔库里配置每个声腔的参考音频和强度。
                     </div>
                     <div class="editor-grid">
                         <label class="field">
@@ -176,13 +176,15 @@
                             <input id="editor-description" type="text" autocomplete="off">
                         </label>
                         <select id="editor-default-mode" hidden></select>
-                        <label class="field">
-                            <span>声腔数量</span>
-                            <input id="editor-style-count" type="text" disabled>
-                        </label>
                         <div class="field full">
                             <span>档位与参数</span>
                             <div class="preset-editor" id="editor-preset-fields"></div>
+                        </div>
+                        <div class="field full section-divider">
+                            <div class="section-header">
+                                <h3>🎭 AI 声腔调教</h3>
+                                <p>教 AI 什么时候用哪种声腔、怎么拆段和分配角色</p>
+                            </div>
                         </div>
                         <div class="field full">
                             <div class="rules-panel">
@@ -208,19 +210,25 @@
                                 </label>
                             </div>
                         </div>
+                        <div class="field full section-divider">
+                            <div class="section-header">
+                                <h3>🎵 声腔库</h3>
+                                <p>每个声腔 ID 对应的参考音频和强度设置</p>
+                            </div>
+                        </div>
                         <div class="field full">
                             <div class="style-toolbar">
-                                <span>声腔映射</span>
+                                <span>声腔列表 <small id="editor-style-count" class="style-count-badge">0 个</small></span>
                                 <button class="btn-secondary compact" id="btn-add-style">+ 新增声腔</button>
                             </div>
                             <div class="style-help">
-                                每一段音频会先拿到一个 <code>style</code>。例如某段输出 <code>style="whisper_soft"</code>，后端就读取下方 <code>whisper_soft</code> 这一行的参考音频和强度来合成该段。
+                                AI 输出 <code>style="whisper_soft"</code> 时，会用下方对应声腔的参考音频来合成这一段。
                             </div>
                             <datalist id="voice-ref-options"></datalist>
                             <div class="style-list" id="editor-styles"></div>
                         </div>
                         <details class="field full json-details">
-                            <summary>高级：生成后的 JSON 预览</summary>
+                            <summary>JSON 预览</summary>
                             <textarea id="editor-json" rows="12" spellcheck="false" readonly></textarea>
                         </details>
                     </div>
