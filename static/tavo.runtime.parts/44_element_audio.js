@@ -91,6 +91,133 @@
       if (code === 4) return "这个音频源当前 WebView 不支持或读不到";
       return "音频加载失败";
     }
+    function savedTrackStaleLiveAudioSource(track) {
+      if (!track || !audio || !isSavedTrack(track)) return null;
+      var src = "";
+      var sourceKind = "";
+      var cacheKey = "";
+      try {
+        src = audio.currentSrc || audio.src || "";
+        sourceKind = audio.dataset.idxSourceKind || "";
+        cacheKey = audio.dataset.idxCacheKey || "";
+      } catch (_) {}
+      var staleKind = sourceKind === "stream" || sourceKind === "live-segment" || sourceKind === "live-mp3";
+      var staleSrc = /\/tts_dialogue_stream_job\//.test(String(src || ""));
+      if (!staleKind && !staleSrc) return null;
+      if (track.cacheKey && cacheKey && cacheKey !== String(track.cacheKey)) return null;
+      if (track.cacheKey && staleSrc && src.indexOf(encodeURIComponent(String(track.cacheKey))) < 0 && src.indexOf(String(track.cacheKey)) < 0) return null;
+      return { src: src, sourceKind: sourceKind };
+    }
+    function switchSavedTrackFromLiveSourceToCompleteAudio(track, reason, opts) {
+      opts = opts || {};
+      var stale = savedTrackStaleLiveAudioSource(track);
+      if (!stale) return false;
+      if (!track.cacheUrl && track.cacheKey) track.cacheUrl = cleanBase(cfg.apiBase) + "/cache_audio/" + encodeURIComponent(track.cacheKey);
+      if (!track.cacheUrl && !trackPlayableUrl(track)) return false;
+      var resetProgress = !!opts.resetProgress;
+      var resumeSec = Number(opts.resumeSec);
+      if (!isFinite(resumeSec)) {
+        var liveSec = 0;
+        try { liveSec = elementLiveAudioBelongsToTrack(track) ? elementPlaybackTimeSec(track) : 0; } catch (_) { liveSec = 0; }
+        resumeSec = Math.max(
+          0,
+          Number(liveSec || 0) || 0,
+          Number(track.lastLiveProgressSec || 0) || 0,
+          Number(track.liveResumeSec || 0) || 0,
+          Number(track.lastStalledSec || 0) || 0,
+          Number(track.lastElementSec || 0) || 0
+        );
+      }
+      if (resetProgress) resumeSec = 0;
+      resumeSec = clampPlaybackTimeSec(track, resumeSec);
+      var shouldAutoplay = opts.autoplay === true;
+      if (opts.autoplay == null) {
+        try { shouldAutoplay = !!(!audio.paused && !audio.ended && String(track.playbackState || "") === "playing"); } catch (_) { shouldAutoplay = false; }
+      }
+      try { stopWebAudioPlayback("saved live source handoff"); } catch (_) {}
+      try { cancelLiveSegmentAudioQueue("saved live source handoff"); } catch (_) {}
+      try { clearLiveMp3AudioState(track); } catch (_) {}
+      track.streamUrl = "";
+      track.streaming = false;
+      track.pendingBlob = false;
+      track.allowStreamPlay = false;
+      track.playSavedWhenReady = false;
+      track.liveEndedAwaitSaved = false;
+      track.streamPlaybackFinished = !!opts.ended;
+      track.livePageSuspended = false;
+      track.pausedByUser = false;
+      if (track.cacheUrl) track.url = track.cacheUrl;
+      setTrackState(track, "saved");
+      track.livePageExited = true;
+      track.latestSynthesisStatusText = "";
+      track.lastPlaybackSegmentStatusAt = 0;
+      setTrackStreamHealth(track, "ok");
+      track.stalledCount = 0;
+      var url = trackPlayableUrl(track) || track.cacheUrl;
+      if (!url) return false;
+      function applySavedPosition() {
+        try {
+          if (currentTrack && currentTrack() !== track) return;
+          var target = resumeSec;
+          if (isFinite(audio.duration) && audio.duration > 0 && !resetProgress) target = Math.min(target, Math.max(0, audio.duration - 0.05));
+          if (resetProgress) target = 0;
+          audio.currentTime = Math.max(0, target);
+          track.lastElementSec = Math.max(0, target);
+          if (cur) cur.textContent = formatTime(target);
+          var hint = progressDurationSec(track, target);
+          if (total) total.textContent = hint > 0 ? formatTime(hint) : "--:--";
+          if (seek) {
+            var meter = progressMeterDurationSec(track, target);
+            seek.disabled = !(canSeekTrackByControls(track) && meter > 0);
+            seek.value = meter > 0 ? String(Math.floor(Math.min(target, meter) / meter * 1000)) : "0";
+          }
+          refreshActiveSubtitleForTrack(track, target, { force: true, scroll: !resetProgress, noStart: !!opts.ended });
+        } catch (_) {}
+      }
+      try {
+        suppressElementPauseState(700);
+        try { audio.pause(); } catch (_) {}
+        try { audio.removeAttribute("src"); audio.load(); } catch (_) {}
+        audio.src = url;
+        markElementAudioTrack(track, savedSourceKindForUrl(track, url));
+        audio.load();
+      } catch (_) {}
+      applySavedPosition();
+      try { audio.addEventListener("loadedmetadata", applySavedPosition, { once: true }); } catch (_) {}
+      try { audio.addEventListener("canplay", applySavedPosition, { once: true }); } catch (_) {}
+      if (track.cacheKey && track.cacheUrl) scheduleOfflineAudioSave(track, (reason || "saved live source handoff") + " offline", 800);
+      if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
+      removePendingJobForTrack(track).catch(function(){});
+      if (!opts.ended) {
+        setTimeout(function () { refreshActiveSubtitleForTrack(track, track.lastElementSec || resumeSec, { force: true, scroll: true }); }, 0);
+        setTimeout(function () { refreshActiveSubtitleForTrack(track, track.lastElementSec || resumeSec, { force: true, scroll: true }); }, 140);
+      }
+      if (opts.ended) {
+        stopSubtitle();
+        setTrackPlaybackState(track, "ended");
+        setPlayState("idle");
+        setStatus(opts.status || "播放完成，完整音频已就绪");
+        showTrackNotice(track, opts.title || "播放完成", opts.detail || "已退出流式播放，卡片已保留为完整音频");
+      } else if (shouldAutoplay) {
+        setTrackPlaybackState(track, "loading");
+        setPlayState("loading");
+        setStatus(opts.status || "流式卡顿，切换完整音频…");
+        showTrackNotice(track, opts.title || "切换完整音频…", opts.detail || "完整音频已保存，从当前位置继续播放");
+        try {
+          setAudioPlaybackRate();
+          var p = audio.play();
+          if (p && typeof p.catch === "function") p.catch(function (e) { handleAudioPlayReject("saved-cache-handoff", e, "请点播放继续完整音频"); });
+        } catch (_) {}
+      } else {
+        setTrackPlaybackState(track, "idle");
+        setPlayState("idle");
+        setStatus(opts.status || "完整音频已就绪");
+        showTrackNotice(track, opts.title || savedTrackLabel(track), opts.detail || "已切回历史音频，可拖动进度条");
+      }
+      updateTrackButtons();
+      debugLog("↪️ saved 卡残留 LIVE audio 源已切到完整音频 reason=" + (reason || "") + " kind=" + (stale.sourceKind || "") + " src=" + (stale.src || ""), "#fc9");
+      return true;
+    }
     function recoverSavedAudioElementError(track, detail) {
       if (!track || !isSavedTrack(track)) return false;
       var src = "";
@@ -106,26 +233,7 @@
         || /\/tts_dialogue_stream_job\//.test(String(src || ""))
       );
       if (staleLiveSource && track.cacheUrl) {
-        debugLog("↪️ saved 卡清理残留 LIVE audio 源，改回 cache_audio。" + detail + " src=" + src, "#fc9");
-        clearLiveMp3AudioState(track);
-        track.streamUrl = "";
-        track.streaming = false;
-        track.pendingBlob = false;
-        track.url = track.cacheUrl;
-        try {
-          suppressElementPauseState(500);
-          audio.src = track.cacheUrl;
-          markElementAudioTrack(track, "saved");
-          audio.load();
-        } catch (_) {}
-        if (seek) seek.disabled = false;
-        if (cur) cur.textContent = formatTime(resumeSec);
-        refreshActiveSubtitleForTrack(track, resumeSec, { force: true, scroll: true });
-        setTrackPlaybackState(track, "idle");
-        setPlayState("idle");
-        setStatus("完整音频已就绪");
-        showTrackNotice(track, savedTrackLabel(track), "已切回历史音频，可拖动进度条");
-        return true;
+        return switchSavedTrackFromLiveSourceToCompleteAudio(track, "saved audio error" + (detail || ""), { resumeSec: resumeSec, autoplay: false });
       }
       var savedSourceActive = !!(sourceKind === "saved" || sourceKind === "saved-blob" || sameAudioUrl(src, track.cacheUrl) || sameAudioUrl(src, track.url));
       if ((sourceKind === "offline" || sourceKind === "offline-blob" || (track.offlineUrl && sameAudioUrl(src, track.offlineUrl))) && track.cacheUrl) {

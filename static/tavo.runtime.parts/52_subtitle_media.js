@@ -401,7 +401,17 @@
 
     function startSubtitle(trackEntry, getTimeSec) {
       stopSubtitle();
+      function liveTrackNeedsTimedSubtitleMeta() {
+        try { return !!(trackEntry && trackEntry.cacheKey && !isSavedTrack(trackEntry)); }
+        catch (_) { return !!(trackEntry && trackEntry.cacheKey); }
+      }
+      function hasTimedSubtitleMeta(list) {
+        return (Array.isArray(list) ? list : []).some(function (s) {
+          return isFinite(segmentStartSec(s, trackEntry && trackEntry.sampleRate));
+        });
+      }
       var segs = (trackEntry && trackEntry.segments) || [];
+      if (liveTrackNeedsTimedSubtitleMeta() && !hasTimedSubtitleMeta(segs)) segs = [];
       var gap = (Number(cfg.intervalMs || 350) / 1000);
       var timeline = [];
       var lastIdx = -1;
@@ -437,11 +447,18 @@
       function mergeMetaWithPlan(metaList, planList) {
         var meta = normalizeSubtitleSegments(metaList);
         var plan = normalizeSubtitleSegments(planList);
-        var count = Math.max(meta.length, plan.length);
+        if (!meta.length) return plan;
+        var planByIdx = {};
+        plan.forEach(function (p, i) {
+          var idx = p && isFinite(Number(p.idx)) ? Number(p.idx) : i;
+          planByIdx[idx] = p;
+        });
+        var count = meta.length;
         var out = [];
         for (var i = 0; i < count; i += 1) {
-          var p = plan[i] || {};
           var m = meta[i] || {};
+          var midx = m && isFinite(Number(m.idx)) ? Number(m.idx) : i;
+          var p = planByIdx[midx] || plan[i] || {};
           var row = Object.assign({}, p, m);
           if (!row.text) row.text = p.text || m.text || "";
           if (!row.role) row.role = p.role || m.role || "旁白";
@@ -480,6 +497,7 @@
           for (var j = 0; j < subs.length; j++) {
             var subDur = segDur * (subs[j].length / totalChars);
             timeline.push({
+              segmentIdx: isFinite(Number(seg.idx)) ? Number(seg.idx) : i,
               role: seg.role || "旁白",
               text: subs[j],
               start: subStart,
@@ -546,7 +564,7 @@
                   trackEntry.segmentPlan = plan;
                 }
               }
-              if (meta.length || (trackEntry.segmentPlan && trackEntry.segmentPlan.length)) {
+              if (meta.length || (!liveTrackNeedsTimedSubtitleMeta() && trackEntry.segmentPlan && trackEntry.segmentPlan.length)) {
                 var merged = mergeMetaWithPlan(meta, trackEntry.segmentPlan || []);
                 var metaSig = subtitleSegmentSignature(merged);
                 if (metaSig && metaSig !== trackEntry.segmentsSignature) {

@@ -71,6 +71,8 @@ Current smoke must prove:
 - non-cached LIVE jobs write a chat-scoped pending card immediately after `cacheKey`; remounting the message restores that same key without a new POST, and explicit LIVE exit/delete must use `preserve_completed=1`;
 - stale `pending/live` records with a `cacheKey` must refresh `/tts_dialogue_job_status` and/or `/cache_audio` before select/play; `state=done`, `status=done`, or `serverState=done` must promote to saved history, clear pending, and play `/cache_audio` instead of re-entering LIVE;
 - saved/cache MP3 seek must stay on the saved native `<audio>` source even if the element still has stale `live-mp3` dataset/source from an old stream. Dragging the progress bar must set `audio.currentTime`, update the seek value, immediately sync the highlighted lyric row, and make no new LIVE GET or `/mp3?start_s=...` request;
+- if a saved card still has a LIVE `/tts_dialogue_stream_job/...` audio source after cache landing, `pause` / `stalled` / `ended` and the next saved play click must switch to complete `/cache_audio` or offline blob, keep the card, hide LIVE-exit, and must not DELETE or reconnect the live job;
+- after a card becomes saved/complete audio, the floating progress line must clear stale LIVE synthesis text. Saved playback and saved seek must not display `已生成 x/y 段`, `合成 x/y`, or `正在播第 x/y 段`;
 - saved/cache MP3 seek while the track is playing must keep the main button and track state as playing. The next play-button click should pause, not be required to catch up to the real audio state;
 - previous/next saved-card selection must start from the selected card's own clean initial position; current v61 behavior intentionally starts saved-card switches from 0 to avoid first-load progress inheritance;
 - dirty restored LIVE pending cards must not inherit saved/offline `lastElementSec`. If a pending LIVE record has `lastElementSec=7` but no trusted LIVE resume fields, runtime open must show `00:00`, play `/tts_dialogue_stream_job/<key>/mp3` without `start_s=7`, and keep the first LIVE lyric active;
@@ -92,7 +94,7 @@ Current smoke must prove:
 - group chat speaker avatars use the matching `chat.characters` role avatar, while unmapped group roles are not auto-added to `voices` or AI `roles_hint`;
 - lazy snapshot open/play and runtime play/generate gestures must not prewarm WebAudio or a separate silent native audio element; they may only record a recent gesture timestamp for explicit WebAudio recovery;
 - loader shell shows a loading bar and refreshes the history counter from Tavo/local saved tracks;
-- lyric panel can show planned `segments_plan` lines before all `segments_meta` timing is complete;
+- LIVE lyric panel must not render future `segments_plan` lines as a timed playback timeline before real `segments_meta` arrives; plan-only subtitles may be used only for non-LIVE/saved contexts where they cannot be replayed later as real timed meta;
 - the lyric toolbar stays inside `.idx-subtitle`, remains sticky while lyrics scroll, and keeps the delete control in place.
 - loading spinner keeps a stable center/size and must not visibly wobble.
 
@@ -162,32 +164,15 @@ Current smoke must prove:
 - During backend-owned LLM parsing, `/tts_dialogue_job_status/{cache_key}` should expose `llm_stage` and fresh `llm_elapsed_s`; the frontend should show `检查分段复用`, `等待 LLM 返回 Ns`, or `整理分段结果`, not first-audio waiting copy.
 - If `复用 LLM 拆段` is requested but no parse cache is hit, user-facing copy should say `复用未命中，等待 LLM 返回 Ns` so it is clear the option was checked but missed.
 - When a live job is waiting on the single TTS lock, `/tts_dialogue_job_status/{cache_key}` should include queue metrics and the Tavo progress hint should say `前面还有 X 个 TTS 任务` or `下一个开始`.
-- LIVE synthesis status should include current playback segment when known, and should be throttled enough that users can read it.
+- LIVE synthesis status should include current playback segment only when the current playback second falls inside known timed `segments_meta`; if playback has moved past the generated meta tail, show only reliable generated count such as `已生成 21/137 段` and do not keep a stale `正在播第 5/137 段`.
+- `latestSynthesisStatusText` is LIVE/TTS-only state. Cache-ready, live-exit preserve, saved-source handoff, and history attach paths must clear it before the card is treated as saved playback.
 - Do not expose raw internal copy like "文本已拆分" as the main user-facing status.
 - Native `<audio>` `seeking` / `seeked` logs should be hidden unless the script URL explicitly enables `debugSeek=1`.
 - AI LIVE should not label backend-owned LLM/TTS phases as the wrong mode; mode-specific status should say whether it is checking/reusing LLM parse, waiting first audio, or synthesizing.
 
-## Launcher Guard
+## Retired WinForms Launcher
 
-For root `LEON-Launcher.exe` and `launcher/LeonNativeLauncher.cs`:
-
-- Opening launcher must not start the API backend.
-- Primary start/stop button must show immediate `启动中...` / `停止中...` feedback and ignore repeat clicks.
-- Visible logs should hide launcher self-check `/health` and `/server_log/tail` spam.
-- Startup/diagnostic logs should strip ANSI/mojibake/banner noise.
-- Launcher startup should use root `LEON-Launcher.exe`, not ad-hoc backend BAT files, unless explicitly debugging low-level startup.
-- Environment detection must show and persist separate rows for `vllm` and `fast6g`: vLLM checks CUDA Toolkit / MSVC / SVML / vLLM plugin; fast6g checks 6G runtime packages and `DeepSpeed 6G 加速`.
-- Runtime package detection must parse the explicit `LEON_IMPORT_PROBE_JSON=` marker and tolerate colored stdout warnings from packages such as `modelscope` or `deepspeed`.
-- Starting the service must not require a completed environment check; environment detection is a manual diagnostic page, and startup/runtime errors should surface through launcher logs.
-- One-click repair lives inside the environment detection page and only repairs rows present for the currently selected version.
-- Health checks, backend log refresh, startup waiting, warmup, and process scans must stay off the UI thread.
-- Closing the launcher or pressing stop must request `/control?command=exit`, then clean port `9880`, launcher wrapper processes, and LEON runtime Python parent/child processes.
-- API calls should use absolute `http://127.0.0.1:9880/...` URLs and short timeouts where appropriate, so local polling cannot freeze the UI.
-- Profile tuning console stores editable profiles under `config/profiles/*.json`; `active.json` is only the applied runtime snapshot. Saving a profile must not write active; applying a profile must write active and keep `appliedFrom` pointing back to the source profile.
-- Starting the service must ensure default profile files exist and pass `LEON_ACTIVE_PROFILE_PATH` to the API backend. Tavo should consume the active profile through `/profiles/active`, not through launcher UI state.
-- Profile schema v3 must include `quality.defaultMode`, `quality.customLabel`, `quality.modes[]`, and `quality.presets.live/generate.<mode>` for every non-`custom` mode. The test button and enable/apply path must reject bad schema instead of writing a broken `active.json`.
-- Launcher profile list should keep the CC Switch-style outer list: avatar initial, profile name, active/default hints, enable, test, edit, copy, delete, and quick drag ordering. The editor should use a single quality-mode dropdown and edit that mode's LIVE and DISK parameters together.
-- Tavo generation requests must honor active profile quality presets separately for LIVE and DISK/generate. The Tavo page selects only the mode name; request fields must come from `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Missing active profile or preset is a hard configuration error, not a fallback path.
+The old root `LEON-Launcher.exe` and `launcher/LeonNativeLauncher.cs` path has been removed. Do not add new validation or fixes for the retired WinForms launcher; use the Tauri launcher guard below.
 
 ## Tauri Launcher Guard
 
@@ -208,7 +193,11 @@ git diff --check
 Latest validation passed 2026-06-11 after style-reference editor and log-noise fixes. See `dev_workspace/docs/AGENT_STATE.md` for full context.
 
 - Opening the Tauri launcher must not start the API backend.
-- Service start must use the current version-specific entrypoint (`vllm/tools/restart_indextts_api.ps1` or `fast6g/indextts2runtime/python.exe fast6g/indextts2_api.py`), set `LEON_ACTIVE_PROFILE_PATH=config/profiles/active.json`, and keep `LEON_ENABLE_QWEN_EMO=0`.
+- Service start must use the shared entrypoint `scripts/restart-leon-api.ps1 -Version vllm|fast6g`, set `LEON_ACTIVE_PROFILE_PATH=config/profiles/active.json`, and keep `LEON_ENABLE_QWEN_EMO=0`. The vLLM path may delegate internally to `vllm/tools/restart_indextts_api.ps1` while the engine adapter is still being split.
+- Shared startup validation can be checked without starting the API by running `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version vllm -ValidateOnly` and the same command with `-Version fast6g`.
+- Shared helper extraction must keep old imports working from both engine cwd paths: `from indextts import voice_library`, `from indextts import llm_proxy`, `from indextts.llm_proxy import _normalize_role`, `from indextts import profile_store`, `from indextts.prompt_render import render_profile_prompt_template, known_roles_for_parse, style_catalog_for_prompt`, `from indextts.profile_config import default_active_profile, validate_active_profile`, and `from indextts.cache_contracts import cache_audio_headers, media_type_for_audio_path`.
+- `voice_library.get_voice_path("声腔/喘息-AD学姐")` should resolve under root `prompts/library` from both `vllm/` and `fast6g/` cwd.
+- `voice_library.list_voices()` should return the same shared library count from both `vllm/` and `fast6g/` cwd, and fast6g `/voices` must use that shared helper rather than a local duplicated traversal.
 - Stop must request `GET http://127.0.0.1:9880/control?command=exit` before clearing the launcher wrapper.
 - Profile list must read source files under `config/profiles/*.json` and exclude `active.json`.
 - Creating a Profile must clone an explicit schema v3 template (`leon-default.json` preferred, then `active.json`) into a non-conflicting `leon-new-profile*.json`; it must not create an incomplete hidden-default profile.

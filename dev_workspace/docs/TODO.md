@@ -107,7 +107,7 @@
 - Packaging and startup hygiene:
   - one-click local startup;
   - launcher visual refresh should target a Windows Terminal-like dark desktop style while preserving easy packaging and double-click startup;
-  - launcher profile UX now uses a CC Switch-like structure; still needs real visual pass in the running launcher after `LEON-Launcher.exe` can be rebuilt;
+  - launcher profile UX now uses a CC Switch-like structure; still needs real visual pass in the running Tauri launcher after `LEON-Launcher-Tauri.exe` is rebuilt;
   - no accidental ComfyUI/SD contention;
   - clear service status page;
   - clean shutdown / restart scripts.

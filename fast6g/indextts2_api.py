@@ -10,7 +10,6 @@ import secrets
 import socket
 import time
 from collections import deque
-from pathlib import Path
 from typing import Optional, List, Dict
 
 now_dir = os.getcwd()
@@ -20,7 +19,7 @@ import asyncio
 import signal
 import numpy as np
 import soundfile as sf
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Request, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -134,79 +133,27 @@ VOICE_LIB_EXTS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
 
 
 def _default_profile_prompt_template() -> str:
-    return "\n".join([
-        "你是中文小说→TTS 片段拆分器。只返回严格 JSON，不要任何解释，不要 ``` 代码块。",
-        "",
-        "{{roles_hint}}",
-        "{{user_alias_hint}}",
-        "{{character_hint}}",
-        "输出格式:",
-        "{{output_contract}}",
-        "",
-        "拆段规则:",
-        "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。",
-        "   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。",
-        "   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。",
-        "   旁白连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。",
-        "2. 人物直接说出口的话 → role 用说话人的名字。",
-        "   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。",
-        "   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。",
-        "   - 其他人物优先从已知角色名单挑名字；名单外的新人物用原文里的名字。",
-        "3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。",
-        "4. text 是要朗读的原文片段，保留标点和语气词。",
-        "{{style_rules}}",
-        "",
-        "{{emotion_rules}}",
-        "",
-        "完整性硬规则:",
-        "- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。",
-        "- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。",
-        "- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。",
-        "- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。",
-        "",
-        "示例输入:",
-        "她低着头，眼角有泪。「对不起，我真的撑不住了。」",
-        "{{example_user}}叹了口气，把手放在她肩上：「别哭。」",
-        "示例输出:",
-        "{{example_output}}",
-    ])
+    from indextts.profile_config import default_profile_prompt_template
+
+    return default_profile_prompt_template()
 
 
 def _default_quality_presets() -> dict:
-    presets = {
-        "fast": {"diffusion_steps": 8, "prompt_audio_seconds": 6, "segment_tokens": 40, "first_tokens": 10, "s2mel_cfg_rate": 0.7},
-        "balanced": {"diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7},
-        "expressive": {"diffusion_steps": 16, "prompt_audio_seconds": 12, "segment_tokens": 72, "first_tokens": 24, "s2mel_cfg_rate": 0.7},
-        "ultra": {"diffusion_steps": 20, "prompt_audio_seconds": 14, "segment_tokens": 96, "first_tokens": 32, "s2mel_cfg_rate": 0.7},
-        "custom": {"diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7},
-    }
-    return {"live": dict(presets), "generate": dict(presets)}
+    from indextts.profile_config import default_quality_presets
+
+    return default_quality_presets()
 
 
 def _default_quality_modes() -> list:
-    return [
-        {"id": "fast", "label": "极速（流式推荐）"},
-        {"id": "balanced", "label": "平衡"},
-        {"id": "expressive", "label": "质量优先"},
-        {"id": "ultra", "label": "落盘高质量"},
-    ]
+    from indextts.profile_config import default_quality_modes
+
+    return default_quality_modes()
 
 
 def _default_active_profile() -> dict:
-    return {
-        "version": 3,
-        "name": "LEON default",
-        "description": "Default local tuning profile managed by the LEON launcher.",
-        "llmPromptId": "launcher_profile_prompt_template_v1",
-        "llmPrompt": _default_profile_prompt_template(),
-        "quality": {
-            "defaultMode": "balanced",
-            "customLabel": "自定义",
-            "modes": _default_quality_modes(),
-            "presets": _default_quality_presets(),
-        },
-        "styles": _default_style_profiles(),
-    }
+    from indextts.profile_config import default_active_profile
+
+    return default_active_profile(_default_style_profiles())
 
 
 def _load_active_profile() -> dict:
@@ -221,60 +168,11 @@ def _load_active_profile() -> dict:
 
 
 def _validate_active_profile(profile: dict) -> None:
-    if int(profile.get("version") or 0) != 3:
-        raise ValueError("Profile 配置错误: version 必须是 3")
-    quality = profile.get("quality")
-    if not isinstance(quality, dict):
-        raise ValueError("Profile 配置错误: 缺少 quality object")
-    styles = profile.get("styles")
-    if not isinstance(styles, dict) or not styles:
-        raise ValueError("Profile 配置错误: 缺少 styles 声腔配置")
-    if "neutral" not in styles:
-        raise ValueError("Profile 配置错误: styles 必须包含 neutral")
-    validated = {}
-    for raw_id, value in styles.items():
-        style_id = str(raw_id or "").strip()
-        if not style_id:
-            raise ValueError("Profile 配置错误: styles 存在空 style id")
-        entry = _strict_style_entry(style_id, value)
-        if entry is not None:
-            validated[style_id] = entry
-    if "neutral" not in validated:
-        raise ValueError("Profile 配置错误: styles 必须启用 neutral")
+    from indextts.profile_config import validate_active_profile
+
+    validate_active_profile(profile)
 
 
-def _voice_dir_has_audio(path: str) -> bool:
-    try:
-        root = Path(path)
-        if not root.is_dir():
-            return False
-        return any(p.is_file() and p.suffix.lower() in VOICE_LIB_EXTS for p in root.rglob("*"))
-    except Exception:
-        return False
-
-
-def _resolve_voice_library_dir() -> str:
-    env_path = os.getenv("LEON_VOICE_LIB_DIR")
-    if env_path:
-        abs_env = os.path.abspath(env_path)
-        if os.path.isdir(abs_env):
-            return abs_env
-    candidates = [
-        os.path.join(APP_ROOT, "prompts", "library"),
-        os.path.join(WORKSPACE_ROOT, "prompts", "library"),
-    ]
-    existing = []
-    for candidate in candidates:
-        abs_path = os.path.abspath(candidate)
-        if not os.path.isdir(abs_path):
-            continue
-        existing.append(abs_path)
-        if _voice_dir_has_audio(abs_path):
-            return abs_path
-    return existing[0] if existing else os.path.join(APP_ROOT, "prompts", "library")
-
-
-VOICE_LIB_DIR = _resolve_voice_library_dir()
 CACHE_DIR = os.path.join("outputs", "cache")
 snapshot_cache.CACHE_DIR = CACHE_DIR
 snapshot_cache.READABLE_CACHE_DIR = os.path.join(CACHE_DIR, "by_role")
@@ -376,93 +274,6 @@ def _static_file_path(name: str) -> Optional[str]:
     return path if os.path.isfile(path) else None
 
 
-def _safe_voice_name(name: str) -> str:
-    raw = str(name or "").strip().strip("/")
-    if not raw:
-        return ""
-    raw = re.sub(r'[\\:*?"<>|\x00-\x1f]', "", raw)
-    parts = [re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", p) for p in raw.split("/") if p and p not in (".", "..")]
-    return "/".join(p for p in parts if p)[:160]
-
-
-def _voice_lookup_candidates(name: str) -> List[str]:
-    raw = str(name or "").strip().strip("\"'")
-    if not raw:
-        return []
-    normalized = raw.replace("\\", "/").strip("/")
-    values = [normalized]
-    lower = normalized.lower()
-    for marker in ("prompts/library/", "library/"):
-        idx = lower.rfind(marker)
-        if idx >= 0:
-            values.append(normalized[idx + len(marker):])
-    expanded = []
-    for value in values:
-        value = value.strip("/")
-        if not value:
-            continue
-        expanded.append(value)
-        for ext in VOICE_LIB_EXTS:
-            if value.lower().endswith(ext):
-                expanded.append(value[:-len(ext)])
-                break
-    out = []
-    seen = set()
-    for value in expanded:
-        key = value.lower()
-        if value and key not in seen:
-            seen.add(key)
-            out.append(value)
-    return out
-
-
-def _format_voice_path(path: Path) -> str:
-    return path.as_posix()
-
-
-def _find_voice_path(name: str) -> Optional[Path]:
-    library_dir = Path(VOICE_LIB_DIR)
-    if not library_dir.is_dir():
-        return None
-    for candidate in _voice_lookup_candidates(name):
-        safe = _safe_voice_name(candidate)
-        if not safe:
-            continue
-        for ext in VOICE_LIB_EXTS:
-            path = library_dir / f"{safe}{ext}"
-            if path.is_file():
-                return path
-        base = safe.rsplit("/", 1)[-1]
-        wanted = safe.lower()
-        for path in library_dir.rglob("*"):
-            if not path.is_file() or path.suffix.lower() not in VOICE_LIB_EXTS:
-                continue
-            rel = path.relative_to(library_dir).with_suffix("").as_posix()
-            if rel.lower() == wanted or path.stem == base or path.stem.lower() == base.lower():
-                return path
-    return None
-
-
-def _list_voices() -> list[dict]:
-    library_dir = Path(VOICE_LIB_DIR)
-    if not library_dir.is_dir():
-        return []
-    items = []
-    for path in library_dir.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in VOICE_LIB_EXTS:
-            continue
-        rel = path.relative_to(library_dir)
-        items.append({
-            "name": rel.with_suffix("").as_posix(),
-            "path": _format_voice_path(path),
-            "ext": path.suffix.lower(),
-            "size_bytes": path.stat().st_size,
-            "subdir": rel.parts[0] if len(rel.parts) > 1 else "",
-        })
-    items.sort(key=lambda item: (item["subdir"], item["name"].lower(), item["name"]))
-    return items
-
-
 def _resolve_voice(name_or_path: str) -> Optional[str]:
     if not name_or_path:
         return None
@@ -470,8 +281,15 @@ def _resolve_voice(name_or_path: str) -> Optional[str]:
     for candidate in (raw, os.path.join(APP_ROOT, raw), os.path.join(WORKSPACE_ROOT, raw)):
         if os.path.exists(candidate):
             return candidate
-    path = _find_voice_path(raw)
-    return _format_voice_path(path) if path else None
+    try:
+        from indextts import voice_library
+
+        path = voice_library.get_voice_path(raw)
+        if path and os.path.exists(path):
+            return path
+    except ImportError:
+        pass
+    return None
 
 
 _STYLE_PROFILE_HINTS = {
@@ -623,73 +441,21 @@ def _default_style_profiles() -> dict:
 
 
 def _style_number(value, field: str, low: float, high: float) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"Profile 配置错误: styles.{field} 必须是数字")
-    if parsed < low or parsed > high:
-        raise ValueError(f"Profile 配置错误: styles.{field} 超出范围 {low}-{high}: {parsed}")
-    return parsed
+    from indextts.profile_config import style_number
+
+    return style_number(value, field, low, high)
 
 
 def _strict_style_entry(style_id: str, value) -> Optional[dict]:
-    if not re.match(r"^[A-Za-z0-9_\-\u4e00-\u9fff]+$", style_id or ""):
-        raise ValueError(f"Profile 配置错误: 非法 style id: {style_id}")
-    if not isinstance(value, dict):
-        raise ValueError(f"Profile 配置错误: styles.{style_id} 必须是 object")
-    if value.get("enabled") is False:
-        return None
-    label = str(value.get("label") or "").strip()
-    if not label:
-        raise ValueError(f"Profile 配置错误: styles.{style_id}.label 不能为空")
-    refs = []
-    raw_refs = value.get("refs")
-    if isinstance(raw_refs, list):
-        for item in raw_refs:
-            ref_item = str(item or "").strip()
-            if ref_item and ref_item not in refs:
-                refs.append(ref_item)
-    ref = str(value.get("ref") or "").strip()
-    if ref and ref not in refs:
-        refs.append(ref)
-    if style_id not in ("neutral", "none") and not refs:
-        raise ValueError(f"Profile 配置错误: styles.{style_id}.refs 至少选择 1 个参考音频")
-    style_alpha = _style_number(value.get("style_alpha"), f"{style_id}.style_alpha", 0.12, 0.78)
-    emo_alpha = _style_number(value.get("emo_alpha"), f"{style_id}.emo_alpha", 0.12, 0.62)
-    raw_vec = value.get("emo_vec")
-    emo_vec = None
-    if raw_vec not in (None, ""):
-        if not isinstance(raw_vec, list) or len(raw_vec) != 8:
-            raise ValueError(f"Profile 配置错误: styles.{style_id}.emo_vec 必须是 8 维数组")
-        emo_vec = []
-        for index, item in enumerate(raw_vec):
-            emo_vec.append(_style_number(item, f"{style_id}.emo_vec[{index}]", 0.0, 1.0))
-    return {
-        "label": label,
-        "ref": refs[0] if refs else "",
-        "refs": refs,
-        "style_alpha": style_alpha,
-        "emo_alpha": emo_alpha,
-        "emo_vec": emo_vec,
-        "description": str(value.get("description") or "").strip(),
-    }
+    from indextts.profile_config import strict_style_entry
+
+    return strict_style_entry(style_id, value)
 
 
 def _active_style_profiles() -> dict:
-    raw_styles = _load_active_profile().get("styles")
-    if not isinstance(raw_styles, dict) or not raw_styles:
-        raise ValueError("Profile 配置错误: 缺少 styles 声腔配置")
-    styles = {}
-    for raw_id, value in raw_styles.items():
-        style_id = str(raw_id or "").strip()
-        if not style_id:
-            raise ValueError("Profile 配置错误: styles 存在空 style id")
-        entry = _strict_style_entry(style_id, value)
-        if entry is not None:
-            styles[style_id] = entry
-    if "neutral" not in styles:
-        raise ValueError("Profile 配置错误: styles 必须启用 neutral")
-    return styles
+    from indextts.profile_config import active_style_profiles
+
+    return active_style_profiles(_load_active_profile())
 
 
 def _style_entry(style: str) -> dict:
@@ -781,11 +547,9 @@ def _delete_cache(key: str) -> bool:
 
 
 def _audio_file_meta(path: str) -> dict:
-    try:
-        st = os.stat(path)
-        return {"size": st.st_size, "mtime": int(st.st_mtime)}
-    except OSError:
-        return {}
+    from indextts.cache_contracts import audio_file_meta
+
+    return audio_file_meta(path)
 
 
 def _clean_tavo_body_text(text: str) -> str:
@@ -1123,101 +887,27 @@ def _llm_max_tokens_for_text(text: str) -> int:
 
 
 def _style_catalog_for_prompt() -> str:
-    styles = _active_style_profiles()
-    labels = []
-    for style_id in sorted(styles.keys(), key=lambda x: (x not in ("neutral", "none"), x)):
-        if style_id == "none":
-            continue
-        entry = styles[style_id]
-        desc = str(entry.get("description") or "").strip()
-        emo_vec = entry.get("emo_vec")
-        vec = ",".join(f"{float(v):.2g}" for v in (emo_vec or []))
-        vec_text = f"emo_vec配置[{vec}]，后端强制优先使用" if emo_vec else "emo_vec未配置，LLM 必须输出"
-        labels.append(
-            f"{style_id}={entry.get('label')}; "
-            f"style_alpha默认{float(entry.get('style_alpha')):.2g}; "
-            f"emo_alpha默认{float(entry.get('emo_alpha')):.2g}; "
-            f"{vec_text}"
-            + (f"; {desc}" if desc else "")
-        )
-    return " / ".join(labels)
+    from indextts.prompt_render import style_catalog_for_prompt
+
+    return style_catalog_for_prompt(_active_style_profiles())
 
 
 def _known_roles_for_parse(req: dict, voices: dict) -> List[str]:
-    roles: List[str] = []
+    from indextts.prompt_render import known_roles_for_parse
 
-    def add(role):
-        role = str(role or "").strip()
-        if role and role not in roles:
-            roles.append(role)
-
-    add("旁白")
-    add("用户")
-    for role in (req.get("roles_hint") or []):
-        role = str(role or "").strip()
-        if role and role not in ("角色", "character", "当前角色", "我"):
-            add(role)
-    for role in (voices or {}).keys():
-        if role != "default" and role not in ("角色", "character", "当前角色", "我"):
-            add(role)
-    character_name = str(req.get("character_name") or "").strip()
-    if character_name:
-        add(character_name)
-    return roles
+    return known_roles_for_parse(req, voices)
 
 
 def _render_profile_prompt_template(template: str, req: dict, voices: dict) -> str:
-    text_user = str(req.get("user_name") or "").strip()
-    character_name = str(req.get("character_name") or "").strip()
-    known_roles = _known_roles_for_parse(req, voices)
-    roles_hint = "已知角色名单(LLM 输出 role 字段必须从这里选，或者用剧情里出现的新人物名):\n  " + " / ".join(known_roles)
-    user_alias_hint = "用户身份名: " + (text_user or "未读取到") + "。只有原文中的「你」以及这个用户身份名明确指向玩家/读者时，role 才写 \"用户\"。"
-    character_hint = "当前角色名: " + (character_name or "未读取到") + "。原文第一人称「我」通常指当前角色或正在自述的人物，不要因为出现「我」就改成用户。"
-    example_user = text_user or "你"
-    if args.qwen_emo:
-        output_contract = "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"emo_text\":\"...\"}]}"
-        style_rules = "5. 当前后端启用 Qwen emotion。不要输出 style/style_alpha/emo_vec/emo_alpha，也不要输出声腔参考。"
-        emotion_rules = "重要: 必须给每段输出 emo_text，写成简短自然语言情绪提示，例如「低声、克制、带一点哽咽」「轻松笑意、语速自然」。后端会把 emo_text 交给 IndexTTS2 的 QwenEmotion 生成情绪向量。"
-        example_output = "\n".join([
-            "{\"segments\":[",
-            "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"emo_text\":\"低声叙述，情绪压抑，带一点心疼\"},",
-            "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"emo_text\":\"哽咽、低落、快哭出来，但声音不要尖\"},",
-            f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\",\"emo_text\":\"平静叙述，动作温柔\"}},",
-            "  {\"role\":\"用户\",\"text\":\"别哭。\",\"emo_text\":\"压低声音、温柔安慰、语速慢\"}",
-            "]}",
-        ])
-    else:
-        output_contract = "{\"segments\":[{\"role\":\"...\",\"text\":\"...\",\"style\":\"neutral\",\"style_alpha\":0.2}]}"
-        style_rules = "5. style 是段级声腔/呼吸参考，只能从这个枚举里选: " + _style_catalog_for_prompt()
-        emotion_rules = "\n".join([
-            "声腔情绪向量由 active profile 的 style 配置优先决定；style 已配置 emo_vec 时，不要输出 emo_vec，后端会强制使用配置值。",
-            "只有 style 枚举里明确写着 emo_vec未配置 时，才输出 8 维 emo_vec，顺序为 [happy,angry,sad,fear,hate,low,surprise,neutral]。",
-            "每段可加 emo_alpha 字段做强度微调：旁白 0.12-0.22，平静对白 0.20-0.30，正常带情绪对白 0.32-0.44，强烈台词 0.46-0.52。",
-            "style_alpha: neutral=0.12-0.20；轻微声腔=0.34-0.46；明显 breath/moan/呻吟/喘息=0.50-0.70。",
-        ])
-        example_output = "\n".join([
-            "{\"segments\":[",
-            "  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"neutral\",\"style_alpha\":0.15},",
-            "  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.42},",
-            f"  {{\"role\":\"旁白\",\"text\":\"{example_user}叹了口气，把手放在她肩上：\",\"style\":\"neutral\",\"style_alpha\":0.15}},",
-            "  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45}",
-            "]}",
-        ])
-    replacements = {
-        "roles_hint": roles_hint,
-        "user_alias_hint": user_alias_hint,
-        "character_hint": character_hint,
-        "output_contract": output_contract,
-        "style_catalog": _style_catalog_for_prompt(),
-        "style_rules": style_rules,
-        "emotion_rules": emotion_rules,
-        "example_user": example_user,
-        "example_output": example_output,
-    }
-    rendered = str(template or "")
-    for key, value in replacements.items():
-        rendered = rendered.replace("{{" + key + "}}", value)
-    return rendered.strip()
+    from indextts.prompt_render import render_profile_prompt_template
+
+    return render_profile_prompt_template(
+        template=template,
+        req=req,
+        known_roles=_known_roles_for_parse(req, voices),
+        style_catalog=_style_catalog_for_prompt(),
+        qwen_emo=bool(args.qwen_emo),
+    )
 
 
 def _build_backend_parse_prompt(req: dict, voices: dict) -> str:
@@ -1553,29 +1243,21 @@ def _wav_bytes_to_pcm_bytes(wav_bytes: bytes) -> tuple[int, bytes]:
 
 
 def _media_type_for_audio_path(path: str) -> str:
-    return "audio/mpeg" if os.path.splitext(str(path or ""))[1].lower() == ".mp3" else "audio/wav"
+    from indextts.cache_contracts import media_type_for_audio_path
+
+    return media_type_for_audio_path(path)
 
 
 def _model_to_dict(value):
-    if value is None:
-        return {}
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if hasattr(value, "dict"):
-        return value.dict()
-    return dict(value or {})
+    from indextts.cache_contracts import model_to_dict
+
+    return model_to_dict(value)
 
 
 def _cache_audio_headers(key: str, path: str, extra: Optional[dict] = None) -> dict:
-    headers = {
-        "X-IndexTTS-Cache": "HIT",
-        "X-IndexTTS-Cache-Key": key,
-        "X-IndexTTS-Audio-Format": "mp3" if _media_type_for_audio_path(path) == "audio/mpeg" else "wav",
-        "Accept-Ranges": "bytes",
-    }
-    if extra:
-        headers.update(extra)
-    return headers
+    from indextts.cache_contracts import cache_audio_headers
+
+    return cache_audio_headers(key, path, extra)
 
 
 def _cached_wav_path_for_diagnostics(cache_key: str) -> Optional[str]:
@@ -1615,13 +1297,9 @@ def _cached_audio_response_with_start_offset(path: str, cache_key: str, start_s:
 
 
 def _segment_meta_at(segments_meta: list, segment_idx: int) -> tuple[int, Optional[dict]]:
-    for pos, meta in enumerate(segments_meta or []):
-        if isinstance(meta, dict) and int(meta.get("idx", pos)) == int(segment_idx):
-            return pos, meta
-    if 0 <= int(segment_idx) < len(segments_meta or []):
-        meta = segments_meta[int(segment_idx)]
-        return int(segment_idx), meta if isinstance(meta, dict) else None
-    return -1, None
+    from indextts.cache_contracts import segment_meta_at
+
+    return segment_meta_at(segments_meta, segment_idx)
 
 
 def _segment_wav_response_from_pcm(
@@ -2365,7 +2043,9 @@ async def server_log_tail(n: int = 100, since: float = 0.0, filter: Optional[str
 @APP.get("/voices")
 async def voices_list_endpoint():
     try:
-        return JSONResponse(content={"voices": _list_voices()})
+        from indextts import voice_library
+
+        return JSONResponse(content={"voices": voice_library.list_voices()})
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=400, content={"message": "voices list failed", "Exception": str(e)})
@@ -2378,6 +2058,100 @@ async def voice_preview_endpoint(name: str):
         return JSONResponse(status_code=404, content={"message": "voice not found", "name": name})
     media_type = "audio/mpeg" if os.path.splitext(path)[1].lower() == ".mp3" else "audio/wav"
     return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
+@APP.post("/voice/upload")
+async def upload_voice_endpoint(name: str = Form(...), ext: str = Form(...), file: UploadFile = File(...)):
+    """Upload a voice file."""
+    try:
+        from indextts import voice_library
+        audio_bytes = await file.read()
+        path = voice_library.save_voice(audio_bytes, name, ext)
+        return JSONResponse(content={"path": path, "message": "上传成功"})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "上传失败", "Exception": str(e)})
+
+
+@APP.delete("/voice/{name:path}")
+async def delete_voice_endpoint(name: str):
+    """Delete a voice by name."""
+    try:
+        from indextts import voice_library
+        success = voice_library.delete_voice(name)
+        if not success:
+            return JSONResponse(status_code=404, content={"message": "音色不存在", "name": name})
+        return JSONResponse(content={"message": "删除成功", "name": name})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "删除失败", "Exception": str(e)})
+
+
+@APP.post("/voice/move")
+async def move_voice_endpoint(request: Request):
+    """Move a voice to a different group."""
+    try:
+        from indextts import voice_library
+        body = await request.json()
+        old_name = body.get("old_name", "")
+        new_name = body.get("new_name", "")
+
+        if not old_name or not new_name:
+            return JSONResponse(status_code=400, content={"message": "缺少 old_name 或 new_name"})
+
+        old_path = voice_library.get_voice_path(old_name)
+        if not old_path:
+            return JSONResponse(status_code=404, content={"message": "源音色不存在", "name": old_name})
+
+        new_path = voice_library.save_voice_from_path(old_path, new_name)
+        voice_library.delete_voice(old_name)
+
+        return JSONResponse(content={"path": new_path, "message": "移动成功"})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "移动失败", "Exception": str(e)})
+
+
+@APP.post("/test_generate")
+async def test_generate_endpoint(request: Request):
+    """Test voice generation with specified voice, style, and text."""
+    try:
+        body = await request.json()
+        voice = body.get("voice", "")
+        style = body.get("style", "neutral")
+        text = body.get("text", "")
+
+        if not text:
+            return JSONResponse(status_code=400, content={"message": "缺少 text"})
+
+        profile = _active_profile_entry()
+        if not profile:
+            return JSONResponse(status_code=400, content={"message": "未找到激活的配置"})
+
+        voice_path = _resolve_voice(voice) if voice else None
+        style_entry = profile.get("styles", {}).get(style, {})
+        style_refs = style_entry.get("refs", []) or ([style_entry.get("ref", "")] if style_entry.get("ref") else [])
+        style_ref = _select_style_voice_ref(style, text, style_refs) if style_refs else ""
+
+        from indextts.infer_v2 import generate_audio
+        import tempfile
+
+        output_path = tempfile.mktemp(suffix=".wav")
+        generate_audio(
+            text=text,
+            spk_audio_prompt=voice_path or "",
+            emo_audio_prompt=style_ref,
+            emo_alpha=style_entry.get("style_alpha", 0.4),
+            emo_vector=style_entry.get("emo_vec", [0, 0, 0, 0, 0, 0, 0, 0.85]),
+            output_path=output_path,
+            diffusion_steps=30,
+            prompt_audio_seconds=5
+        )
+
+        return FileResponse(output_path, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"message": "测试生成失败", "Exception": str(e)})
 
 
 @APP.get("/cache_audio/{key}")

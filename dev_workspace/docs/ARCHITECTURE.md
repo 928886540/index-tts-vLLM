@@ -11,7 +11,7 @@ Primary goal: a user runs the model service on their own Windows machine, inject
 - `vllm/`: vLLM quality API backend version directory.
 - `fast6g/`: double-accelerated 6 GB friendly API backend version directory.
 - `static/tavo.js`: shared single Tavo frontend injected script and player UI.
-- `launcher/` and `scripts/`: shared startup tooling and version selection.
+- `launcher-tauri/` and `scripts/`: shared startup tooling and version selection.
 - `prompts/library/` under each backend version: voice/reference audio library.
 - `outputs/cache/` under the selected backend version: generated MP3 cache, optional debug/legacy WAV, and metadata snapshots.
 - `dev_workspace/dev_tools/`: local smoke tests, payloads, Playwright runner script, audio analysis utilities.
@@ -25,7 +25,7 @@ Use these terms consistently in code review, bug notes, and user-facing explanat
 - Backend / API backend / `后端`: the HTTP API layer, including `vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, request models, job status, cache endpoints, and API-side LLM parse helpers.
 - Frontend / `前端`: Tavo-side injected scripts and UI, including `static/tavo.js`, runtime parts, Tavo storage, WebAudio/native audio lifecycle, and role/voice settings UI.
 - TTS service / `TTS服务`: IndexTTS / IndexTTS2 inference and model synthesis pipeline. This is not called "backend" in this project terminology.
-- Launcher / `启动器`: `LEON-Launcher.exe`, `launcher/`, and startup scripts.
+- Launcher / `启动器`: `LEON-Launcher-Tauri.exe`, `launcher-tauri/`, and startup scripts.
 
 When describing a flow, separate the boundaries: frontend submits a job, API backend owns job/cache/status and validation, TTS service performs synthesis, then frontend plays live or saved audio.
 

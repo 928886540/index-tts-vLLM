@@ -97,3 +97,45 @@ Conservative estimate:
 - real vLLM + fast6g validation: 0.5-1 day.
 
 Total: about 5-8 engineering days if we avoid unrelated UI redesign and long audio benchmarks.
+
+## Current Status 2026-06-11
+
+Package split is paused here for bugfix work.
+
+Completed:
+
+- Stage 1 shared startup entry exists: `scripts/restart-leon-api.ps1 -Version vllm|fast6g`.
+- Tauri launcher and both version BAT files call the shared startup entry.
+- Old WinForms launcher files were retired; current launcher entry is `LEON-Launcher-Tauri.exe`.
+- Stage 2 low-risk helper extraction is partially complete:
+  - `leon_common/profile_store.py`
+  - `leon_common/voice_library.py`
+  - `leon_common/llm_proxy.py`
+  - `leon_common/prompt_render.py`
+  - `leon_common/profile_config.py`
+  - `leon_common/cache_contracts.py`
+- Both `vllm/indextts/` and `fast6g/indextts/` keep compatibility wrappers for those shared helpers.
+- fast6g API now uses the shared voice library for `/voices` and `_resolve_voice()`, matching vLLM behavior.
+
+Not done yet:
+
+- `leon_common/env_probe.py` is not extracted yet. Current env/GPU probing is still split between PowerShell startup and Tauri Rust, so avoid creating a premature Python abstraction.
+- Shared API route extraction has not started. Next resume point should be small contracts only: `/profiles/active`, `/voices`, and `/cache_audio/{key}` wrappers. Do not move live job execution or TTS inference in the next slice.
+- Engine adapters and package manifests are still future stages.
+
+Latest no-start validation passed:
+
+```powershell
+python -m py_compile leon_common\__init__.py leon_common\profile_store.py leon_common\voice_library.py leon_common\llm_proxy.py leon_common\prompt_render.py leon_common\profile_config.py leon_common\cache_contracts.py vllm\indextts2_api.py fast6g\indextts2_api.py fast6g\indextts\infer_v2.py
+python -c "from indextts import voice_library; from indextts.profile_config import default_active_profile, validate_active_profile; from indextts.cache_contracts import cache_audio_headers, media_type_for_audio_path; print(len(voice_library.list_voices())); print(voice_library.get_voice_path('声腔/喘息-AD学姐'))"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version vllm -ValidateOnly
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version fast6g -ValidateOnly
+git diff --check
+```
+
+Validation notes:
+
+- Import checks passed from both `vllm/` and `fast6g/` cwd.
+- Shared voice library count was `1095` from both engine cwd paths.
+- `active.json` validated successfully in both startup validate-only runs.
+- No API service was started or restarted, and no TTS generation was run.

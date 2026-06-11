@@ -1271,7 +1271,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
   });
   await page.route("**/tts_dialogue_job_status/**", async (route) => {
     statusCount += 1;
-    const queued = statusCount === 1;
+    const queued = statusCount <= 4;
     if (!queued) ttsProgressServed += 1;
     const done = ttsProgressServed >= 6 && statusCount >= 10 && streamGetCount >= 2;
     await route.fulfill({
@@ -1444,8 +1444,17 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
       const parts = curText.split(":").map((x) => Number(x) || 0);
       const sec = parts.length >= 2 ? parts[0] * 60 + parts[1] : 0;
       const subtitleText = (document.querySelector(".idx-subtitle") || {}).textContent || "";
-      return sec >= 1 && /第二段计划歌词/.test(subtitleText);
+      return sec >= 1
+        && /第一段正在合成/.test(subtitleText)
+        && !/第二段计划歌词|第三段计划歌词/.test(subtitleText);
     }, { timeout: 6000 });
+    await page.waitForFunction(() => {
+      const curText = (document.querySelector('[data-role="current"]') || {}).textContent || "00:00";
+      const parts = curText.split(":").map((x) => Number(x) || 0);
+      const sec = parts.length >= 2 ? parts[0] * 60 + parts[1] : 0;
+      const progressText = (document.querySelector('[data-role="progress"]') || {}).textContent || "";
+      return sec >= 1 && !/正在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(progressText);
+    }, { timeout: 3000 });
     await page.waitForTimeout(250);
 
     const result = await page.evaluate(() => {
@@ -1511,6 +1520,7 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
         statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
         streamGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).length,
         liveExitVisible: liveExit ? getComputedStyle(liveExit).display !== "none" : false,
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
         playRect: rectFor(play),
         liveExitRect: rectFor(liveExit),
         prevVisibility: prev ? getComputedStyle(prev).visibility : "",
@@ -1586,9 +1596,6 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (!hadGeneratedProgress) {
       throw new Error("LIVE synthesis progress should say how many segments are already generated: " + JSON.stringify(result));
     }
-    if (!hadPlaybackSegment) {
-      throw new Error("LIVE progress should include the current playing segment when timing is known: " + JSON.stringify(result));
-    }
     if (hadOldAmbiguousProgress) {
       throw new Error("LIVE progress should not use ambiguous AI x/y or 合成 x/y wording: " + JSON.stringify(result));
     }
@@ -1601,8 +1608,13 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
     if (transientProgressPattern.test(result.status)) {
       throw new Error("transient LIVE progress must stay out of the avatar-side status: " + JSON.stringify(result));
     }
-    if (!/第二段计划歌词/.test(result.notice) || !/第三段计划歌词/.test(result.notice)) {
-      throw new Error("LIVE subtitle should render planned later lyrics before all segments are synthesized: " + JSON.stringify(result));
+    const currentMetrics = (result.debugTrack && result.debugTrack.metrics) || {};
+    const partialMetaActive = Number(currentMetrics.segments_total || 0) > Number(currentMetrics.segments_done || 0);
+    if (partialMetaActive && /第二段计划歌词|第三段计划歌词/.test(result.notice)) {
+      throw new Error("LIVE subtitle must not merge future plan lyrics into a partial real timeline: " + JSON.stringify(result));
+    }
+    if (partialMetaActive && /正在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(result.progressText || "")) {
+      throw new Error("LIVE progress must not keep a stale current segment when playback has moved beyond known meta: " + JSON.stringify(result));
     }
     if (!/^00:0[1-9]/.test(result.curText) || Number(result.seekValue || 0) <= 0) {
       throw new Error("LIVE progress should keep moving beyond the first known segment: " + JSON.stringify(result));
@@ -2338,8 +2350,8 @@ async function runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl) {
       HTMLMediaElement.prototype.load = function () { this.__idxEnded = false; this.__idxMockCurrentTime = 0; };
       HTMLMediaElement.prototype.play = function () {
         const el = this;
-        const src = el.currentSrc || el.src || "";
         const kind = el.dataset ? (el.dataset.idxSourceKind || "") : "";
+        const src = kind === "saved" ? (el.src || el.currentSrc || "") : (el.currentSrc || el.src || "");
         el.__idxPlaying = true;
         el.__idxEnded = false;
         try {
@@ -2378,6 +2390,7 @@ async function runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl) {
   let statusCount = 0;
   let cacheHeadCount = 0;
   let cacheGetCount = 0;
+  let deleteCount = 0;
   const liveRequests = [];
 
   await page.route("**/cache_audio/**", async (route) => {
@@ -2444,6 +2457,11 @@ async function runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl) {
         },
         body: mp3Bytes
       });
+      return;
+    }
+    if (method === "DELETE") {
+      deleteCount += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ state: "done", preserved: true }) });
       return;
     }
     await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "unexpected live cache-ready method" }) });
@@ -2522,8 +2540,140 @@ async function runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl) {
     if (Number(result.seekValue || 0) <= 0 || !/第二句/.test(result.currentLyricText)) {
       throw new Error("cache-ready live source should keep progress and lyric moving: " + JSON.stringify(result));
     }
+    const cacheGetsBeforeStall = result.cacheGets;
+    const liveGetsBeforeStall = result.liveGets.length;
+    await page.evaluate(() => {
+      const t = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      if (t) {
+        t.latestSynthesisStatusText = "已生成 10/12 段";
+        t.lastPlaybackSegmentStatusAt = 0;
+      }
+      const audio = document.querySelector('[data-role="audio"]');
+      if (!audio) throw new Error("missing audio before saved-live stalled handoff");
+      audio.currentTime = 1.2;
+      audio.dispatchEvent(new Event("stalled"));
+    });
+    await page.waitForFunction((liveKey) => {
+      const audio = document.querySelector('[data-role="audio"]');
+      const play = document.querySelector('[data-role="play"]');
+      return audio
+        && audio.dataset
+        && audio.dataset.idxSourceKind === "saved"
+        && audio.dataset.idxCacheKey === liveKey
+        && /\/cache_audio\//.test(audio.currentSrc || audio.src || "")
+        && play
+        && play.dataset.state === "playing";
+    }, liveKey, { timeout: 5000 });
+    await page.waitForFunction(() => {
+      const currentLyric = document.querySelector(".idx-sub-row.is-current .idx-sub-text");
+      return currentLyric && /第二句/.test(currentLyric.textContent || "");
+    }, { timeout: 5000 });
+    const afterStallHandoff = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const audio = document.querySelector('[data-role="audio"]');
+      const play = document.querySelector('[data-role="play"]');
+      const liveExit = document.querySelector('[data-role="live-exit"]');
+      const currentLyric = document.querySelector(".idx-sub-row.is-current .idx-sub-text");
+      return {
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        playState: play ? play.dataset.state || "" : "",
+        liveExitHidden: !!(liveExit && liveExit.classList.contains("idx-hidden")),
+        currentLyricText: currentLyric ? currentLyric.textContent || "" : "",
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
+        liveGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\//.test(r.url)).map((r) => r.url),
+        liveStartGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3\?/.test(r.url) && /[?&]start_s=/.test(r.url)).map((r) => r.url),
+        cacheGets: fetches.filter((r) => r.method === "GET" && /\/cache_audio\//.test(r.url)).length,
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        progress: (document.querySelector('[data-role="progress"]') || {}).textContent || "",
+        playCalls: window.__cacheReadyPlayCalls || []
+      };
+    });
+    if (afterStallHandoff.audioKind !== "saved" || !/\/cache_audio\//.test(afterStallHandoff.audioSrc)) {
+      throw new Error("saved live stalled source should switch to complete cache audio: " + JSON.stringify(afterStallHandoff));
+    }
+    if (Math.abs(Number(afterStallHandoff.audioCurrentTime || 0) - 1.2) > 0.2 || !/第二句/.test(afterStallHandoff.currentLyricText)) {
+      throw new Error("saved live stalled handoff should preserve playback second and lyric: " + JSON.stringify(afterStallHandoff));
+    }
+    if (!afterStallHandoff.debugTrack || afterStallHandoff.debugTrack.state !== "saved" || afterStallHandoff.debugTrack.playbackState !== "playing" || !afterStallHandoff.debugTrack.livePageExited) {
+      throw new Error("saved live stalled handoff should exit LIVE and keep the saved card playing: " + JSON.stringify(afterStallHandoff));
+    }
+    if (!afterStallHandoff.liveExitHidden) {
+      throw new Error("saved live stalled handoff should hide the LIVE exit control: " + JSON.stringify(afterStallHandoff));
+    }
+    if (afterStallHandoff.liveGets.length > liveGetsBeforeStall || afterStallHandoff.liveStartGets.length || deleteCount !== 0) {
+      throw new Error("saved live stalled handoff must not reconnect or delete the LIVE job: " + JSON.stringify({ afterStallHandoff, deleteCount }));
+    }
+    if (afterStallHandoff.cacheGets <= cacheGetsBeforeStall) {
+      throw new Error("saved live stalled handoff should play the complete cache audio: " + JSON.stringify(afterStallHandoff));
+    }
+    if (/已生成\s*\d+\/\d+\s*段|正在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(afterStallHandoff.progress || "")) {
+      throw new Error("saved live stalled handoff should clear stale synthesis progress: " + JSON.stringify(afterStallHandoff));
+    }
+    await page.evaluate((liveKey) => {
+      const t = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      if (t) {
+        t.latestSynthesisStatusText = "已生成 10/12 段";
+        t.lastPlaybackSegmentStatusAt = 0;
+      }
+      const audio = document.querySelector('[data-role="audio"]');
+      if (!audio) throw new Error("missing audio before saved-live ended handoff");
+      audio.src = "/tts_dialogue_stream_job/" + liveKey + "/mp3?start_s=1.000";
+      audio.dataset.idxSourceKind = "live-mp3";
+      audio.dataset.idxCacheKey = liveKey;
+      audio.dataset.idxLiveOffsetSec = "1";
+      audio.__idxPlaying = false;
+      audio.__idxEnded = true;
+      audio.currentTime = 1.0;
+      audio.dispatchEvent(new Event("ended"));
+    }, liveKey);
+    await page.waitForFunction((liveKey) => {
+      const audio = document.querySelector('[data-role="audio"]');
+      const play = document.querySelector('[data-role="play"]');
+      const t = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      return audio
+        && audio.dataset
+        && audio.dataset.idxSourceKind === "saved"
+        && audio.dataset.idxCacheKey === liveKey
+        && /\/cache_audio\//.test(audio.currentSrc || audio.src || "")
+        && play
+        && play.dataset.state === "idle"
+        && t
+        && t.state === "saved"
+        && t.playbackState === "ended";
+    }, liveKey, { timeout: 5000 });
+    const afterEndedHandoff = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const audio = document.querySelector('[data-role="audio"]');
+      const play = document.querySelector('[data-role="play"]');
+      const liveExit = document.querySelector('[data-role="live-exit"]');
+      return {
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        playState: play ? play.dataset.state || "" : "",
+        liveExitHidden: !!(liveExit && liveExit.classList.contains("idx-hidden")),
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
+        liveStartGets: fetches.filter((r) => r.method === "GET" && /\/tts_dialogue_stream_job\/[^/?#]+\/mp3\?/.test(r.url) && /[?&]start_s=/.test(r.url)).map((r) => r.url),
+        status: (document.querySelector('[data-role="status"]') || {}).textContent || "",
+        progress: (document.querySelector('[data-role="progress"]') || {}).textContent || ""
+      };
+    });
+    if (afterEndedHandoff.audioKind !== "saved" || !/\/cache_audio\//.test(afterEndedHandoff.audioSrc)) {
+      throw new Error("saved live ended source should mount complete cache audio: " + JSON.stringify(afterEndedHandoff));
+    }
+    if (!afterEndedHandoff.debugTrack || !afterEndedHandoff.debugTrack.livePageExited || afterEndedHandoff.debugTrack.state !== "saved" || afterEndedHandoff.debugTrack.playbackState !== "ended") {
+      throw new Error("saved live ended source should auto-exit LIVE and keep the saved card: " + JSON.stringify(afterEndedHandoff));
+    }
+    if (afterEndedHandoff.playState !== "idle" || !afterEndedHandoff.liveExitHidden || deleteCount !== 0 || afterEndedHandoff.liveStartGets.length) {
+      throw new Error("saved live ended source should stop without deleting or reconnecting: " + JSON.stringify({ afterEndedHandoff, deleteCount }));
+    }
+    if (/已生成\s*\d+\/\d+\s*段|正在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(afterEndedHandoff.progress || "")) {
+      throw new Error("saved live ended handoff should clear stale synthesis progress: " + JSON.stringify(afterEndedHandoff));
+    }
     if (pageErrors.length) throw new Error("live MP3 cache-ready keep-source smoke page error: " + pageErrors.join(" | "));
-    return { result, statusCount, cacheHeadCount, cacheGetCount, liveRequests };
+    return { result, afterStallHandoff, afterEndedHandoff, statusCount, cacheHeadCount, cacheGetCount, liveRequests };
   } finally {
     await context.close();
   }

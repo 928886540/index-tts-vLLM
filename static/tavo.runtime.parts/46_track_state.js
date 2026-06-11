@@ -1133,6 +1133,7 @@
         state: trackState(track),
         playbackState: String(track.playbackState || ""),
         streamHealth: String(track.streamHealth || ""),
+        livePageExited: !!track.livePageExited,
         livePageSuspended: !!track.livePageSuspended,
         pausedByUser: !!track.pausedByUser,
         liveResumeSec: Number(track.liveResumeSec || 0) || 0,
@@ -1142,6 +1143,12 @@
         lastStalledSec: Number(track.lastStalledSec || 0) || 0,
         lastKnownLiveResumeSec: lastKnownLiveResumeSec(track),
         trackResumeSec: trackResumeSec(track),
+        metrics: track.metrics ? {
+          phase: String(track.metrics.phase || ""),
+          state: String(track.metrics.state || ""),
+          segments_done: Number(track.metrics.segments_done || 0) || 0,
+          segments_total: Number(track.metrics.segments_total || 0) || 0
+        } : null,
         currentText: cur ? String(cur.textContent || "") : ""
       };
     }
@@ -1510,16 +1517,7 @@
         if (track) track.lastWebAudioSec = sec;
         if (track) rememberLiveResumeSec(track, sec, "progress");
         try {
-          if (track && track.latestSynthesisStatusText && Date.now() - Number(track.lastPlaybackSegmentStatusAt || 0) > 1000) {
-            var base = String(track.latestSynthesisStatusText || "");
-            if (/已生成\s*\d+\s*\/\s*\d+\s*段|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|音频合成中|音频已合成|正在保存|保存中/.test(base)) {
-              var segText = typeof playbackSegmentStatusTextForTrack === "function" ? playbackSegmentStatusTextForTrack(track, null, 0, sec) : "";
-              if (segText) {
-                track.lastPlaybackSegmentStatusAt = Date.now();
-                setStatus(base + " · " + segText);
-              }
-            }
-          }
+          if (typeof updatePlaybackSegmentProgressStatus === "function") updatePlaybackSegmentProgressStatus(track, sec);
         } catch (_) {}
       }, 250);
     }
@@ -1714,13 +1712,7 @@
                 return startOffsetSec + ((((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt) / 1000) * playbackRate);
               });
               try {
-                if (track.latestSynthesisStatusText) {
-                  var playingSegText = typeof playbackSegmentStatusTextForTrack === "function" ? playbackSegmentStatusTextForTrack(track, null, 0, startOffsetSec) : "";
-                  if (playingSegText) {
-                    track.lastPlaybackSegmentStatusAt = Date.now();
-                    setStatus(String(track.latestSynthesisStatusText || "") + " · " + playingSegText);
-                  }
-                }
+                if (typeof updatePlaybackSegmentProgressStatus === "function") updatePlaybackSegmentProgressStatus(track, startOffsetSec, { force: true });
               } catch (_) {}
             } else if (state === "stable_playing") {
               track.webAudioStable = true;

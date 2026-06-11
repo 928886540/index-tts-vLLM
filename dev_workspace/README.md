@@ -10,7 +10,7 @@ LEON is a local IndexTTS2 + Tavo integration. It provides:
 
 - a Tavo injected voice player in `static/`;
 - an API backend in `vllm/` or `fast6g/`;
-- a Windows launcher in `LEON-Launcher.exe`, `launcher/`, and `scripts/`;
+- a Windows Tauri launcher in `LEON-Launcher-Tauri.exe`, `launcher-tauri/`, and `scripts/`;
 - active collaboration state in `dev_workspace/docs/`.
 
 ## Boundaries
@@ -18,7 +18,7 @@ LEON is a local IndexTTS2 + Tavo integration. It provides:
 - `后端` / backend: the HTTP API layer, mainly `vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, routes, job/cache/status, and API helpers.
 - `前端` / frontend: Tavo injected UI/scripts, mainly `static/tavo.js`, `static/tavo.runtime.js`, runtime parts, Tavo storage, and playback behavior.
 - `TTS服务`: the IndexTTS / IndexTTS2 inference and synthesis pipeline.
-- `启动器`: `LEON-Launcher.exe`, `launcher/`, and startup scripts.
+- `启动器`: `LEON-Launcher-Tauri.exe`, `launcher-tauri/`, and startup scripts.
 
 Keep those terms separate when diagnosing bugs.
 
@@ -27,7 +27,7 @@ Keep those terms separate when diagnosing bugs.
 - `..\vllm\`: vLLM quality backend.
 - `..\fast6g\`: double-accelerated 6 GB friendly backend.
 - `..\static\`: shared Tavo frontend.
-- `..\launcher\`: launcher source and assets.
+- `..\launcher-tauri\`: Tauri launcher source and assets.
 - `..\scripts\`: shared startup scripts.
 - `docs\`: active state, bugs, decisions, TODOs, and regression checklist.
 - `dev_tools\`: local smoke and Playwright test utilities.
@@ -55,7 +55,7 @@ Read only when relevant:
 Use the root launcher:
 
 ```text
-D:\apiWorkSpace\leon_api\LEON-Launcher.exe
+D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe
 ```
 
 The launcher selects `vllm` or `fast6g`, then starts the selected backend through shared scripts. It must not auto-start the backend on open.
@@ -65,10 +65,18 @@ The launcher selects `vllm` or `fast6g`, then starts the selected backend throug
 The app does not require a public domain. Same-LAN testing can use:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260609-mp3-cache-v63"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260611-mp3-cache-v65"></script>
 ```
 
 For public tunnel usage, configure the tunnel/reverse proxy outside this repository and replace only the script host. The program should not detect, store, or require a public domain.
+
+## Rust Toolchain
+
+This machine uses the D-drive Rust install for Tauri work. Before running `cargo` commands, prefer this PowerShell setup:
+
+```powershell
+$env:PATH='D:\Rust\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin;D:\Rust\.cargo\bin;' + $env:PATH
+```
 
 ## Common Checks
 

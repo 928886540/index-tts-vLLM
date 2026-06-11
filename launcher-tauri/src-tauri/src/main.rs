@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use base64::{engine::general_purpose, Engine as _};
 use chrono::{Local, Utc};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -29,6 +30,13 @@ struct ProfileListItem {
     display_order: i64,
     updated_at: Option<String>,
     active: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveProfileResult {
+    file: String,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,6 +171,7 @@ fn main() {
             get_profiles,
             get_profile,
             get_voice_refs,
+            get_voice_ref_audio,
             create_profile,
             save_profile,
             apply_profile,
@@ -175,7 +184,11 @@ fn main() {
             health_check,
             get_service_status,
             get_environment,
-            get_log_snapshot
+            get_log_snapshot,
+            upload_voice,
+            delete_voice,
+            move_voice,
+            test_voice_generation
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -277,16 +290,54 @@ fn get_voice_refs() -> Result<Vec<VoiceRefItem>, String> {
     let root = leon_root()?;
     let mut items = Vec::new();
     for library_root in voice_library_roots(&root) {
-        let cavity_root = library_root.join("声腔");
-        collect_voice_refs(&root, &library_root, &cavity_root, &mut items)?;
+        collect_voice_refs(&root, &library_root, &library_root, &mut items)?;
     }
     items.sort_by(|a, b| {
-        (a.subdir != "声腔")
-            .cmp(&(b.subdir != "声腔"))
-            .then_with(|| a.subdir.cmp(&b.subdir))
+        a.subdir
+            .cmp(&b.subdir)
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     Ok(items)
+}
+
+#[tauri::command]
+fn get_voice_ref_audio(ref_name: String) -> Result<String, String> {
+    let root = leon_root()?;
+    let path = resolve_voice_ref(&root, &ref_name)
+        .ok_or_else(|| format!("参考音频不存在: {}", ref_name.trim()))?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("解析参考音频路径失败 {}: {}", path.display(), e))?;
+    if !is_voice_file(&canonical) {
+        return Err(format!("不是支持的音频文件: {}", canonical.display()));
+    }
+
+    let inside_cavity_library = voice_library_roots(&root)
+        .into_iter()
+        .map(|library_root| library_root.join("声腔"))
+        .filter_map(|candidate| candidate.canonicalize().ok())
+        .any(|cavity_root| canonical.starts_with(cavity_root));
+    if !inside_cavity_library {
+        return Err("试听只允许读取 prompts/library/声腔 下的参考音频".to_string());
+    }
+
+    let meta = fs::metadata(&canonical)
+        .map_err(|e| format!("读取参考音频信息失败 {}: {}", canonical.display(), e))?;
+    const MAX_PREVIEW_BYTES: u64 = 25 * 1024 * 1024;
+    if meta.len() > MAX_PREVIEW_BYTES {
+        return Err(format!(
+            "参考音频过大，无法试听: {:.1} MB",
+            meta.len() as f64 / 1024.0 / 1024.0
+        ));
+    }
+
+    let bytes = fs::read(&canonical)
+        .map_err(|e| format!("读取参考音频失败 {}: {}", canonical.display(), e))?;
+    Ok(format!(
+        "data:{};base64,{}",
+        media_type_for_voice_path(&canonical),
+        general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 #[tauri::command]
@@ -322,7 +373,7 @@ fn create_profile() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_profile(file: String, mut profile: Value) -> Result<String, String> {
+fn save_profile(file: String, mut profile: Value) -> Result<SaveProfileResult, String> {
     let safe_name = safe_profile_file_name(&file)?;
     validate_profile_value(&profile)?;
     let Some(object) = profile.as_object_mut() else {
@@ -333,13 +384,36 @@ fn save_profile(file: String, mut profile: Value) -> Result<String, String> {
     object.remove("appliedFrom");
     object.insert("updatedAt".to_string(), json!(Utc::now().to_rfc3339()));
 
-    let profile_path = profile_file_path(&safe_name)?;
+    let root = leon_root()?;
+    let profile_dir = root.join("config").join("profiles");
+    let target_name = profile_file_name_for_profile(&profile, &safe_name, &profile_dir)?;
+    let source_path = profile_dir.join(&safe_name);
+    let target_path = profile_dir.join(&target_name);
     let content = serde_json::to_string_pretty(&profile)
         .map_err(|e| format!("序列化 Profile 失败: {}", e))?;
-    fs::write(&profile_path, content)
-        .map_err(|e| format!("写入 {} 失败: {}", profile_path.display(), e))?;
 
-    Ok(format!("已保存 Profile：{}", safe_name))
+    if !target_name.eq_ignore_ascii_case(&safe_name) && source_path.exists() {
+        fs::rename(&source_path, &target_path).map_err(|e| {
+            format!(
+                "重命名 Profile {} -> {} 失败: {}",
+                source_path.display(),
+                target_path.display(),
+                e
+            )
+        })?;
+    }
+    fs::write(&target_path, content)
+        .map_err(|e| format!("写入 {} 失败: {}", target_path.display(), e))?;
+
+    let message = if target_name.eq_ignore_ascii_case(&safe_name) {
+        format!("已保存 Profile：{}", target_name)
+    } else {
+        format!("已保存 Profile：{}（文件名已跟随名称更新）", target_name)
+    };
+    Ok(SaveProfileResult {
+        file: target_name,
+        message,
+    })
 }
 
 #[tauri::command]
@@ -357,6 +431,7 @@ fn apply_profile(file: String) -> Result<String, String> {
         .map_err(|e| format!("序列化 active profile 失败: {}", e))?;
     fs::write(&active_path, content)
         .map_err(|e| format!("写入 {} 失败: {}", active_path.display(), e))?;
+    hide_file_best_effort(&active_path);
 
     Ok(format!("已启用配置：{}", safe_profile_file_name(&file)?))
 }
@@ -452,15 +527,18 @@ async fn start_service(
     let version_root = root.join(&normalized);
     let active_profile = root.join("config").join("profiles").join("active.json");
     let launcher_log = launcher_log_path(&root, &normalized)?;
+    let shared_entry = root.join("scripts").join("restart-leon-api.ps1");
+    if !shared_entry.exists() {
+        return Err(format!("缺少共享启动脚本: {}", shared_entry.display()));
+    }
+    append_launcher_log(
+        &launcher_log,
+        "INFO",
+        &format!("调用启动入口: {}", shell_path(&shared_entry)),
+    )?;
     if normalized == "vllm" {
         let ratio = gpu_ratio.unwrap_or(0.15);
         let use_msvc = enable_msvc.unwrap_or(true);
-        let entry = version_root.join("tools").join("restart_indextts_api.ps1");
-        append_launcher_log(
-            &launcher_log,
-            "INFO",
-            &format!("调用启动入口: {}", shell_path(&entry)),
-        )?;
         append_launcher_log(
             &launcher_log,
             "INFO",
@@ -471,14 +549,6 @@ async fn start_service(
             ),
         )?;
     } else {
-        append_launcher_log(
-            &launcher_log,
-            "INFO",
-            &format!(
-                "调用启动入口: {}",
-                shell_path(&version_root.join("indextts2_api.py"))
-            ),
-        )?;
         append_launcher_log(&launcher_log, "INFO", "启动配置: Fast6G")?;
     }
     let stdout = fs::OpenOptions::new()
@@ -490,25 +560,28 @@ async fn start_service(
         .try_clone()
         .map_err(|e| format!("复制启动日志句柄失败: {}", e))?;
 
-    let mut cmd = if normalized == "vllm" {
-        let entry = version_root.join("tools").join("restart_indextts_api.ps1");
-        if !entry.exists() {
-            return Err(format!("缺少启动脚本: {}", entry.display()));
-        }
-        let mut command = Command::new("powershell.exe");
-        command
-            .args([
-                "-NoProfile",
-                "-WindowStyle",
-                "Hidden",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(shell_path(&entry))
-            .args(["-Port", "9880", "-HostAddress", "0.0.0.0", "-LeonRoot"])
-            .arg(shell_path(&root))
-            .args(["-VllmGpuMemoryUtilization"])
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args([
+        "-NoProfile",
+        "-WindowStyle",
+        "Hidden",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+    ])
+    .arg(shell_path(&shared_entry))
+    .args([
+        "-Version",
+        normalized.as_str(),
+        "-Port",
+        "9880",
+        "-HostAddress",
+        "0.0.0.0",
+        "-LeonRoot",
+    ])
+    .arg(shell_path(&root));
+    if normalized == "vllm" {
+        cmd.args(["-VllmGpuMemoryUtilization"])
             .arg(format_ratio(gpu_ratio.unwrap_or(0.15)))
             .args([
                 "-EnableMsvc",
@@ -518,28 +591,9 @@ async fn start_service(
                     "0"
                 },
             ]);
-        command
-    } else {
-        let python = version_root.join("indextts2runtime").join("python.exe");
-        let entry = version_root.join("indextts2_api.py");
-        if !python.exists() {
-            return Err(format!("缺少 Python runtime: {}", python.display()));
-        }
-        if !entry.exists() {
-            return Err(format!("缺少 API 入口: {}", entry.display()));
-        }
-        let mut command = Command::new(shell_path(&python));
-        command.arg(shell_path(&entry)).args([
-            "-a",
-            "0.0.0.0",
-            "-p",
-            "9880",
-            "--fp16",
-            "--no_qwen_emo",
-        ]);
-        command
-    };
-    cmd.current_dir(shell_path(&version_root))
+    }
+
+    cmd.current_dir(shell_path(&root))
         .env("LEON_LAUNCHER_NO_PAUSE", "1")
         .env("LEON_ROOT", shell_path(&root))
         .env("LEON_VERSION_ROOT", shell_path(&version_root))
@@ -558,13 +612,6 @@ async fn start_service(
         cmd.env("INDEXTTS_VLLM_GPU_MEMORY_UTILIZATION", format_ratio(ratio));
         let use_msvc = enable_msvc.unwrap_or(true);
         cmd.env("LEON_ENABLE_MSVC", if use_msvc { "1" } else { "0" });
-    } else {
-        let scripts_path = version_root.join("indextts2runtime").join("Scripts");
-        let old_path = std::env::var("PATH").unwrap_or_default();
-        cmd.env(
-            "PATH",
-            format!("{};{}", shell_path(&scripts_path), old_path),
-        );
     }
     hide_child_window(&mut cmd);
 
@@ -957,6 +1004,155 @@ fn safe_profile_file_name(file: &str) -> Result<String, String> {
     Ok(name.to_string())
 }
 
+fn profile_file_name_for_profile(
+    profile: &Value,
+    current_name: &str,
+    profile_dir: &Path,
+) -> Result<String, String> {
+    let display_name = profile
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let mut stem = profile_name_slug(display_name);
+    if stem.is_empty() {
+        stem = profile_name_slug(current_name.trim_end_matches(".json"));
+    }
+    if stem.is_empty() {
+        stem = "leon-profile".to_string();
+    }
+    if !stem.eq_ignore_ascii_case("leon") && !stem.starts_with("leon-") {
+        stem = format!("leon-{}", stem);
+    }
+
+    for index in 0..1000 {
+        let candidate = if index == 0 {
+            format!("{}.json", stem)
+        } else {
+            format!("{}-{}.json", stem, index + 1)
+        };
+        if candidate.eq_ignore_ascii_case("active.json") {
+            continue;
+        }
+        if candidate.eq_ignore_ascii_case(current_name) || !profile_dir.join(&candidate).exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err("无法生成可用的 Profile 文件名".to_string())
+}
+
+fn profile_name_slug(name: &str) -> String {
+    let mut output = String::new();
+    let mut pending_separator = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if pending_separator && !output.is_empty() {
+                output.push('-');
+            }
+            output.push(ch.to_ascii_lowercase());
+            pending_separator = false;
+            continue;
+        }
+
+        if let Some(piece) = slug_char_piece(ch) {
+            if pending_separator && !output.is_empty() {
+                output.push('-');
+            }
+            output.push_str(&piece);
+            pending_separator = false;
+            continue;
+        }
+
+        if !output.is_empty() {
+            pending_separator = true;
+        }
+    }
+    output.trim_matches('-').to_string()
+}
+
+fn slug_char_piece(ch: char) -> Option<String> {
+    let piece = match ch {
+        '步' => "bu",
+        '非' => "fei",
+        '烟' => "yan",
+        '默' => "mo",
+        '认' => "ren",
+        '耳' => "er",
+        '语' => "yu",
+        '恋' => "lian",
+        '爱' => "ai",
+        '声' => "sheng",
+        '腔' => "qiang",
+        '喘' => "chuan",
+        '息' => "xi",
+        '低' => "di",
+        '吟' => "yin",
+        '哭' => "ku",
+        '惊' => "jing",
+        '笑' => "xiao",
+        '挑' => "tiao",
+        '逗' => "dou",
+        '轻' => "qing",
+        '微' => "wei",
+        '明' => "ming",
+        '显' => "xian",
+        '紧' => "jin",
+        '张' => "zhang",
+        '害' => "hai",
+        '羞' => "xiu",
+        '阶' => "jie",
+        '段' => "duan",
+        '开' => "kai",
+        '场' => "chang",
+        '升' => "sheng",
+        '温' => "wen",
+        '高' => "gao",
+        '点' => "dian",
+        '余' => "yu",
+        '韵' => "yun",
+        '普' => "pu",
+        '通' => "tong",
+        '平' => "ping",
+        '静' => "jing",
+        '新' => "xin",
+        '配' => "pei",
+        '置' => "zhi",
+        '宫' => "gong",
+        '本' => "ben",
+        '留' => "liu",
+        '衣' => "yi",
+        _ => {
+            if is_cjk(ch) {
+                return Some(format!("u{:x}", ch as u32));
+            }
+            return None;
+        }
+    };
+    Some(piece.to_string())
+}
+
+fn is_cjk(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff | 0x20000..=0x2a6df | 0x2a700..=0x2b73f | 0x2b740..=0x2b81f | 0x2b820..=0x2ceaf
+    )
+}
+
+fn hide_file_best_effort(path: &Path) {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("attrib")
+            .arg("+H")
+            .arg(shell_path(path))
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+    }
+}
+
 fn next_copy_file_name(profile_dir: &Path, source_name: &str) -> Result<String, String> {
     let stem = source_name.trim_end_matches(".json");
     for index in 1..1000 {
@@ -1313,6 +1509,21 @@ fn voice_extensions() -> &'static [&'static str] {
     &["wav", "mp3", "flac", "ogg", "m4a"]
 }
 
+fn media_type_for_voice_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("mp3") => "audio/mpeg",
+        Some("flac") => "audio/flac",
+        Some("ogg") => "audio/ogg",
+        Some("m4a") => "audio/mp4",
+        _ => "audio/wav",
+    }
+}
+
 fn read_json(path: &Path) -> Result<Value, String> {
     let content =
         fs::read_to_string(path).map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
@@ -1505,4 +1716,117 @@ fn hide_child_window(command: &mut Command) {
 fn system_time_to_rfc3339(time: std::time::SystemTime) -> Option<String> {
     let datetime: chrono::DateTime<Utc> = time.into();
     Some(datetime.to_rfc3339())
+}
+
+#[tauri::command]
+async fn upload_voice(name: String, data: Vec<u8>, ext: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let form = reqwest::multipart::Form::new()
+        .text("name", name)
+        .text("ext", ext)
+        .part("file", reqwest::multipart::Part::bytes(data));
+
+    let resp = client
+        .post(format!("{}/voice/upload", API_BASE))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("上传音色失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("上传音色失败: HTTP {}", resp.status()));
+    }
+
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+    Ok(result
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string())
+}
+
+#[tauri::command]
+async fn delete_voice(name: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{}/voice/{}", API_BASE, urlencoding::encode(&name)))
+        .send()
+        .await
+        .map_err(|e| format!("删除音色失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("删除音色失败: HTTP {}", resp.status()));
+    }
+
+    Ok(format!("已删除音色: {}", name))
+}
+
+#[tauri::command]
+async fn move_voice(name: String, new_group: String) -> Result<String, String> {
+    let old_parts: Vec<&str> = name.rsplitn(2, '/').collect();
+    let base_name = old_parts[0];
+    let new_name = if new_group.is_empty() {
+        base_name.to_string()
+    } else {
+        format!("{}/{}", new_group.trim_matches('/'), base_name)
+    };
+
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "old_name": name,
+        "new_name": new_name
+    });
+
+    let resp = client
+        .post(format!("{}/voice/move", API_BASE))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("移动音色失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("移动音色失败: HTTP {}", resp.status()));
+    }
+
+    Ok(format!("已移动到: {}", new_name))
+}
+
+#[tauri::command]
+async fn test_voice_generation(
+    voice: String,
+    style: String,
+    text: String,
+    profile: String,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "voice": voice,
+        "style": style,
+        "text": text,
+        "profile": profile,
+        "mode": "test"
+    });
+
+    let resp = client
+        .post(format!("{}/test_generate", API_BASE))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("测试生成失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let error_text = resp.text().await.unwrap_or_default();
+        return Err(format!("测试生成失败: HTTP {} - {}", status, error_text));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("读取音频失败: {}", e))?;
+    let encoded = general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:audio/wav;base64,{}", encoded))
 }

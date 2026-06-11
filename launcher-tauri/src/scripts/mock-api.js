@@ -144,6 +144,10 @@ window.tauri_mock = {
         }
     ]),
 
+    getVoiceRefAudio: () => Promise.resolve(
+        "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA="
+    ),
+
     createProfile: () => {
         const template = structuredClone(mockProfiles[0]);
         const index = mockProfiles.length + 1;
@@ -174,6 +178,7 @@ window.tauri_mock = {
             mockProfiles.push(nextProfile);
         }
         return Promise.resolve({
+            file: filename,
             success: true,
             message: `已保存配置: ${filename}`
         });

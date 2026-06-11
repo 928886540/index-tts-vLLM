@@ -234,6 +234,11 @@
       }
       track.url = track.cacheUrl;
       setTrackState(track, "saved");
+      track.latestSynthesisStatusText = "";
+      track.lastPlaybackSegmentStatusAt = 0;
+      if (isCurrentTrack) {
+        try { setStatus(trackPlaybackLabel(track)); } catch (_) {}
+      }
       track.liveEndedAwaitSaved = false;
       track.streamPlaybackFinished = false;
       track.livePageSuspended = false;
@@ -505,9 +510,9 @@
       trackEntry.cachePollStarted = true;
       setTrackCacheState(trackEntry, "pending");
       label = label || "snapshot";
-      function playbackSegmentStatusText(trackEntry, payload, totalSegments) {
+      function playbackSegmentStatusText(trackEntry, payload, totalSegments, positionSec) {
         if (typeof playbackSegmentStatusTextForTrack === "function") {
-          return playbackSegmentStatusTextForTrack(trackEntry, payload, totalSegments);
+          return playbackSegmentStatusTextForTrack(trackEntry, payload, totalSegments, positionSec);
         }
         if (!trackEntry || currentTrack() !== trackEntry) return "";
         if (normalizePlaybackMode(trackEntry.playbackMode) !== "live") return "";
@@ -517,8 +522,10 @@
           || (typeof isElementPlayingTrackStream === "function" && isElementPlayingTrackStream(trackEntry))
         );
         if (!isPlaying) return "";
-        var sec = 0;
-        try { sec = trackResumeSec(trackEntry); } catch (_) { sec = 0; }
+        var sec = Number(positionSec);
+        if (!isFinite(sec)) {
+          try { sec = trackResumeSec(trackEntry); } catch (_) { sec = 0; }
+        }
         if (!isFinite(Number(sec)) || Number(sec) < 0) return "";
         var raw = [];
         if (payload && Array.isArray(payload.segments_meta) && payload.segments_meta.length) raw = payload.segments_meta;
@@ -535,28 +542,45 @@
           return a.start - b.start;
         });
         if (!rows.length) return "";
+        var metrics = payload && payload.metrics ? payload.metrics : (trackEntry.metrics || null);
+        var knownTotal = Math.max(
+          Number(totalSegments || 0) || 0,
+          metrics ? Number(metrics.segments_total || 0) || 0 : 0,
+          payload && Array.isArray(payload.segments_plan) ? payload.segments_plan.length : 0,
+          trackEntry.segmentPlan && Array.isArray(trackEntry.segmentPlan) ? trackEntry.segmentPlan.length : 0
+        );
+        var maxIdx = -1;
+        rows.forEach(function (row) {
+          if (isFinite(Number(row.idx))) maxIdx = Math.max(maxIdx, Number(row.idx));
+        });
+        var doneLike = !!(
+          isSavedTrack(trackEntry)
+          || (payload && String(payload.state || "") === "done")
+          || (metrics && String(metrics.phase || "") === "done")
+          || (metrics && String(metrics.state || "") === "done")
+        );
+        if (doneLike && rows.length) knownTotal = rows.length;
+        var rowsComplete = !!(doneLike || !knownTotal || rows.length >= knownTotal || maxIdx >= knownTotal - 1);
+        function rowEndAt(index) {
+          var row = rows[index];
+          var next = rows[index + 1];
+          if (row.duration > 0) return row.start + row.duration;
+          if (next) return next.start;
+          return rowsComplete ? Infinity : row.start + 1.0;
+        }
         var currentIdx = -1;
         for (var i = 0; i < rows.length; i += 1) {
           var row = rows[i];
-          var next = rows[i + 1];
-          var end = row.duration > 0 ? row.start + row.duration : (next ? next.start : Infinity);
+          var end = rowEndAt(i);
           if (sec + 0.05 >= row.start && sec < end + 0.15) {
             currentIdx = row.idx;
             break;
           }
-          if (sec >= row.start) currentIdx = row.idx;
         }
         if (currentIdx < 0 && sec <= rows[0].start + 0.15) currentIdx = rows[0].idx;
         if (currentIdx < 0) return "";
         var displayIdx = Math.max(1, Math.floor(Number(currentIdx) || 0) + 1);
-        var total = Math.max(
-          Number(totalSegments || 0) || 0,
-          payload && payload.metrics ? Number(payload.metrics.segments_total || 0) || 0 : 0,
-          payload && Array.isArray(payload.segments_plan) ? payload.segments_plan.length : 0,
-          trackEntry.segmentPlan && Array.isArray(trackEntry.segmentPlan) ? trackEntry.segmentPlan.length : 0,
-          raw.length,
-          displayIdx
-        );
+        var total = Math.max(knownTotal, raw.length, displayIdx);
         return "正在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
       }
       function jobStatusMessage(metrics, trackEntry, payload) {
@@ -570,7 +594,13 @@
         if (!isFinite(doneSegs)) doneSegs = payload && Array.isArray(payload.segments_meta) ? payload.segments_meta.length : 0;
         doneSegs = Math.max(0, Math.floor(doneSegs || 0));
         if (total) doneSegs = Math.min(total, doneSegs);
-        var playingSeg = playbackSegmentStatusText(trackEntry, payload, total);
+        var playbackSecForStatus = NaN;
+        try {
+          playbackSecForStatus = currentTrack() === trackEntry ? elementPlaybackTimeSec(trackEntry) : trackResumeSec(trackEntry);
+        } catch (_) {
+          playbackSecForStatus = NaN;
+        }
+        var playingSeg = playbackSegmentStatusText(trackEntry, payload, total, playbackSecForStatus);
         function withPlayingSegment(text) {
           return playingSeg ? (text + " · " + playingSeg) : text;
         }
@@ -698,6 +728,8 @@
                   setTrackState(trackEntry, "saved");
                   appendedDetached = appendDetachedBackgroundTrackToHistory(trackEntry, label);
                 }
+                trackEntry.latestSynthesisStatusText = "";
+                trackEntry.lastPlaybackSegmentStatusAt = 0;
                 var autoplaySaved = !!liveCacheHandoffNeeded;
                 if (liveEndedAwaitSaved) autoplaySaved = false;
                 if (wasBackground) autoplaySaved = false;
@@ -1061,6 +1093,8 @@
       stopSubtitle();
       hideSubtitlePanel();
       setTrackState(track, "saved");
+      track.latestSynthesisStatusText = "";
+      track.lastPlaybackSegmentStatusAt = 0;
       setTrackPlaybackState(track, "idle");
       setPlayState("idle");
       attachCacheAudio(track, { deferElement: true });

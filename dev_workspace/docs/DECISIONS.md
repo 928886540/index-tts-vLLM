@@ -157,7 +157,7 @@ The project uses these terms:
 - `后端` / backend means the API backend only: HTTP routes, request/response models, job/cache/status handling, and API-side helpers in `vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, and related API modules.
 - `前端` / frontend means Tavo-side injected UI/scripts: `static/tavo.js`, `static/tavo.runtime.js`, runtime parts, Tavo storage, WebAudio/native audio playback, and settings UI.
 - `TTS服务` / TTS service means the IndexTTS / IndexTTS2 inference and synthesis pipeline. Do not call this "backend" in this project.
-- `启动器` / launcher means `LEON-Launcher.exe`, `launcher/`, and startup scripts.
+- `启动器` / launcher means `LEON-Launcher-Tauri.exe`, `launcher-tauri/`, and startup scripts.
 
 Reason: the user relies on precise boundary language when reporting bugs. Mixing the IndexTTS inference layer into "backend" creates confusion about whether a regression is in the API contract, the Tavo frontend, the TTS service, or the launcher.
 

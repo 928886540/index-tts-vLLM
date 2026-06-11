@@ -44,7 +44,7 @@ These preferences are merged from `C:\Users\Administrator\AGENTS.md` and apply t
 - `..\vllm\` is the vLLM API backend version directory.
 - `..\fast6g\` is the double-accelerated 6 GB friendly API backend version directory.
 - `..\static\` is shared Tavo frontend code.
-- `..\launcher\` and `..\scripts\` are shared startup tooling.
+- `..\launcher-tauri\` and `..\scripts\` are shared startup tooling.
 - `dev_workspace\` is collaboration state, docs, local smoke tests, screenshots, and historical notes.
 
 Do not move shared files back under `vllm/`. Do not create new Chinese-named paths.
@@ -56,7 +56,7 @@ Use these names consistently:
 - Backend / API backend / `后端`: the HTTP API layer, mainly `vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, and API helpers such as `indextts/llm_proxy.py`.
 - Frontend / `前端`: the Tavo injected player/UI/scripts, mainly `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.parts/*`, and Tavo storage/UI behavior.
 - TTS service / `TTS服务`: the IndexTTS / IndexTTS2 inference/model pipeline and synthesis engine. Do not call this "backend" when discussing project bugs or architecture.
-- Launcher / `启动器`: `LEON-Launcher.exe`, `launcher/`, and `scripts/` startup tooling.
+- Launcher / `启动器`: `LEON-Launcher-Tauri.exe`, `launcher-tauri/`, and `scripts/` startup tooling.
 
 When analyzing bugs, state which boundary is involved. For example: "frontend submits role mapping", "API backend exposes job status", and "TTS service synthesizes audio".
 
@@ -75,7 +75,7 @@ Do not treat the injected Tavo surface as a normal web app until the AR lifecycl
 Use the root launcher for service startup/restart workflows:
 
 ```text
-D:\apiWorkSpace\leon_api\LEON-Launcher.exe
+D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe
 ```
 
 The launcher must not auto-start the backend on open. The user selects `vllm` or `fast6g` and manually starts the service.
@@ -112,7 +112,7 @@ For long tasks, update `docs/AGENT_STATE.md` after each stable milestone. If con
 
 - This is a local IndexTTS2 + Tavo integration workspace, not a hosted SaaS service.
 - `dev_workspace/` is documentation, smoke tests, screenshots, and historical handoff material.
-- Production runtime code lives in `vllm/`, `fast6g/`, shared `static/`, shared `launcher/`, and shared `scripts/`.
+- Production runtime code lives in `vllm/`, `fast6g/`, shared `static/`, shared `launcher-tauri/`, and shared `scripts/`.
 - Do not move shared files back under `vllm/`.
 - Do not create new Chinese-named paths.
 - Do not delete or reorganize `prompts/`, `prompts/library/`, or reference audio assets unless the user explicitly asks.

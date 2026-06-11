@@ -35,6 +35,25 @@ Recommended first implementation slice:
 - Keep `vllm/` and `fast6g/` existing entrypoints runnable while the shared path is introduced.
 - Do not begin by deleting duplicated backend route code; first prove both engines can start/stop, read `config/profiles/active.json`, resolve shared `prompts/library` refs, and expose `/health`, `/profiles/active`, `/voices`, logs, and port checks through the same contracts.
 
+Current package-split slice status:
+
+- `scripts/restart-leon-api.ps1` now exists as the shared startup entry. It validates active profile schema/presets, resolves enabled non-neutral style refs under shared `prompts/library`, reports GPU/log/static paths, and supports `-ValidateOnly` for no-start checks.
+- `scripts/start-vllm-api.bat`, `scripts/start-fast6g-api.bat`, and Tauri `start_service` now call the shared entry. vLLM still delegates internally to the existing `vllm/tools/restart_indextts_api.ps1`; fast6g is started by the shared script.
+- Old WinForms launcher files were retired after Tauri smoke passed: root `LEON-Launcher.exe` and tracked `launcher/` source/assets were deleted. Use `LEON-Launcher-Tauri.exe` as the launcher entry.
+- Low-risk shared Python helpers have started moving into `leon_common/`: `profile_store.py`, `voice_library.py`, `llm_proxy.py`, `prompt_render.py`, `profile_config.py`, and `cache_contracts.py` now live there. Both `vllm/indextts/*` and `fast6g/indextts/*` keep thin compatibility wrappers so existing `from indextts import ...` imports still work.
+- `leon_common.voice_library` resolves the shared library from `LEON_VOICE_LIB_DIR`, `LEON_ROOT`, or the package root, so both engine cwd paths resolve to root `prompts/library`.
+- Prompt rendering helpers are shared through `leon_common.prompt_render`: role-hint construction, style-catalog prompt text, and profile prompt placeholder replacement. vLLM and fast6g keep local wrapper functions that pass their API-specific active-profile/qwen context into the shared helpers.
+- fast6g API no longer carries its own voice-library traversal; `/voices` and `_resolve_voice()` now use the shared `indextts.voice_library` wrapper, matching vLLM behavior while preserving direct path resolution.
+- Active-profile schema helpers are shared through `leon_common.profile_config`: default prompt template, default quality modes/presets, active profile skeleton, strict style-entry validation, and active style filtering. Engine APIs still own style defaults and active-profile file path loading.
+- Cache/audio contract helpers are shared through `leon_common.cache_contracts`: audio media type detection, cache response headers, audio file metadata, pydantic/dict normalization, and segment metadata lookup. Full cache/job routes are still engine-local.
+
+Package split pause note before bugfix work:
+
+- Pause package split here unless the user explicitly asks to resume it. The next split step should be Stage 3 only: move small route contracts such as `/profiles/active`, `/voices`, and `/cache_audio/{key}` into shared API helpers behind engine-local wrappers. Do not start by moving TTS generation, live jobs, or cache deletion semantics.
+- Latest lightweight validation passed without starting the API: Python `py_compile` for shared helpers and both API files, import checks from both `vllm/` and `fast6g/` cwd, shared voice library count/path checks, `scripts/restart-leon-api.ps1 -Version vllm -ValidateOnly`, `scripts/restart-leon-api.ps1 -Version fast6g -ValidateOnly`, and `git diff --check` with only CRLF warnings.
+- During bugfix work, keep the current split changes in place and do not revert unrelated local state: `config/profiles/*.json`, `dev_workspace/optimization_plan/README.md` deletion, `dev_workspace/screenshots/`, and `tauri_debug.log` are intentionally not handled by the split pass.
+- If the bug touches Tavo frontend, injected JS, Tavo storage, LIVE/saved playback, or role/persona behavior, load the local `tavo` skill before editing.
+
 Current Tauri launcher state to preserve:
 
 - Root executable `LEON-Launcher-Tauri.exe` was rebuilt and smoke-tested on 2026-06-11.
@@ -56,7 +75,7 @@ $env:PATH='D:\Rust\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin;D:\Rust\
 
 Current Tauri status:
 
-- New independent Tauri project lives under `launcher-tauri/`; existing WinForms launcher code was not modified.
+- Current launcher source lives under `launcher-tauri/`; the old WinForms launcher code has been removed.
 - Root artifact path is `D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe`; source release exe is `launcher-tauri/src-tauri/target/release/leon-launcher-tauri.exe`.
 - 2026-06-11 log-noise fix: Tauri log tail reading now splits carriage-return progress updates, skips empty fragments, and the logs UI filters checkpoint/tqdm progress-only lines such as `0/14 ... it/s` while keeping warnings, timing, RTF, and real errors. Validation passed: JS check, sample filter check, frontend build, D-drive Rust fmt/check/release build, root exe copy, smoke exit code `0`.
 - 2026-06-11 style-reference editor fix: the first-level style editor now commits current fields before opening the reference picker/emotion editor, secondary modal saves return to the first-level style editor, selected refs write `style.ref` plus `style.refs`, and saving an already-active source profile reapplies it to `config/profiles/active.json`. Validation passed: `node --check launcher-tauri\src\scripts\app.js`, `npm --prefix launcher-tauri run frontend:build`, D-drive Rust `cargo fmt --check`, `cargo check`, `cargo build --release`, root `LEON-Launcher-Tauri.exe` copy, smoke exit code `0`, and active style refs resolved under shared `prompts/library`.
@@ -66,7 +85,7 @@ Current Tauri status:
 - Tauri backend now uses real LEON contracts:
   - Profile list reads `config/profiles/*.json` and excludes `active.json`;
   - applying writes `config/profiles/active.json` with `appliedAt` / `appliedFrom`;
-  - service start calls `scripts/start-vllm-api.bat` or `scripts/start-fast6g-api.bat`;
+  - service start calls shared `scripts/restart-leon-api.ps1 -Version vllm|fast6g`;
   - start env includes `LEON_ACTIVE_PROFILE_PATH`, `LEON_LAUNCHER_VERSION`, `LEON_ENABLE_QWEN_EMO=0`, UTF-8 settings, and vLLM GPU/MSVC env;
   - stop calls `GET http://127.0.0.1:9880/control?command=exit`;
   - health checks use `GET http://127.0.0.1:9880/health`.
@@ -128,7 +147,7 @@ Working tree update after the launcher/Tavo profile pass:
 - Runtime tuning config must not silently fall back to hidden code defaults. Missing active profile, missing `styles`, unknown style IDs, invalid style params, unavailable style refs, or invalid LLM style output should raise a clear `Profile 配置错误` / `LLM 输出错误`.
 - `custom` remains the only Tavo-local temporary parameter mode.
 - Launcher tuning UI is now a profile list plus editor: list cards show avatar initial, name, active/default info, enable/test/edit/copy/delete actions, and drag ordering. The editor uses one quality-mode dropdown for LIVE/DISK params, exposes profile `styles` voice-cavity CRUD, and keeps the LLM prompt box below the style section.
-- Latest launcher validation passed with temp exe compile/smoke and root `LEON-Launcher.exe` compile/smoke. Root `LEON-Launcher.exe` was overwritten successfully after closing the old launcher UI process.
+- Historical WinForms launcher validation passed at that point; the WinForms launcher has since been retired and removed. Current launcher validation should target `LEON-Launcher-Tauri.exe`.
 
 Runtime state after validation:
 
@@ -172,7 +191,7 @@ State model source of truth:
 - `后端` / backend: API layer only, mainly `vllm/indextts2_api.py`, `fast6g/indextts2_api.py`, routes, job/cache/status, and API-side helpers.
 - `前端` / frontend: Tavo injected UI/scripts, mainly `static/tavo.js`, `static/tavo.runtime.js`, runtime parts, Tavo storage, and playback lifecycle.
 - `TTS服务`: IndexTTS / IndexTTS2 inference/model pipeline.
-- `启动器`: `LEON-Launcher.exe`, `launcher/`, and `scripts/`.
+- `启动器`: `LEON-Launcher-Tauri.exe`, `launcher-tauri/`, and `scripts/`.
 
 Use these boundaries when reporting bugs or fixes.
 
@@ -181,13 +200,13 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260609-mp3-cache-v63"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260611-mp3-cache-v65"></script>
 ```
 
 Current code state:
 
 - Root `README.md`, `dev_workspace/README.md`, and `dev_workspace/AGENTS.md` now point Tavo playback/generation work to `dev_workspace/docs/LOGIC.md`.
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260609-mp3-cache-v63`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260611-mp3-cache-v65`.
 - Launcher tuning first slice now uses profile schema v3: `config/profiles/*.json` are editable source profiles, `config/profiles/active.json` is the applied runtime snapshot, `quality.presets.live/generate` stores parameters for every Tavo quality mode, and `styles` stores voice-cavity defaults/ref audio. The launcher editor can now edit style id, label, enabled flag, ref, `style_alpha`, `emo_alpha`, `emo_vec`, and description. Saving writes the selected profile; applying writes `active.json`; backend startup receives `LEON_ACTIVE_PROFILE_PATH` pointing at the active snapshot.
 - Tavo generation now reads `/profiles/active` at config load and again immediately before generation. Tavo only stores/selects the quality mode name; request parameters are taken from active profile `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Profile `llmPrompt` is submitted as `parse_system_prompt` and rendered by the API backend as a template with runtime role/user/style placeholders.
 - vLLM and fast6g LLM proxy requests now send a stable LEON user-agent. This fixes real OpenAI-compatible gateways that reject urllib's default Python user-agent with Cloudflare 1010 while direct keyed requests succeed.
@@ -205,6 +224,7 @@ Current code state:
 - AI mode does not submit `voices.default`; explicit role mappings are required.
 - AI mode with no explicit mapping shows "音色未设置" / mapping error instead of falling back to a default voice.
 - Avatar-side status is only the configured/current voice label; LLM/TTS/LIVE progress uses a transparent one-line hint floating near the seek/time area. During LIVE playback, synthesis progress uses completed/audio-current wording such as `已生成 8/10 段 · 正在播第 7/10 段`; noisy connection/buffer micro-states are filtered/throttled. The top header shows `LIVE`/`DISK`, page counter, then settings; the lyric panel toolbar keeps delete only.
+- In v64, LIVE progress appends `正在播第 x/y 段` only when the current real playback second falls inside known timed `segments_meta`. If audio has moved past the currently generated meta tail, the hint keeps only reliable text such as `已生成 21/137 段` instead of freezing on a stale segment number.
 - Settings keeps `复用 LLM 拆段` and `保存离线音频` as label-only switches. The old explanatory subtext is removed.
 - Submit/LLM progress copy is short and phase-based: `准备分析文本`, `任务已提交，等待分析文本`, `正在分析文本`, `等待合成`, `已生成 X/Y 段`. The old per-second submit timers and `AI x/y` / bare `合成 x/y` style are not user-facing.
 - vLLM and fast6g expose FIFO visibility for the existing single TTS lock; queued LIVE jobs show `前面还有 X 个 TTS 任务` in the transparent progress hint instead of only showing elapsed waiting.
@@ -248,16 +268,34 @@ Current code state:
 - Offline `blob:` playback rejection is treated as a WebView playback-source problem, not as a history-card failure. If `offline-blob audio.play()` returns `NotSupportedError` / "The operation is not supported", the saved card switches to its complete online `/cache_audio/<cacheKey>` source and remains normal saved playback.
 - Saved/history seek while audio is already playing keeps the button/track state as playing, updates the real complete-audio `currentTime`, immediately syncs subtitles, and does not hand that seek position to next/previous cards.
 - LIVE cache落盘 while native live MP3 is already playing keeps that current live `<audio>` source and continues progress/subtitle timing; it only marks the ordinary card saved and does not steal playback into `/cache_audio` or reset the player to 0.
+- Since v64, active LIVE subtitles require timed `segments_meta`; future `segments_plan` lines are not rendered as a temporary timed timeline, avoiding plan-estimated lyrics being replayed later when real meta arrives.
+- Since v64, saved tracks no longer accept LIVE MP3/stream/segment sources as valid saved ownership. If a saved card still has a `/tts_dialogue_stream_job/...` source after cache landing, play/pause/stalled/ended switches it to complete `/cache_audio`, keeps the card, exits the LIVE UI, and avoids DELETE/reconnect.
+- In v65, saved/live handoff clears `latestSynthesisStatusText` and the floating progress line when the card becomes complete audio, so a saved card cannot keep showing `已生成 x/y 段` or `正在播第 x/y 段`.
 - LIVE restored from pending storage ignores stale `lastElementSec`; only LIVE-owned resume fields (`liveResumeSec`, `lastLiveProgressSec`, `lastWebAudioSec`) can reconnect a non-zero LIVE offset. A dirty pending card with `lastElementSec=7` and no trusted LIVE resume opens at `00:00`, requests `/mp3` without `start_s=7`, and keeps lyrics on the first LIVE line.
 - The lazy card/loader snapshot no longer displays or propagates saved/pending `lastElementSec`; unopened cards show clean zero progress until the selected card's own playback starts.
 
 ## Latest Validation
 
+Passed on 2026-06-11 after `20260611-mp3-cache-v65`:
+
+```powershell
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+$manifest = Get-Content -Raw static\tavo.runtime.manifest.json | ConvertFrom-Json; $code = "(async function(){`n"; foreach ($m in $manifest.modules) { $code += (Get-Content -Raw (Join-Path static $m.file)) + "`n" }; $code += "`n})();"; $code | node --check -
+node dev_workspace\dev_tools\test_tavo_widget_playwright.js
+```
+
+The Playwright smoke now additionally asserts:
+
+- partial LIVE `segments_meta` does not render future `segments_plan` lines as timed lyrics;
+- LIVE progress clears stale `正在播第 x/y 段` when playback is beyond known generated meta;
+- saved cards with stale LIVE MP3 source switch to complete `/cache_audio` on stalled/ended, keep the card, auto-exit LIVE UI, and do not DELETE or reconnect.
+- saved/complete cards clear stale LIVE synthesis progress and do not show `已生成 x/y 段` or `正在播第 x/y 段`.
+
 Passed on 2026-06-09:
 
 ```powershell
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /platform:anycpu /optimize+ /out:LEON-Launcher.profile-smoke.exe /win32icon:launcher\leon-launcher.ico /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll /r:System.Management.dll launcher\LeonNativeLauncher.cs
-$env:LEON_LAUNCHER_SMOKE_TEST='1'; $p = Start-Process -FilePath "D:\apiWorkSpace\leon_api\LEON-Launcher.profile-smoke.exe" -WorkingDirectory "D:\apiWorkSpace\leon_api" -Wait -PassThru; $p.ExitCode
 node --check static\tavo.js
 node --check static\tavo.runtime.js
 node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
@@ -269,8 +307,7 @@ python C:\Users\Administrator\.codex\skills\.system\skill-creator\scripts\quick_
 
 After `20260609-mp3-cache-v63`, launcher/frontend validation additionally asserts:
 
-- launcher source compiles to a temporary smoke exe and exits with code `0` under `LEON_LAUNCHER_SMOKE_TEST=1`;
-- root `LEON-Launcher.exe` was overwritten successfully and exits with code `0` under `LEON_LAUNCHER_SMOKE_TEST=1`;
+- retired WinForms launcher validation is historical only; current launcher smoke uses root `LEON-Launcher-Tauri.exe` with `LEON_LAUNCHER_SMOKE_TEST=1`;
 - active profile tuning smoke fetches `/profiles/active` for both LIVE and DISK/generate, keeps the Tavo-selected `balanced` mode, uses `quality.presets.live.balanced` / `quality.presets.generate.balanced` request fields, and submits profile `llmPrompt` as `parse_system_prompt`.
 
 Real lifecycle validation on 2026-06-09:
@@ -430,7 +467,7 @@ Current high-priority validation:
 ## Known Runtime Situation
 
 - API port `9880` is the expected LEON IndexTTS2 API port.
-- Launcher entry is `D:\apiWorkSpace\leon_api\LEON-Launcher.exe`.
+- Launcher entry is `D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe`.
 - The launcher must not auto-start the backend on open.
 - vLLM ratio guidance from previous benchmark: `0.11` safer for long sessions; `0.15` speed sweet spot when other GPU workloads are off; avoid `0.20+` unless architecture changes.
 

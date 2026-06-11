@@ -1,20 +1,19 @@
 # LEON Launcher Tauri
 
-Independent Tauri 2 launcher prototype for LEON. It does not replace the tracked WinForms launcher yet.
+Active Tauri 2 launcher for LEON. The old tracked WinForms launcher has been retired.
 
 ## Current Status
 
 - Frontend: Vanilla HTML/CSS/JS with Vite.
 - Backend: Tauri 2 Rust commands in `src-tauri/src/main.rs`.
-- Root test artifact: `D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe`.
-- Existing WinForms launcher remains `D:\apiWorkSpace\leon_api\LEON-Launcher.exe`.
+- Root launcher artifact: `D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe`.
 
 Implemented:
 
 - Profile list from `config/profiles/*.json`, excluding `active.json`.
 - Profile apply writes `config/profiles/active.json` with `appliedAt` and `appliedFrom`.
 - Profile copy/delete, schema v3 preflight, and a basic editor for source profiles.
-- Service start through `scripts/start-vllm-api.bat` or `scripts/start-fast6g-api.bat`.
+- Service start through shared `scripts/restart-leon-api.ps1 -Version vllm|fast6g`.
 - Service stop through `GET http://127.0.0.1:9880/control?command=exit`.
 - Health polling through `GET http://127.0.0.1:9880/health`.
 - Basic environment display and `logs/<version>/` latest-tail polling.
@@ -24,7 +23,6 @@ Implemented:
 Not done:
 
 - Real GUI manual smoke.
-- Full WinForms parity.
 - Profile creation wizard, drag ordering, keyboard shortcuts, and log file watcher.
 - Real `/warmup` validation in this migration pass.
 

@@ -16,10 +16,13 @@ const STATUS_REFRESH_MS = 15000;
 const LOG_REFRESH_MS = 12000;
 const EMO_VEC_DEFAULT = [0, 0, 0, 0, 0, 0, 0, 0.85];
 const DEFAULT_STYLE_SELECTION_RULES = [
-    '- 旁白、动作描写、环境描写默认输出 style="neutral"。',
-    '- 直接台词才根据语气选择声腔；长句优先低强度，短促反应用更明显的声腔。',
-    '- 根据下方声腔映射的“适用场景”选择 style ID，不要输出不存在或已禁用的 ID。',
-    '- 不确定时输出 style="neutral"，不要沿用上一段对白的声腔。'
+    '- 根据语气强度选择声腔，不要把“旁白”固定等同于 style="neutral"。',
+    '- 只有纯环境、普通动作、平铺过渡、信息说明，或完全无法判断情绪时，才使用 style="neutral"。',
+    '- 旁白如果包含贴近低声、呼吸/喘息、紧张、害羞、哭腔、惊讶、暧昧、身体反应、阶段升温/高点/余韵等明确语气，也必须选择对应声腔。',
+    '- 可优先参考这些映射：轻微呼吸/贴近=breath_soft；紧张惊讶=tense_breath 或 gasp_surprise；压抑哭意=sob_soft 或 cry_soft；低声/耳语=low_murmur 或 whisper_soft；升温/高点/余韵=stage_warmup / stage_rising / stage_peak / stage_afterglow。',
+    '- 长句优先低强度 style 或 stage_*，短促反应用更明显的声腔；不要连续大段无脑 neutral。',
+    '- 根据下方声腔映射的“适用场景”选择 style ID，不要输出不存在或已禁用的 ID；不确定时才用 neutral，且不要沿用上一段对白的声腔。',
+    '- 示例输出只演示 JSON 格式，不代表旁白必须 neutral。'
 ].join('\n');
 const DEFAULT_EMOTION_RULES = [
     '- LLM 主要负责选择 style ID；style 配置了声腔情绪向量时，后端优先使用配置值。',
@@ -51,6 +54,11 @@ const api = {
     async getVoiceRefs() {
         if (tauriInvoke) return tauriInvoke('get_voice_refs');
         return window.tauri_mock.getVoiceRefs();
+    },
+
+    async getVoiceRefAudio(refName) {
+        if (tauriInvoke) return tauriInvoke('get_voice_ref_audio', { refName });
+        return window.tauri_mock.getVoiceRefAudio(refName);
     },
 
     async createProfile() {
@@ -127,6 +135,26 @@ const api = {
     async getLogSnapshot(version, maxLines) {
         if (tauriInvoke) return tauriInvoke('get_log_snapshot', { version, maxLines });
         return window.tauri_mock.getLogSnapshot(version, maxLines);
+    },
+
+    async uploadVoice(name, data, ext) {
+        if (tauriInvoke) return tauriInvoke('upload_voice', { name, data, ext });
+        return Promise.resolve('prompts/library/' + name + ext);
+    },
+
+    async deleteVoice(name) {
+        if (tauriInvoke) return tauriInvoke('delete_voice', { name });
+        return Promise.resolve('已删除: ' + name);
+    },
+
+    async moveVoice(name, newGroup) {
+        if (tauriInvoke) return tauriInvoke('move_voice', { name, newGroup });
+        return Promise.resolve('已移动');
+    },
+
+    async testVoiceGeneration(voice, style, text, profile) {
+        if (tauriInvoke) return tauriInvoke('test_voice_generation', { voice, style, text, profile });
+        return Promise.resolve('data:audio/wav;base64,UklGRi...');
     }
 };
 
@@ -147,6 +175,14 @@ class LeonLauncher {
         this.voiceRefs = [];
         this.voiceRefMap = new Map();
         this.modalCloseHandler = null;
+        this.voices = [];
+        this.voiceGroups = [];
+        this.selectedGroup = null;
+        this.testHistory = [];
+        this.currentAudio = null;
+        this.monitorInterval = null;
+        this.selectedTestVoice = null;
+        this.selectedTestStyle = null;
 
         this.init();
     }
@@ -335,6 +371,51 @@ class LeonLauncher {
             this.loadEnvironment();
         });
 
+        document.getElementById('btn-import-voice')?.addEventListener('click', () => {
+            this.openImportVoiceModal();
+        });
+
+        document.getElementById('btn-test-voice')?.addEventListener('click', () => {
+            this.openTestVoiceModal();
+        });
+
+        document.getElementById('btn-add-group')?.addEventListener('click', () => {
+            this.openAddGroupModal();
+        });
+
+        document.getElementById('voice-search')?.addEventListener('input', () => {
+            this.renderVoices();
+        });
+
+        document.getElementById('btn-test-generate')?.addEventListener('click', () => {
+            this.generateTest();
+        });
+
+        document.getElementById('btn-select-voice')?.addEventListener('click', () => {
+            this.openSelectVoiceModal();
+        });
+
+        document.getElementById('btn-select-style')?.addEventListener('click', () => {
+            this.openSelectStyleModal();
+        });
+
+        document.getElementById('btn-clear-history')?.addEventListener('click', () => {
+            this.testHistory = [];
+            this.renderTestHistory();
+        });
+
+        document.querySelectorAll('.btn-preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const text = btn.dataset.text;
+                const input = document.getElementById('test-text-input');
+                if (input) input.value = text;
+            });
+        });
+
+        document.getElementById('btn-refresh-monitor')?.addEventListener('click', () => {
+            this.refreshMonitor();
+        });
+
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && !event.altKey && !event.shiftKey && !event.ctrlKey) {
                 if (this.closeModal()) {
@@ -427,6 +508,17 @@ class LeonLauncher {
         }
         if (pageName === 'mixer') {
             this.loadProfiles();
+        }
+        if (pageName === 'voices') {
+            this.loadVoices();
+        }
+        if (pageName === 'test') {
+            this.loadTestPage();
+        }
+        if (pageName === 'monitor') {
+            this.startMonitor();
+        } else {
+            this.stopMonitor();
         }
     }
 
@@ -843,13 +935,15 @@ class LeonLauncher {
                 <div class="style-mini-card" data-style-id="${escapeAttribute(id)}">
                     <div class="style-mini-header">
                         <div class="style-mini-id">${escapeHtml(id)}</div>
-                        <label class="style-mini-toggle" onclick="event.stopPropagation()">
-                            <input data-style-field="enabled" type="checkbox" ${enabled ? 'checked' : ''}>
-                        </label>
+                        <div class="style-mini-actions" onclick="event.stopPropagation()">
+                            <label class="style-mini-toggle" title="启用">
+                                <input data-style-field="enabled" type="checkbox" ${enabled ? 'checked' : ''}>
+                            </label>
+                            <button type="button" class="btn-delete-style-mini" title="删除声腔">×</button>
+                        </div>
                     </div>
                     <div class="style-mini-label">${escapeHtml(style?.label || '未命名')}</div>
                     <div class="style-mini-meta">${refs.length} 个参考音频</div>
-                    <button type="button" class="btn-delete-style-mini" title="删除">×</button>
                 </div>
                 <input data-style-field="label" type="hidden" value="${escapeAttribute(style?.label || '')}">
                 <input data-style-field="refs" type="hidden" value="${escapeAttribute(JSON.stringify(refs))}">
@@ -881,7 +975,11 @@ class LeonLauncher {
         };
         backdrop.addEventListener('mousedown', backdropHandler);
 
+        let cleanup = null;
         this.modalCloseHandler = () => {
+            if (typeof cleanup === 'function') {
+                try { cleanup(); } catch (error) { console.warn('modal cleanup failed', error); }
+            }
             backdrop.removeEventListener('mousedown', backdropHandler);
             backdrop.hidden = true;
             panel.innerHTML = '';
@@ -892,7 +990,10 @@ class LeonLauncher {
         panel.querySelectorAll('.modal-close').forEach(button => {
             button.addEventListener('click', () => this.closeModal());
         });
-        if (typeof onMount === 'function') onMount(panel);
+        if (typeof onMount === 'function') {
+            const maybeCleanup = onMount(panel);
+            if (typeof maybeCleanup === 'function') cleanup = maybeCleanup;
+        }
         return true;
     }
 
@@ -1029,9 +1130,72 @@ class LeonLauncher {
             const list = panel.querySelector('#ref-picker-list');
             const count = panel.querySelector('#ref-selected-count');
             const order = new Map(this.voiceRefs.map((item, index) => [item.name, index]));
+            let previewAudio = null;
+            let previewRef = '';
+            let previewToken = 0;
             panel.querySelectorAll('.modal-close').forEach(button => {
                 button.addEventListener('click', reopenParent);
             });
+
+            const updatePreviewButtons = () => {
+                list.querySelectorAll('.btn-preview-ref').forEach(button => {
+                    const isActive = previewRef && button.dataset.ref === previewRef;
+                    button.textContent = isActive ? '停止' : '试听';
+                    button.classList.toggle('playing', Boolean(isActive));
+                    button.disabled = button.dataset.loading === '1';
+                });
+            };
+            const stopPreview = () => {
+                previewToken += 1;
+                if (previewAudio) {
+                    try { previewAudio.pause(); } catch {}
+                    try { previewAudio.removeAttribute('src'); previewAudio.load(); } catch {}
+                }
+                previewAudio = null;
+                previewRef = '';
+                list.querySelectorAll('.btn-preview-ref').forEach(button => {
+                    delete button.dataset.loading;
+                    button.disabled = false;
+                });
+                updatePreviewButtons();
+            };
+            const playPreview = async (refName, button) => {
+                if (!refName) return;
+                if (previewRef === refName && previewAudio && !previewAudio.paused) {
+                    stopPreview();
+                    return;
+                }
+                stopPreview();
+                const token = ++previewToken;
+                if (button) {
+                    button.dataset.loading = '1';
+                    button.disabled = true;
+                    button.textContent = '读取中';
+                }
+                try {
+                    const dataUrl = await api.getVoiceRefAudio(refName);
+                    if (token !== previewToken) return;
+                    const audio = new Audio(dataUrl);
+                    previewAudio = audio;
+                    previewRef = refName;
+                    audio.addEventListener('ended', stopPreview, { once: true });
+                    audio.addEventListener('error', () => {
+                        this.addLog('warning', `试听失败: ${refName}`);
+                        stopPreview();
+                    }, { once: true });
+                    if (button) delete button.dataset.loading;
+                    updatePreviewButtons();
+                    const playResult = audio.play();
+                    if (playResult && typeof playResult.catch === 'function') {
+                        await playResult;
+                    }
+                } catch (error) {
+                    if (token === previewToken) {
+                        this.addLog('error', `试听失败 ${refName}: ${formatError(error)}`);
+                        stopPreview();
+                    }
+                }
+            };
 
             const updateCount = () => {
                 count.textContent = selected.size
@@ -1078,6 +1242,7 @@ class LeonLauncher {
                                         <b>${escapeHtml(stripAudioExt(item.name).split('/').pop() || item.name)}</b>
                                         <em>${escapeHtml(item.relativePath || item.name)}</em>
                                     </span>
+                                    <button type="button" class="btn-preview-ref" data-ref="${escapeAttribute(item.name)}">试听</button>
                                 </label>
                             `).join('')}
                         </div>
@@ -1091,7 +1256,15 @@ class LeonLauncher {
                         updateCount();
                     });
                 });
+                list.querySelectorAll('.btn-preview-ref').forEach(button => {
+                    button.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        playPreview(button.dataset.ref || '', button);
+                    });
+                });
                 updateCount();
+                updatePreviewButtons();
             };
 
             search?.addEventListener('input', renderList);
@@ -1103,6 +1276,7 @@ class LeonLauncher {
             });
             renderList();
             search?.focus();
+            return stopPreview;
         });
     }
 
@@ -1587,10 +1761,12 @@ ${completenessRules}`;
 
         try {
             const editedProfileWasActive = this.profiles.some(item => item.file === this.editorFile && item.active);
-            const message = await api.saveProfile(this.editorFile, profile);
-            this.addLog('success', normalizeMessage(message));
+            const result = await api.saveProfile(this.editorFile, profile);
+            const savedFile = result?.file || this.editorFile;
+            this.editorFile = savedFile;
+            this.addLog('success', normalizeMessage(result?.message || result));
             if (applyAfterSave || editedProfileWasActive) {
-                const applyMessage = await api.applyProfile(this.editorFile);
+                const applyMessage = await api.applyProfile(savedFile);
                 this.addLog('success', normalizeMessage(applyMessage));
             }
             await this.loadProfiles();
@@ -1624,7 +1800,7 @@ ${completenessRules}`;
             <div class="modal-header">
                 <div>
                     <h3>删除 Profile</h3>
-                    <p>只删除源配置文件，不会删除 active.json。</p>
+                    <p>只删除源配置文件，不会删除当前运行快照。</p>
                 </div>
                 <button type="button" class="modal-close">×</button>
             </div>
@@ -1859,6 +2035,699 @@ ${completenessRules}`;
     clearLogs() {
         this.replaceLogs([]);
         this.addLog('info', '日志已清空');
+    }
+
+    async loadVoices() {
+        try {
+            const voices = await api.getVoiceRefs();
+            this.voices = voices;
+            this.voiceGroups = this.extractVoiceGroups(voices);
+            this.renderVoiceGroups();
+            this.renderVoices();
+        } catch (error) {
+            this.addLog('error', `加载音色库失败: ${formatError(error)}`);
+        }
+    }
+
+    extractVoiceGroups(voices) {
+        const groups = new Set();
+        voices.forEach(voice => {
+            if (voice.subdir) groups.add(voice.subdir);
+        });
+        return ['全部', ...Array.from(groups).sort()];
+    }
+
+    renderVoiceGroups() {
+        const container = document.getElementById('voice-groups');
+        if (!container) return;
+        container.innerHTML = this.voiceGroups.map(group => `
+            <div class="group-item ${!this.selectedGroup || this.selectedGroup === group ? 'active' : ''}" data-group="${escapeAttribute(group)}">
+                ${escapeHtml(group)}
+            </div>
+        `).join('');
+        container.querySelectorAll('.group-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.selectedGroup = item.dataset.group === '全部' ? null : item.dataset.group;
+                this.renderVoiceGroups();
+                this.renderVoices();
+            });
+        });
+    }
+
+    renderVoices() {
+        const container = document.getElementById('voices-grid');
+        const search = document.getElementById('voice-search')?.value.toLowerCase() || '';
+        const filtered = this.voices.filter(voice => {
+            if (this.selectedGroup && voice.subdir !== this.selectedGroup) return false;
+            if (search && !voice.name.toLowerCase().includes(search)) return false;
+            return true;
+        });
+
+        document.getElementById('voice-count').textContent = `${filtered.length} 个音色`;
+
+        if (!filtered.length) {
+            container.innerHTML = '<div class="empty-state">未找到音色</div>';
+            return;
+        }
+
+        container.innerHTML = filtered.map(voice => `
+            <div class="voice-card" data-voice="${escapeAttribute(voice.name)}">
+                <div class="voice-name">${escapeHtml(stripAudioExt(voice.name.split('/').pop()))}</div>
+                <div class="voice-path">${escapeHtml(voice.relativePath)}</div>
+                <div class="voice-actions">
+                    <button class="btn-icon" data-action="play" title="试听">▶</button>
+                    <button class="btn-icon" data-action="move" title="移动">→</button>
+                    <button class="btn-icon" data-action="delete" title="删除">×</button>
+                </div>
+            </div>
+        `).join('');
+
+        container.querySelectorAll('.voice-card').forEach(card => {
+            const voiceName = card.dataset.voice;
+            card.querySelector('[data-action="play"]')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.playVoice(voiceName);
+            });
+            card.querySelector('[data-action="move"]')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.openMoveVoiceModal(voiceName);
+            });
+            card.querySelector('[data-action="delete"]')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.confirmDeleteVoice(voiceName);
+            });
+        });
+    }
+
+    async playVoice(name) {
+        try {
+            if (this.currentAudio && !this.currentAudio.paused) {
+                this.currentAudio.pause();
+                this.currentAudio = null;
+                this.updatePlayButtons();
+                return;
+            }
+
+            const dataUrl = await api.getVoiceRefAudio(name);
+            const audio = new Audio(dataUrl);
+            this.currentAudio = audio;
+
+            audio.addEventListener('ended', () => {
+                this.currentAudio = null;
+                this.updatePlayButtons();
+            });
+
+            audio.addEventListener('error', () => {
+                this.currentAudio = null;
+                this.updatePlayButtons();
+            });
+
+            await audio.play();
+            this.updatePlayButtons(name);
+        } catch (error) {
+            this.currentAudio = null;
+            this.updatePlayButtons();
+            this.addLog('error', `试听失败: ${formatError(error)}`);
+        }
+    }
+
+    updatePlayButtons(playingName = null) {
+        document.querySelectorAll('.voice-card [data-action="play"]').forEach(btn => {
+            const card = btn.closest('.voice-card');
+            const voiceName = card?.dataset.voice;
+            if (voiceName === playingName && this.currentAudio && !this.currentAudio.paused) {
+                btn.textContent = '⏸';
+                btn.classList.add('playing');
+            } else {
+                btn.textContent = '▶';
+                btn.classList.remove('playing');
+            }
+        });
+    }
+
+    openImportVoiceModal() {
+        this.openModal(`
+            <div class="modal-header">
+                <h3>导入音色</h3>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body modal-form">
+                <label class="field">
+                    <span>音色名称</span>
+                    <input id="import-voice-name" placeholder="例如：角色A">
+                </label>
+                <label class="field">
+                    <span>分组（可选）</span>
+                    <select id="import-voice-group">
+                        <option value="">根目录</option>
+                        ${this.voiceGroups.filter(g => g !== '全部').map(g => `
+                            <option value="${escapeAttribute(g)}">${escapeHtml(g)}</option>
+                        `).join('')}
+                    </select>
+                </label>
+                <label class="field">
+                    <span>音频文件</span>
+                    <input type="file" id="import-voice-file" accept=".wav,.mp3,.flac,.ogg,.m4a">
+                </label>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">取消</button>
+                <button type="button" class="btn-secondary primary" id="btn-import-confirm">导入</button>
+            </div>
+        `, (panel) => {
+            panel.querySelector('#btn-import-confirm')?.addEventListener('click', async () => {
+                const name = panel.querySelector('#import-voice-name')?.value.trim();
+                const group = panel.querySelector('#import-voice-group')?.value.trim();
+                const file = panel.querySelector('#import-voice-file')?.files[0];
+
+                if (!name || !file) {
+                    this.addLog('error', '请填写音色名称并选择文件');
+                    return;
+                }
+
+                const fullName = group ? `${group}/${name}` : name;
+                const ext = '.' + file.name.split('.').pop();
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const data = Array.from(new Uint8Array(arrayBuffer));
+                    await api.uploadVoice(fullName, data, ext);
+                    this.addLog('success', `导入成功: ${fullName}`);
+                    this.closeModal();
+                    await this.loadVoices();
+                } catch (error) {
+                    this.addLog('error', `导入失败: ${formatError(error)}`);
+                }
+            });
+        });
+    }
+
+    openMoveVoiceModal(name) {
+        const currentGroup = name.includes('/') ? name.split('/')[0] : '';
+        this.openModal(`
+            <div class="modal-header">
+                <h3>移动音色</h3>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body modal-form">
+                <div class="field">
+                    <span>当前: ${escapeHtml(name)}</span>
+                </div>
+                <label class="field">
+                    <span>目标分组</span>
+                    <select id="move-voice-group">
+                        <option value="">根目录</option>
+                        ${this.voiceGroups.filter(g => g !== '全部').map(g => `
+                            <option value="${escapeAttribute(g)}" ${g === currentGroup ? 'selected' : ''}>${escapeHtml(g)}</option>
+                        `).join('')}
+                    </select>
+                </label>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">取消</button>
+                <button type="button" class="btn-secondary primary" id="btn-move-confirm">移动</button>
+            </div>
+        `, (panel) => {
+            panel.querySelector('#btn-move-confirm')?.addEventListener('click', async () => {
+                const newGroup = panel.querySelector('#move-voice-group')?.value || '';
+                try {
+                    await api.moveVoice(name, newGroup);
+                    this.addLog('success', `移动成功`);
+                    this.closeModal();
+                    await this.loadVoices();
+                } catch (error) {
+                    this.addLog('error', `移动失败: ${formatError(error)}`);
+                }
+            });
+        });
+    }
+
+    confirmDeleteVoice(name) {
+        this.openModal(`
+            <div class="modal-header">
+                <h3>删除音色</h3>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <p>确定要删除音色吗？</p>
+                <div class="delete-confirm-name">${escapeHtml(name)}</div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">取消</button>
+                <button type="button" class="btn-secondary danger" id="btn-delete-confirm">删除</button>
+            </div>
+        `, (panel) => {
+            panel.querySelector('#btn-delete-confirm')?.addEventListener('click', async () => {
+                try {
+                    await api.deleteVoice(name);
+                    this.addLog('success', `删除成功`);
+                    this.closeModal();
+                    await this.loadVoices();
+                } catch (error) {
+                    this.addLog('error', `删除失败: ${formatError(error)}`);
+                }
+            });
+        });
+    }
+
+    openAddGroupModal() {
+        this.openModal(`
+            <div class="modal-header">
+                <h3>新建分组</h3>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body modal-form">
+                <label class="field">
+                    <span>分组名称</span>
+                    <input id="new-group-name" placeholder="例如：女声">
+                </label>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">取消</button>
+                <button type="button" class="btn-secondary primary" id="btn-group-confirm">创建</button>
+            </div>
+        `, (panel) => {
+            panel.querySelector('#btn-group-confirm')?.addEventListener('click', () => {
+                const name = panel.querySelector('#new-group-name')?.value.trim();
+                if (!name) {
+                    this.addLog('error', '请填写分组名称');
+                    return;
+                }
+                if (!this.voiceGroups.includes(name)) {
+                    this.voiceGroups.push(name);
+                    this.voiceGroups.sort();
+                }
+                this.closeModal();
+                this.renderVoiceGroups();
+                this.addLog('info', `分组 ${name} 已添加（导入音色时使用）`);
+            });
+        });
+    }
+
+    openTestVoiceModal() {
+        this.openModal(`
+            <div class="modal-header">
+                <h3>测试生成</h3>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body modal-form">
+                <label class="field">
+                    <span>音色</span>
+                    <select id="test-voice">
+                        <option value="">默认</option>
+                        ${this.voices.map(v => `<option value="${escapeAttribute(v.name)}">${escapeHtml(v.name)}</option>`).join('')}
+                    </select>
+                </label>
+                <label class="field">
+                    <span>声腔</span>
+                    <input id="test-style" value="neutral">
+                </label>
+                <label class="field full">
+                    <span>测试文本</span>
+                    <textarea id="test-text" rows="3">你好，这是一段测试语音。</textarea>
+                </label>
+                <div id="test-result"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">关闭</button>
+                <button type="button" class="btn-secondary primary" id="btn-test-generate">生成</button>
+            </div>
+        `, (panel) => {
+            panel.querySelector('#btn-test-generate')?.addEventListener('click', async () => {
+                const voice = panel.querySelector('#test-voice')?.value || '';
+                const style = panel.querySelector('#test-style')?.value || 'neutral';
+                const text = panel.querySelector('#test-text')?.value.trim();
+                const result = panel.querySelector('#test-result');
+
+                if (!text) {
+                    this.addLog('error', '请输入测试文本');
+                    return;
+                }
+
+                result.textContent = '生成中...';
+                try {
+                    const audioData = await api.testVoiceGeneration(voice, style, text, '');
+                    result.innerHTML = `<audio controls src="${audioData}" autoplay></audio>`;
+                    this.addLog('success', '生成成功');
+                } catch (error) {
+                    result.textContent = '';
+                    this.addLog('error', `生成失败: ${formatError(error)}`);
+                }
+            });
+        });
+    }
+
+    clearLogs() {
+        this.replaceLogs([]);
+        this.addLog('info', '日志已清空');
+    }
+
+    async loadTestPage() {
+        try {
+            const voices = await api.getVoiceRefs();
+            this.voices = voices;
+            this.voiceGroups = this.extractVoiceGroups(voices);
+            this.renderTestHistory();
+        } catch (error) {
+            this.addLog('error', `加载测试页面失败: ${formatError(error)}`);
+        }
+    }
+
+    async generateTest() {
+        const text = document.getElementById('test-text-input')?.value.trim() || '';
+        const result = document.getElementById('test-current-result');
+
+        if (!text) {
+            this.addLog('error', '请输入测试文本');
+            return;
+        }
+
+        if (!this.selectedTestVoice || !this.selectedTestStyle) {
+            this.addLog('error', '请选择音色和声腔');
+            return;
+        }
+
+        result.innerHTML = '<div class="test-loading">生成中...</div>';
+        try {
+            const audioData = await api.testVoiceGeneration(
+                this.selectedTestVoice.path || '',
+                this.selectedTestStyle.path || '',
+                text,
+                ''
+            );
+            const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            result.innerHTML = `
+                <div class="test-result-card">
+                    <div class="result-info">
+                        <span>${timestamp}</span>
+                        <span>音色: ${this.selectedTestVoice.name}</span>
+                        <span>声腔: ${this.selectedTestStyle.name}</span>
+                    </div>
+                    <audio controls src="${audioData}" autoplay></audio>
+                </div>
+            `;
+            this.testHistory.unshift({
+                voice: this.selectedTestVoice.name,
+                style: this.selectedTestStyle.name,
+                text,
+                audioData,
+                timestamp
+            });
+            if (this.testHistory.length > 20) this.testHistory = this.testHistory.slice(0, 20);
+            this.renderTestHistory();
+            this.addLog('success', '生成成功');
+        } catch (error) {
+            result.innerHTML = '<div class="test-error">生成失败</div>';
+            this.addLog('error', `生成失败: ${formatError(error)}`);
+        }
+    }
+
+    renderTestHistory() {
+        const container = document.getElementById('test-history-list');
+        const count = document.getElementById('history-count');
+        if (!container || !count) return;
+
+        count.textContent = `${this.testHistory.length} 条`;
+
+        if (!this.testHistory.length) {
+            container.innerHTML = '<div class="empty-state compact">暂无测试记录</div>';
+            return;
+        }
+
+        container.innerHTML = this.testHistory.map((item, index) => `
+            <div class="history-item">
+                <div class="history-meta">
+                    <span>${item.timestamp}</span>
+                    <button class="btn-icon-small" data-action="replay" data-index="${index}" title="重新生成">↻</button>
+                </div>
+                <div class="history-params">
+                    <div>音色: ${escapeHtml(item.voice || '默认')}</div>
+                    <div>声腔: ${escapeHtml(item.style)}</div>
+                </div>
+                <div class="history-text">${escapeHtml(item.text.substring(0, 50))}${item.text.length > 50 ? '...' : ''}</div>
+                <audio controls src="${item.audioData}"></audio>
+            </div>
+        `).join('');
+
+        container.querySelectorAll('[data-action="replay"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const index = parseInt(btn.dataset.index);
+                const item = this.testHistory[index];
+                if (item) {
+                    document.getElementById('test-voice-select').value = item.voice;
+                    document.getElementById('test-style-input').value = item.style;
+                    document.getElementById('test-text-input').value = item.text;
+                }
+            });
+        });
+    }
+
+    startMonitor() {
+        this.stopMonitor();
+        this.refreshMonitor();
+        this.monitorInterval = setInterval(() => this.refreshMonitor(), 3000);
+    }
+
+    stopMonitor() {
+        if (this.monitorInterval) {
+            clearInterval(this.monitorInterval);
+            this.monitorInterval = null;
+        }
+    }
+
+    async refreshMonitor() {
+        try {
+            const status = await api.getServiceStatus();
+            const env = await api.getEnvironment();
+
+            document.getElementById('monitor-service-status').textContent = status.running ? '运行中' : '已停止';
+            document.getElementById('monitor-service-status').className = 'status-indicator ' + (status.running ? 'running' : 'stopped');
+            document.getElementById('monitor-version').textContent = status.health.version || '-';
+            document.getElementById('monitor-uptime').textContent = this.isRunning ? this.formatUptime(this.uptime) : '-';
+            document.getElementById('monitor-port').textContent = env.port || '9880';
+            document.getElementById('monitor-gpu').textContent = env.cuda || '-';
+            document.getElementById('monitor-pid').textContent = this.extractPID(env.port) || '-';
+
+            await this.loadMonitorErrors();
+
+            document.getElementById('monitor-recent-tasks').innerHTML = '<div class="empty-state compact">暂无生成记录</div>';
+        } catch (error) {
+            this.addLog('error', `刷新监控数据失败: ${formatError(error)}`);
+        }
+    }
+
+    extractPID(portInfo) {
+        const match = String(portInfo || '').match(/PID:\s*(\d+)/);
+        return match ? match[1] : null;
+    }
+
+    async loadMonitorErrors() {
+        try {
+            const snapshot = await api.getLogSnapshot(this.selectedVersion, 200);
+            const errors = snapshot.lines.filter(line =>
+                line.toLowerCase().includes('error') ||
+                line.toLowerCase().includes('exception') ||
+                line.toLowerCase().includes('failed')
+            ).slice(-10);
+
+            const container = document.getElementById('monitor-errors');
+            if (!errors.length) {
+                container.innerHTML = '<div class="empty-state compact">无错误日志</div>';
+                return;
+            }
+
+            container.innerHTML = errors.map(line => `
+                <div class="error-line">${escapeHtml(line)}</div>
+            `).join('');
+        } catch (error) {
+            document.getElementById('monitor-errors').innerHTML = '<div class="empty-state compact">加载失败</div>';
+        }
+    }
+
+    openSelectVoiceModal() {
+        let selectedGroup = null;
+        let selectedVoice = null;
+        let currentAudio = null;
+
+        this.openModal(`
+            <div class="modal-header">
+                <h3>选择音色</h3>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body modal-select">
+                <div class="select-sidebar">
+                    <div id="select-voice-groups"></div>
+                </div>
+                <div class="select-content">
+                    <input type="search" id="select-voice-search" placeholder="搜索音色">
+                    <div class="select-grid" id="select-voice-grid"></div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">取消</button>
+                <button type="button" class="btn-secondary primary" id="btn-confirm-voice">确定</button>
+            </div>
+        `, (panel) => {
+            const renderGroups = () => {
+                const container = panel.querySelector('#select-voice-groups');
+                container.innerHTML = ['全部', ...this.voiceGroups.filter(g => g !== '全部')].map(g => `
+                    <div class="select-group-item ${!selectedGroup || selectedGroup === g ? 'active' : ''}" data-group="${escapeAttribute(g)}">
+                        ${escapeHtml(g)}
+                    </div>
+                `).join('');
+                container.querySelectorAll('.select-group-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        selectedGroup = item.dataset.group === '全部' ? null : item.dataset.group;
+                        renderGroups();
+                        renderVoices();
+                    });
+                });
+            };
+
+            const renderVoices = () => {
+                const search = panel.querySelector('#select-voice-search')?.value.toLowerCase() || '';
+                const filtered = this.voices.filter(v => {
+                    if (selectedGroup && v.subdir !== selectedGroup) return false;
+                    if (search && !v.name.toLowerCase().includes(search)) return false;
+                    return true;
+                });
+
+                const container = panel.querySelector('#select-voice-grid');
+                if (!filtered.length) {
+                    container.innerHTML = '<div class="empty-state">未找到音色</div>';
+                    return;
+                }
+
+                container.innerHTML = filtered.map(v => `
+                    <div class="select-card ${selectedVoice?.name === v.name ? 'selected' : ''}" data-name="${escapeAttribute(v.name)}">
+                        <div class="select-name">${escapeHtml(stripAudioExt(v.name.split('/').pop()))}</div>
+                        <button class="btn-icon-small">▶</button>
+                    </div>
+                `).join('');
+
+                container.querySelectorAll('.select-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        const name = card.dataset.name;
+                        selectedVoice = this.voices.find(v => v.name === name);
+                        renderVoices();
+                    });
+
+                    card.querySelector('.btn-icon-small')?.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (currentAudio) currentAudio.pause();
+                        const name = card.dataset.name;
+                        const dataUrl = await api.getVoiceRefAudio(name);
+                        currentAudio = new Audio(dataUrl);
+                        await currentAudio.play();
+                    });
+                });
+            };
+
+            panel.querySelector('#select-voice-search')?.addEventListener('input', renderVoices);
+            panel.querySelector('#btn-confirm-voice')?.addEventListener('click', () => {
+                if (selectedVoice) {
+                    this.selectedTestVoice = selectedVoice;
+                    document.getElementById('selected-voice-name').textContent = selectedVoice.name;
+                    this.closeModal();
+                }
+            });
+
+            renderGroups();
+            renderVoices();
+        });
+    }
+
+    openSelectStyleModal() {
+        let selectedGroup = null;
+        let selectedStyle = null;
+        let currentAudio = null;
+
+        this.openModal(`
+            <div class="modal-header">
+                <h3>选择声腔</h3>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body modal-select">
+                <div class="select-sidebar">
+                    <div id="select-style-groups"></div>
+                </div>
+                <div class="select-content">
+                    <input type="search" id="select-style-search" placeholder="搜索声腔">
+                    <div class="select-grid" id="select-style-grid"></div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">取消</button>
+                <button type="button" class="btn-secondary primary" id="btn-confirm-style">确定</button>
+            </div>
+        `, (panel) => {
+            const renderGroups = () => {
+                const container = panel.querySelector('#select-style-groups');
+                container.innerHTML = ['全部', ...this.voiceGroups.filter(g => g !== '全部')].map(g => `
+                    <div class="select-group-item ${!selectedGroup || selectedGroup === g ? 'active' : ''}" data-group="${escapeAttribute(g)}">
+                        ${escapeHtml(g)}
+                    </div>
+                `).join('');
+                container.querySelectorAll('.select-group-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        selectedGroup = item.dataset.group === '全部' ? null : item.dataset.group;
+                        renderGroups();
+                        renderStyles();
+                    });
+                });
+            };
+
+            const renderStyles = () => {
+                const search = panel.querySelector('#select-style-search')?.value.toLowerCase() || '';
+                const filtered = this.voices.filter(v => {
+                    if (selectedGroup && v.subdir !== selectedGroup) return false;
+                    if (search && !v.name.toLowerCase().includes(search)) return false;
+                    return true;
+                });
+
+                const container = panel.querySelector('#select-style-grid');
+                if (!filtered.length) {
+                    container.innerHTML = '<div class="empty-state">未找到声腔</div>';
+                    return;
+                }
+
+                container.innerHTML = filtered.map(v => `
+                    <div class="select-card ${selectedStyle?.name === v.name ? 'selected' : ''}" data-name="${escapeAttribute(v.name)}">
+                        <div class="select-name">${escapeHtml(stripAudioExt(v.name.split('/').pop()))}</div>
+                        <button class="btn-icon-small">▶</button>
+                    </div>
+                `).join('');
+
+                container.querySelectorAll('.select-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        const name = card.dataset.name;
+                        selectedStyle = this.voices.find(v => v.name === name);
+                        renderStyles();
+                    });
+
+                    card.querySelector('.btn-icon-small')?.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (currentAudio) currentAudio.pause();
+                        const name = card.dataset.name;
+                        const dataUrl = await api.getVoiceRefAudio(name);
+                        currentAudio = new Audio(dataUrl);
+                        await currentAudio.play();
+                    });
+                });
+            };
+
+            panel.querySelector('#select-style-search')?.addEventListener('input', renderStyles);
+            panel.querySelector('#btn-confirm-style')?.addEventListener('click', () => {
+                if (selectedStyle) {
+                    this.selectedTestStyle = selectedStyle;
+                    document.getElementById('selected-style-name').textContent = selectedStyle.name;
+                    this.closeModal();
+                }
+            });
+
+            renderGroups();
+            renderStyles();
+        });
     }
 }
 
@@ -2101,6 +2970,13 @@ function isTextEditingTarget(target) {
     return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || Boolean(target?.isContentEditable);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function bootLeonLauncher() {
+    if (window.leonLauncher) return;
     window.leonLauncher = new LeonLauncher();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootLeonLauncher);
+} else {
+    bootLeonLauncher();
+}

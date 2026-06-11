@@ -107,7 +107,7 @@ Real lifecycle validation:
 
 - 启动器管理 profile：新建、复制、重命名、导入、导出、恢复默认。
 - 启动器编辑 LLM prompt：提供模板变量、输出 JSON schema、测试拆段和恢复默认。
-- 启动器编辑声腔映射：style 列表、参考音频、默认强度、emo_vec、适用说明。当前 WinForms 启动器已覆盖基础 CRUD；ref-audio 选择器后续再补。
+- 启动器编辑声腔映射：style 列表、参考音频、默认强度、emo_vec、适用说明。当前 Tauri 启动器已覆盖基础 CRUD；ref-audio 选择器后续再补。
 - 启动器编辑角色策略：旁白、用户、当前角色、别名、未匹配角色策略、默认 style、允许/禁用 style。
 - 启动器编辑质量档位：LIVE 和 D 模式分别配置，专家参数折叠在高级区。
 - 启动器做预检：检查 voice/style 是否存在，参数是否越界，坏音频是否可解码。

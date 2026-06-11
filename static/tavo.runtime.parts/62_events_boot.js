@@ -282,6 +282,10 @@
         } catch (_) {}
         try {
           if (isSavedTrack(t) && !savedElementAudioBelongsToTrack(t)) {
+            if (switchSavedTrackFromLiveSourceToCompleteAudio(t, "saved stale pause", { autoplay: false, resumeSec: elementPlaybackTimeSec(t) })) {
+              try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
+              return;
+            }
             debugLog("↪️ 忽略 saved 卡残留非完整音频源 pause，不反写播放态 src=" + (audio.currentSrc || audio.src || ""), "#fc9");
             try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
             return;
@@ -340,6 +344,10 @@
         pollCacheUpgrade(t, "live mp3 ended before cache");
         stopSubtitle();
         updateTrackButtons();
+        return;
+      }
+      if (t && isSavedTrack(t) && switchSavedTrackFromLiveSourceToCompleteAudio(t, "saved live source ended", { ended: true, resetProgress: true, autoplay: false })) {
+        try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
         return;
       }
       if (t && t.mode === "single" && t.cacheKey && t.cacheUrl) {
@@ -445,6 +453,9 @@
         t.lastStalledSec = isLiveProgressTrack(t) ? rememberLiveResumeSec(t, elementPlaybackTimeSec(t), "native stalled") : elementPlaybackTimeSec(t);
       }
       debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2) + (t ? " count=" + t.stalledCount : ""), "#fc9");
+      if (t && isSavedTrack(t)) {
+        switchSavedTrackFromLiveSourceToCompleteAudio(t, "saved live source stalled", { autoplay: true, resumeSec: t.lastStalledSec, status: "流式卡顿，切换完整音频…", title: "切换完整音频…", detail: "完整音频已保存，从卡顿位置继续" });
+      }
     });
     on(audio, 'timeupdate', function () {
       var activeTrack = currentTrack();
@@ -463,6 +474,9 @@
         seek.value = meterDur > 0 ? String(Math.floor(Math.min(pos, meterDur) / meterDur * 1000)) : "0";
         setTimeout(function () { seekProgrammaticUpdate = false; }, 0);
       }
+      try {
+        if (typeof updatePlaybackSegmentProgressStatus === "function") updatePlaybackSegmentProgressStatus(activeTrack, pos);
+      } catch (_) {}
     });
     on(seek, 'input', function () {
       if (seekProgrammaticUpdate) return;

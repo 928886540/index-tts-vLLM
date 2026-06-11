@@ -73,7 +73,7 @@
       try {
         if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey)) {
           if (!isSavedTrack(track)) return true;
-          return kind === "saved" || kind === "saved-blob" || kind === "offline" || kind === "offline-blob" || kind === "stream" || kind === "live-segment" || kind === "live-mp3";
+          return kind === "saved" || kind === "saved-blob" || kind === "offline" || kind === "offline-blob";
         }
       } catch (_) {}
       var src = "";
@@ -273,29 +273,80 @@
         return a.start - b.start;
       });
       if (!rows.length) return "";
+      var metrics = payload && payload.metrics ? payload.metrics : (track.metrics || null);
+      var knownTotal = Math.max(
+        Number(totalSegments || 0) || 0,
+        metrics ? Number(metrics.segments_total || 0) || 0 : 0,
+        payload && Array.isArray(payload.segments_plan) ? payload.segments_plan.length : 0,
+        track.segmentPlan && Array.isArray(track.segmentPlan) ? track.segmentPlan.length : 0
+      );
+      var maxIdx = -1;
+      rows.forEach(function (row) {
+        if (isFinite(Number(row.idx))) maxIdx = Math.max(maxIdx, Number(row.idx));
+      });
+      var doneLike = !!(
+        isSavedTrack(track)
+        || (payload && String(payload.state || "") === "done")
+        || (metrics && String(metrics.phase || "") === "done")
+        || (metrics && String(metrics.state || "") === "done")
+      );
+      if (doneLike && rows.length) knownTotal = rows.length;
+      var rowsComplete = !!(doneLike || !knownTotal || rows.length >= knownTotal || maxIdx >= knownTotal - 1);
+      function rowEndAt(index) {
+        var row = rows[index];
+        var next = rows[index + 1];
+        if (row.duration > 0) return row.start + row.duration;
+        if (next) return next.start;
+        return rowsComplete ? Infinity : row.start + 1.0;
+      }
       var currentIdx = -1;
       for (var i = 0; i < rows.length; i += 1) {
         var row = rows[i];
-        var next = rows[i + 1];
-        var end = row.duration > 0 ? row.start + row.duration : (next ? next.start : Infinity);
+        var end = rowEndAt(i);
         if (sec + 0.05 >= row.start && sec < end + 0.15) {
           currentIdx = row.idx;
           break;
         }
-        if (sec >= row.start) currentIdx = row.idx;
       }
       if (currentIdx < 0 && sec <= rows[0].start + 0.15) currentIdx = rows[0].idx;
       if (currentIdx < 0) return "";
       var displayIdx = Math.max(1, Math.floor(Number(currentIdx) || 0) + 1);
-      var total = Math.max(
-        Number(totalSegments || 0) || 0,
-        payload && payload.metrics ? Number(payload.metrics.segments_total || 0) || 0 : 0,
-        payload && Array.isArray(payload.segments_plan) ? payload.segments_plan.length : 0,
-        track.segmentPlan && Array.isArray(track.segmentPlan) ? track.segmentPlan.length : 0,
-        raw.length,
-        displayIdx
-      );
+      var total = Math.max(knownTotal, raw.length, displayIdx);
       return "正在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
+    }
+    function updatePlaybackSegmentProgressStatus(track, positionSec, opts) {
+      opts = opts || {};
+      if (!track || !track.latestSynthesisStatusText) return false;
+      if (isSavedTrack(track)) {
+        track.latestSynthesisStatusText = "";
+        track.lastPlaybackSegmentStatusAt = 0;
+        try {
+          var savedProgress = String(progressLine && progressLine.textContent || "");
+          if (/已生成\s*\d+\s*\/\s*\d+\s*段|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|(?:当前在播第|正在播第|播第)\s*\d+/.test(savedProgress)) {
+            setStatus(trackPlaybackLabel(track));
+          }
+        } catch (_) {}
+        return false;
+      }
+      var base = String(track.latestSynthesisStatusText || "");
+      if (!/已生成\s*\d+\s*\/\s*\d+\s*段|合成(?:第)?\s*\d+\s*\/\s*\d+(?:\s*段)?|音频合成中|音频已合成|正在保存|保存中/.test(base)) return false;
+      var now = Date.now();
+      if (!opts.force && now - Number(track.lastPlaybackSegmentStatusAt || 0) < 1000) return false;
+      var segText = playbackSegmentStatusTextForTrack(track, null, 0, positionSec);
+      if (segText) {
+        track.lastPlaybackSegmentStatusAt = now;
+        setStatus(base + " · " + segText);
+        return true;
+      }
+      try {
+        var currentProgress = String(progressLine && progressLine.textContent || "");
+        if (/(?:当前在播第|正在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(currentProgress)) {
+          track.lastPlaybackSegmentStatusAt = now;
+          setStatus(base);
+          return true;
+        }
+      } catch (_) {}
+      return false;
     }
     function trackDurationHintSec(track) {
       if (!track) return 0;

@@ -88,6 +88,10 @@
         await prepareOfflineAudio(existingTrack, "play", { saveMissing: true });
         var existingUrl = trackPlayableUrl(existingTrack);
         var audioUrl = audio.currentSrc || audio.src || "";
+        if (switchSavedTrackFromLiveSourceToCompleteAudio(existingTrack, "saved play click", { autoplay: true, status: "切换完整音频…", title: "切换完整音频…", detail: "当前卡片已保存，改播完整音频" })) {
+          updateTrackButtons();
+          return true;
+        }
         if (existingUrl && !elementAudioBelongsToTrack(existingTrack) && audioUrl !== existingUrl) {
           startElementAudioFrom(existingTrack, trackResumeSec(existingTrack));
         } else if (audio.src) {
