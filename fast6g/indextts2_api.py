@@ -157,14 +157,9 @@ def _default_active_profile() -> dict:
 
 
 def _load_active_profile() -> dict:
-    if not os.path.isfile(ACTIVE_PROFILE_PATH):
-        raise FileNotFoundError(f"Profile 配置错误: active profile 不存在: {ACTIVE_PROFILE_PATH}")
-    with open(ACTIVE_PROFILE_PATH, "r", encoding="utf-8") as f:
-        profile = json.load(f)
-    if not isinstance(profile, dict):
-        raise ValueError("Profile 配置错误: active profile 必须是 JSON object")
-    _validate_active_profile(profile)
-    return profile
+    from indextts.api_routes import load_active_profile
+
+    return load_active_profile(ACTIVE_PROFILE_PATH)
 
 
 def _validate_active_profile(profile: dict) -> None:
@@ -266,12 +261,9 @@ for _style_speaker in ("步非烟", "AD学姐", "JOK"):
 
 
 def _static_file_path(name: str) -> Optional[str]:
-    if not STATIC_DIR:
-        return None
-    path = os.path.abspath(os.path.join(STATIC_DIR, name))
-    if os.path.commonpath([STATIC_DIR, path]) != STATIC_DIR:
-        return None
-    return path if os.path.isfile(path) else None
+    from indextts.api_routes import static_file_path
+
+    return static_file_path(STATIC_DIR, name)
 
 
 def _resolve_voice(name_or_path: str) -> Optional[str]:
@@ -1515,11 +1507,9 @@ class _LiveJob:
 
 
 def _mark_job_cancelled(job: "_LiveJob", message: str = "任务已取消") -> None:
-    job.cancelled = True
-    job.error = None
-    job.metrics["state"] = "cancelled"
-    job.metrics["phase"] = "cancelled"
-    job.metrics["message"] = message
+    from indextts.api_jobs import mark_job_cancelled
+
+    mark_job_cancelled(job, message)
 
 
 def _gc_live_job(cache_key: str, delay: float = LIVE_JOB_LINGER_SECONDS, expected_job: Optional["_LiveJob"] = None) -> None:
@@ -1596,25 +1586,6 @@ def _align_pcm_offset(value: int, block_align: int = 2) -> int:
     return value - (value % max(1, int(block_align or 2)))
 
 
-def _job_status_from_cache(cache_key: str) -> Optional[dict]:
-    path = _get_cached_audio(cache_key)
-    if not path:
-        return None
-    meta = _read_cache_metadata(cache_key)
-    return {
-        "state": "done",
-        "cache_key": cache_key,
-        "cache_url": f"/cache_audio/{cache_key}",
-        "segments_done": len(meta.get("segments_meta") or []),
-        "segments_meta": meta.get("segments_meta") or [],
-        "segments_plan": meta.get("segments_plan") or (meta.get("metrics") or {}).get("segments_plan") or [],
-        "sample_rate": meta.get("sample_rate") or 22050,
-        "duration_s": meta.get("duration_s"),
-        "metrics": meta.get("metrics") or {},
-        "error": None,
-    }
-
-
 tts_pipeline = IndexTTS2(
     model_dir=args.model_dir,
     cfg_path=os.path.join(args.model_dir, "config.yaml"),
@@ -1643,100 +1614,20 @@ APP.add_middleware(
 
 tts_lock = asyncio.Lock()
 LIVE_JOBS: Dict[str, _LiveJob] = {}
-TTS_QUEUE_WAITING = deque()
-TTS_QUEUE_ACTIVE = None
-TTS_QUEUE_SEQ = 0
-
-
-def _next_tts_queue_id() -> int:
-    global TTS_QUEUE_SEQ
-    TTS_QUEUE_SEQ += 1
-    return TTS_QUEUE_SEQ
-
-
-def _tts_queue_item(kind: str, cache_key: str = "") -> dict:
-    return {
-        "id": _next_tts_queue_id(),
-        "kind": str(kind or "tts"),
-        "cache_key": str(cache_key or ""),
-        "queued_at": time.time(),
-        "perf_queued_at": time.perf_counter(),
-    }
-
-
-def _remove_tts_queue_waiter(item: dict) -> None:
-    try:
-        TTS_QUEUE_WAITING.remove(item)
-    except ValueError:
-        pass
+from indextts.api_jobs import TtsQueue
+_TTS_QUEUE = TtsQueue(tts_lock)
 
 
 def _tts_queue_snapshot(cache_key: str = "", item: Optional[dict] = None) -> dict:
-    target_id = item.get("id") if item else None
-    target_key = str(cache_key or (item.get("cache_key") if item else "") or "")
-    active = TTS_QUEUE_ACTIVE
-    waiting = list(TTS_QUEUE_WAITING)
-    active_count = 1 if active else 0
-    matched = None
-    is_active = False
-    is_waiting = False
-    ahead_waiting = 0
-
-    def _matches(cur: Optional[dict]) -> bool:
-        if not cur:
-            return False
-        if target_id is not None and cur.get("id") == target_id:
-            return True
-        return bool(target_key and cur.get("cache_key") == target_key)
-
-    if _matches(active):
-        matched = active
-        is_active = True
-    else:
-        for cur in waiting:
-            if _matches(cur):
-                matched = cur
-                is_waiting = True
-                break
-            ahead_waiting += 1
-
-    if is_active:
-        ahead = 0
-        position = 1
-    elif is_waiting:
-        ahead = ahead_waiting + active_count
-        position = ahead + 1
-    else:
-        ahead = None
-        position = None
-
-    wait_s = None
-    if matched and matched.get("perf_queued_at") is not None:
-        wait_s = round(max(0.0, time.perf_counter() - float(matched["perf_queued_at"])), 3)
-    return {
-        "queue_ahead": ahead,
-        "queue_position": position,
-        "queue_size": active_count + len(waiting),
-        "queue_waiting": len(waiting),
-        "queue_active": bool(active),
-        "queue_active_kind": active.get("kind") if active else "",
-        "queue_wait_s": wait_s,
-    }
+    return _TTS_QUEUE.snapshot(cache_key=cache_key, item=item)
 
 
 def _write_tts_queue_metrics(metrics: Optional[dict], snapshot: dict) -> None:
-    if not isinstance(metrics, dict):
-        return
-    if snapshot.get("queue_ahead") is None:
-        return
-    for key in ("queue_ahead", "queue_position", "queue_size", "queue_waiting", "queue_active", "queue_active_kind", "queue_wait_s"):
-        metrics[key] = snapshot.get(key)
+    _TTS_QUEUE.write_metrics(metrics, snapshot)
 
 
 def _refresh_live_job_queue_metrics(job: "_LiveJob") -> None:
-    if not job:
-        return
-    _write_tts_queue_metrics(job.metrics, _tts_queue_snapshot(cache_key=job.cache_key))
+    _TTS_QUEUE.refresh_job_metrics(job)
 
 
 def _llm_endpoint_label(endpoint: str) -> str:
@@ -1774,48 +1665,8 @@ def _refresh_llm_metrics(metrics: Optional[dict]) -> None:
     _set_llm_metrics(metrics, str(metrics.get("llm_stage") or "waiting"))
 
 
-class _TTSInferenceSlot:
-    def __init__(self, kind: str = "tts", cache_key: str = "", metrics: Optional[dict] = None):
-        self.item = _tts_queue_item(kind, cache_key)
-        self.metrics = metrics
-        self.acquired = False
-
-    async def __aenter__(self):
-        global TTS_QUEUE_ACTIVE
-        TTS_QUEUE_WAITING.append(self.item)
-        _write_tts_queue_metrics(self.metrics, _tts_queue_snapshot(item=self.item))
-        try:
-            await tts_lock.acquire()
-        except BaseException:
-            _remove_tts_queue_waiter(self.item)
-            _write_tts_queue_metrics(self.metrics, _tts_queue_snapshot(item=self.item))
-            raise
-        self.acquired = True
-        _remove_tts_queue_waiter(self.item)
-        self.item["acquired_at"] = time.time()
-        self.item["perf_acquired_at"] = time.perf_counter()
-        TTS_QUEUE_ACTIVE = self.item
-        _write_tts_queue_metrics(self.metrics, _tts_queue_snapshot(item=self.item))
-        if isinstance(self.metrics, dict):
-            self.metrics["lock_wait_s"] = round(
-                max(0.0, float(self.item["perf_acquired_at"]) - float(self.item["perf_queued_at"])),
-                3,
-            )
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        global TTS_QUEUE_ACTIVE
-        if self.acquired:
-            if TTS_QUEUE_ACTIVE and TTS_QUEUE_ACTIVE.get("id") == self.item.get("id"):
-                TTS_QUEUE_ACTIVE = None
-            tts_lock.release()
-        else:
-            _remove_tts_queue_waiter(self.item)
-        return False
-
-
-def _tts_inference_slot(kind: str = "tts", cache_key: str = "", metrics: Optional[dict] = None) -> "_TTSInferenceSlot":
-    return _TTSInferenceSlot(kind=kind, cache_key=cache_key, metrics=metrics)
+def _tts_inference_slot(kind: str = "tts", cache_key: str = "", metrics: Optional[dict] = None):
+    return _TTS_QUEUE.slot(kind=kind, cache_key=cache_key, metrics=metrics)
 
 
 class TTS_Request(BaseModel):
@@ -1890,53 +1741,30 @@ def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
 
 @APP.get("/static/tavo.js")
 async def tavo_js_endpoint():
-    path = _static_file_path("tavo.js")
-    if not path:
-        return JSONResponse(status_code=404, content={"message": "static/tavo.js not found", "static_dir": STATIC_DIR})
-    return FileResponse(
-        path,
-        media_type="text/javascript; charset=utf-8",
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    from indextts.api_routes import static_tavo_js_response
+
+    return static_tavo_js_response(STATIC_DIR)
 
 
 @APP.get("/tavo_test")
 async def tavo_widget_test_endpoint():
-    path = _static_file_path("tavo_widget_test.html")
-    if not path:
-        return JSONResponse(status_code=404, content={"message": "static/tavo_widget_test.html not found", "static_dir": STATIC_DIR})
-    return FileResponse(
-        path,
-        media_type="text/html; charset=utf-8",
-        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
-    )
+    from indextts.api_routes import tavo_test_response
+
+    return tavo_test_response(STATIC_DIR)
 
 
 @APP.head("/tavo_test")
 async def tavo_widget_test_head():
-    path = _static_file_path("tavo_widget_test.html")
-    headers = {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Content-Length": str(os.path.getsize(path)) if path and os.path.exists(path) else "0",
-    }
-    return Response(status_code=200 if path and os.path.exists(path) else 404, media_type="text/html", headers=headers)
+    from indextts.api_routes import tavo_test_head_response
+
+    return tavo_test_head_response(STATIC_DIR)
 
 
 @APP.get("/profiles/active")
 async def active_profile_endpoint():
-    try:
-        profile = _load_active_profile()
-        return JSONResponse(
-            content=profile,
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
-        )
-    except Exception as e:
-        traceback.print_exc()
-        return JSONResponse(status_code=400, content={"message": "active profile load failed", "Exception": str(e)})
+    from indextts.api_routes import active_profile_response
+
+    return active_profile_response(_load_active_profile)
 
 
 if STATIC_DIR:
@@ -2025,30 +1853,24 @@ async def health():
 
 @APP.get("/server_log/tail")
 async def server_log_tail(n: int = 100, since: float = 0.0, filter: Optional[str] = None):
-    try:
-        n = max(1, min(500, int(n or 100)))
-    except Exception:
-        n = 100
-    lines = []
-    needle = str(filter or "")
-    for item in list(LOG_BUFFER):
-        if since and float(item.get("ts") or 0) <= float(since):
-            continue
-        if needle and needle not in str(item.get("line") or ""):
-            continue
-        lines.append(item)
-    return JSONResponse(content={"lines": lines[-n:], "now": time.time()})
+    from indextts.api_routes import server_log_tail_response
+
+    return server_log_tail_response(
+        LOG_BUFFER,
+        n=n,
+        since=since,
+        filter_text=filter,
+        max_n=500,
+        case_sensitive_filter=True,
+    )
 
 
 @APP.get("/voices")
 async def voices_list_endpoint():
-    try:
-        from indextts import voice_library
+    from indextts import voice_library
+    from indextts.api_routes import voices_list_response
 
-        return JSONResponse(content={"voices": voice_library.list_voices()})
-    except Exception as e:
-        traceback.print_exc()
-        return JSONResponse(status_code=400, content={"message": "voices list failed", "Exception": str(e)})
+    return voices_list_response(voice_library.list_voices)
 
 
 @APP.get("/voice_preview")
@@ -2156,32 +1978,16 @@ async def test_generate_endpoint(request: Request):
 
 @APP.get("/cache_audio/{key}")
 async def cache_audio_by_key(key: str, format: Optional[str] = None):
-    try:
-        path = _get_cached_audio(key, format=format)
-        if not path:
-            return JSONResponse(status_code=404, content={"message": "cache miss", "key": key})
-        return FileResponse(
-            path,
-            media_type=_media_type_for_audio_path(path),
-            headers=_cache_audio_headers(key, path),
-        )
-    except Exception as e:
-        return JSONResponse(status_code=400, content={"message": "cache audio failed", "Exception": str(e)})
+    from indextts.api_routes import cache_audio_get_response
+
+    return cache_audio_get_response(key, format, _get_cached_audio)
 
 
 @APP.head("/cache_audio/{key}")
 async def cache_audio_by_key_head(key: str, format: Optional[str] = None):
-    try:
-        path = _get_cached_audio(key, format=format)
-        if not path:
-            return Response(status_code=404, headers={"X-IndexTTS-Cache": "MISS", "X-IndexTTS-Cache-Key": key})
-        return Response(
-            status_code=200,
-            media_type=_media_type_for_audio_path(path),
-            headers=_cache_audio_headers(key, path, {"Content-Length": str(os.path.getsize(path))}),
-        )
-    except Exception as e:
-        return Response(status_code=400, headers={"X-IndexTTS-Error": str(e)})
+    from indextts.api_routes import cache_audio_head_response
+
+    return cache_audio_head_response(key, format, _get_cached_audio)
 
 
 async def _run_dialogue_job(job: "_LiveJob", prepared: dict):
@@ -2500,41 +2306,17 @@ async def tts_dialogue_stream_job_endpoint(request: TTS_Dialogue_Request):
     prepared, err = await _prepare_dialogue_job(req)
     if err is not None:
         return err
-    cache_key = prepared["cache_key"]
-    cached_path = None if bool(req.get("bypass_cache", False)) else _get_cached_audio(cache_key)
-    if cached_path:
-        return JSONResponse(content={
-            "job_id": cache_key,
-            "cache_key": cache_key,
-            "url": f"/tts_dialogue_stream_job/{cache_key}",
-            "cache_url": f"/cache_audio/{cache_key}",
-            "cached": True,
-            "live": False,
-            "expires_in": LIVE_JOB_LINGER_SECONDS,
-        })
-    live = LIVE_JOBS.get(cache_key)
-    if live and not live.cancelled:
-        return JSONResponse(content={
-            "job_id": cache_key,
-            "cache_key": cache_key,
-            "url": f"/tts_dialogue_stream_job/{cache_key}",
-            "cache_url": f"/cache_audio/{cache_key}",
-            "cached": False,
-            "live": True,
-            "expires_in": LIVE_JOB_LINGER_SECONDS,
-        })
-    job = _LiveJob(cache_key)
-    LIVE_JOBS[cache_key] = job
-    asyncio.create_task(_run_dialogue_job(job, prepared))
-    return JSONResponse(content={
-        "job_id": cache_key,
-        "cache_key": cache_key,
-        "url": f"/tts_dialogue_stream_job/{cache_key}",
-        "cache_url": f"/cache_audio/{cache_key}",
-        "cached": False,
-        "live": True,
-        "expires_in": LIVE_JOB_LINGER_SECONDS,
-    })
+    from indextts.api_jobs import dialogue_job_start_response
+
+    return dialogue_job_start_response(
+        req,
+        prepared,
+        LIVE_JOBS,
+        _get_cached_audio,
+        _LiveJob,
+        _run_dialogue_job,
+        LIVE_JOB_LINGER_SECONDS,
+    )
 
 
 @APP.get("/tts_dialogue_stream_job/{job_id}")
@@ -2741,78 +2523,31 @@ async def tts_dialogue_stream_job_mp3_audio_endpoint(job_id: str, start_s: float
 
 @APP.delete("/tts_dialogue_stream_job/{job_id}")
 async def tts_dialogue_stream_job_delete_endpoint(job_id: str, preserve_completed: bool = False):
-    live = LIVE_JOBS.get(job_id)
-    cached_path = _get_cached_audio(job_id)
-    if preserve_completed and cached_path:
-        return JSONResponse(content={
-            "cancelled_live": False,
-            "deleted": False,
-            "preserved": True,
-            "state": "done",
-            "cache_key": job_id,
-            "cache_url": f"/cache_audio/{job_id}",
-        })
-    if preserve_completed and live:
-        phase = str(live.metrics.get("phase") or live.metrics.get("state") or "")
-        segments_total = int(live.metrics.get("segments_total") or len(live.metrics.get("segments_plan") or []) or 0)
-        segments_done = int(live.metrics.get("segments_done") or len(live.segments_meta or []) or 0)
-        all_segments_done = bool(segments_total > 0 and segments_done >= segments_total and len(live.pcm) > 0)
-        if live.finished.is_set() or phase in ("saving", "done") or all_segments_done:
-            state = "done" if live.finished.is_set() or phase == "done" else "saving"
-            return JSONResponse(content={
-                "cancelled_live": False,
-                "deleted": False,
-                "preserved": True,
-                "state": state,
-                "cache_key": job_id,
-                "cache_url": f"/cache_audio/{job_id}",
-                "metrics": live.metrics,
-            })
-    if live:
-        _mark_job_cancelled(live)
-        live.finished.set()
-        _gc_live_job(job_id, delay=30, expected_job=live)
-    deleted = False
-    try:
-        deleted = _delete_cache(job_id)
-    except Exception:
-        deleted = False
-    return JSONResponse(content={
-        "cancelled_live": bool(live),
-        "deleted": deleted,
-        "preserved": False,
-        "state": "cancelled" if live else "missing",
-        "cache_key": job_id,
-    })
+    from indextts.api_jobs import dialogue_job_delete_response
+
+    return dialogue_job_delete_response(
+        job_id,
+        preserve_completed,
+        LIVE_JOBS,
+        _get_cached_audio,
+        _delete_cache,
+        _gc_live_job,
+        suppress_delete_errors=True,
+    )
 
 
 @APP.get("/tts_dialogue_job_status/{cache_key}")
 async def tts_dialogue_job_status_endpoint(cache_key: str):
-    job = LIVE_JOBS.get(cache_key)
-    if job:
-        _refresh_live_job_queue_metrics(job)
-        _refresh_llm_metrics(job.metrics)
-        if job.cancelled or job.metrics.get("state") == "cancelled":
-            state = "cancelled"
-        else:
-            state = "failed" if job.error else ("done" if job.finished.is_set() else "running")
-        return JSONResponse(content={
-            "state": state,
-            "cache_key": cache_key,
-            "cache_url": f"/cache_audio/{cache_key}",
-            "pcm_bytes": len(job.pcm),
-            "segments_done": len(job.segments_meta),
-            "segments_meta": job.segments_meta,
-            "segments_plan": job.metrics.get("segments_plan") or [],
-            "sample_rate": job.sample_rate,
-            "duration_s": job.metrics.get("audio_duration_s") or 0.0,
-            "metrics": job.metrics,
-            "error": job.error,
-        })
-    cached = _job_status_from_cache(cache_key)
-    if cached:
-        return JSONResponse(content=cached)
-    return JSONResponse(status_code=404, content={"state": "missing", "cache_key": cache_key})
+    from indextts.api_jobs import dialogue_job_status_response
+
+    return dialogue_job_status_response(
+        cache_key,
+        LIVE_JOBS,
+        _get_cached_audio,
+        _read_cache_metadata,
+        _refresh_live_job_queue_metrics,
+        _refresh_llm_metrics,
+    )
 
 
 @APP.get("/tts")

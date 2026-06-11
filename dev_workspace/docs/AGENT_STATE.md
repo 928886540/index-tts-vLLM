@@ -1,6 +1,6 @@
 # Agent State
 
-Updated: 2026-06-11
+Updated: 2026-06-12
 
 This is the active handoff summary. Full historical state was archived on 2026-06-07:
 
@@ -8,7 +8,7 @@ This is the active handoff summary. Full historical state was archived on 2026-0
 
 Read the archive only when investigating old decisions, benchmark history, or fixed regressions.
 
-## Package Split Handoff 2026-06-11
+## Package Split Handoff 2026-06-12
 
 User's next requested direction: split LEON into a common package plus optional `vllm` and `fast6g` engine packages.
 
@@ -28,12 +28,11 @@ Start the next Codex session in `D:\apiWorkSpace\leon_api\dev_workspace` and rea
 8. `dev_workspace/docs/LEON_PACKAGE_SPLIT_PLAN.md`
 9. `dev_workspace/docs/REGRESSION.md`
 
-Recommended first implementation slice:
+Current recommendation:
 
-- Create the shared startup entry `scripts/restart-leon-api.ps1 -Version vllm|fast6g`.
-- Move only startup/profile/env/log/port checks into the shared path first.
-- Keep `vllm/` and `fast6g/` existing entrypoints runnable while the shared path is introduced.
-- Do not begin by deleting duplicated backend route code; first prove both engines can start/stop, read `config/profiles/active.json`, resolve shared `prompts/library` refs, and expose `/health`, `/profiles/active`, `/voices`, logs, and port checks through the same contracts.
+- Stop the package split here unless a later task explicitly targets adapter packaging.
+- Do not move TTS model loading or segment inference into common code.
+- If continuing later, make `vllm` and `fast6g` explicit engine adapters behind the shared API/job/cache contracts instead of adding version-condition branches to common code.
 
 Current package-split slice status:
 
@@ -46,11 +45,12 @@ Current package-split slice status:
 - fast6g API no longer carries its own voice-library traversal; `/voices` and `_resolve_voice()` now use the shared `indextts.voice_library` wrapper, matching vLLM behavior while preserving direct path resolution.
 - Active-profile schema helpers are shared through `leon_common.profile_config`: default prompt template, default quality modes/presets, active profile skeleton, strict style-entry validation, and active style filtering. Engine APIs still own style defaults and active-profile file path loading.
 - Cache/audio contract helpers are shared through `leon_common.cache_contracts`: audio media type detection, cache response headers, audio file metadata, pydantic/dict normalization, and segment metadata lookup. Full cache/job routes are still engine-local.
+- Stage 3 API/job contract split is now in place: `leon_common/api/routes.py` owns shared response builders for `/profiles/active`, `/voices`, `GET`/`HEAD /cache_audio/{key}`, `/static/tavo.js`, `/tavo_test`, `HEAD /tavo_test`, and `/server_log/tail`. `leon_common/api/jobs.py` owns the shared engine-adapter protocol, TTS queue bookkeeping, dialogue job start/reuse responses, status responses, cancellation marking, and `preserve_completed` delete contract. `vllm/indextts/api_routes.py`, `fast6g/indextts/api_routes.py`, `vllm/indextts/api_jobs.py`, and `fast6g/indextts/api_jobs.py` are thin wrappers. Both `indextts2_api.py` files keep route decorators plus engine-specific prepare/run/stream functions, then delegate shared contracts to common helpers.
 
 Package split pause note before bugfix work:
 
-- Pause package split here unless the user explicitly asks to resume it. The next split step should be Stage 3 only: move small route contracts such as `/profiles/active`, `/voices`, and `/cache_audio/{key}` into shared API helpers behind engine-local wrappers. Do not start by moving TTS generation, live jobs, or cache deletion semantics.
-- Latest lightweight validation passed without starting the API: Python `py_compile` for shared helpers and both API files, import checks from both `vllm/` and `fast6g/` cwd, shared voice library count/path checks, `scripts/restart-leon-api.ps1 -Version vllm -ValidateOnly`, `scripts/restart-leon-api.ps1 -Version fast6g -ValidateOnly`, and `git diff --check` with only CRLF warnings.
+- Do not move TTS model loading or segment inference into common code; keep those behind engine adapters. The shared layer should own API/job/cache contracts and call engine-local prepare/run/stream functions.
+- Latest lightweight validation passed without starting the API: Python `py_compile` for shared helpers, new shared API/job helpers, wrappers, and both API files; `indextts.api_routes` and `indextts.api_jobs` import checks from both `vllm/` and `fast6g/` cwd; shared helper behavior checks; `scripts/restart-leon-api.ps1 -Version vllm -ValidateOnly`; `scripts/restart-leon-api.ps1 -Version fast6g -ValidateOnly`; and `git diff --check` with only CRLF warnings.
 - During bugfix work, keep the current split changes in place and do not revert unrelated local state: `config/profiles/*.json`, `dev_workspace/optimization_plan/README.md` deletion, `dev_workspace/screenshots/`, and `tauri_debug.log` are intentionally not handled by the split pass.
 - If the bug touches Tavo frontend, injected JS, Tavo storage, LIVE/saved playback, or role/persona behavior, load the local `tavo` skill before editing.
 

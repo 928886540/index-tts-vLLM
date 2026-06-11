@@ -98,9 +98,9 @@ Conservative estimate:
 
 Total: about 5-8 engineering days if we avoid unrelated UI redesign and long audio benchmarks.
 
-## Current Status 2026-06-11
+## Current Status 2026-06-12
 
-Package split is paused here for bugfix work.
+Stage 3 API/job contract split is closed here. Do not continue by moving model loading or segment inference into common code; keep those as engine adapter responsibilities.
 
 Completed:
 
@@ -116,17 +116,27 @@ Completed:
   - `leon_common/cache_contracts.py`
 - Both `vllm/indextts/` and `fast6g/indextts/` keep compatibility wrappers for those shared helpers.
 - fast6g API now uses the shared voice library for `/voices` and `_resolve_voice()`, matching vLLM behavior.
+- Stage 3 API/job contract split is in place:
+  - `leon_common/api/routes.py` owns shared response builders for `/profiles/active`, `/voices`, `GET`/`HEAD /cache_audio/{key}`, `/static/tavo.js`, `/tavo_test`, `HEAD /tavo_test`, and `/server_log/tail`;
+  - `leon_common/api/jobs.py` owns the shared engine-adapter protocol, TTS queue bookkeeping, dialogue job start/reuse responses, status responses, cancellation marking, and `preserve_completed` delete contract;
+  - `vllm/indextts/api_routes.py` and `fast6g/indextts/api_routes.py` are thin compatibility wrappers;
+  - `vllm/indextts/api_jobs.py` and `fast6g/indextts/api_jobs.py` are thin compatibility wrappers;
+  - both `vllm/indextts2_api.py` and `fast6g/indextts2_api.py` keep the public route decorators and engine-specific prepare/run/stream functions, then delegate shared contracts to the common helpers.
 
 Not done yet:
 
 - `leon_common/env_probe.py` is not extracted yet. Current env/GPU probing is still split between PowerShell startup and Tauri Rust, so avoid creating a premature Python abstraction.
-- Shared API route extraction has not started. Next resume point should be small contracts only: `/profiles/active`, `/voices`, and `/cache_audio/{key}` wrappers. Do not move live job execution or TTS inference in the next slice.
-- Engine adapters and package manifests are still future stages.
+- Stage 3 now has the API/job contract boundary in place. Continue by moving route registration and voice-management wrappers if useful. Do not move TTS model loading or segment inference into common code; those should remain engine adapter responsibilities.
+- Engine adapters and package manifests are still future stages. The current stop point is intentional: common code owns API/job/cache contracts, while `vllm` and `fast6g` keep engine-specific prepare/run/stream/inference.
 
 Latest no-start validation passed:
 
 ```powershell
-python -m py_compile leon_common\__init__.py leon_common\profile_store.py leon_common\voice_library.py leon_common\llm_proxy.py leon_common\prompt_render.py leon_common\profile_config.py leon_common\cache_contracts.py vllm\indextts2_api.py fast6g\indextts2_api.py fast6g\indextts\infer_v2.py
+python -m py_compile leon_common\__init__.py leon_common\profile_store.py leon_common\voice_library.py leon_common\llm_proxy.py leon_common\prompt_render.py leon_common\profile_config.py leon_common\cache_contracts.py leon_common\api\__init__.py leon_common\api\routes.py leon_common\api\jobs.py vllm\indextts\api_routes.py fast6g\indextts\api_routes.py vllm\indextts\api_jobs.py fast6g\indextts\api_jobs.py vllm\indextts2_api.py fast6g\indextts2_api.py fast6g\indextts\infer_v2.py
+python -c "from indextts.api_routes import load_active_profile, voices_list_response, cache_audio_get_response, cache_audio_head_response; p=load_active_profile(r'D:\apiWorkSpace\leon_api\config\profiles\active.json'); print('vllm api_routes ok', p.get('version'))"
+python -c "from indextts.api_routes import load_active_profile, voices_list_response, cache_audio_get_response, cache_audio_head_response; p=load_active_profile(r'D:\apiWorkSpace\leon_api\config\profiles\active.json'); print('fast6g api_routes ok', p.get('version'))"
+python -c "from indextts.api_routes import static_file_path, static_tavo_js_response, tavo_test_response, tavo_test_head_response; static_dir=r'D:\apiWorkSpace\leon_api\static'; print(bool(static_file_path(static_dir,'tavo.js')), type(static_tavo_js_response(static_dir)).__name__, type(tavo_test_response(static_dir)).__name__, tavo_test_head_response(static_dir).status_code)"
+python -c "from indextts.api_jobs import TtsQueue, dialogue_job_start_response, dialogue_job_status_response, dialogue_job_delete_response; print('api_jobs ok', TtsQueue.__name__)"
 python -c "from indextts import voice_library; from indextts.profile_config import default_active_profile, validate_active_profile; from indextts.cache_contracts import cache_audio_headers, media_type_for_audio_path; print(len(voice_library.list_voices())); print(voice_library.get_voice_path('声腔/喘息-AD学姐'))"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version vllm -ValidateOnly
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version fast6g -ValidateOnly
@@ -136,6 +146,6 @@ git diff --check
 Validation notes:
 
 - Import checks passed from both `vllm/` and `fast6g/` cwd.
-- Shared voice library count was `1095` from both engine cwd paths.
+- Shared voice library count was `1093` from both engine cwd paths.
 - `active.json` validated successfully in both startup validate-only runs.
 - No API service was started or restarted, and no TTS generation was run.
