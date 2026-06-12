@@ -1,20 +1,29 @@
 {
-  "version": 3,
-  "name": "LEON default",
-  "description": "Default local tuning profile managed by the LEON launcher.",
+  "appliedAt": "2026-06-11T13:35:00.000000000+00:00",
+  "appliedFrom": "leon-bufeiyan.json",
+  "description": "步非烟声腔",
+  "displayOrder": 20,
+  "llmPrompt": "你是中文小说→TTS 片段拆分器。只返回严格 JSON，不要任何解释，不要 ``` 代码块。\n\n{{roles_hint}}\n{{user_alias_hint}}\n{{character_hint}}\n输出格式:\n{{output_contract}}\n\n拆段与说话人规则:\n1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。\n   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。\n   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。\n   旁白如果连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。\n2. 人物直接说出口的话 → role 用说话人的名字。\n   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。\n   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。\n   - 其他人物优先从已知角色名单挑名字；名单外的新人物用原文里的名字。\n3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。\n4. text 是要朗读的原文片段，保留标点和语气词。\n\n声腔选择规则:\n{{style_rules}}\n\n- 根据语气强度选择声腔，不要把“旁白”固定等同于 style=\"neutral\"。\n- 只有纯环境、普通动作、平铺过渡、信息说明，或完全无法判断情绪时，才使用 style=\"neutral\"。\n- 旁白如果包含贴近低声、呼吸/喘息、紧张、害羞、哭腔、惊讶、暧昧、身体反应、阶段升温/高点/余韵等明确语气，也必须选择对应声腔。\n- 可优先参考这些映射：轻微呼吸/贴近=breath_soft；紧张惊讶=tense_breath 或 gasp_surprise；压抑哭意=sob_soft 或 cry_soft；低声/耳语=low_murmur 或 whisper_soft；升温/高点/余韵=stage_warmup / stage_rising / stage_peak / stage_afterglow。\n- 长句优先低强度 style 或 stage_*，短促反应用更明显的声腔；不要连续大段无脑 neutral。\n- 根据下方声腔映射的“适用场景”选择 style ID，不要输出不存在或已禁用的 ID；不确定时才用 neutral，且不要沿用上一段对白的声腔。\n- 示例输出只演示 JSON 格式，不代表旁白必须 neutral。\n\n段级情绪补充规则:\n{{emotion_rules}}\n\n- LLM 主要负责选择 style ID；style 配置了声腔情绪向量时，后端优先使用配置值。\n- 只有某个 style 没配置情绪向量时，才让 LLM 按 happy/angry/sad/fear/hate/low/surprise/neutral 补 emo_vec。\n- 段级 emo_alpha 可以按语气微调，但不要覆盖声腔配置向量本身。\n\n完整性硬规则:\n- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。\n- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。\n- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。\n- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。\n\n示例输入:\n她低着头，眼角有泪。「对不起，我真的撑不住了。」\n{{example_user}}叹了口气，把手放在她肩上：「别哭。」\n示例输出:\n{\"segments\":[\n  {\"role\":\"旁白\",\"text\":\"她低着头，眼角有泪。\",\"style\":\"sob_soft\",\"style_alpha\":0.38},\n  {\"role\":\"她\",\"text\":\"对不起，我真的撑不住了。\",\"style\":\"sob_soft\",\"style_alpha\":0.42},\n  {\"role\":\"旁白\",\"text\":\"{{example_user}}叹了口气，把手放在她肩上：\",\"style\":\"whisper_soft\",\"style_alpha\":0.36},\n  {\"role\":\"用户\",\"text\":\"别哭。\",\"style\":\"whisper_soft\",\"style_alpha\":0.45}\n]}",
+  "llmPromptConfig": {
+    "completenessRules": "- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。\n- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。\n- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。\n- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。",
+    "customNotes": "",
+    "emotionRules": "- LLM 主要负责选择 style ID；style 配置了声腔情绪向量时，后端优先使用配置值。\n- 只有某个 style 没配置情绪向量时，才让 LLM 按 happy/angry/sad/fear/hate/low/surprise/neutral 补 emo_vec。\n- 段级 emo_alpha 可以按语气微调，但不要覆盖声腔配置向量本身。",
+    "segmentRules": "1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。\n   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。\n   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。\n   旁白如果连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。\n2. 人物直接说出口的话 → role 用说话人的名字。\n   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。\n   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。\n   - 其他人物优先从已知角色名单挑名字；名单外的新人物用原文里的名字。\n3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。\n4. text 是要朗读的原文片段，保留标点和语气词。",
+    "styleSelectionRules": "- 根据语气强度选择声腔，不要把“旁白”固定等同于 style=\"neutral\"。\n- 只有纯环境、普通动作、平铺过渡、信息说明，或完全无法判断情绪时，才使用 style=\"neutral\"。\n- 旁白如果包含贴近低声、呼吸/喘息、紧张、害羞、哭腔、惊讶、暧昧、身体反应、阶段升温/高点/余韵等明确语气，也必须选择对应声腔。\n- 可优先参考这些映射：轻微呼吸/贴近=breath_soft；紧张惊讶=tense_breath 或 gasp_surprise；压抑哭意=sob_soft 或 cry_soft；低声/耳语=low_murmur 或 whisper_soft；升温/高点/余韵=stage_warmup / stage_rising / stage_peak / stage_afterglow。\n- 长句优先低强度 style 或 stage_*，短促反应用更明显的声腔；不要连续大段无脑 neutral。\n- 根据下方声腔映射的“适用场景”选择 style ID，不要输出不存在或已禁用的 ID；不确定时才用 neutral，且不要沿用上一段对白的声腔。\n- 示例输出只演示 JSON 格式，不代表旁白必须 neutral。"
+  },
   "llmPromptId": "launcher_profile_prompt_template_v1",
-  "llmPrompt": "你是中文小说→TTS 片段拆分器。只返回严格 JSON，不要任何解释，不要 ``` 代码块。\n\n{{roles_hint}}\n{{user_alias_hint}}\n{{character_hint}}\n输出格式:\n{{output_contract}}\n\n拆段规则:\n1. 旁白（叙述、环境、动作描写、心理描写、所有无引号正文）→ role 固定为 \"旁白\"。\n   无论主语是不是用户身份名/当前角色名，只要不是引号里的直接台词，都必须写 \"旁白\"。\n   例如「白夜雨抱住她」「潘金莲低下头」「她笑了」「我低下头看着……」「白夜雨说道：」都写旁白，不要让用户或角色认领旁白。\n   旁白连续多个句子，要按句号/问号/感叹号/分号拆成多个旁白 segments，每段≤2 句。\n2. 人物直接说出口的话 → role 用说话人的名字。\n   - 如果说话人是「你」或用户身份名，role 统一写 \"用户\"。\n   - 不要把「我」当作用户；无引号的「我……」默认是第一人称叙述，role 写 \"旁白\"。\n   - 其他人物优先从已知角色名单挑名字；名单外的新人物用原文里的名字。\n3. 「他说：」「她笑道：」「白夜雨说道：」这类引导句本身永远是旁白；只有后面引号里的直接台词才按说话人分配。\n4. text 是要朗读的原文片段，保留标点和语气词。\n{{style_rules}}\n\n{{emotion_rules}}\n\n完整性硬规则:\n- 必须覆盖输入原文 100%，按原文顺序输出，不要总结、改写、删字、漏掉最后一段。\n- 每个原文片段只能出现一次，不要把多段无关尾巴合并成一条对白。\n- 如果最后一个引号后还有动作/叙述/心理描写，最后一段必须是 role=\"旁白\"。\n- 不确定说话人时用 role=\"旁白\"，不要沿用上一句对白角色。\n\n示例输入:\n她低着头，眼角有泪。「对不起，我真的撑不住了。」\n{{example_user}}叹了口气，把手放在她肩上：「别哭。」\n示例输出:\n{{example_output}}",
+  "name": "LEON-步非烟",
   "quality": {
-    "defaultMode": "balanced",
     "customLabel": "自定义",
+    "defaultMode": "ultra",
     "modes": [
       {
         "id": "fast",
-        "label": "极速（流式推荐）"
+        "label": "极速模式"
       },
       {
         "id": "balanced",
-        "label": "平衡"
+        "label": "平衡模式"
       },
       {
         "id": "expressive",
@@ -22,110 +31,110 @@
       },
       {
         "id": "ultra",
-        "label": "落盘高质量"
+        "label": "超高质量"
       }
     ],
     "presets": {
-      "live": {
-        "fast": {
-          "diffusion_steps": 8,
-          "prompt_audio_seconds": 6,
-          "segment_tokens": 40,
-          "first_tokens": 10,
-          "s2mel_cfg_rate": 0.7
-        },
+      "generate": {
         "balanced": {
           "diffusion_steps": 14,
-          "prompt_audio_seconds": 10,
-          "segment_tokens": 60,
           "first_tokens": 18,
-          "s2mel_cfg_rate": 0.7
-        },
-        "expressive": {
-          "diffusion_steps": 16,
-          "prompt_audio_seconds": 12,
-          "segment_tokens": 72,
-          "first_tokens": 24,
-          "s2mel_cfg_rate": 0.7
-        },
-        "ultra": {
-          "diffusion_steps": 20,
-          "prompt_audio_seconds": 14,
-          "segment_tokens": 96,
-          "first_tokens": 32,
-          "s2mel_cfg_rate": 0.7
+          "prompt_audio_seconds": 10,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 60
         },
         "custom": {
           "diffusion_steps": 14,
-          "prompt_audio_seconds": 10,
-          "segment_tokens": 60,
           "first_tokens": 18,
-          "s2mel_cfg_rate": 0.7
+          "prompt_audio_seconds": 10,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 60
+        },
+        "expressive": {
+          "diffusion_steps": 16,
+          "first_tokens": 24,
+          "prompt_audio_seconds": 12,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 72
+        },
+        "fast": {
+          "diffusion_steps": 8,
+          "first_tokens": 10,
+          "prompt_audio_seconds": 6,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 40
+        },
+        "ultra": {
+          "diffusion_steps": 20,
+          "first_tokens": 32,
+          "prompt_audio_seconds": 14,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 96
         }
       },
-      "generate": {
-        "fast": {
-          "diffusion_steps": 8,
-          "prompt_audio_seconds": 6,
-          "segment_tokens": 40,
-          "first_tokens": 10,
-          "s2mel_cfg_rate": 0.7
-        },
+      "live": {
         "balanced": {
           "diffusion_steps": 14,
-          "prompt_audio_seconds": 10,
-          "segment_tokens": 60,
           "first_tokens": 18,
-          "s2mel_cfg_rate": 0.7
-        },
-        "expressive": {
-          "diffusion_steps": 16,
-          "prompt_audio_seconds": 12,
-          "segment_tokens": 72,
-          "first_tokens": 24,
-          "s2mel_cfg_rate": 0.7
-        },
-        "ultra": {
-          "diffusion_steps": 20,
-          "prompt_audio_seconds": 14,
-          "segment_tokens": 96,
-          "first_tokens": 32,
-          "s2mel_cfg_rate": 0.7
+          "prompt_audio_seconds": 10,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 60
         },
         "custom": {
           "diffusion_steps": 14,
-          "prompt_audio_seconds": 10,
-          "segment_tokens": 60,
           "first_tokens": 18,
-          "s2mel_cfg_rate": 0.7
+          "prompt_audio_seconds": 10,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 60
+        },
+        "expressive": {
+          "diffusion_steps": 16,
+          "first_tokens": 24,
+          "prompt_audio_seconds": 12,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 72
+        },
+        "fast": {
+          "diffusion_steps": 8,
+          "first_tokens": 10,
+          "prompt_audio_seconds": 6,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 40
+        },
+        "ultra": {
+          "diffusion_steps": 20,
+          "first_tokens": 32,
+          "prompt_audio_seconds": 14,
+          "s2mel_cfg_rate": 0.7,
+          "segment_tokens": 96
         }
       }
     }
   },
-  "appliedAt": "2026-06-09T10:50:52.7226499Z",
-  "appliedFrom": "leon-default.json",
   "styles": {
-    "neutral": {
-      "label": "普通/平静",
-      "ref": "",
-      "style_alpha": 0.15,
-      "emo_alpha": 0.18,
+    "breath_heavy": {
+      "description": "更明显的喘息和气口，适合高张力或体力消耗后的对白。",
+      "emo_alpha": 0.42,
       "emo_vec": [
+        0.08,
         0,
+        0.04,
+        0.08,
         0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0.85
+        0.28,
+        0.05,
+        0.52
       ],
-      "description": "稳定自然，不叠加声腔参考；旁白默认使用。"
+      "enabled": true,
+      "label": "明显喘息",
+      "ref": "声腔/喘息-步非烟",
+      "refs": [
+        "声腔/喘息-步非烟"
+      ],
+      "style_alpha": 0.58
     },
     "breath_soft": {
-      "label": "轻微气声",
-      "ref": "声腔/轻喘-AD学姐",
-      "style_alpha": 0.42,
+      "description": "轻微呼吸感，适合贴近、低声、暧昧但不过度的对白。",
       "emo_alpha": 0.36,
       "emo_vec": [
         0.05,
@@ -137,131 +146,16 @@
         0,
         0.68
       ],
-      "description": "轻微呼吸感，适合贴近、低声、暧昧但不过度的对白。"
-    },
-    "breath_heavy": {
-      "label": "明显喘息",
-      "ref": "声腔/喘息-AD学姐",
-      "style_alpha": 0.58,
-      "emo_alpha": 0.42,
-      "emo_vec": [
-        0.08,
-        0,
-        0.04,
-        0.08,
-        0,
-        0.28,
-        0.05,
-        0.52
+      "enabled": true,
+      "label": "轻微气声",
+      "ref": "声腔/轻喘-步非烟",
+      "refs": [
+        "声腔/轻喘-步非烟"
       ],
-      "description": "更明显的喘息和气口，适合高张力或体力消耗后的对白。"
-    },
-    "intimate_breath": {
-      "label": "亲密喘息",
-      "ref": "声腔/喘息-AD学姐",
-      "style_alpha": 0.6,
-      "emo_alpha": 0.42,
-      "emo_vec": [
-        0.08,
-        0,
-        0.04,
-        0.06,
-        0,
-        0.3,
-        0.03,
-        0.52
-      ],
-      "description": "亲密、靠近、呼吸更重；不建议给旁白使用。"
-    },
-    "low_murmur": {
-      "label": "低吟",
-      "ref": "声腔/低吟-AD学姐",
-      "style_alpha": 0.46,
-      "emo_alpha": 0.38,
-      "emo_vec": [
-        0.04,
-        0,
-        0.08,
-        0.02,
-        0,
-        0.3,
-        0,
-        0.62
-      ],
-      "description": "压低声线、贴近耳边的低声表达。"
-    },
-    "whisper_soft": {
-      "label": "耳语",
-      "ref": "声腔/耳语-AD学姐",
-      "style_alpha": 0.44,
-      "emo_alpha": 0.36,
-      "emo_vec": [
-        0.08,
-        0,
-        0.08,
-        0.03,
-        0,
-        0.24,
-        0,
-        0.62
-      ],
-      "description": "轻声耳语，适合温柔、安抚、秘密感对白。"
-    },
-    "shy_whisper": {
-      "label": "害羞低语",
-      "ref": "声腔/低语-AD学姐",
-      "style_alpha": 0.44,
-      "emo_alpha": 0.38,
-      "emo_vec": [
-        0.1,
-        0,
-        0.1,
-        0.05,
-        0,
-        0.2,
-        0,
-        0.6
-      ],
-      "description": "更含蓄、害羞、吞吐的低语。"
-    },
-    "tense_breath": {
-      "label": "紧张惊喘",
-      "ref": "声腔/惊喘-AD学姐",
-      "style_alpha": 0.5,
-      "emo_alpha": 0.42,
-      "emo_vec": [
-        0,
-        0,
-        0.08,
-        0.34,
-        0,
-        0.2,
-        0.18,
-        0.42
-      ],
-      "description": "惊讶、紧张、突然被触动时的短促气口。"
-    },
-    "sob_soft": {
-      "label": "轻微哽咽",
-      "ref": "声腔/哽咽-AD学姐",
-      "style_alpha": 0.42,
-      "emo_alpha": 0.42,
-      "emo_vec": [
-        0,
-        0,
-        0.46,
-        0.06,
-        0,
-        0.16,
-        0,
-        0.36
-      ],
-      "description": "压抑、快哭但不爆发的对白。"
+      "style_alpha": 0.42
     },
     "cry_soft": {
-      "label": "哭腔",
-      "ref": "声腔/哭腔-AD学姐",
-      "style_alpha": 0.48,
+      "description": "更明显的哭腔和破碎感。",
       "emo_alpha": 0.46,
       "emo_vec": [
         0,
@@ -273,46 +167,16 @@
         0,
         0.3
       ],
-      "description": "更明显的哭腔和破碎感。"
-    },
-    "tease_soft": {
-      "label": "挑逗",
-      "ref": "声腔/挑逗-AD学姐",
-      "style_alpha": 0.46,
-      "emo_alpha": 0.38,
-      "emo_vec": [
-        0.22,
-        0,
-        0.02,
-        0,
-        0,
-        0.16,
-        0,
-        0.58
+      "enabled": true,
+      "label": "哭腔",
+      "ref": "声腔/哭腔-步非烟",
+      "refs": [
+        "声腔/哭腔-步非烟"
       ],
-      "description": "轻佻、笑意、靠近但不过度夸张。"
-    },
-    "laugh_soft": {
-      "label": "轻笑",
-      "ref": "声腔/轻笑-AD学姐",
-      "style_alpha": 0.4,
-      "emo_alpha": 0.34,
-      "emo_vec": [
-        0.34,
-        0,
-        0,
-        0,
-        0,
-        0.06,
-        0.08,
-        0.52
-      ],
-      "description": "轻笑、愉悦、调侃语气。"
+      "style_alpha": 0.48
     },
     "gasp_surprise": {
-      "label": "惊喘",
-      "ref": "声腔/惊喘-AD学姐",
-      "style_alpha": 0.5,
+      "description": "惊讶或猝不及防的气声。",
       "emo_alpha": 0.42,
       "emo_vec": [
         0.02,
@@ -324,12 +188,98 @@
         0.28,
         0.42
       ],
-      "description": "惊讶或猝不及防的气声。"
+      "enabled": true,
+      "label": "惊喘",
+      "ref": "声腔/惊喘-步非烟",
+      "refs": [
+        "声腔/惊喘-步非烟"
+      ],
+      "style_alpha": 0.5
+    },
+    "intimate_breath": {
+      "description": "亲密、靠近、呼吸更重；不建议给旁白使用。",
+      "emo_alpha": 0.42,
+      "emo_vec": [
+        0.08,
+        0,
+        0.04,
+        0.06,
+        0,
+        0.3,
+        0.03,
+        0.52
+      ],
+      "enabled": true,
+      "label": "亲密喘息",
+      "ref": "声腔/喘息-步非烟",
+      "refs": [
+        "声腔/喘息-步非烟"
+      ],
+      "style_alpha": 0.6
+    },
+    "laugh_soft": {
+      "description": "轻笑、愉悦、调侃语气。",
+      "emo_alpha": 0.34,
+      "emo_vec": [
+        0.34,
+        0,
+        0,
+        0,
+        0,
+        0.06,
+        0.08,
+        0.52
+      ],
+      "enabled": true,
+      "label": "轻笑",
+      "ref": "声腔/轻笑-步非烟",
+      "refs": [
+        "声腔/轻笑-步非烟"
+      ],
+      "style_alpha": 0.4
+    },
+    "low_murmur": {
+      "description": "压低声线、贴近耳边的低声表达。",
+      "emo_alpha": 0.38,
+      "emo_vec": [
+        0.04,
+        0,
+        0.08,
+        0.02,
+        0,
+        0.3,
+        0,
+        0.62
+      ],
+      "enabled": true,
+      "label": "低吟",
+      "ref": "声腔/低吟-步非烟",
+      "refs": [
+        "声腔/低吟-步非烟"
+      ],
+      "style_alpha": 0.46
+    },
+    "neutral": {
+      "description": "稳定自然，不叠加声腔参考；仅用于纯环境、普通动作、平铺过渡或无法判断语气。",
+      "emo_alpha": 0.18,
+      "emo_vec": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.85
+      ],
+      "enabled": true,
+      "label": "普通/平静",
+      "ref": "",
+      "refs": [],
+      "style_alpha": 0.15
     },
     "scream_peak": {
-      "label": "尖叫/高点",
-      "ref": "声腔/尖叫-AD学姐",
-      "style_alpha": 0.58,
+      "description": "强烈高点或惊叫，默认不适合旁白和长句。",
       "emo_alpha": 0.5,
       "emo_vec": [
         0,
@@ -341,63 +291,58 @@
         0.28,
         0.24
       ],
-      "description": "强烈高点或惊叫，默认不适合旁白和长句。"
+      "enabled": true,
+      "label": "尖叫/高点",
+      "ref": "声腔/尖叫-步非烟",
+      "refs": [
+        "声腔/尖叫-步非烟"
+      ],
+      "style_alpha": 0.58
     },
-    "stage_warmup": {
-      "label": "阶段-开场",
-      "ref": "声腔/轻喘-AD学姐",
-      "style_alpha": 0.36,
-      "emo_alpha": 0.34,
+    "shy_whisper": {
+      "description": "更含蓄、害羞、吞吐的低语。",
+      "emo_alpha": 0.38,
       "emo_vec": [
+        0.1,
+        0,
+        0.1,
         0.05,
         0,
-        0.04,
-        0.02,
+        0.2,
         0,
-        0.18,
-        0,
-        0.72
+        0.6
       ],
-      "description": "阶段曲线用：轻微升温。"
-    },
-    "stage_rising": {
-      "label": "阶段-升温",
-      "ref": "声腔/喘息-AD学姐",
-      "style_alpha": 0.5,
-      "emo_alpha": 0.4,
-      "emo_vec": [
-        0.08,
-        0,
-        0.04,
-        0.06,
-        0,
-        0.26,
-        0.04,
-        0.56
+      "enabled": true,
+      "label": "害羞低语",
+      "ref": "声腔/低语-步非烟",
+      "refs": [
+        "声腔/低语-步非烟"
       ],
-      "description": "阶段曲线用：张力上升。"
+      "style_alpha": 0.44
     },
-    "stage_peak": {
-      "label": "阶段-高点",
-      "ref": "声腔/尖叫-AD学姐",
-      "style_alpha": 0.58,
-      "emo_alpha": 0.48,
+    "sob_soft": {
+      "description": "压抑、快哭但不爆发的对白。",
+      "emo_alpha": 0.42,
       "emo_vec": [
-        0.02,
+        0,
+        0,
+        0.46,
         0.06,
-        0.1,
-        0.32,
         0,
         0.16,
-        0.24,
-        0.3
+        0,
+        0.36
       ],
-      "description": "阶段曲线用：强烈高点。"
+      "enabled": true,
+      "label": "轻微哽咽",
+      "ref": "声腔/哽咽-步非烟",
+      "refs": [
+        "声腔/哽咽-步非烟"
+      ],
+      "style_alpha": 0.42
     },
     "stage_afterglow": {
-      "label": "阶段-余韵",
-      "ref": "声腔/余韵-AD学姐",
-      "style_alpha": 0.42,
+      "description": "阶段曲线用：放松、余韵、低声。",
       "emo_alpha": 0.36,
       "emo_vec": [
         0.06,
@@ -409,7 +354,141 @@
         0,
         0.66
       ],
-      "description": "阶段曲线用：放松、余韵、低声。"
+      "enabled": true,
+      "label": "阶段-余韵",
+      "ref": "声腔/余韵-步非烟",
+      "refs": [
+        "声腔/余韵-步非烟"
+      ],
+      "style_alpha": 0.42
+    },
+    "stage_peak": {
+      "description": "阶段曲线用：强烈高点。",
+      "emo_alpha": 0.48,
+      "emo_vec": [
+        0.02,
+        0.06,
+        0.1,
+        0.32,
+        0,
+        0.16,
+        0.24,
+        0.3
+      ],
+      "enabled": true,
+      "label": "阶段-高点",
+      "ref": "声腔/尖叫-步非烟",
+      "refs": [
+        "声腔/尖叫-步非烟"
+      ],
+      "style_alpha": 0.58
+    },
+    "stage_rising": {
+      "description": "阶段曲线用：张力上升。",
+      "emo_alpha": 0.4,
+      "emo_vec": [
+        0.08,
+        0,
+        0.04,
+        0.06,
+        0,
+        0.26,
+        0.04,
+        0.56
+      ],
+      "enabled": true,
+      "label": "阶段-升温",
+      "ref": "声腔/喘息-步非烟",
+      "refs": [
+        "声腔/喘息-步非烟"
+      ],
+      "style_alpha": 0.5
+    },
+    "stage_warmup": {
+      "description": "阶段曲线用：轻微升温。",
+      "emo_alpha": 0.34,
+      "emo_vec": [
+        0.05,
+        0,
+        0.04,
+        0.02,
+        0,
+        0.18,
+        0,
+        0.72
+      ],
+      "enabled": true,
+      "label": "阶段-开场",
+      "ref": "声腔/轻喘-步非烟",
+      "refs": [
+        "声腔/轻喘-步非烟"
+      ],
+      "style_alpha": 0.36
+    },
+    "tease_soft": {
+      "description": "轻佻、笑意、靠近但不过度夸张。",
+      "emo_alpha": 0.38,
+      "emo_vec": [
+        0.22,
+        0,
+        0.02,
+        0,
+        0,
+        0.16,
+        0,
+        0.58
+      ],
+      "enabled": true,
+      "label": "挑逗",
+      "ref": "声腔/挑逗-步非烟",
+      "refs": [
+        "声腔/挑逗-步非烟"
+      ],
+      "style_alpha": 0.46
+    },
+    "tense_breath": {
+      "description": "惊讶、紧张、突然被触动时的短促气口。",
+      "emo_alpha": 0.42,
+      "emo_vec": [
+        0,
+        0,
+        0.08,
+        0.34,
+        0,
+        0.2,
+        0.18,
+        0.42
+      ],
+      "enabled": true,
+      "label": "紧张惊喘",
+      "ref": "声腔/惊喘-步非烟",
+      "refs": [
+        "声腔/惊喘-步非烟"
+      ],
+      "style_alpha": 0.5
+    },
+    "whisper_soft": {
+      "description": "轻声耳语，适合温柔、安抚、秘密感对白。",
+      "emo_alpha": 0.36,
+      "emo_vec": [
+        0.08,
+        0,
+        0.08,
+        0.03,
+        0,
+        0.24,
+        0,
+        0.62
+      ],
+      "enabled": true,
+      "label": "耳语",
+      "ref": "声腔/耳语-步非烟",
+      "refs": [
+        "声腔/耳语-步非烟"
+      ],
+      "style_alpha": 0.44
     }
-  }
+  },
+  "updatedAt": "2026-06-11T13:35:00.000000000+00:00",
+  "version": 3
 }
