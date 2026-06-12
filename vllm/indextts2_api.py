@@ -3565,31 +3565,68 @@ async def test_generate_endpoint(request: Request):
         if not text:
             return JSONResponse(status_code=400, content={"message": "缺少 text"})
 
-        profile = _active_profile_entry()
-        if not profile:
-            return JSONResponse(status_code=400, content={"message": "未找到激活的配置"})
-
         voice_path = _resolve_voice(voice) if voice else None
-        style_entry = profile.get("styles", {}).get(style, {})
-        style_refs = style_entry.get("refs", []) or ([style_entry.get("ref", "")] if style_entry.get("ref") else [])
-        style_ref = _select_style_voice_ref(style, text, style_refs) if style_refs else ""
+        if voice and not voice_path:
+            return JSONResponse(status_code=400, content={"message": "音色参考音频不可用", "voice": voice})
 
-        from indextts.infer_v2 import generate_audio
-        import tempfile
+        styles = _active_style_profiles()
+        style_key = str(style or "neutral").strip() or "neutral"
+        style_entry = styles.get(style_key)
+        style_ref = ""
+        direct_style_ref = False
+        if style_key not in ("neutral", "none"):
+            if style_entry:
+                style_refs = style_entry.get("refs", []) or ([style_entry.get("ref", "")] if style_entry.get("ref") else [])
+                mapped_ref = _select_style_voice_ref(style_key, text, style_refs) if style_refs else ""
+                style_ref = _resolve_voice(mapped_ref) if mapped_ref else ""
+                if mapped_ref and not style_ref:
+                    return JSONResponse(status_code=400, content={"message": "active profile 声腔参考音频不可用", "style": style_key, "ref": mapped_ref})
+            else:
+                style_ref = _resolve_voice(style_key)
+                direct_style_ref = bool(style_ref)
+                if not style_ref:
+                    return JSONResponse(status_code=400, content={"message": "声腔参考音频不可用", "style": style_key})
+                style_entry = {
+                    "style_alpha": 0.8,
+                    "emo_vec": [0, 0, 0, 0, 0, 0, 0, 0.85],
+                }
+        if style_entry is None:
+            style_entry = styles.get("neutral", {})
 
-        output_path = tempfile.mktemp(suffix=".wav")
-        generate_audio(
-            text=text,
-            spk_audio_prompt=voice_path or "",
-            emo_audio_prompt=style_ref,
-            emo_alpha=style_entry.get("style_alpha", 0.4),
-            emo_vector=style_entry.get("emo_vec", [0, 0, 0, 0, 0, 0, 0, 0.85]),
-            output_path=output_path,
-            diffusion_steps=30,
-            prompt_audio_seconds=5
+        print(
+            f">> quick_test voice_path={voice_path!r} "
+            f"style={style_key!r} style_ref={style_ref!r} "
+            f"direct_style_ref={direct_style_ref} "
+            f"emo_alpha={style_entry.get('style_alpha', 0.4)} "
+            f"emo_vector_enabled={not direct_style_ref and bool(style_entry.get('emo_vec'))}"
         )
 
-        return FileResponse(output_path, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+        emo_vec = None if direct_style_ref else style_entry.get("emo_vec", [0, 0, 0, 0, 0, 0, 0, 0.85])
+        if emo_vec:
+            emo_vec = tts_pipeline.normalize_emo_vec(emo_vec)
+        async with _tts_inference_slot("quick_test"):
+            sampling_rate, wav_data = await tts_pipeline.infer(
+                spk_audio_prompt=voice_path or "",
+                emo_audio_prompt=style_ref or None,
+                text=text,
+                emo_alpha=style_entry.get("style_alpha", 0.4),
+                emo_vector=emo_vec,
+                top_p=0.8,
+                top_k=30,
+                temperature=0.7,
+                repetition_penalty=1.2,
+                output_path=None,
+                diffusion_steps=30,
+                max_prompt_audio_seconds=5,
+                max_emo_audio_seconds=5,
+            )
+
+        return Response(
+            pack_wav(BytesIO(), wav_data, sampling_rate).getvalue(),
+            media_type="audio/wav",
+            headers={"Cache-Control": "no-store"},
+        )
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=400, content={"message": "测试生成失败", "Exception": str(e)})

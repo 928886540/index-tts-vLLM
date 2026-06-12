@@ -3296,7 +3296,15 @@ async fn test_voice_generation(
     text: String,
     profile: String,
 ) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let health = health_check_internal().await;
+    if !health.reachable {
+        return Err("生成试听需要先在首页启动 vLLM 或 6G 服务；音色/声腔试听是离线播放参考音频，生成新语音不是离线功能。".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("创建测试生成 HTTP client 失败: {}", e))?;
     let body = serde_json::json!({
         "voice": voice,
         "style": style,
@@ -3310,7 +3318,7 @@ async fn test_voice_generation(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("测试生成失败: {}", e))?;
+        .map_err(|e| format!("生成试听请求失败：请确认 vLLM/6G 服务仍在运行。{}", e))?;
 
     if !resp.status().is_success() {
         let status = resp.status();

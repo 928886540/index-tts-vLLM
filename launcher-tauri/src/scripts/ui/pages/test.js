@@ -40,7 +40,11 @@ export function testPage() {
                             <button class="btn-preset" data-text="呜呜……为什么会这样……">哭泣</button>
                             <button class="btn-preset" data-text="嗯……啊……这个……">犹豫</button>
                         </div>
-                        <button class="btn-primary btn-large" id="btn-test-generate">
+                        <div class="test-service-note" id="test-service-note">
+                            <b>生成试听需要先启动 vLLM 或 6G 服务</b>
+                            <span>音色/声腔按钮只试听本地参考音频；生成新语音会调用当前运行中的 API/TTS 服务，它不是离线生成功能。</span>
+                        </div>
+                        <button class="btn-primary btn-large" id="btn-test-generate" disabled>
                             <span>生成试听</span>
                         </button>
                         <div id="test-current-result"></div>

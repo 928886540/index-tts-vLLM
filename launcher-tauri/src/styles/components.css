@@ -2510,6 +2510,37 @@ select option:checked {
     color: #818cf8;
 }
 
+.test-service-note {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    border: 1px solid rgba(245, 158, 11, 0.22);
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.08);
+    color: rgba(255, 255, 255, 0.78);
+    line-height: 1.45;
+}
+
+.test-service-note b {
+    color: #fde68a;
+    font-size: 13px;
+}
+
+.test-service-note span {
+    color: rgba(255, 255, 255, 0.60);
+    font-size: 12px;
+}
+
+.test-service-note.ready {
+    border-color: rgba(74, 222, 128, 0.22);
+    background: rgba(34, 197, 94, 0.08);
+}
+
+.test-service-note.ready b {
+    color: #86efac;
+}
+
 .btn-primary {
     padding: 14px 32px;
     background: linear-gradient(135deg, #6366f1, #8b5cf6);
@@ -2525,6 +2556,18 @@ select option:checked {
 .btn-primary:hover {
     transform: translateY(-2px);
     box-shadow: 0 8px 16px rgba(99, 102, 241, 0.4);
+}
+
+.btn-primary:disabled {
+    cursor: not-allowed;
+    opacity: 0.46;
+    transform: none;
+    box-shadow: none;
+}
+
+.btn-primary:disabled:hover {
+    transform: none;
+    box-shadow: none;
 }
 
 .btn-large {
@@ -3132,6 +3175,14 @@ select option:checked {
 .btn-primary:hover {
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
     transform: translateY(-1px);
+}
+
+.btn-primary:disabled,
+.btn-primary:disabled:hover {
+    cursor: not-allowed;
+    opacity: 0.46;
+    box-shadow: none;
+    transform: none;
 }
 
 .history-item,

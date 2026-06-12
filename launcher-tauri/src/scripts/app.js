@@ -704,13 +704,17 @@ class LeonLauncher {
             if (!running && state === 'starting') {
                 this.setServiceButtonState('starting');
                 this.setSystemStatus('starting', '模型加载中');
+                this.updateTestGenerateState(false, '模型加载中');
                 return;
             }
 
             this.setRunningUi(running);
             this.setSystemStatus(state, label);
+            this.updateTestGenerateState(running, label);
         } catch (error) {
+            this.setRunningUi(false);
             this.setSystemStatus('stopped', '服务未运行');
+            this.updateTestGenerateState(false, '服务未运行');
         }
     }
 
@@ -753,6 +757,35 @@ class LeonLauncher {
         const label = document.querySelector('.status-text');
         if (dot) dot.dataset.state = state || 'stopped';
         if (label) label.textContent = text || '系统就绪';
+    }
+
+    updateTestGenerateState(running = this.isRunning, label = '') {
+        const button = document.getElementById('btn-test-generate');
+        const note = document.getElementById('test-service-note');
+        if (!button && !note) return;
+
+        const ready = Boolean(running);
+        const versionLabel = label || (ready ? 'LEON 服务运行中' : '服务未运行');
+
+        if (button) {
+            button.disabled = !ready;
+            button.title = ready
+                ? '使用当前运行中的 LEON API/TTS 服务生成测试音频'
+                : '生成试听需要先在首页启动 vLLM 或 6G 服务';
+        }
+
+        if (note) {
+            note.className = `test-service-note ${ready ? 'ready' : 'blocked'}`;
+            note.innerHTML = ready
+                ? `
+                    <b>生成试听将使用当前运行中的服务</b>
+                    <span>${escapeHtml(versionLabel)}。音色/声腔按钮仍是本地参考音频试听。</span>
+                `
+                : `
+                    <b>生成试听需要先启动 vLLM 或 6G 服务</b>
+                    <span>音色/声腔按钮只试听本地参考音频；生成新语音会调用当前运行中的 API/TTS 服务，它不是离线生成功能。</span>
+                `;
+        }
     }
 
     async loadProfiles() {
@@ -2736,12 +2769,16 @@ ${completenessRules}`;
 
     async loadTestPage() {
         try {
+            this.updateTestGenerateState(this.isRunning);
+            await this.refreshServiceStatus(false);
             const voices = await api.getVoiceRefs();
             this.voices = voices;
             this.voiceGroups = this.extractVoiceGroups(voices);
             this.renderTestHistory();
         } catch (error) {
             this.addLog('error', `加载测试页面失败: ${formatError(error)}`);
+        } finally {
+            this.updateTestGenerateState(this.isRunning);
         }
     }
 
@@ -2760,6 +2797,19 @@ ${completenessRules}`;
         }
         if (!isVoiceCavityRef(this.selectedTestStyle)) {
             this.addLog('error', '声腔必须选择 prompts/library/声腔 下的音频');
+            return;
+        }
+
+        if (!this.isRunning) {
+            await this.refreshServiceStatus(false);
+        }
+        if (!this.isRunning) {
+            const message = '生成试听需要先在首页启动 vLLM 或 6G 服务；它不是离线生成。';
+            if (result) {
+                result.innerHTML = `<div class="test-error">${escapeHtml(message)}</div>`;
+            }
+            this.addLog('warning', message);
+            this.updateTestGenerateState(false, '服务未运行');
             return;
         }
 
@@ -2793,7 +2843,8 @@ ${completenessRules}`;
             this.renderTestHistory();
             this.addLog('success', '生成成功');
         } catch (error) {
-            result.innerHTML = '<div class="test-error">生成失败</div>';
+            const message = formatError(error);
+            result.innerHTML = `<div class="test-error">${escapeHtml(message || '生成失败')}</div>`;
             this.addLog('error', `生成失败: ${formatError(error)}`);
         }
     }

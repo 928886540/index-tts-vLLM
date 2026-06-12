@@ -30,9 +30,14 @@ from transformers.cache_utils import (
     DynamicCache,
     EncoderDecoderCache,
     OffloadedCache,
-    QuantizedCacheConfig,
     StaticCache,
 )
+try:
+    from transformers.cache_utils import QuantizedCacheConfig
+except ImportError:
+    @dataclass
+    class QuantizedCacheConfig:
+        backend: str = "quanto"
 from transformers.configuration_utils import PretrainedConfig
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.integrations.fsdp import is_fsdp_managed_module
