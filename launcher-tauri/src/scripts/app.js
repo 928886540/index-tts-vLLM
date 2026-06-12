@@ -235,7 +235,6 @@ class LeonLauncher {
     async refreshAll() {
         await Promise.allSettled([
             this.loadProfiles(),
-            this.loadEnvironment(),
             this.refreshServiceStatus(false)
         ]);
         this.updateStats();
@@ -377,6 +376,11 @@ class LeonLauncher {
             if (generationDetailButton) {
                 const index = Number(generationDetailButton.dataset.generationDetail);
                 if (Number.isFinite(index)) this.openGenerationRecordModal(index);
+            }
+            const generationSegmentButton = e.target.closest('[data-generation-segment-detail]');
+            if (generationSegmentButton) {
+                const index = Number(generationSegmentButton.dataset.generationSegmentDetail);
+                if (Number.isFinite(index)) this.openGenerationSegmentModal(index);
             }
         });
 
@@ -2886,12 +2890,7 @@ ${completenessRules}`;
 
     renderMonitorRecentGenerations(items, pageData = {}) {
         const container = document.getElementById('monitor-recent-tasks');
-        const count = document.getElementById('monitor-generation-count');
         if (!container) return;
-        const total = Number(pageData.total || items.length || 0);
-        const start = total && items.length ? ((Number(pageData.page || 1) - 1) * Number(pageData.pageSize || items.length) + 1) : 0;
-        const end = start ? start + items.length - 1 : 0;
-        if (count) count.textContent = total ? `${start}-${end}/${total} 条` : '0 条';
 
         if (!items.length) {
             container.innerHTML = '<div class="empty-state compact">没有生成记录</div>';
@@ -2912,7 +2911,7 @@ ${completenessRules}`;
                         </div>
                         <div class="generation-time">${escapeHtml(formatDateTime(item.createdAt || item.modified))}</div>
                     </div>
-                    <p class="generation-preview">${escapeHtml(truncateText(item.firstText || '-', 120))}</p>
+                    <p class="generation-preview">${escapeHtml(truncateText(item.firstText || '未记录文本', 120))}</p>
                     <div class="generation-metrics">
                         <span>RTF <b>${escapeHtml(formatRtf(item.rtf))}</b></span>
                         <span>音频 <b>${escapeHtml(formatSeconds(item.durationS))}</b></span>
@@ -2935,10 +2934,14 @@ ${completenessRules}`;
         const pageSize = Math.max(1, Number(pageData.pageSize || this.generationRecordsPageSize || 10));
         const total = Math.max(0, Number(pageData.total || 0));
         const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const currentCount = Array.isArray(this.generationRecords) ? this.generationRecords.length : 0;
+        const start = total && currentCount ? ((page - 1) * pageSize + 1) : 0;
+        const end = start ? Math.min(total, start + currentCount - 1) : 0;
+        const totalText = total ? `${start}-${end}/${total} 条 · 第 ${page}/${totalPages} 页` : '0 条 · 第 1/1 页';
         const hasMore = Boolean(pageData.hasMore);
         pager.innerHTML = `
             <button type="button" class="btn-secondary compact" data-generation-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>上一页</button>
-            <span>${total ? `第 ${page}/${totalPages} 页` : '第 1/1 页'}</span>
+            <span class="generation-page-status">${escapeHtml(totalText)}</span>
             <button type="button" class="btn-secondary compact" data-generation-page="${page + 1}" ${!hasMore ? 'disabled' : ''}>下一页</button>
         `;
     }
@@ -2947,6 +2950,8 @@ ${completenessRules}`;
         const item = this.generationRecords[index];
         if (!item) return;
         const segments = Array.isArray(item.segments) ? item.segments : [];
+        this.activeGenerationRecordIndex = index;
+        this.activeGenerationRecord = item;
         this.openModal(`
             <div class="modal-header">
                 <div>
@@ -2978,11 +2983,12 @@ ${completenessRules}`;
                 <section class="generation-detail-section">
                     <h4>分段文本与耗时</h4>
                     <div class="generation-segment-list">
-                        ${segments.length ? segments.map(segment => `
+                        ${segments.length ? segments.map((segment, segmentIndex) => `
                             <div class="generation-segment-row ${segmentRoleClass(segment.role)}"${roleStyleAttribute(segment.role)}>
                                 <span class="segment-index">${escapeHtml(`${Number(segment.index ?? 0) + 1}`)}</span>
-                                ${rolePillHtml(segment.role || '-')}
-                                <p>${escapeHtml(segment.text || '-')}</p>
+                                <div class="segment-heading">${rolePillHtml(segment.role || '-')}</div>
+                                <button type="button" class="btn-secondary compact segment-expand" data-generation-segment-detail="${segmentIndex}">放大</button>
+                                <p>${escapeHtml(segment.text || '未记录文本')}</p>
                                 <div class="segment-metrics">
                                     <em>RTF ${escapeHtml(formatRtf(segment.rtf ?? segment.inferRtf))}</em>
                                     <em>音频 ${escapeHtml(formatSeconds(segment.durationS))}</em>
@@ -2999,6 +3005,48 @@ ${completenessRules}`;
                 </section>
             </div>
             <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">关闭</button>
+            </div>
+        `);
+    }
+
+    openGenerationSegmentModal(index) {
+        const item = this.activeGenerationRecord;
+        const parentIndex = Number(this.activeGenerationRecordIndex);
+        const segments = Array.isArray(item?.segments) ? item.segments : [];
+        const segment = segments[index];
+        if (!segment) return;
+        this.openModal(`
+            <div class="modal-header">
+                <div>
+                    <h3>分段详情</h3>
+                    <p>${escapeHtml(item?.key || '-')} · 第 ${escapeHtml(String(Number(segment.index ?? index) + 1))} 段</p>
+                </div>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body generation-segment-detail">
+                <div class="segment-detail-title">
+                    ${rolePillHtml(segment.role || '-')}
+                    <span>${escapeHtml(segment.style || '未记录声腔')}</span>
+                </div>
+                <div class="segment-detail-text">${escapeHtml(segment.text || '未记录文本')}</div>
+                <div class="generation-detail-grid compact-grid">
+                    <div><span>RTF</span><b>${escapeHtml(formatRtf(segment.rtf ?? segment.inferRtf))}</b></div>
+                    <div><span>音频时长</span><b>${escapeHtml(formatSeconds(segment.durationS))}</b></div>
+                    <div><span>段耗时</span><b>${escapeHtml(formatSeconds(segment.wallS))}</b></div>
+                    <div><span>开始秒</span><b>${escapeHtml(formatSeconds(segment.startS))}</b></div>
+                    <div><span>GPT生成</span><b>${escapeHtml(formatSeconds(segment.gptGenS))}</b></div>
+                    <div><span>S2Mel</span><b>${escapeHtml(formatSeconds(segment.s2melS))}</b></div>
+                    <div><span>BigVGAN</span><b>${escapeHtml(formatSeconds(segment.bigvganS))}</b></div>
+                    <div><span>说话人缓存</span><b>${escapeHtml(segment.spkCacheHit ? '命中' : '未命中')}</b></div>
+                    <div><span>声腔缓存</span><b>${escapeHtml(segment.emoCacheHit ? '命中' : '未命中')}</b></div>
+                    <div><span>声腔音频</span><b>${escapeHtml(segment.usesStyleAudio ? '使用' : '未使用')}</b></div>
+                    <div><span>文本字数</span><b>${escapeHtml(segment.textLen ?? '-')}</b></div>
+                    <div><span>文本 tokens</span><b>${escapeHtml(segment.textTokenCount ?? '-')}</b></div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" data-generation-detail="${Number.isFinite(parentIndex) ? parentIndex : 0}">返回详情</button>
                 <button type="button" class="btn-secondary modal-close">关闭</button>
             </div>
         `);

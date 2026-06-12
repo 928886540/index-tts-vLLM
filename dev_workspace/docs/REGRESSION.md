@@ -224,8 +224,12 @@ Latest validation passed 2026-06-11 after style-reference editor and log-noise f
 - `生成记录` row role should prefer `readable_cache.role` or `outputs/cache/by_role/<role>` over the first segment role, so mixed jobs do not all display `旁白`.
 - `生成记录` rows should expose the selected档位 near the role/key/title line, not hide it after long metrics. RTF/audio/wall/file metrics should wrap cleanly in narrow windows.
 - `生成记录` rows should not expose raw `分段 12/12` style copy; segment counts and segment text belong in the `查看` detail modal.
+- `生成记录` segment summaries must merge `segments_meta` / `segments_plan` text with `metrics.segments` RTF/timing fields; existing text must not render as placeholder-only `-`.
+- `生成记录` detail modal should show each segment text in a readable full-width row and allow opening one segment in a larger detail modal with per-segment RTF/timing/cache fields.
 - Voice library should render a dense searchable list with group counts and stable row sizing. When no group is selected, only `全部` should be active, not every group.
 - Voice library preview should play any supported audio under the shared `prompts/library`, including non-声腔 folders, while rejecting paths outside the canonical library root.
+- Voice library import, move, and delete are launcher-local file operations under shared `prompts/library`; they must work with the API service stopped and must not call `/voice/upload`, `/voice/move`, or `/voice/{name}` from the launcher.
+- Voice library lookup should support stems containing dots, e.g. `38.8一品` should resolve `38.8一品.mp3` by appending known audio extensions instead of replacing the dotted suffix.
 - Mixer style-reference `选择声腔` and quick-test `选择声腔` should list only shared `prompts/library/声腔` items. Normal voice selection and the voice library may still show the full shared library.
 - Quick test voice/style selection should use the searchable grouped picker with current selection and preview. Generation must submit the selected item's `name`, not a missing `.path`; history replay should restore the visible selected voice/style labels and must not bypass the声腔-folder guard.
 - Profile preset editing must expose and save the full generation parameter set aligned with Tavo custom: diffusion steps, prompt seconds, segment tokens, first tokens, S2Mel CFG, interval ms, top P, top K, temperature, and repetition penalty. Launcher/profile/startup validation should reject missing or non-numeric preset fields instead of falling back to hidden defaults.

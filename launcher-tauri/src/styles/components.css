@@ -1172,6 +1172,12 @@ select option:checked {
     border-color: rgba(245, 158, 11, 0.26);
 }
 
+.env-status-pill.idle {
+    color: rgba(218, 228, 238, 0.68);
+    background: rgba(148, 163, 184, 0.10);
+    border-color: rgba(148, 163, 184, 0.20);
+}
+
 .env-status-pill.error {
     color: #fca5a5;
     background: rgba(239, 68, 68, 0.12);
@@ -1223,9 +1229,17 @@ select option:checked {
     border-color: rgba(245, 158, 11, 0.22);
 }
 
+.env-ready-item.idle {
+    border-color: rgba(148, 163, 184, 0.16);
+}
+
 .env-ready-item.warn strong,
 .env-ready-item.loading strong {
     color: #fde68a;
+}
+
+.env-ready-item.idle strong {
+    color: rgba(218, 228, 238, 0.66);
 }
 
 .env-check-list {
@@ -1255,6 +1269,10 @@ select option:checked {
     border-color: rgba(245, 158, 11, 0.20);
 }
 
+.env-check-row.idle {
+    border-color: rgba(148, 163, 184, 0.14);
+}
+
 .env-check-row.error {
     border-color: rgba(239, 68, 68, 0.24);
 }
@@ -1281,6 +1299,11 @@ select option:checked {
 .env-check-row.loading .env-check-mark {
     color: #fde68a;
     background: rgba(245, 158, 11, 0.12);
+}
+
+.env-check-row.idle .env-check-mark {
+    color: rgba(218, 228, 238, 0.62);
+    background: rgba(148, 163, 184, 0.10);
 }
 
 .env-check-row.error .env-check-mark {
@@ -3382,6 +3405,11 @@ select option:checked {
     font-size: 12px;
 }
 
+.generation-page-status {
+    min-width: 180px;
+    text-align: center;
+}
+
 .generation-detail {
     display: flex;
     flex-direction: column;
@@ -3434,10 +3462,14 @@ select option:checked {
 
 .generation-segment-row {
     display: grid;
-    grid-template-columns: 34px 116px minmax(220px, 1fr) minmax(280px, 0.8fr);
-    gap: 10px;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    grid-template-areas:
+        "index heading action"
+        "index text text"
+        "index metrics metrics";
+    gap: 8px 10px;
     align-items: start;
-    padding: 8px 10px;
+    padding: 10px 12px;
     background: rgba(255, 255, 255, 0.035);
     border: 1px solid rgba(151, 178, 205, 0.10);
     border-radius: 7px;
@@ -3457,6 +3489,10 @@ select option:checked {
     font-family: 'Consolas', 'Monaco', monospace;
     font-size: 11px;
     font-style: normal;
+}
+
+.generation-segment-row .segment-index {
+    grid-area: index;
 }
 
 .role-pill {
@@ -3487,9 +3523,19 @@ select option:checked {
 }
 
 .segment-metrics {
+    grid-area: metrics;
     display: grid;
-    grid-template-columns: repeat(4, minmax(62px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
     gap: 5px;
+}
+
+.segment-heading {
+    grid-area: heading;
+    min-width: 0;
+}
+
+.segment-expand {
+    grid-area: action;
 }
 
 .segment-metrics em {
@@ -3514,12 +3560,48 @@ select option:checked {
 }
 
 .generation-segment-row p {
+    grid-area: text;
     min-width: 0;
     margin: 0;
     color: rgba(225, 234, 242, 0.84);
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: 13px;
+    line-height: 1.55;
     overflow-wrap: anywhere;
+}
+
+.generation-segment-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.segment-detail-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.segment-detail-title span {
+    color: rgba(218, 228, 238, 0.56);
+    font-size: 12px;
+}
+
+.segment-detail-text {
+    max-height: 360px;
+    overflow: auto;
+    padding: 14px 16px;
+    color: rgba(245, 248, 251, 0.92);
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(151, 178, 205, 0.14);
+    border-radius: 8px;
+    font-size: 15px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+}
+
+.compact-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .monitor-log-line {
@@ -3599,8 +3681,13 @@ select option:checked {
     }
 
     .generation-detail-grid,
-    .generation-segment-row {
+    .generation-segment-row,
+    .compact-grid {
         grid-template-columns: 1fr;
+    }
+
+    .generation-segment-row {
+        grid-template-areas: "index" "heading" "text" "metrics" "action";
     }
 
     .modal-select.refined-select,

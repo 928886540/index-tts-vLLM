@@ -8,6 +8,96 @@ This is the active handoff summary. Full historical state was archived on 2026-0
 
 Read the archive only when investigating old decisions, benchmark history, or fixed regressions.
 
+## Launcher Generation Records Text Detail Fix 2026-06-12
+
+Current launcher slice:
+
+- `生成记录` segment summaries now merge text-bearing arrays (`segments_meta` / `segments_plan`) with timing-bearing `metrics.segments` instead of choosing only the metrics array.
+- Record list preview and detail rows no longer collapse existing segment text into `-`; missing text is shown explicitly as `未记录文本`.
+- The page title was removed from the page shell, the refresh button moved into the card header, and record count/page range moved into the pager.
+- Detail modal segment rows now show role, full-width text, wrapped RTF/timing metrics, and a per-segment `放大` modal for inspecting text and per-segment timing/cache fields.
+- Root `LEON-Launcher-Tauri.exe` was rebuilt and overwritten. Occupied launcher PID `23528` was force-stopped after `CloseMainWindow()` did not exit it; API/TTS service processes were not touched.
+
+Validation for this slice:
+
+```powershell
+node --check launcher-tauri\src\scripts\app.js
+node --check launcher-tauri\src\scripts\ui\pages\monitor.js
+node --check launcher-tauri\src\scripts\mock-api.js
+node --check launcher-tauri\src\scripts\ui\pages\environment.js
+npm --prefix launcher-tauri run frontend:build
+cargo fmt --manifest-path launcher-tauri\src-tauri\Cargo.toml --check
+cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
+cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
+Copy-Item launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe LEON-Launcher-Tauri.exe -Force
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+```
+
+Notes:
+
+- Smoke mode exited with code `0`.
+- `git diff --check` for touched launcher/doc files reported only Windows LF-to-CRLF warnings.
+- `launcher-tauri/src/scripts/ui/pages/test.js` was left unstaged because quick-test generation is being handled by another Codex session.
+## Launcher Voice Library Local Ops Fix 2026-06-12
+
+Current launcher slice:
+
+- Voice library import / move / delete no longer depends on `http://127.0.0.1:9880/voice/...` backend routes. Tauri now performs these operations directly against the local shared `prompts/library`.
+- Path handling now supports dotted stems such as `38.8一品`: missing-extension lookup appends `.mp3/.wav/...` instead of replacing the last dotted suffix.
+- Local operations validate that resolved files stay under canonical voice-library roots, reject traversal / invalid path characters, preserve file extensions on move, and prune empty temporary group directories after delete/move.
+- Launcher smoke now exercises the voice-library lifecycle with a temporary `_launcher_smoke` item: import, preview read, move, preview read again, delete, and cleanup.
+
+Validation for this slice:
+
+```powershell
+node --check launcher-tauri\src\scripts\app.js
+node --check launcher-tauri\src\scripts\mock-api.js
+npm --prefix launcher-tauri run frontend:build
+cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
+cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
+Copy-Item launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe LEON-Launcher-Tauri.exe -Force
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+git diff --check
+```
+
+Notes:
+
+- Root launcher PID `3300` was open during rebuild. A normal close request was sent; it exited before force-kill was needed, then the root exe was overwritten.
+- Smoke mode exited with code `0` and left no `_launcher_smoke*` directory under `prompts/library`.
+
+## Launcher Environment Doctor 2026-06-12
+
+Current launcher release-readiness slice:
+
+- Tauri backend now exposes `get_environment_report` and `repair_environment`.
+- Environment report checks common package files, `active.json`, NVIDIA GPU/free VRAM, API port 9880 ownership, LEON GPU worker residue, and both optional engines (`vllm`, `fast6g`) with runtime/API/checkpoint presence.
+- Environment page now shows a launchability summary for `vLLM` and `6G`, root path, fixable count, and detailed check rows instead of the old OS/Python/CUDA-only cards.
+- Auto repair is intentionally limited to safe local actions: create missing `active.json` from `leon-default.json`, create log/cache/tmp directories, clear LEON-owned unhealthy port listeners, and clear LEON-owned orphan `indextts2runtime` GPU workers.
+- Auto repair does not try to fix NVIDIA driver install, missing engine packages, missing checkpoints/runtime files, or low VRAM from non-LEON apps. If `/health` is reachable, the running LEON service is not killed by environment repair; users should stop the service explicitly if they want to free VRAM.
+- Root `LEON-Launcher-Tauri.exe` was rebuilt and overwritten. The old occupied launcher PID `32528` was closed first. A leftover LEON vLLM worker PID `24976` remained after the old runtime had no 9880 listener and was cleaned manually; final state had no 9880 listener, no LEON GPU worker, and about 10.8 GB free VRAM on the local RTX 3060.
+
+Validation for this slice:
+
+```powershell
+node --check launcher-tauri\src\scripts\app.js
+node --check launcher-tauri\src\scripts\mock-api.js
+node --check launcher-tauri\src\scripts\ui\pages\environment.js
+npm --prefix launcher-tauri run frontend:build
+cargo fmt --manifest-path launcher-tauri\src-tauri\Cargo.toml --check
+cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
+cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
+Copy-Item launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe LEON-Launcher-Tauri.exe -Force
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version vllm -ValidateOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version fast6g -ValidateOnly
+git diff --check
+```
+
+Notes:
+
+- `git diff --check` reported only Windows LF-to-CRLF warnings.
+- Smoke mode exits before the normal Tauri window lifecycle, so it validates executable startup only; it does not exercise close cleanup. The close cleanup path is compiled in the normal app path.
+
 ## Launcher Voice Preview / Generation Records Fix 2026-06-12
 
 Current launcher slice:

@@ -24,36 +24,36 @@ export function environmentPage() {
 
             <section class="env-summary" id="env-summary">
                 <div class="env-summary-main">
-                    <span class="env-status-pill loading">检测中</span>
+                    <span class="env-status-pill idle">未检测</span>
                     <div>
-                        <h3>正在检测启动环境</h3>
-                        <p>等待检测结果...</p>
+                        <h3>环境检测未运行</h3>
+                        <p>点击“重新检测”后再检查 common / engine / GPU / 端口状态。</p>
                     </div>
                 </div>
-                <div class="env-summary-meta" id="env-root">根目录检测中...</div>
+                <div class="env-summary-meta" id="env-root">不会在启动器打开时自动检测</div>
             </section>
 
             <section class="env-readiness" id="env-startability">
-                <div class="env-ready-item loading">
+                <div class="env-ready-item idle">
                     <span>vLLM</span>
-                    <strong>检测中</strong>
+                    <strong>未检测</strong>
                 </div>
-                <div class="env-ready-item loading">
+                <div class="env-ready-item idle">
                     <span>6G</span>
-                    <strong>检测中</strong>
+                    <strong>未检测</strong>
                 </div>
-                <div class="env-ready-item loading">
+                <div class="env-ready-item idle">
                     <span>可修复项</span>
-                    <strong>检测中</strong>
+                    <strong>-</strong>
                 </div>
             </section>
 
             <section class="env-check-list" id="env-check-list">
-                <div class="env-check-row loading">
-                    <div class="env-check-mark">...</div>
+                <div class="env-check-row idle">
+                    <div class="env-check-mark">-</div>
                     <div class="env-check-body">
-                        <div class="env-check-title">检测中</div>
-                        <div class="env-check-detail">等待环境报告...</div>
+                        <div class="env-check-title">等待手动检测</div>
+                        <div class="env-check-detail">环境医生不会自动跑，避免打开启动器时卡顿。</div>
                     </div>
                 </div>
             </section>

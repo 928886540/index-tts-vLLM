@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashSet,
     fs,
-    io::Write,
+    io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -309,6 +309,23 @@ fn smoke_test() -> Result<(), String> {
     if !active_path.exists() {
         return Err(format!("缺少 active profile: {}", active_path.display()));
     }
+    voice_library_smoke_test(&root)?;
+    Ok(())
+}
+
+fn voice_library_smoke_test(root: &Path) -> Result<(), String> {
+    let base = format!("voice_ops_{}", std::process::id());
+    let source_name = format!("_launcher_smoke/{}", base);
+    let moved_group = "_launcher_smoke_moved";
+    let moved_name = format!("{}/{}", moved_group, base);
+    let _ = delete_voice_local(root, &source_name);
+    let _ = delete_voice_local(root, &moved_name);
+
+    upload_voice_local(root, &source_name, b"RIFF\x24\x00\x00\x00WAVEfmt ", "wav")?;
+    get_voice_ref_audio(source_name.clone())?;
+    move_voice_local(root, &source_name, moved_group)?;
+    get_voice_ref_audio(moved_name.clone())?;
+    delete_voice_local(root, &moved_name)?;
     Ok(())
 }
 
@@ -414,10 +431,7 @@ fn get_voice_ref_audio(ref_name: String) -> Result<String, String> {
         return Err(format!("不是支持的音频文件: {}", canonical.display()));
     }
 
-    let inside_voice_library = voice_library_roots(&root)
-        .into_iter()
-        .any(|library_root| canonical.starts_with(library_root));
-    if !inside_voice_library {
+    if !is_inside_voice_library(&root, &canonical) {
         return Err("试听只允许读取 prompts/library 下的参考音频".to_string());
     }
 
@@ -896,7 +910,7 @@ fn get_environment() -> Result<EnvironmentInfo, String> {
         )
         .unwrap_or_else(|| "未检测到 NVIDIA GPU".to_string()),
         port: check_port_text(9880),
-        root: root.display().to_string(),
+        root: shell_path(&root),
     })
 }
 
@@ -910,8 +924,14 @@ fn repair_environment() -> Result<EnvironmentRepairResult, String> {
     let root = leon_root()?;
     let mut fixed = Vec::new();
     let mut skipped = Vec::new();
+    let api_healthy = api_health_reachable_blocking();
 
     match ensure_active_profile(&root) {
+        Ok(Some(message)) => fixed.push(message),
+        Ok(None) => {}
+        Err(error) => skipped.push(error),
+    }
+    match ensure_profile_visible(&root) {
         Ok(Some(message)) => fixed.push(message),
         Ok(None) => {}
         Err(error) => skipped.push(error),
@@ -924,15 +944,22 @@ fn repair_environment() -> Result<EnvironmentRepairResult, String> {
         }
     }
 
-    match kill_project_api_listeners(9880) {
-        Ok(count) if count > 0 => fixed.push(format!("清理 LEON API 端口残留进程: {}", count)),
-        Ok(_) => {}
-        Err(error) => skipped.push(format!("API 端口残留清理失败: {}", error)),
-    }
-    match kill_project_gpu_runtime_processes() {
-        Ok(count) if count > 0 => fixed.push(format!("清理 LEON GPU worker 残留进程: {}", count)),
-        Ok(_) => {}
-        Err(error) => skipped.push(format!("GPU worker 残留清理失败: {}", error)),
+    if api_healthy {
+        skipped
+            .push("LEON 服务正在运行，未清理 API/GPU 进程；需要释放显存请先停止服务。".to_string());
+    } else {
+        match kill_project_api_listeners(9880) {
+            Ok(count) if count > 0 => fixed.push(format!("清理 LEON API 端口残留进程: {}", count)),
+            Ok(_) => {}
+            Err(error) => skipped.push(format!("API 端口残留清理失败: {}", error)),
+        }
+        match kill_project_gpu_runtime_processes() {
+            Ok(count) if count > 0 => {
+                fixed.push(format!("清理 LEON GPU worker 残留进程: {}", count))
+            }
+            Ok(_) => {}
+            Err(error) => skipped.push(format!("GPU worker 残留清理失败: {}", error)),
+        }
     }
 
     Ok(EnvironmentRepairResult {
@@ -1665,10 +1692,9 @@ fn resolve_voice_ref(root: &Path, ref_path: &str) -> Option<PathBuf> {
         if candidate.is_file() {
             return Some(candidate);
         }
-        if candidate.extension().is_none() {
+        if !is_voice_file(&candidate) {
             for extension in voice_extensions() {
-                let mut with_ext = candidate.clone();
-                with_ext.set_extension(extension);
+                let with_ext = append_voice_extension(&candidate, extension);
                 if with_ext.is_file() {
                     return Some(with_ext);
                 }
@@ -1690,6 +1716,10 @@ fn voice_library_roots(root: &Path) -> Vec<PathBuf> {
     roots
 }
 
+fn primary_voice_library_root(root: &Path) -> PathBuf {
+    root.join("prompts").join("library")
+}
+
 fn add_unique_existing_dir(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
     if !candidate.is_dir() {
         return;
@@ -1698,6 +1728,12 @@ fn add_unique_existing_dir(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
     if !roots.iter().any(|item| item == &canonical) {
         roots.push(canonical);
     }
+}
+
+fn is_inside_voice_library(root: &Path, canonical_path: &Path) -> bool {
+    voice_library_roots(root)
+        .into_iter()
+        .any(|library_root| canonical_path.starts_with(library_root))
 }
 
 fn is_voice_file(path: &Path) -> bool {
@@ -1709,6 +1745,13 @@ fn is_voice_file(path: &Path) -> bool {
                 .any(|item| ext.eq_ignore_ascii_case(item))
         })
         .unwrap_or(false)
+}
+
+fn append_voice_extension(path: &Path, extension: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(".");
+    value.push(extension.trim_start_matches('.'));
+    PathBuf::from(value)
 }
 
 fn voice_extensions() -> &'static [&'static str] {
@@ -1819,10 +1862,11 @@ fn recent_generation_from_json(
         .or_else(|| value_string(metrics, "phase"))
         .unwrap_or_else(|| "done".to_string());
     let role = generation_display_role(&value);
+    let segments = generation_segment_summaries(&value);
     let first_text = role
         .as_deref()
-        .and_then(|role| first_segment_text_for_role(&value, role))
-        .or_else(|| first_segment_string(&value, "text"));
+        .and_then(|role| first_segment_text_for_role(&segments, role))
+        .or_else(|| segments.iter().find_map(|segment| segment.text.clone()));
 
     Ok(RecentGenerationItem {
         version: version.to_string(),
@@ -1854,7 +1898,7 @@ fn recent_generation_from_json(
         performance_mode: value_string(metrics, "performance_mode"),
         role,
         first_text,
-        segments: generation_segment_summaries(&value),
+        segments,
         status,
     })
 }
@@ -1918,60 +1962,105 @@ fn array_len_u64(value: Option<&Value>) -> Option<u64> {
 }
 
 fn first_segment_string(value: &Value, key: &str) -> Option<String> {
-    segment_items(value)
-        .and_then(|items| items.first())
-        .and_then(|item| value_string(item, key))
+    generation_segment_summaries(value)
+        .into_iter()
+        .find_map(|item| match key {
+            "role" => item.role,
+            "text" => item.text,
+            _ => None,
+        })
 }
 
-fn first_segment_text_for_role(value: &Value, role: &str) -> Option<String> {
+fn first_segment_text_for_role(
+    segments: &[GenerationSegmentSummary],
+    role: &str,
+) -> Option<String> {
     if role.contains(" / ") {
         return None;
     }
-    segment_items(value)?
+    segments
         .iter()
-        .find(|item| value_string(item, "role").as_deref() == Some(role))
-        .and_then(|item| value_string(item, "text"))
+        .find(|item| item.role.as_deref() == Some(role))
+        .and_then(|item| item.text.clone())
 }
 
-fn segment_items(value: &Value) -> Option<&Vec<Value>> {
+fn segment_arrays(value: &Value) -> Vec<&Vec<Value>> {
     let metrics = value.get("metrics").unwrap_or(&Value::Null);
     [
-        metrics.get("segments"),
         value.get("segments_meta"),
         value.get("segments_plan"),
+        metrics.get("segments"),
     ]
     .iter()
-    .find_map(|section| section.and_then(Value::as_array))
+    .filter_map(|section| section.and_then(Value::as_array))
+    .collect()
+}
+
+fn value_for_segment<'a>(
+    arrays: &'a [&'a Vec<Value>],
+    index: usize,
+    idx: u64,
+    key: &str,
+) -> Option<&'a Value> {
+    arrays
+        .iter()
+        .filter_map(|items| {
+            items
+                .iter()
+                .find(|item| value_u64(item, "idx") == Some(idx))
+                .or_else(|| items.get(index))
+        })
+        .find(|item| item.get(key).is_some())
+}
+
+fn segment_string(arrays: &[&Vec<Value>], index: usize, idx: u64, key: &str) -> Option<String> {
+    value_for_segment(arrays, index, idx, key).and_then(|item| value_string(item, key))
+}
+
+fn segment_f64(arrays: &[&Vec<Value>], index: usize, idx: u64, key: &str) -> Option<f64> {
+    value_for_segment(arrays, index, idx, key).and_then(|item| value_f64(item, key))
+}
+
+fn segment_u64(arrays: &[&Vec<Value>], index: usize, idx: u64, key: &str) -> Option<u64> {
+    value_for_segment(arrays, index, idx, key).and_then(|item| value_u64(item, key))
+}
+
+fn segment_bool(arrays: &[&Vec<Value>], index: usize, idx: u64, key: &str) -> Option<bool> {
+    value_for_segment(arrays, index, idx, key).and_then(|item| value_bool(item, key))
 }
 
 fn generation_segment_summaries(value: &Value) -> Vec<GenerationSegmentSummary> {
-    let Some(items) = segment_items(value) else {
-        return Vec::new();
-    };
-    items
-        .iter()
-        .enumerate()
-        .map(|(index, item)| GenerationSegmentSummary {
-            index: value_u64(item, "idx").unwrap_or(index as u64),
-            role: value_string(item, "role"),
-            text: value_string(item, "text"),
-            style: value_string(item, "style"),
-            style_alpha: value_f64(item, "style_alpha"),
-            start_s: value_f64(item, "start_s"),
-            duration_s: value_f64(item, "duration_s"),
-            wall_s: value_f64(item, "wall_s"),
-            rtf: value_f64(item, "rtf"),
-            infer_rtf: value_f64(item, "infer_rtf"),
-            gpt_gen_s: value_f64(item, "gpt_gen_s"),
-            s2mel_s: value_f64(item, "s2mel_s"),
-            bigvgan_s: value_f64(item, "bigvgan_s"),
-            spk_condition_s: value_f64(item, "spk_condition_s"),
-            emo_condition_s: value_f64(item, "emo_condition_s"),
-            text_len: value_u64(item, "text_len"),
-            text_token_count: value_u64(item, "text_token_count"),
-            spk_cache_hit: value_bool(item, "spk_cache_hit"),
-            emo_cache_hit: value_bool(item, "emo_cache_hit"),
-            uses_style_audio: value_bool(item, "uses_style_audio"),
+    let arrays = segment_arrays(value);
+    let max_len = arrays.iter().map(|items| items.len()).max().unwrap_or(0);
+    (0..max_len)
+        .map(|index| {
+            let idx = arrays
+                .iter()
+                .filter_map(|items| items.get(index).and_then(|item| value_u64(item, "idx")))
+                .next()
+                .unwrap_or(index as u64);
+            GenerationSegmentSummary {
+                index: idx,
+                role: segment_string(&arrays, index, idx, "role"),
+                text: segment_string(&arrays, index, idx, "text"),
+                style: segment_string(&arrays, index, idx, "style"),
+                style_alpha: segment_f64(&arrays, index, idx, "style_alpha"),
+                start_s: segment_f64(&arrays, index, idx, "start_s"),
+                duration_s: segment_f64(&arrays, index, idx, "duration_s"),
+                wall_s: segment_f64(&arrays, index, idx, "wall_s"),
+                rtf: segment_f64(&arrays, index, idx, "rtf"),
+                infer_rtf: segment_f64(&arrays, index, idx, "infer_rtf"),
+                gpt_gen_s: segment_f64(&arrays, index, idx, "gpt_gen_s"),
+                s2mel_s: segment_f64(&arrays, index, idx, "s2mel_s"),
+                bigvgan_s: segment_f64(&arrays, index, idx, "bigvgan_s"),
+                spk_condition_s: segment_f64(&arrays, index, idx, "spk_condition_s"),
+                emo_condition_s: segment_f64(&arrays, index, idx, "emo_condition_s"),
+                text_len: segment_u64(&arrays, index, idx, "text_len"),
+                text_token_count: segment_u64(&arrays, index, idx, "text_token_count"),
+                spk_cache_hit: segment_bool(&arrays, index, idx, "spk_cache_hit"),
+                emo_cache_hit: segment_bool(&arrays, index, idx, "emo_cache_hit"),
+                uses_style_audio: segment_bool(&arrays, index, idx, "uses_style_audio"),
+            }
         })
         .collect()
 }
@@ -1985,10 +2074,11 @@ fn generation_display_role(value: &Value) -> Option<String> {
 }
 
 fn first_non_narrator_segment_role(value: &Value) -> Option<String> {
-    segment_items(value)?
-        .iter()
-        .filter_map(|item| value_string(item, "role"))
-        .find(|role| role != "旁白")
+    generation_segment_summaries(value)
+        .into_iter()
+        .filter_map(|item| item.role)
+        .map(|role| role.trim().to_string())
+        .find(|role| !role.is_empty() && role != "旁白")
 }
 
 fn readable_cache_roles(value: &Value) -> Vec<String> {
@@ -2125,20 +2215,33 @@ fn build_environment_report() -> Result<EnvironmentReport, String> {
     let gpu = gpu_status();
     checks.push(gpu.check);
 
-    let port = port_status(&root, 9880);
+    let api_healthy = api_health_reachable_blocking();
+    let port = port_status(&root, 9880, api_healthy);
     checks.push(port.check);
 
     let stale_gpu_count = project_gpu_runtime_process_count(&root);
+    let running_service_gpu_workers = api_healthy && stale_gpu_count > 0;
     checks.push(env_check(
         "stale_gpu",
         "LEON GPU 残留",
-        if stale_gpu_count > 0 { "warn" } else { "ok" },
-        if stale_gpu_count > 0 {
+        if stale_gpu_count > 0 && !running_service_gpu_workers {
+            "warn"
+        } else {
+            "ok"
+        },
+        if running_service_gpu_workers {
+            "GPU worker 属于运行中服务"
+        } else if stale_gpu_count > 0 {
             "发现可清理的残留 worker"
         } else {
             "没有 LEON GPU 残留"
         },
-        if stale_gpu_count > 0 {
+        if running_service_gpu_workers {
+            format!(
+                "检测到 {} 个 LEON indextts2runtime GPU 进程；API /health 可访问，未判定为残留。",
+                stale_gpu_count
+            )
+        } else if stale_gpu_count > 0 {
             format!(
                 "检测到 {} 个 LEON indextts2runtime GPU 进程。",
                 stale_gpu_count
@@ -2146,7 +2249,7 @@ fn build_environment_report() -> Result<EnvironmentReport, String> {
         } else {
             "nvidia-smi 中未发现 LEON indextts2runtime GPU 进程。".to_string()
         },
-        stale_gpu_count > 0,
+        stale_gpu_count > 0 && !running_service_gpu_workers,
     ));
 
     let vllm = engine_status(&root, "vllm", gpu.free_mib, 9000);
@@ -2206,7 +2309,7 @@ fn build_environment_report() -> Result<EnvironmentReport, String> {
     Ok(EnvironmentReport {
         status,
         summary,
-        root: root.display().to_string(),
+        root: shell_path(&root),
         can_start_vllm,
         can_start_fast6g,
         fixable_count,
@@ -2235,15 +2338,25 @@ fn active_profile_status(root: &Path) -> CheckState {
     let profile_dir = root.join("config").join("profiles");
     let active = profile_dir.join("active.json");
     if active.is_file() {
+        let hidden = is_hidden_file(&active);
         match read_json(&active).and_then(|value| validate_profile_value(&value).map(|_| value)) {
             Ok(_) => CheckState {
                 check: env_check(
                     "active_profile",
                     "Active Profile",
-                    "ok",
-                    "active.json 可用",
-                    active.display().to_string(),
-                    false,
+                    if hidden { "warn" } else { "ok" },
+                    if hidden {
+                        "active.json 可用但被隐藏"
+                    } else {
+                        "已选择配置文件"
+                    },
+                    if hidden {
+                        "config/profiles/active.json 存在但带 Hidden 属性；自动修复会取消隐藏。"
+                            .to_string()
+                    } else {
+                        "config/profiles/active.json".to_string()
+                    },
+                    hidden,
                 ),
                 ready: true,
             },
@@ -2268,7 +2381,7 @@ fn active_profile_status(root: &Path) -> CheckState {
                 "error",
                 "缺少 active.json",
                 template
-                    .map(|path| format!("可从模板创建: {}", path.display()))
+                    .map(|path| format!("可从模板创建: {}", display_project_path(root, &path)))
                     .unwrap_or_else(|| {
                         "缺少 leon-default.json，无法自动创建 active.json。".to_string()
                     }),
@@ -2337,7 +2450,7 @@ fn query_gpu_summary() -> Option<(String, u64, u64)> {
     ))
 }
 
-fn port_status(root: &Path, port: u16) -> CheckState {
+fn port_status(root: &Path, port: u16, api_healthy: bool) -> CheckState {
     let pids = listening_pids(port);
     if pids.is_empty() {
         return CheckState {
@@ -2373,6 +2486,18 @@ fn port_status(root: &Path, port: u16) -> CheckState {
             ),
             ready: false,
         }
+    } else if api_healthy {
+        CheckState {
+            check: env_check(
+                "port",
+                "API 端口 9880",
+                "ok",
+                "LEON 服务正在运行",
+                format!("LEON API /health 可访问，监听 PID: {:?}", project),
+                false,
+            ),
+            ready: true,
+        }
     } else {
         CheckState {
             check: env_check(
@@ -2402,7 +2527,7 @@ fn engine_status(
                 &format!("{} engine", engine),
                 "warn",
                 "未安装",
-                format!("未找到目录: {}", engine_root.display()),
+                format!("未找到目录: {}", display_project_path(root, &engine_root)),
                 false,
             ),
             installed: false,
@@ -2477,6 +2602,61 @@ fn ensure_active_profile(root: &Path) -> Result<Option<String>, String> {
     }
     fs::copy(&template, &active).map_err(|e| format!("创建 active.json 失败: {}", e))?;
     Ok(Some("已从 leon-default.json 创建 active.json".to_string()))
+}
+
+fn ensure_profile_visible(root: &Path) -> Result<Option<String>, String> {
+    let active = root.join("config").join("profiles").join("active.json");
+    if !active.is_file() || !is_hidden_file(&active) {
+        return Ok(None);
+    }
+    clear_hidden_file_attribute(&active)?;
+    Ok(Some("已取消隐藏 config/profiles/active.json".to_string()))
+}
+
+#[cfg(windows)]
+fn is_hidden_file(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    fs::metadata(path)
+        .map(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn is_hidden_file(_path: &Path) -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn clear_hidden_file_attribute(path: &Path) -> Result<(), String> {
+    let mut command = Command::new("attrib");
+    command.arg("-H").arg(shell_path(path));
+    hide_child_window(&mut command);
+    let output = command
+        .output()
+        .map_err(|e| format!("取消 active.json 隐藏属性失败: {}", e))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            "取消 active.json 隐藏属性失败".to_string()
+        } else {
+            format!("取消 active.json 隐藏属性失败: {}", stderr)
+        })
+    }
+}
+
+#[cfg(not(windows))]
+fn clear_hidden_file_attribute(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+fn display_project_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .ok()
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|| shell_path(path))
 }
 
 fn release_runtime_dirs(root: &Path) -> Vec<PathBuf> {
@@ -2582,6 +2762,44 @@ fn wait_for_api_port_closed(timeout: Duration) -> bool {
         std::thread::sleep(Duration::from_millis(150));
     }
     false
+}
+
+fn api_health_reachable_blocking() -> bool {
+    let addr: SocketAddr = match "127.0.0.1:9880".parse() {
+        Ok(addr) => addr,
+        Err(_) => return false,
+    };
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(450)) {
+        Ok(stream) => stream,
+        Err(_) => return false,
+    };
+    if stream
+        .set_write_timeout(Some(Duration::from_millis(450)))
+        .is_err()
+    {
+        return false;
+    }
+    if stream
+        .set_read_timeout(Some(Duration::from_millis(900)))
+        .is_err()
+    {
+        return false;
+    }
+    if stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1:9880\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut buffer = [0u8; 160];
+    let Ok(read) = stream.read(&mut buffer) else {
+        return false;
+    };
+    if read == 0 {
+        return false;
+    }
+    let response = String::from_utf8_lossy(&buffer[..read]);
+    response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
 }
 
 fn kill_project_api_listeners(port: u16) -> Result<usize, String> {
@@ -2814,80 +3032,261 @@ fn system_time_to_rfc3339(time: std::time::SystemTime) -> Option<String> {
     Some(datetime.to_rfc3339())
 }
 
-#[tauri::command]
-async fn upload_voice(name: String, data: Vec<u8>, ext: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
-    let form = reqwest::multipart::Form::new()
-        .text("name", name)
-        .text("ext", ext)
-        .part("file", reqwest::multipart::Part::bytes(data));
-
-    let resp = client
-        .post(format!("{}/voice/upload", API_BASE))
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| format!("上传音色失败: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("上传音色失败: HTTP {}", resp.status()));
+fn upload_voice_local(root: &Path, name: &str, data: &[u8], ext: &str) -> Result<String, String> {
+    if data.is_empty() {
+        return Err("音频文件为空".to_string());
+    }
+    const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
+    if data.len() > MAX_UPLOAD_BYTES {
+        return Err(format!(
+            "音频文件过大，无法导入: {:.1} MB",
+            data.len() as f64 / 1024.0 / 1024.0
+        ));
     }
 
-    let result: Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析响应失败: {}", e))?;
-    Ok(result
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string())
+    let extension = normalize_voice_extension(ext)?;
+    let rel_stem = safe_voice_relative_stem(name)?;
+    let library_root = primary_voice_library_root(root);
+    fs::create_dir_all(&library_root)
+        .map_err(|e| format!("创建音色库目录失败 {}: {}", library_root.display(), e))?;
+
+    let target_stem = library_root.join(&rel_stem);
+    let target = append_voice_extension(&target_stem, &extension);
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("音色路径无效: {}", target.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("创建音色分组目录失败 {}: {}", parent.display(), e))?;
+    delete_existing_voice_variants(&target_stem, Some(&target))?;
+    fs::write(&target, data).map_err(|e| format!("写入音色失败 {}: {}", target.display(), e))?;
+    Ok(relative_to_root(root, &target))
+}
+
+fn delete_voice_local(root: &Path, name: &str) -> Result<String, String> {
+    let path = resolve_voice_ref(root, name).ok_or_else(|| format!("音色不存在: {}", name))?;
+    let canonical = canonical_voice_file_in_library(root, &path)?;
+    fs::remove_file(&canonical)
+        .map_err(|e| format!("删除音色失败 {}: {}", canonical.display(), e))?;
+    prune_empty_voice_dirs(root, canonical.parent());
+    Ok(format!(
+        "已删除音色: {}",
+        strip_extension_for_display(root, &canonical)
+    ))
+}
+
+fn move_voice_local(root: &Path, name: &str, new_group: &str) -> Result<String, String> {
+    let source = resolve_voice_ref(root, name).ok_or_else(|| format!("源音色不存在: {}", name))?;
+    let source = canonical_voice_file_in_library(root, &source)?;
+    let file_name = source
+        .file_name()
+        .ok_or_else(|| format!("源音色文件名无效: {}", source.display()))?;
+    let library_root = primary_voice_library_root(root);
+    fs::create_dir_all(&library_root)
+        .map_err(|e| format!("创建音色库目录失败 {}: {}", library_root.display(), e))?;
+
+    let mut target_dir = library_root.clone();
+    if let Some(group) = safe_voice_group_path(new_group)? {
+        target_dir.push(group);
+    }
+    fs::create_dir_all(&target_dir)
+        .map_err(|e| format!("创建目标分组失败 {}: {}", target_dir.display(), e))?;
+    let target = target_dir.join(file_name);
+    let target_compare = target.canonicalize().unwrap_or_else(|_| target.clone());
+    if source == target_compare {
+        return Ok(format!(
+            "音色已在目标分组: {}",
+            strip_extension_for_display(root, &source)
+        ));
+    }
+    if target.exists() {
+        return Err(format!("目标分组已存在同名音色: {}", target.display()));
+    }
+
+    fs::rename(&source, &target).map_err(|e| {
+        format!(
+            "移动音色失败 {} -> {}: {}",
+            source.display(),
+            target.display(),
+            e
+        )
+    })?;
+    prune_empty_voice_dirs(root, source.parent());
+    Ok(format!(
+        "已移动到: {}",
+        strip_extension_for_display(root, &target)
+    ))
+}
+
+fn canonical_voice_file_in_library(root: &Path, path: &Path) -> Result<PathBuf, String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("解析音色路径失败 {}: {}", path.display(), e))?;
+    if !is_voice_file(&canonical) {
+        return Err(format!("不是支持的音频文件: {}", canonical.display()));
+    }
+    if !is_inside_voice_library(root, &canonical) {
+        return Err("音色操作只允许访问 prompts/library 下的音频".to_string());
+    }
+    Ok(canonical)
+}
+
+fn normalize_voice_extension(ext: &str) -> Result<String, String> {
+    let normalized = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    if voice_extensions()
+        .iter()
+        .any(|item| normalized.eq_ignore_ascii_case(item))
+    {
+        Ok(normalized)
+    } else {
+        Err(format!("不支持的音频扩展名: {}", ext))
+    }
+}
+
+fn safe_voice_relative_stem(raw: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_voice_library_input(raw, true);
+    safe_voice_relative_path(&normalized, "音色名称")
+}
+
+fn safe_voice_group_path(raw: &str) -> Result<Option<PathBuf>, String> {
+    let normalized = normalize_voice_library_input(raw, false);
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(safe_voice_relative_path(&normalized, "目标分组")?))
+}
+
+fn normalize_voice_library_input(raw: &str, strip_ext: bool) -> String {
+    let mut text = raw
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .replace('\\', "/");
+    let lower = text.to_ascii_lowercase();
+    for marker in ["prompts/library/", "library/"] {
+        if let Some(index) = lower.rfind(marker) {
+            text = text[index + marker.len()..].to_string();
+            break;
+        }
+    }
+    let text = text.trim_matches('/').to_string();
+    if strip_ext {
+        strip_known_voice_extension(&text)
+    } else {
+        text
+    }
+}
+
+fn strip_known_voice_extension(text: &str) -> String {
+    let lower = text.to_ascii_lowercase();
+    for ext in voice_extensions() {
+        let suffix = format!(".{}", ext);
+        if lower.ends_with(&suffix) {
+            return text[..text.len().saturating_sub(suffix.len())].to_string();
+        }
+    }
+    text.to_string()
+}
+
+fn safe_voice_relative_path(text: &str, label: &str) -> Result<PathBuf, String> {
+    let mut out = PathBuf::new();
+    for raw_part in text.split('/') {
+        let part = raw_part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if part == "." || part == ".." {
+            return Err(format!("{} 不能包含越级路径: {}", label, text));
+        }
+        if part.chars().any(invalid_voice_path_char) {
+            return Err(format!("{} 包含非法字符: {}", label, part));
+        }
+        out.push(part);
+    }
+    if out.as_os_str().is_empty() {
+        return Err(format!("{} 不能为空", label));
+    }
+    Ok(out)
+}
+
+fn invalid_voice_path_char(ch: char) -> bool {
+    matches!(ch, ':' | '*' | '?' | '"' | '<' | '>' | '|') || ch.is_control()
+}
+
+fn delete_existing_voice_variants(stem: &Path, keep: Option<&Path>) -> Result<(), String> {
+    for ext in voice_extensions() {
+        let candidate = append_voice_extension(stem, ext);
+        if keep
+            .map(|keep_path| keep_path == candidate.as_path())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if candidate.exists() {
+            fs::remove_file(&candidate)
+                .map_err(|e| format!("删除旧音色失败 {}: {}", candidate.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
+fn prune_empty_voice_dirs(root: &Path, start: Option<&Path>) {
+    let Some(mut current) = start.map(Path::to_path_buf) else {
+        return;
+    };
+    let Some(stop_root) = voice_library_root_for_path(root, &current) else {
+        return;
+    };
+    while current != stop_root {
+        let is_empty = fs::read_dir(&current)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if !is_empty || fs::remove_dir(&current).is_err() {
+            break;
+        }
+        let Some(parent) = current.parent().map(Path::to_path_buf) else {
+            break;
+        };
+        current = parent;
+    }
+}
+
+fn voice_library_root_for_path(root: &Path, path: &Path) -> Option<PathBuf> {
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    voice_library_roots(root)
+        .into_iter()
+        .find(|library_root| canonical_path.starts_with(library_root))
+}
+
+fn relative_to_root(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn strip_extension_for_display(root: &Path, path: &Path) -> String {
+    path.strip_prefix(primary_voice_library_root(root))
+        .map(strip_extension)
+        .unwrap_or_else(|_| strip_extension(path))
+        .replace('\\', "/")
+}
+
+#[tauri::command]
+async fn upload_voice(name: String, data: Vec<u8>, ext: String) -> Result<String, String> {
+    let root = leon_root()?;
+    upload_voice_local(&root, &name, &data, &ext)
 }
 
 #[tauri::command]
 async fn delete_voice(name: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .delete(format!("{}/voice/{}", API_BASE, urlencoding::encode(&name)))
-        .send()
-        .await
-        .map_err(|e| format!("删除音色失败: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("删除音色失败: HTTP {}", resp.status()));
-    }
-
-    Ok(format!("已删除音色: {}", name))
+    let root = leon_root()?;
+    delete_voice_local(&root, &name)
 }
 
 #[tauri::command]
 async fn move_voice(name: String, new_group: String) -> Result<String, String> {
-    let old_parts: Vec<&str> = name.rsplitn(2, '/').collect();
-    let base_name = old_parts[0];
-    let new_name = if new_group.is_empty() {
-        base_name.to_string()
-    } else {
-        format!("{}/{}", new_group.trim_matches('/'), base_name)
-    };
-
-    let client = reqwest::Client::new();
-    let body = serde_json::json!({
-        "old_name": name,
-        "new_name": new_name
-    });
-
-    let resp = client
-        .post(format!("{}/voice/move", API_BASE))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("移动音色失败: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("移动音色失败: HTTP {}", resp.status()));
-    }
-
-    Ok(format!("已移动到: {}", new_name))
+    let root = leon_root()?;
+    move_voice_local(&root, &name, &new_group)
 }
 
 #[tauri::command]
