@@ -29,7 +29,13 @@
     background: linear-gradient(135deg, #ef4444, #dc2626);
 }
 
-.btn-launch.running .btn-icon {
+.btn-launch.pending {
+    cursor: progress;
+    background: linear-gradient(135deg, #d99b2b, #ffd86a);
+}
+
+.btn-launch.running .btn-icon,
+.btn-launch.pending .btn-icon {
     animation: spin 1s linear infinite;
 }
 
@@ -1259,6 +1265,12 @@ select option:checked {
 
 .bottom-panel .btn-launch.running {
     background: linear-gradient(135deg, #b64c43, #e07162);
+}
+
+.bottom-panel .btn-launch.pending {
+    color: #1a1a1a;
+    background: linear-gradient(135deg, #d49a2f, #ffd86a);
+    border-color: rgba(255, 216, 106, 0.62);
 }
 
 .btn-secondary,
@@ -2995,7 +3007,7 @@ select option:checked {
 
 .generation-metrics {
     display: grid;
-    grid-template-columns: repeat(4, minmax(70px, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
     min-width: 0;
 }
@@ -3016,6 +3028,15 @@ select option:checked {
 .generation-metrics b {
     color: #ffd86a;
     font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.generation-quality-metric {
+    border-color: rgba(110, 231, 199, 0.20) !important;
+    background: rgba(110, 231, 199, 0.08) !important;
+}
+
+.generation-quality-metric b {
+    color: #6ee7c7;
 }
 
 .generation-time {
@@ -3098,8 +3119,8 @@ select option:checked {
 
 .generation-segment-row {
     display: grid;
-    grid-template-columns: 34px 86px minmax(0, 1fr) 120px;
-    gap: 8px;
+    grid-template-columns: 34px 116px minmax(220px, 1fr) minmax(280px, 0.8fr);
+    gap: 10px;
     align-items: start;
     padding: 8px 10px;
     background: rgba(255, 255, 255, 0.035);
@@ -3107,16 +3128,73 @@ select option:checked {
     border-radius: 7px;
 }
 
-.generation-segment-row span,
-.generation-segment-row em {
+.generation-segment-row.is-character {
+    border-left: 3px solid var(--role-color, #6ee7c7);
+}
+
+.generation-segment-row.is-narrator {
+    border-left: 3px solid #d8b45f;
+}
+
+.generation-segment-row .segment-index,
+.segment-metrics em {
     color: rgba(218, 228, 238, 0.48);
     font-family: 'Consolas', 'Monaco', monospace;
     font-size: 11px;
     font-style: normal;
 }
 
-.generation-segment-row b {
-    color: #6ee7c7;
+.role-pill {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 22px;
+    padding: 3px 8px;
+    overflow: hidden;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.role-pill.narrator {
+    color: #d8b45f;
+    background: rgba(216, 180, 95, 0.10);
+}
+
+.role-pill.character {
+    color: var(--role-color, #6ee7c7);
+    background: rgba(110, 231, 199, 0.08);
+}
+
+.segment-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(62px, 1fr));
+    gap: 5px;
+}
+
+.segment-metrics em {
+    min-width: 0;
+    padding: 4px 6px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(151, 178, 205, 0.10);
+    border-radius: 5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.segment-metrics em:first-child {
+    color: #ffd86a;
+    border-color: rgba(255, 216, 106, 0.22);
+    background: rgba(255, 216, 106, 0.08);
+}
+
+.generation-segment-row .role-pill {
     font-size: 12px;
 }
 

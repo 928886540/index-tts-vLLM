@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof document !== "undefined" && document.currentScript) ? document.currentScript : null;
-  var LOADER_VERSION = "20260612-mp3-cache-v66";
+  var LOADER_VERSION = "20260612-mp3-cache-v70";
   var STYLE_ID = "indextts-tavo-loader-v2";
   var TRACKS_KEY_PREFIX = "indextts_tracks_";
   var PENDING_JOBS_KEY_PREFIX = "indextts_pending_jobs_";

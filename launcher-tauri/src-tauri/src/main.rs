@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::{
     fs,
     io::Write,
-    net::TcpListener,
+    net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
@@ -96,6 +96,14 @@ struct RecentGenerationItem {
     duration_s: Option<f64>,
     wall_s: Option<f64>,
     rtf: Option<f64>,
+    wall_rtf: Option<f64>,
+    first_pcm_s: Option<f64>,
+    queue_wait_s: Option<f64>,
+    llm_parse_s: Option<f64>,
+    gpt_gen_s: Option<f64>,
+    s2mel_s: Option<f64>,
+    bigvgan_s: Option<f64>,
+    cache_write_s: Option<f64>,
     segments_done: Option<u64>,
     segments_total: Option<u64>,
     parse_mode: Option<String>,
@@ -113,8 +121,22 @@ struct GenerationSegmentSummary {
     role: Option<String>,
     text: Option<String>,
     style: Option<String>,
+    style_alpha: Option<f64>,
     start_s: Option<f64>,
     duration_s: Option<f64>,
+    wall_s: Option<f64>,
+    rtf: Option<f64>,
+    infer_rtf: Option<f64>,
+    gpt_gen_s: Option<f64>,
+    s2mel_s: Option<f64>,
+    bigvgan_s: Option<f64>,
+    spk_condition_s: Option<f64>,
+    emo_condition_s: Option<f64>,
+    text_len: Option<u64>,
+    text_token_count: Option<u64>,
+    spk_cache_hit: Option<bool>,
+    emo_cache_hit: Option<bool>,
+    uses_style_audio: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -208,7 +230,7 @@ fn main() {
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 let state = window.state::<AppState>();
-                let _ = cleanup_service_wrapper(&state);
+                cleanup_service_on_exit(&state);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -724,10 +746,18 @@ async fn stop_service(state: State<'_, AppState>) -> Result<String, String> {
         .send()
         .await;
 
+    tokio::time::sleep(Duration::from_millis(1200)).await;
     let killed_wrapper = cleanup_service_wrapper(&state)?;
+    let killed_project_listeners = kill_project_api_listeners(9880)?;
+    let killed_project_gpu_workers = kill_project_gpu_runtime_processes()?;
 
-    if killed_wrapper {
-        Ok("已发送退出请求，并清理启动 wrapper".to_string())
+    if killed_wrapper || killed_project_listeners > 0 || killed_project_gpu_workers > 0 {
+        Ok(format!(
+            "已发送退出请求，并清理残留进程：wrapper={}，API={}，GPU worker={}",
+            if killed_wrapper { 1 } else { 0 },
+            killed_project_listeners,
+            killed_project_gpu_workers
+        ))
     } else {
         Ok("已发送退出请求".to_string())
     }
@@ -888,7 +918,15 @@ fn get_log_snapshot(version: String, max_lines: Option<usize>) -> Result<LogSnap
     });
     candidates.sort_by(|a, b| b.1.cmp(&a.1));
 
-    let Some((active_path, _)) = candidates.first() else {
+    let latest_modified = candidates.first().and_then(|(_, modified)| *modified);
+    let Some((active_path, _)) = candidates
+        .iter()
+        .find(|(path, modified)| {
+            is_launcher_log_file(path)
+                && modified_is_close_to_latest(*modified, latest_modified, Duration::from_secs(180))
+        })
+        .or_else(|| candidates.first())
+    else {
         return Ok(LogSnapshot {
             version: normalized,
             files,
@@ -1690,6 +1728,15 @@ fn recent_generation_from_json(
             .or_else(|| value_f64(metrics, "audio_duration_s")),
         wall_s: value_f64(metrics, "total_wall_s").or_else(|| value_f64(metrics, "infer_total_s")),
         rtf: value_f64(metrics, "rtf"),
+        wall_rtf: value_f64(metrics, "wall_rtf"),
+        first_pcm_s: value_f64(metrics, "first_pcm_s"),
+        queue_wait_s: value_f64(metrics, "queue_wait_s"),
+        llm_parse_s: value_f64(metrics, "llm_parse_s")
+            .or_else(|| value_f64(metrics, "llm_elapsed_s")),
+        gpt_gen_s: value_f64(metrics, "gpt_gen_s"),
+        s2mel_s: value_f64(metrics, "s2mel_s"),
+        bigvgan_s: value_f64(metrics, "bigvgan_s"),
+        cache_write_s: value_f64(metrics, "cache_write_s"),
         segments_done: value_u64(metrics, "segments_done")
             .or_else(|| array_len_u64(value.get("segments_meta"))),
         segments_total: value_u64(metrics, "segments_total")
@@ -1746,6 +1793,10 @@ fn value_u64(value: &Value, key: &str) -> Option<u64> {
     value.get(key).and_then(Value::as_u64)
 }
 
+fn value_bool(value: &Value, key: &str) -> Option<bool> {
+    value.get(key).and_then(Value::as_bool)
+}
+
 fn array_len_u64(value: Option<&Value>) -> Option<u64> {
     value
         .and_then(Value::as_array)
@@ -1771,8 +1822,8 @@ fn first_segment_text_for_role(value: &Value, role: &str) -> Option<String> {
 fn segment_items(value: &Value) -> Option<&Vec<Value>> {
     let metrics = value.get("metrics").unwrap_or(&Value::Null);
     [
-        value.get("segments_meta"),
         metrics.get("segments"),
+        value.get("segments_meta"),
         value.get("segments_plan"),
     ]
     .iter()
@@ -1791,8 +1842,22 @@ fn generation_segment_summaries(value: &Value) -> Vec<GenerationSegmentSummary> 
             role: value_string(item, "role"),
             text: value_string(item, "text"),
             style: value_string(item, "style"),
+            style_alpha: value_f64(item, "style_alpha"),
             start_s: value_f64(item, "start_s"),
             duration_s: value_f64(item, "duration_s"),
+            wall_s: value_f64(item, "wall_s"),
+            rtf: value_f64(item, "rtf"),
+            infer_rtf: value_f64(item, "infer_rtf"),
+            gpt_gen_s: value_f64(item, "gpt_gen_s"),
+            s2mel_s: value_f64(item, "s2mel_s"),
+            bigvgan_s: value_f64(item, "bigvgan_s"),
+            spk_condition_s: value_f64(item, "spk_condition_s"),
+            emo_condition_s: value_f64(item, "emo_condition_s"),
+            text_len: value_u64(item, "text_len"),
+            text_token_count: value_u64(item, "text_token_count"),
+            spk_cache_hit: value_bool(item, "spk_cache_hit"),
+            emo_cache_hit: value_bool(item, "emo_cache_hit"),
+            uses_style_audio: value_bool(item, "uses_style_audio"),
         })
         .collect()
 }
@@ -1932,11 +1997,166 @@ fn listening_pids(port: u16) -> Vec<String> {
     pids
 }
 
+fn cleanup_service_on_exit(state: &AppState) {
+    let _ = request_api_exit_blocking();
+    wait_for_api_port_closed(Duration::from_millis(1500));
+    let _ = cleanup_service_wrapper(state);
+    let _ = kill_project_api_listeners(9880);
+    let _ = kill_project_gpu_runtime_processes();
+}
+
+fn request_api_exit_blocking() -> Result<(), String> {
+    let addr: SocketAddr = "127.0.0.1:9880"
+        .parse()
+        .map_err(|e| format!("解析 API 地址失败: {}", e))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(700))
+        .map_err(|e| format!("连接 API 退出接口失败: {}", e))?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(700)))
+        .map_err(|e| format!("设置 API 退出写超时失败: {}", e))?;
+    stream
+        .write_all(b"GET /control?command=exit HTTP/1.1\r\nHost: 127.0.0.1:9880\r\nConnection: close\r\n\r\n")
+        .map_err(|e| format!("发送 API 退出请求失败: {}", e))
+}
+
+fn wait_for_api_port_closed(timeout: Duration) -> bool {
+    let addr: SocketAddr = match "127.0.0.1:9880".parse() {
+        Ok(addr) => addr,
+        Err(_) => return false,
+    };
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_err() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    false
+}
+
+fn kill_project_api_listeners(port: u16) -> Result<usize, String> {
+    let root = leon_root()?;
+    let mut killed = 0usize;
+    for pid_text in listening_pids(port) {
+        let Ok(pid) = pid_text.parse::<u32>() else {
+            continue;
+        };
+        if project_process_matches_root(pid, &root) {
+            kill_process_tree(pid);
+            killed += 1;
+        }
+    }
+    Ok(killed)
+}
+
+fn kill_project_gpu_runtime_processes() -> Result<usize, String> {
+    let root = leon_root()?;
+    let mut killed = 0usize;
+    for pid in gpu_process_pids() {
+        if project_runtime_python_matches_root(pid, &root) {
+            kill_process_tree(pid);
+            killed += 1;
+        }
+    }
+    Ok(killed)
+}
+
+fn gpu_process_pids() -> Vec<u32> {
+    let mut command = Command::new("nvidia-smi");
+    command.args(["--query-compute-apps=pid", "--format=csv,noheader,nounits"]);
+    hide_child_window(&mut command);
+    let Ok(output) = command.output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let mut pids = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some(first) = line.split([',', ' ']).find(|part| !part.trim().is_empty()) else {
+            continue;
+        };
+        let Ok(pid) = first.trim().parse::<u32>() else {
+            continue;
+        };
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
+fn project_process_matches_root(pid: u32, root: &Path) -> bool {
+    let Some(command_line) = process_command_line(pid) else {
+        return false;
+    };
+    let root_text = shell_path(root).to_ascii_lowercase();
+    command_line.to_ascii_lowercase().contains(&root_text)
+}
+
+fn project_runtime_python_matches_root(pid: u32, root: &Path) -> bool {
+    let Some(command_line) = process_command_line(pid) else {
+        return false;
+    };
+    let root_text = normalize_windows_path_text(&shell_path(root));
+    let command_text = normalize_windows_path_text(&command_line);
+    command_text.contains(&root_text) && command_text.contains(r"indextts2runtime\python.exe")
+}
+
+fn normalize_windows_path_text(text: &str) -> String {
+    text.replace('/', "\\").to_ascii_lowercase()
+}
+
+fn process_command_line(pid: u32) -> Option<String> {
+    let script = format!(
+        "$p=Get-CimInstance Win32_Process -Filter \"ProcessId = {}\"; if ($p) {{ $p.CommandLine }}",
+        pid
+    );
+    let mut command = Command::new("powershell.exe");
+    command.arg("-NoProfile").arg("-Command").arg(&script);
+    hide_child_window(&mut command);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
 fn is_log_file(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|s| s.to_str()),
         Some("log" | "err" | "txt")
     )
+}
+
+fn is_launcher_log_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.starts_with("launcher-") && name.ends_with(".log"))
+        .unwrap_or(false)
+}
+
+fn modified_is_close_to_latest(
+    candidate: Option<std::time::SystemTime>,
+    latest: Option<std::time::SystemTime>,
+    tolerance: Duration,
+) -> bool {
+    match (candidate, latest) {
+        (Some(candidate), Some(latest)) => {
+            candidate >= latest
+                || latest
+                    .duration_since(candidate)
+                    .map(|elapsed| elapsed <= tolerance)
+                    .unwrap_or(true)
+        }
+        _ => true,
+    }
 }
 
 fn launcher_log_path(root: &Path, version: &str) -> Result<PathBuf, String> {

@@ -143,6 +143,7 @@
       track.allowStreamPlay = false;
       track.playSavedWhenReady = false;
       track.liveEndedAwaitSaved = false;
+      track.savedLiveSourceActive = false;
       track.streamPlaybackFinished = !!opts.ended;
       track.livePageSuspended = false;
       track.pausedByUser = false;
@@ -320,6 +321,12 @@
     function handleAudioPlayReject(label, err, fallbackStatus) {
       if (err && err.name === "AbortError") return;
       var t = currentTrack();
+      if (t && isTerminalTrack(t)) {
+        setPlayState("idle");
+        setStatus(trackState(t) === "cancelled" ? "任务已取消" : "生成失败");
+        showTrackNotice(t, trackState(t) === "cancelled" ? "任务已取消" : "生成失败", t.error || "点音符重新生成");
+        return;
+      }
       if (t) setTrackPlaybackState(t, "idle");
       setPlayState("idle");
       if (isUnsupportedPlayError(err)) {

@@ -71,7 +71,8 @@ Current smoke must prove:
 - non-cached LIVE jobs write a chat-scoped pending card immediately after `cacheKey`; remounting the message restores that same key without a new POST, and explicit LIVE exit/delete must use `preserve_completed=1`;
 - stale `pending/live` records with a `cacheKey` must refresh `/tts_dialogue_job_status` and/or `/cache_audio` before select/play; `state=done`, `status=done`, or `serverState=done` must promote to saved history, clear pending, and play `/cache_audio` instead of re-entering LIVE;
 - saved/cache MP3 seek must stay on the saved native `<audio>` source even if the element still has stale `live-mp3` dataset/source from an old stream. Dragging the progress bar must set `audio.currentTime`, update the seek value, immediately sync the highlighted lyric row, and make no new LIVE GET or `/mp3?start_s=...` request;
-- if a saved card still has a LIVE `/tts_dialogue_stream_job/...` audio source after cache landing, `pause` / `stalled` / `ended` and the next saved play click must switch to complete `/cache_audio` or offline blob, keep the card, hide LIVE-exit, and must not DELETE or reconnect the live job;
+- if a current LIVE MP3 session becomes cache-ready while it is already playing, the track may be `saved` for history but the active `<audio>` source remains `live-mp3`. Transient or sustained `stalled` events must not auto-mount `/cache_audio`, must not DELETE/reconnect, and must keep LIVE controls visible until the live source naturally ends, errors, or the user explicitly seeks/replays saved audio;
+- if an inactive saved/history card is polluted with a stale LIVE `/tts_dialogue_stream_job/...` audio source, saved seek/play/error/ended paths must repair it back to complete `/cache_audio` or offline blob, keep the card, hide LIVE-exit, and must not DELETE or reconnect the live job;
 - after a card becomes saved/complete audio, the floating progress line must clear stale LIVE synthesis text. Saved playback and saved seek must not display `已生成 x/y 段`, `合成 x/y`, or `正在播第 x/y 段`;
 - saved/cache MP3 seek while the track is playing must keep the main button and track state as playing. The next play-button click should pause, not be required to catch up to the real audio state;
 - previous/next saved-card selection must start from the selected card's own clean initial position; current v61 behavior intentionally starts saved-card switches from 0 to avoid first-load progress inheritance;
@@ -148,7 +149,7 @@ Current smoke must prove:
 - User-facing copy must not say "实时生成跟不上" or "手动续播".
 - Completed cache handoff must stop WebAudio before mounting native saved `<audio>` only when LIVE never became audible, was interrupted, or entered explicit saved-cache fallback; stable/audible LIVE should not be stolen just because cache landed.
 - Cache落盘 must not steal an already audible LIVE stream into saved `<audio>` or show a fresh loading handoff just because a transient stalled/buffering flag was recorded.
-- Cache落盘 while native `live-mp3` is already owned by the current track must keep that live source playing and continue progress/subtitle updates; saved `/cache_audio` mounting is reserved for explicit fallback, user seek, replay, or non-audible/interrupted streams.
+- Cache落盘 while native `live-mp3` is already owned by the current track must keep that live source playing and continue progress/subtitle updates. Saved `/cache_audio` mounting is reserved for natural live end, audio error, explicit saved fallback, user seek/replay, or non-audible/interrupted streams; `stalled` alone is not enough to force the handoff.
 - Short buffering after LIVE playback starts must not immediately reset the main button to idle or show "还没收到实时音频".
 - LIVE PCM playback should keep enough prebuffer, pull sufficiently large chunks, and flush small pending PCM tails before the queue runs dry to reduce audible 0.xs stalls at segment boundaries.
 - If cache audio becomes ready while LIVE never became audible, was interrupted, or entered explicit saved-cache fallback, the frontend may force native saved `<audio>` handoff so the user gets audible playback.
@@ -163,8 +164,10 @@ Current smoke must prove:
 - UI should translate raw backend phases into clear text, such as LLM call, role/emotion analysis, waiting first audio, or synthesizing segment x/y.
 - During backend-owned LLM parsing, `/tts_dialogue_job_status/{cache_key}` should expose `llm_stage` and fresh `llm_elapsed_s`; the frontend should show `检查分段复用`, `等待 LLM 返回 Ns`, or `整理分段结果`, not first-audio waiting copy.
 - If `复用 LLM 拆段` is requested but no parse cache is hit, user-facing copy should say `复用未命中，等待 LLM 返回 Ns` so it is clear the option was checked but missed.
+- AI LIVE must not connect `/tts_dialogue_stream_job/<cache_key>/mp3` while backend status is still `created` or `llm_parse`, unless reusable segments already exist. If the backend reports `failed` / `cancelled` during LLM parsing, the card must finalize as failed/cancelled, clear pending/LIVE output, and must not fall through to MP3-unavailable or saved-cache fallback copy.
 - When a live job is waiting on the single TTS lock, `/tts_dialogue_job_status/{cache_key}` should include queue metrics and the Tavo progress hint should say `前面还有 X 个 TTS 任务` or `下一个开始`.
 - LIVE synthesis status should include current playback segment only when the current playback second falls inside known timed `segments_meta`; if playback has moved past the generated meta tail, show only reliable generated count such as `已生成 21/137 段` and do not keep a stale `正在播第 5/137 段`.
+- LIVE generated-count status must prefer actual `segments_meta` over early `metrics.segments_done`. If status says `segments_done=2/3` but only one generated meta row exists, the floating hint should stay `已生成 1/3 段` until the second timed meta row arrives; same-base polling must not strip a valid local `正在播第 x/y 段` suffix.
 - `latestSynthesisStatusText` is LIVE/TTS-only state. Cache-ready, live-exit preserve, saved-source handoff, and history attach paths must clear it before the card is treated as saved playback.
 - Do not expose raw internal copy like "文本已拆分" as the main user-facing status.
 - Native `<audio>` `seeking` / `seeked` logs should be hidden unless the script URL explicitly enables `debugSeek=1`.
@@ -199,6 +202,7 @@ Latest validation passed 2026-06-11 after style-reference editor and log-noise f
 - `voice_library.get_voice_path("声腔/喘息-AD学姐")` should resolve under root `prompts/library` from both `vllm/` and `fast6g/` cwd.
 - `voice_library.list_voices()` should return the same shared library count from both `vllm/` and `fast6g/` cwd, and fast6g `/voices` must use that shared helper rather than a local duplicated traversal.
 - Stop must request `GET http://127.0.0.1:9880/control?command=exit` before clearing the launcher wrapper.
+- Closing the launcher window must use the same stop contract: request `/control?command=exit`, wait briefly, clear the launcher wrapper, then kill only port-9880 listener processes whose command line belongs to the current LEON root. It must not leave a project API process running, and it must not kill unrelated port owners.
 - Profile list must read source files under `config/profiles/*.json` and exclude `active.json`.
 - Creating a Profile must clone an explicit schema v3 template (`leon-default.json` preferred, then `active.json`) into a non-conflicting `leon-new-profile*.json`; it must not create an incomplete hidden-default profile.
 - Applying a Profile writes only `config/profiles/active.json` and preserves `appliedFrom`.

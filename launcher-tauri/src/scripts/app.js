@@ -184,6 +184,7 @@ class LeonLauncher {
         this.logSnapshotDropped = 0;
         this.logSnapshotFiles = [];
         this.selectedVersion = 'vllm';
+        this.serviceUiState = 'stopped';
         this.voiceRefs = [];
         this.voiceRefMap = new Map();
         this.modalCloseHandler = null;
@@ -577,8 +578,10 @@ class LeonLauncher {
     async toggleService() {
         const btn = document.getElementById('btn-start');
 
-        if (this.isRunning) {
+        if (this.isRunning || this.serviceUiState === 'starting') {
             await this.stopService(btn);
+        } else if (this.serviceUiState === 'stopping') {
+            return;
         } else {
             await this.startService(btn);
         }
@@ -588,6 +591,7 @@ class LeonLauncher {
 
     async startService(btn) {
         btn.disabled = true;
+        this.setServiceButtonState('starting');
         const version = this.selectedVersion;
         let gpuRatio = null;
         let enableMsvc = true;
@@ -602,6 +606,7 @@ class LeonLauncher {
             }
         } catch (error) {
             this.addLog('error', `启动参数错误: ${formatError(error)}`);
+            this.setRunningUi(false);
             btn.disabled = false;
             return;
         }
@@ -612,9 +617,12 @@ class LeonLauncher {
         try {
             const message = await api.startService(version, gpuRatio, enableMsvc);
             this.addLog('success', normalizeMessage(message));
-            this.addLog('info', '正在加载模型，请等待 20-30 秒...');
-            this.setRunningUi(true);
-            this.startUptimeCounter();
+            this.addLog('info', '启动命令已发送，正在加载模型并等待 API ready...');
+            this.setServiceButtonState('starting');
+            this.setSystemStatus('starting', '模型加载中');
+            setTimeout(() => this.refreshServiceStatus(true), 1500);
+            setTimeout(() => this.refreshServiceStatus(true), 6000);
+            setTimeout(() => this.refreshServiceStatus(true), 15000);
             setTimeout(() => this.refreshServiceStatus(true), 30000);
         } catch (error) {
             this.addLog('error', `启动失败: ${formatError(error)}`);
@@ -637,6 +645,7 @@ class LeonLauncher {
 
     async stopService(btn) {
         btn.disabled = true;
+        this.setServiceButtonState('stopping');
         this.addLog('warning', '正在停止服务...');
         this.setSystemStatus('starting', '服务停止中');
 
@@ -661,13 +670,20 @@ class LeonLauncher {
             const label = status.health?.version
                 ? `服务运行中 · ${status.health.version}`
                 : cleanStatusMessage(status.health?.message) || (running ? '服务运行中' : '服务未运行');
+            const state = status.state || (running ? 'running' : 'stopped');
 
             if (running !== this.isRunning && logChanges) {
                 this.addLog(running ? 'success' : 'warning', label);
             }
 
+            if (!running && state === 'starting') {
+                this.setServiceButtonState('starting');
+                this.setSystemStatus('starting', '模型加载中');
+                return;
+            }
+
             this.setRunningUi(running);
-            this.setSystemStatus(status.state || (running ? 'running' : 'stopped'), label);
+            this.setSystemStatus(state, label);
         } catch (error) {
             this.setSystemStatus('stopped', '服务未运行');
         }
@@ -675,16 +691,36 @@ class LeonLauncher {
 
     setRunningUi(running) {
         this.isRunning = running;
-        const btn = document.getElementById('btn-start');
-        const btnText = btn.querySelector('span');
-        const btnIcon = btn.querySelector('.btn-icon path');
-
-        btn.classList.toggle('running', running);
-        btnText.textContent = running ? '停止 LEON 服务' : '启动 LEON 服务';
-        btnIcon.setAttribute('d', running ? 'M6 4h4v16H6zM14 4h4v16h-4z' : 'M8 5v14l11-7z');
+        this.setServiceButtonState(running ? 'running' : 'stopped');
 
         if (running && !this.uptimeInterval) this.startUptimeCounter();
         if (!running && this.uptimeInterval) this.stopUptimeCounter();
+    }
+
+    setServiceButtonState(state) {
+        this.serviceUiState = state || 'stopped';
+        const btn = document.getElementById('btn-start');
+        if (!btn) return;
+        const btnText = btn.querySelector('span');
+        const btnIcon = btn.querySelector('.btn-icon path');
+        const running = state === 'running';
+        const pending = state === 'starting' || state === 'stopping';
+
+        btn.classList.toggle('running', running);
+        btn.classList.toggle('pending', pending);
+        btn.classList.toggle('stopping', state === 'stopping');
+        if (btnText) {
+            btnText.textContent = state === 'starting'
+                ? '启动中...'
+                : state === 'stopping'
+                    ? '停止中...'
+                    : running
+                        ? '停止 LEON 服务'
+                        : '启动 LEON 服务';
+        }
+        if (btnIcon) {
+            btnIcon.setAttribute('d', running || state === 'stopping' ? 'M6 4h4v16H6zM14 4h4v16h-4z' : 'M8 5v14l11-7z');
+        }
     }
 
     setSystemStatus(state, text) {
@@ -1974,8 +2010,10 @@ ${completenessRules}`;
         const fileLabel = snapshot.activeFile || '无日志文件';
         this.addLog('info', `${snapshot.version} · ${fileLabel}`, null, { category: 'startup' });
 
+        let snapshotFallbackTimestamp = null;
         if (snapshot.files?.length && snapshot.activeFile) {
             const activeInfo = snapshot.files.find(file => file.file === snapshot.activeFile);
+            snapshotFallbackTimestamp = logTimeFromDate(activeInfo?.modified);
             const size = activeInfo ? ` (${formatBytes(activeInfo.bytes)})` : '';
             const modified = activeInfo?.modified ? ` · 修改 ${formatDateTime(activeInfo.modified)}` : '';
             this.addLog('info', `当前日志文件: ${snapshot.activeFile}${size}${modified}`, null, { category: 'startup' });
@@ -1990,7 +2028,7 @@ ${completenessRules}`;
             if (parsed.timestamp) {
                 lastSnapshotTimestamp = parsed.timestamp;
             }
-            this.addLog(parsed.level, parsed.message, parsed.timestamp || lastSnapshotTimestamp || '历史');
+            this.addLog(parsed.level, parsed.message, parsed.timestamp || lastSnapshotTimestamp || snapshotFallbackTimestamp || '日志');
         });
         this.renderLogSummary();
     }
@@ -2137,7 +2175,8 @@ ${completenessRules}`;
             || entry.level === levelFilter;
         const category = entry.category || 'other';
         const categoryMatches = categoryFilter === 'all'
-            || (categoryFilter === 'useful' && (category !== 'other' || ['warning', 'error', 'success'].includes(entry.level)))
+            || (categoryFilter === 'useful' && ((category !== 'other' && category !== 'advisory')
+                || (['warning', 'error', 'success'].includes(entry.level) && category !== 'advisory')))
             || category === categoryFilter
             || (categoryFilter === 'error' && entry.level === 'error');
         const text = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`.toLowerCase();
@@ -2698,6 +2737,7 @@ ${completenessRules}`;
                         <p>${escapeHtml(truncateText(item.firstText || '-', 88))}</p>
                     </div>
                     <div class="generation-metrics">
+                        <span class="generation-quality-metric">档位名称 <b>${escapeHtml(generationQualityLabel(item.performanceMode))}</b></span>
                         <span>RTF <b>${escapeHtml(formatRtf(item.rtf))}</b></span>
                         <span>音频 <b>${escapeHtml(formatSeconds(item.durationS))}</b></span>
                         <span>总耗时 <b>${escapeHtml(formatSeconds(item.wallS))}</b></span>
@@ -2740,27 +2780,43 @@ ${completenessRules}`;
                 <button type="button" class="modal-close">×</button>
             </div>
             <div class="modal-body generation-detail">
-                <div class="generation-detail-grid">
-                    <div><span>角色</span><b>${escapeHtml(generationRoleLabel(item))}</b></div>
+                    <div class="generation-detail-grid">
+                    <div><span>角色</span>${rolePillHtml(generationRoleLabel(item))}</div>
                     <div><span>状态</span><b>${escapeHtml(item.status || '-')}</b></div>
                     <div><span>解析</span><b>${escapeHtml(item.parseMode || '-')}</b></div>
-                    <div><span>档位</span><b>${escapeHtml(item.performanceMode || '-')}</b></div>
+                    <div><span>档位名称</span><b>${escapeHtml(generationQualityLabel(item.performanceMode))}</b></div>
                     <div><span>RTF</span><b>${escapeHtml(formatRtf(item.rtf))}</b></div>
+                    <div><span>Wall RTF</span><b>${escapeHtml(formatRtf(item.wallRtf))}</b></div>
                     <div><span>音频时长</span><b>${escapeHtml(formatSeconds(item.durationS))}</b></div>
                     <div><span>总耗时</span><b>${escapeHtml(formatSeconds(item.wallS))}</b></div>
+                    <div><span>首段出声</span><b>${escapeHtml(formatSeconds(item.firstPcmS))}</b></div>
+                    <div><span>排队等待</span><b>${escapeHtml(formatSeconds(item.queueWaitS))}</b></div>
+                    <div><span>LLM解析</span><b>${escapeHtml(formatSeconds(item.llmParseS))}</b></div>
+                    <div><span>GPT生成</span><b>${escapeHtml(formatSeconds(item.gptGenS))}</b></div>
+                    <div><span>S2Mel</span><b>${escapeHtml(formatSeconds(item.s2melS))}</b></div>
+                    <div><span>BigVGAN</span><b>${escapeHtml(formatSeconds(item.bigvganS))}</b></div>
                     <div><span>音频文件</span><b>${escapeHtml((item.audioFormat || '-').toUpperCase())} · ${escapeHtml(formatBytes(item.audioBytes))}</b></div>
                     <div><span>分段</span><b>${escapeHtml(formatGenerationSegmentCount(item))}</b></div>
                     <div><span>创建时间</span><b>${escapeHtml(formatDateTime(item.createdAt || item.modified))}</b></div>
                 </div>
                 <section class="generation-detail-section">
-                    <h4>分段文本</h4>
+                    <h4>分段文本与耗时</h4>
                     <div class="generation-segment-list">
                         ${segments.length ? segments.map(segment => `
-                            <div class="generation-segment-row">
-                                <span>${escapeHtml(`${Number(segment.index ?? 0) + 1}`)}</span>
-                                <b>${escapeHtml(segment.role || '-')}</b>
+                            <div class="generation-segment-row ${segmentRoleClass(segment.role)}"${roleStyleAttribute(segment.role)}>
+                                <span class="segment-index">${escapeHtml(`${Number(segment.index ?? 0) + 1}`)}</span>
+                                ${rolePillHtml(segment.role || '-')}
                                 <p>${escapeHtml(segment.text || '-')}</p>
-                                <em>${escapeHtml(segment.style || '-')} · ${escapeHtml(formatSeconds(segment.durationS))}</em>
+                                <div class="segment-metrics">
+                                    <em>RTF ${escapeHtml(formatRtf(segment.rtf ?? segment.inferRtf))}</em>
+                                    <em>音频 ${escapeHtml(formatSeconds(segment.durationS))}</em>
+                                    <em>耗时 ${escapeHtml(formatSeconds(segment.wallS))}</em>
+                                    <em>GPT ${escapeHtml(formatSeconds(segment.gptGenS))}</em>
+                                    <em>S2Mel ${escapeHtml(formatSeconds(segment.s2melS))}</em>
+                                    <em>BigVGAN ${escapeHtml(formatSeconds(segment.bigvganS))}</em>
+                                    <em>${escapeHtml(segment.style || '-')}</em>
+                                    <em>${escapeHtml(segmentCacheLabel(segment))}</em>
+                                </div>
                             </div>
                         `).join('') : '<div class="empty-state compact">没有分段详情</div>'}
                     </div>
@@ -3192,15 +3248,69 @@ function roleSummaryFromSegments(segments) {
     return segments.some(segment => String(segment?.role || '').trim() === '旁白') ? '旁白' : '';
 }
 
+function generationQualityLabel(mode) {
+    const text = String(mode || '').trim();
+    const labels = {
+        fast: '极速',
+        balanced: '平衡',
+        expressive: '质量优先',
+        ultra: '落盘高质量',
+        custom: '自定义'
+    };
+    return labels[text] || text || '-';
+}
+
 function formatGenerationSegmentCount(item) {
     const done = Number(item?.segmentsDone);
     const total = Number(item?.segmentsTotal);
     if (Number.isFinite(done) && Number.isFinite(total) && total > 0) {
-        return `已完成 ${done} 段 / 计划 ${total} 段`;
+        return `完成 ${done} / 计划 ${total}`;
     }
-    if (Number.isFinite(done) && done > 0) return `已完成 ${done} 段`;
+    if (Number.isFinite(done) && done > 0) return `完成 ${done}`;
     const segments = Array.isArray(item?.segments) ? item.segments.length : 0;
     return segments ? `${segments} 段` : '-';
+}
+
+function segmentRoleClass(role) {
+    return String(role || '').trim() === '旁白' ? 'is-narrator' : 'is-character';
+}
+
+function rolePillHtml(role) {
+    const text = String(role || '-').trim() || '-';
+    const narrator = text === '旁白';
+    const style = narrator ? '' : ` style="--role-color:${roleColor(text)}"`;
+    return `<b class="role-pill ${narrator ? 'narrator' : 'character'}"${style}>${escapeHtml(text)}</b>`;
+}
+
+function roleStyleAttribute(role) {
+    const text = String(role || '').trim();
+    if (!text || text === '旁白') return '';
+    return ` style="--role-color:${roleColor(text)}"`;
+}
+
+function roleColor(role) {
+    let hash = 0;
+    const text = String(role || '');
+    for (let index = 0; index < text.length; index++) {
+        hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+    }
+    const hue = 185 + (hash % 125);
+    return `hsl(${hue} 78% 66%)`;
+}
+
+function segmentCacheLabel(segment) {
+    const parts = [];
+    if (segment?.spkCacheHit === true) parts.push('音色缓存');
+    if (segment?.emoCacheHit === true) parts.push('情绪缓存');
+    if (segment?.usesStyleAudio === true) parts.push('声腔');
+    return parts.length ? parts.join(' / ') : '无缓存';
+}
+
+function logTimeFromDate(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
 function formatUptime(seconds) {
@@ -3252,18 +3362,29 @@ function parseLogSnapshotLine(line) {
     const text = String(line ?? '').trimEnd();
     const launcherMatch = text.match(/^\[(\d{2}:\d{2}:\d{2})\]\s+\[(INFO|SUCCESS|WARNING|ERROR)\]\s*(.*)$/i);
     if (launcherMatch) {
+        const message = launcherMatch[3];
         return {
             timestamp: launcherMatch[1],
-            level: launcherMatch[2].toLowerCase(),
-            message: launcherMatch[3]
+            level: isBigVganCudaAdvisory(message) ? 'info' : launcherMatch[2].toLowerCase(),
+            message
+        };
+    }
+    const bracketDateMatch = text.match(/^\[(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\]\s+\[(INFO|SUCCESS|WARNING|ERROR)\]\s*(.*)$/i);
+    if (bracketDateMatch) {
+        const message = bracketDateMatch[3];
+        return {
+            timestamp: bracketDateMatch[1],
+            level: isBigVganCudaAdvisory(message) ? 'info' : bracketDateMatch[2].toLowerCase(),
+            message
         };
     }
     const backendMatch = text.match(/^(INFO|WARNING|ERROR)\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(.*)$/i);
     if (backendMatch) {
+        const message = backendMatch[3];
         return {
             timestamp: backendMatch[2],
-            level: backendMatch[1].toLowerCase(),
-            message: backendMatch[3]
+            level: isBigVganCudaAdvisory(message) ? 'info' : backendMatch[1].toLowerCase(),
+            message
         };
     }
     return {
@@ -3275,6 +3396,7 @@ function parseLogSnapshotLine(line) {
 
 function logLevelForLine(line) {
     const text = String(line).toLowerCase();
+    if (isBigVganCudaAdvisory(text)) return 'info';
     if (text.includes('error') || text.includes('traceback') || text.includes('failed') || text.includes('fatal') || text.includes('panic') || text.includes('exception')) return 'error';
     if (text.includes('warn') || text.includes('timeout') || text.includes('retry')) return 'warning';
     if (text.includes('ready') || text.includes('success') || text.includes('ok')) return 'success';
@@ -3283,6 +3405,7 @@ function logLevelForLine(line) {
 
 function logCategoryForLine(line, level = 'info') {
     const text = stripAnsi(String(line ?? '')).toLowerCase();
+    if (isBigVganCudaAdvisory(text)) return 'advisory';
     if (level === 'error'
         || /\b(error|traceback|exception|failed|fatal|panic)\b/i.test(text)
         || text.includes('配置错误')
@@ -3310,6 +3433,14 @@ function isRtfLogLine(line) {
         || text.includes('mp3_bytes')
         || text.includes('音频已保存')
         || text.includes('耗时');
+}
+
+function isBigVganCudaAdvisory(line) {
+    const text = stripAnsi(String(line ?? '')).toLowerCase();
+    return text.includes('use_cuda_kernel=true during bigvgan.from_pretrained')
+        || text.includes('only inference is supported')
+        || (text.includes('nvcc') && text.includes('ninja') && text.includes('build the kernel'))
+        || (text.includes('github.com/nvidia/bigvgan') && text.includes('custom-cuda-kernel'));
 }
 
 function isStartupLogLine(line) {

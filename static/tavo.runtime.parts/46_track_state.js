@@ -99,6 +99,39 @@
       } catch (_) {}
       return ownsAudio;
     }
+    function finalizeTerminalTrack(track, state, message, label) {
+      if (!track) return false;
+      state = state === "cancelled" ? "cancelled" : "failed";
+      var title = state === "cancelled" ? "任务已取消" : "生成失败";
+      var detail = String(message || track.error || (state === "cancelled" ? "任务已取消" : "服务端生成失败"));
+      track.error = detail;
+      track.latestSynthesisStatusText = "";
+      track.lastPlaybackSegmentStatusAt = 0;
+      track.liveEndedAwaitSaved = false;
+      track.streamTooSlowFallback = false;
+      track.playSavedWhenReady = false;
+      track.allowStreamPlay = false;
+      track.pendingBlob = false;
+      track.streaming = false;
+      track.liveMp3AudioActive = false;
+      track.liveSegmentAudioActive = false;
+      track.savedLiveSourceActive = false;
+      setTrackState(track, state);
+      try { setTrackStreamHealth(track, "ok"); } catch (_) {}
+      try { removePendingJobForTrack(track).catch(function(){}); } catch (_) {}
+      try { forgetDetachedBackgroundJob(track); } catch (_) {}
+      try { if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){}); } catch (_) {}
+      try {
+        if (currentTrack() === track || !currentTrack()) {
+          setPlayState("idle");
+          setStatus(title);
+          showTrackNotice(track, title, detail || "点音符重新生成");
+        }
+      } catch (_) {}
+      try { updateTrackButtons(); } catch (_) {}
+      try { debugLog((state === "cancelled" ? "🛑 " : "❌ ") + (label || "task terminal") + ": " + detail, state === "cancelled" ? "#fc9" : "#f99"); } catch (_) {}
+      return true;
+    }
     function setTrackState(track, state) {
       if (!track) return "";
       state = oneOf(state, ["pending", "live", "saved", "failed", "cancelled"], "pending");
@@ -181,6 +214,7 @@
     function trackHasActiveLiveOutput(track) {
       if (track && track.livePageExited) return false;
       if (!track || track.deleted || isTerminalTrack(track)) return false;
+      if (isSavedTrack(track) && !savedTrackHasActiveLiveAudioSource(track)) return false;
       var ps = String(track.playbackState || "");
       try {
         if (webAudioBelongsToTrack(track) && (track.webAudioPlaying || track.webAudioPausedLocal || ps === "playing" || ps === "buffering" || ps === "loading")) return true;
@@ -265,7 +299,7 @@
     }
     function isElementUsingTrackStream(track) {
       if (!track || !track.streamUrl) return false;
-      if (isSavedTrack(track)) return false;
+      if (isSavedTrack(track) && !elementLiveAudioBelongsToTrack(track)) return false;
       try {
         if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey) && audio.dataset.idxSourceKind === "stream") return true;
       } catch (_) {}
@@ -274,7 +308,7 @@
     }
     function isElementUsingTrackLiveSegment(track) {
       if (!track || !audio) return false;
-      if (isSavedTrack(track)) return false;
+      if (isSavedTrack(track) && !elementLiveAudioBelongsToTrack(track)) return false;
       try {
         return !!(track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey) && audio.dataset.idxSourceKind === "live-segment");
       } catch (_) {
@@ -295,7 +329,7 @@
     }
     function isElementUsingTrackLiveMp3(track) {
       if (!track || !audio) return false;
-      if (isSavedTrack(track)) return false;
+      if (isSavedTrack(track) && !elementLiveAudioBelongsToTrack(track)) return false;
       try {
         if (track.cacheKey && audio.dataset.idxCacheKey === String(track.cacheKey) && audio.dataset.idxSourceKind === "live-mp3") return true;
       } catch (_) {}
@@ -806,11 +840,13 @@
       if (track) {
         track.liveMp3AudioActive = false;
         track.liveMp3StartSec = 0;
+        track.savedLiveSourceActive = false;
       } else {
         generatedTracks.forEach(function (t) {
           if (t) {
             t.liveMp3AudioActive = false;
             t.liveMp3StartSec = 0;
+            t.savedLiveSourceActive = false;
           }
         });
       }
@@ -924,11 +960,9 @@
       }
       try { saveReusableSegmentsFromStatus(messageText, cfg, context, track, payload, "dialogue status").catch(function(){}); } catch (_) {}
       if (payload.state === "failed") {
-        track.error = (payload.metrics && payload.metrics.message ? payload.metrics.message + ": " : "") + (payload.error || "服务端生成失败");
-        setTrackState(track, "failed");
+        finalizeTerminalTrack(track, "failed", (payload.metrics && payload.metrics.message ? payload.metrics.message + ": " : "") + (payload.error || "服务端生成失败"), "dialogue status");
       } else if (payload.state === "cancelled") {
-        track.error = payload.error || "任务已取消";
-        setTrackState(track, "cancelled");
+        finalizeTerminalTrack(track, "cancelled", payload.error || "任务已取消", "dialogue status");
       } else if (payload.state === "done") {
         setTrackServerState(track, "done");
         setTrackCacheState(track, "ready");
@@ -1133,6 +1167,7 @@
         state: trackState(track),
         playbackState: String(track.playbackState || ""),
         streamHealth: String(track.streamHealth || ""),
+        savedLiveSourceActive: !!track.savedLiveSourceActive,
         livePageExited: !!track.livePageExited,
         livePageSuspended: !!track.livePageSuspended,
         pausedByUser: !!track.pausedByUser,
@@ -1223,7 +1258,7 @@
     }
     function waitForSavedLiveTrack(track, label, opts) {
       opts = opts || {};
-      if (!track || !track.cacheKey) return false;
+      if (!track || !track.cacheKey || isTerminalTrack(track)) return false;
       stopWebAudioPlayback("replace");
       clearElementAudioSrc();
       if (isSavedTrack(track)) {
@@ -1981,21 +2016,11 @@
           return true;
         }
         if (j && j.state === "failed") {
-          track.error = (j.metrics && j.metrics.message ? j.metrics.message + ": " : "") + (j.error || "服务端生成失败");
-          setTrackState(track, "failed");
-          removePendingJobForTrack(track).catch(function(){});
-          updateTrackButtons();
-          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-          debugLog("❌ " + (label || "track") + " 服务端生成失败: " + track.error, "#f99");
+          finalizeTerminalTrack(track, "failed", (j.metrics && j.metrics.message ? j.metrics.message + ": " : "") + (j.error || "服务端生成失败"), label || "track");
           return true;
         }
         if (j && j.state === "cancelled") {
-          track.error = j.error || "任务已取消";
-          setTrackState(track, "cancelled");
-          removePendingJobForTrack(track).catch(function(){});
-          updateTrackButtons();
-          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-          debugLog("🛑 " + (label || "track") + " 服务端任务已取消", "#fc9");
+          finalizeTerminalTrack(track, "cancelled", j.error || "任务已取消", label || "track");
           return true;
         }
       } catch (e) {

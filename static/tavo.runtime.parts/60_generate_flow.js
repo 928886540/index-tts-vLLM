@@ -23,7 +23,7 @@
       track.playSavedWhenReady = false;
       setPlayState("idle");
       setStatus("已暂停");
-      showTrackNotice(track, "已暂停", track.webAudioPausedLocal ? "继续缓冲中，点播放直接接着播" : (track.cacheKey ? "点播放从当前位置继续实时流；后台仍会自动落盘" : "已停止等待"));
+      showTrackNotice(track, "已暂停", track.webAudioPausedLocal ? "继续缓冲中，点播放直接接着播" : (savedTrackHasActiveLiveAudioSource(track) ? "点播放继续当前实时音频" : (track.cacheKey ? "点播放从当前位置继续实时流；后台仍会自动落盘" : "已停止等待")));
     }
 
     async function playOrPauseCurrentTrack() {
@@ -55,7 +55,9 @@
       var existingIsPlaying = String(existingTrack.playbackState || "") === "playing"
         && (existingTrack.webAudioPlaying || isElementPlayingTrackStream(existingTrack) || (elementLiveAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended) || (elementAudioBelongsToTrack(existingTrack) && !audio.paused && !audio.ended));
       if (existingIsPlaying) {
-        if (isSavedTrack(existingTrack)) {
+        if (savedTrackHasActiveLiveAudioSource(existingTrack)) {
+          pauseLiveTrack(existingTrack);
+        } else if (isSavedTrack(existingTrack)) {
           try {
             existingTrack.lastElementSec = Math.max(0, Number(audio.currentTime || 0) || 0);
             existingTrack.savedElementUserPaused = true;
@@ -83,6 +85,38 @@
       if (resumePausedWebAudioTrack(existingTrack)) {
         updateTrackButtons();
         return true;
+      }
+      if (savedTrackHasActiveLiveAudioSource(existingTrack)) {
+        if (audio.ended || existingTrack.streamPlaybackFinished) {
+          switchSavedTrackFromLiveSourceToCompleteAudio(existingTrack, "saved live source ended replay", { ended: true, resetProgress: true, autoplay: false });
+          updateTrackButtons();
+          return true;
+        }
+        try {
+          setAudioPlaybackRate();
+          setTrackPlaybackState(existingTrack, "loading");
+          setPlayState("loading");
+          var liveResumePromise = audio.play();
+          if (liveResumePromise && typeof liveResumePromise.then === "function") {
+            await liveResumePromise.then(function () {
+              setTrackPlaybackState(existingTrack, "playing");
+              setPlayState("playing");
+              setStatus(trackPlaybackLabel(existingTrack));
+              showTrackNotice(existingTrack, "继续实时播放", "正在接着当前音频播放");
+            }).catch(function(e){ handleAudioPlayReject("saved-live", e, "请点播放继续实时音频"); });
+          } else {
+            setTrackPlaybackState(existingTrack, "playing");
+            setPlayState("playing");
+            setStatus(trackPlaybackLabel(existingTrack));
+            showTrackNotice(existingTrack, "继续实时播放", "正在接着当前音频播放");
+          }
+          updateTrackButtons();
+          return true;
+        } catch (e) {
+          handleAudioPlayReject("saved-live", e, "请点播放继续实时音频");
+          updateTrackButtons();
+          return false;
+        }
       }
       if (shouldUseElementForSavedTrack(existingTrack)) {
         await prepareOfflineAudio(existingTrack, "play", { saveMissing: true });
@@ -255,6 +289,36 @@
         }
         setStatus(titleText);
         if (!isTransientProgressNotice(titleText)) showTrackNotice(track, titleText, detailText);
+      }
+      function preLiveLlmStatusText(track) {
+        var metrics = (track && track.metrics) || {};
+        var stage = String(metrics.llm_stage || "");
+        var elapsed = Number(metrics.llm_elapsed_s);
+        if (stage === "reuse_check") return "检查分段复用";
+        if (stage === "normalizing") return "整理分段结果";
+        if (stage === "done") return "分段已就绪，等待合成";
+        if (isFinite(elapsed) && elapsed >= 1) return "等待 LLM 返回 " + Math.floor(elapsed) + "s";
+        return "等待 LLM 返回";
+      }
+      async function waitForAiLiveReady(track) {
+        if (parseMode !== "ai" || !track || !track.cacheKey || track.reusedLlmSegments) return true;
+        for (var waitIdx = 0; waitIdx < 160; waitIdx += 1) {
+          if (track.deleted || isTerminalTrack(track) || isSavedTrack(track)) return false;
+          var resolved = await refreshTrackFromStatus(track, "pre-live llm");
+          if (resolved) {
+            if (isTerminalTrack(track)) {
+              finalizeTerminalTrack(track, trackState(track), track.error || "服务端生成失败", "pre-live llm");
+              return false;
+            }
+            return !isSavedTrack(track);
+          }
+          var phase = String((track.metrics && track.metrics.phase) || "");
+          if (phase && phase !== "created" && phase !== "llm_parse") return true;
+          showGenerationProgress(track, preLiveLlmStatusText(track), "");
+          await new Promise(function(r){ setTimeout(r, 700); });
+        }
+        finalizeTerminalTrack(track, "failed", "等待 LLM 返回超时，请检查后端日志", "pre-live llm timeout");
+        return false;
       }
       var voicesMap = parseMode === "normal" ? normalModeVoicesMap(cfg) : rolesListToVoicesMap(cfg.roleVoiceList, cfg.defaultVoice, cfg.currentCharacterName);
       var representativeVoice = representativeVoiceForMode(parseMode, voicesMap, cfg.defaultVoice);
@@ -457,6 +521,21 @@
             }
           }
         }
+        if (playbackMode === "live" && parseMode === "ai" && !placeholder.reusedLlmSegments) {
+          var liveReady = await waitForAiLiveReady(placeholder);
+          if (!liveReady) {
+            stopServerLogPolling();
+            if (isSavedTrack(placeholder)) {
+              setPlayState("loading");
+              startElementAudioFrom(placeholder, trackResumeSec(placeholder));
+            } else if (isTerminalTrack(placeholder)) {
+              setPlayState("idle");
+              showTrackNotice(placeholder, trackState(placeholder) === "cancelled" ? "任务已取消" : "生成失败", placeholder.error || "点音符重新生成");
+            }
+            updateTrackButtons();
+            return;
+          }
+        }
         if (placeholder.pausedByUser) {
           setStatus("已暂停，后台合成中");
           showTrackNotice(placeholder, "已暂停", "合成还在后台进行，完成后会成为历史音频");
@@ -504,14 +583,8 @@
         // 生成失败不自动删卡；D 只有用户点删除才删后端任务/音频。
         if (placeholder) {
           if (!placeholder.deleted) {
-            placeholder.error = msg;
-            setTrackState(placeholder, isAbort ? "cancelled" : "failed");
-            if (currentTrack() === placeholder) showTrackNotice(placeholder, isAbort ? "已取消" : "生成失败", msg || "点删除可移除这张卡片");
+            finalizeTerminalTrack(placeholder, isAbort ? "cancelled" : "failed", msg || "点删除可移除这张卡片", isAbort ? "generate abort" : "generate error");
           }
-          removePendingJobForTrack(placeholder).catch(function(){});
-          forgetDetachedBackgroundJob(placeholder);
-          if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
-          updateTrackButtons();
           if (!generatedTracks.length && !backgroundDetached) {
             currentCacheKey = "";
             if (seek) { seek.disabled = true; seek.value = "0"; }

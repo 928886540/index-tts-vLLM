@@ -33,7 +33,7 @@ D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe
 同一局域网内测试时，在 Tavo 注入脚本里加载：
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260612-mp3-cache-v66"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260612-mp3-cache-v70"></script>
 ```
 
 如需公网访问，请在仓库外配置隧道或反向代理，只替换脚本地址中的主机部分。项目代码不会保存公网域名或密钥。

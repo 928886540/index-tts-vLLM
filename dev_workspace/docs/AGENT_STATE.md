@@ -8,6 +8,91 @@ This is the active handoff summary. Full historical state was archived on 2026-0
 
 Read the archive only when investigating old decisions, benchmark history, or fixed regressions.
 
+## LIVE Progress Count Stabilization 2026-06-12
+
+Current Tavo playback slice:
+
+- Tavo runtime bumped to `20260612-mp3-cache-v70`.
+- The floating LIVE progress hint now treats `segments_meta` as the generated-count authority. If backend `metrics.segments_done` is ahead of actual timed meta, the UI keeps showing the real landed count, e.g. `已生成 1/3 段`, until the second generated meta row arrives.
+- Status polling no longer owns `正在播第 x/y 段`. Polling writes only the synthesis base text, while local playback timing appends/removes the current playback segment. Same-base polling preserves `已生成 2/3 段 · 正在播第 1/3 段` instead of stripping it on the next tick.
+- `track.segments` is used as generated evidence only when rows have timing fields, so planned/fallback segment rows cannot inflate `已生成 x/y 段`.
+
+Validation for this slice:
+
+```powershell
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check static\tavo.runtime.parts\42_playback_header.js
+node --check static\tavo.runtime.parts\48_track_history.js
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+$manifest = Get-Content -Raw static\tavo.runtime.manifest.json | ConvertFrom-Json; $code = "(async function(){`n"; foreach ($m in $manifest.modules) { $code += (Get-Content -Raw (Join-Path static $m.file)) + "`n" }; $code += "`n})();"; $code | node --check -
+$env:TAVO_TEST_URL='http://127.0.0.1:9883/static/tavo_widget_test.html'; node dev_workspace\dev_tools\test_tavo_widget_playwright.js
+git diff --check
+```
+
+Notes:
+
+- The default `http://127.0.0.1:9880/tavo_test` smoke was first attempted and failed with `ERR_CONNECTION_REFUSED` because the user had closed the API service. The passing Playwright run used a temporary mock static server on `127.0.0.1:9883` that served `/profiles/active`, `/voices`, and static files only; no real TTS/API service was started.
+- `git diff --check` reported only Windows LF-to-CRLF warnings.
+
+## LIVE Cache-Ready Handoff Fix 2026-06-12
+
+Current Tavo playback slice:
+
+- Tavo runtime bumped to `20260612-mp3-cache-v69`.
+- Cache-ready LIVE MP3 no longer treats `stalled` as enough reason to auto-mount `/cache_audio`. The active live source is marked with `savedLiveSourceActive`, so the card may be history-ready while the current `<audio>` remains `live-mp3`.
+- Pause/resume on an active cache-ready live session keeps the same live source. Natural `ended`, audio error, explicit saved fallback, user seek/replay, or inactive saved-history stale-source pollution can still mount complete `/cache_audio`.
+- Saved-history seek regression remains protected: if an inactive saved card has a stale `/tts_dialogue_stream_job/.../mp3` source, seeking repairs it to `/cache_audio` without reconnecting LIVE.
+
+Validation for this slice:
+
+```powershell
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+$manifest = Get-Content -Raw static\tavo.runtime.manifest.json | ConvertFrom-Json; $code = "(async function(){`n"; foreach ($m in $manifest.modules) { $code += (Get-Content -Raw (Join-Path static $m.file)) + "`n" }; $code += "`n})();"; $code | node --check -
+node dev_workspace\dev_tools\test_tavo_widget_playwright.js
+```
+
+The full Playwright smoke passed after the v69 bump and loaded runtime parts with `runtime_part_v=20260612-mp3-cache-v69`.
+
+## LIVE Failure / Launcher Exit Fix 2026-06-12
+
+Current bugfix slice:
+
+- Tavo runtime bumped to `20260612-mp3-cache-v67`.
+- AI LIVE generation now waits until backend-owned LLM parsing has moved past `created` / `llm_parse` before connecting the LIVE MP3 route. If the backend reports failed/cancelled while parsing, the card is finalized as failed/cancelled instead of falling through to "MP3 stream unavailable" or stale "waiting for LLM" UI.
+- Terminal generation cleanup is centralized through `finalizeTerminalTrack()`: it clears LIVE audio output, stale synthesis/progress text, pending storage, detached background records, and persisted card state before showing the final failed/cancelled notice.
+- `scripts/restart-leon-api.ps1` now delegates vLLM startup with PowerShell hashtable splatting instead of building a positional argument array. This fixes the launcher log failure where `Port` received the literal value `-Port`.
+- Tauri launcher close/stop now first asks `GET /control?command=exit`, then clears the launcher wrapper and kills only port-9880 listener processes whose command line belongs to the current LEON root. Root `LEON-Launcher-Tauri.exe` was rebuilt and overwritten after closing the old launcher UI process.
+
+Validation for this slice:
+
+```powershell
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check static\tavo.runtime.parts\44_element_audio.js
+node --check static\tavo.runtime.parts\46_track_state.js
+node --check static\tavo.runtime.parts\48_track_history.js
+node --check static\tavo.runtime.parts\60_generate_flow.js
+$manifest = Get-Content -Raw static\tavo.runtime.manifest.json | ConvertFrom-Json; $code = "(async function(){`n"; foreach ($m in $manifest.modules) { $code += (Get-Content -Raw (Join-Path static $m.file)) + "`n" }; $code += "`n})();"; $code | node --check -
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version vllm -ValidateOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version fast6g -ValidateOnly
+cargo fmt --manifest-path launcher-tauri\src-tauri\Cargo.toml --check
+cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
+npm --prefix launcher-tauri run frontend:build
+cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
+Copy-Item launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe LEON-Launcher-Tauri.exe -Force
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+git diff --check
+```
+
+Notes:
+
+- Full `node dev_workspace\dev_tools\test_tavo_widget_playwright.js` against `http://127.0.0.1:9880/tavo_test` was not run because no API service was listening on `9880`; the first navigation returned `ERR_CONNECTION_REFUSED`.
+- A static-file-only retry against `static/tavo_widget_test.html` reached Playwright but timed out in `runLlmReuseSmoke` because that environment does not serve `/profiles/active`. Do not count that as a frontend regression without an API or proper mock server.
+
 ## Tauri Launcher UX Cleanup 2026-06-12
 
 Current launcher UX slice:
@@ -239,13 +324,13 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260612-mp3-cache-v66"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260612-mp3-cache-v67"></script>
 ```
 
 Current code state:
 
 - Root `README.md`, `dev_workspace/README.md`, and `dev_workspace/AGENTS.md` now point Tavo playback/generation work to `dev_workspace/docs/LOGIC.md`.
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260612-mp3-cache-v66`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260612-mp3-cache-v67`.
 - Launcher tuning first slice now uses profile schema v3: `config/profiles/*.json` are editable source profiles, `config/profiles/active.json` is the applied runtime snapshot, `quality.presets.live/generate` stores parameters for every Tavo quality mode, and `styles` stores voice-cavity defaults/ref audio. The launcher editor can now edit style id, label, enabled flag, ref, `style_alpha`, `emo_alpha`, `emo_vec`, and description. Saving writes the selected profile; applying writes `active.json`; backend startup receives `LEON_ACTIVE_PROFILE_PATH` pointing at the active snapshot.
 - Tavo generation now reads `/profiles/active` at config load and again immediately before generation. Tavo only stores/selects the quality mode name; request parameters are taken from active profile `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Profile `llmPrompt` is submitted as `parse_system_prompt` and rendered by the API backend as a template with runtime role/user/style placeholders.
 - vLLM and fast6g LLM proxy requests now send a stable LEON user-agent. This fixes real OpenAI-compatible gateways that reject urllib's default Python user-agent with Cloudflare 1010 while direct keyed requests succeed.

@@ -42,6 +42,34 @@
           }
         }
         if (!t) return false;
+        if (savedTrackHasActiveLiveAudioSource(t)) {
+          if (audio.ended || t.streamPlaybackFinished) return false;
+          if (audio.paused) {
+            setAudioPlaybackRate();
+            setTrackPlaybackState(t, "loading");
+            setPlayState("loading");
+            var lp = audio.play();
+            if (lp && typeof lp.then === "function") {
+              lp.then(function () {
+                setTrackPlaybackState(t, "playing");
+                setPlayState("playing");
+                setStatus(trackPlaybackLabel(t));
+              }).catch(function (e) {
+                setTrackPlaybackState(t, "idle");
+                setPlayState("idle");
+                handleAudioPlayReject("saved-live", e, "请点播放继续实时音频");
+              });
+            } else {
+              setTrackPlaybackState(t, "playing");
+              setPlayState("playing");
+              setStatus(trackPlaybackLabel(t));
+            }
+          } else {
+            try { rememberNativeLiveElementResumeSec(t, "gesture pause saved-live"); } catch (_) {}
+            pauseLiveTrack(t);
+          }
+          return true;
+        }
         if (isSavedTrack(t)) {
           if (!savedElementAudioBelongsToTrack(t)) return false;
         } else if (!elementAudioBelongsToTrack(t)) return false;
@@ -281,6 +309,14 @@
           }
         } catch (_) {}
         try {
+          if (savedTrackHasActiveLiveAudioSource(t)) {
+            pauseSec = rememberNativeLiveElementResumeSec(t, "saved live source pause");
+            setTrackPlaybackState(t, "paused");
+            setPlayState("idle");
+            if (((pauseSec > 0) || (audio.currentTime > 0)) && !audio.ended) setStatus("已暂停");
+            try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
+            return;
+          }
           if (isSavedTrack(t) && !savedElementAudioBelongsToTrack(t)) {
             if (switchSavedTrackFromLiveSourceToCompleteAudio(t, "saved stale pause", { autoplay: false, resumeSec: elementPlaybackTimeSec(t) })) {
               try { updateMediaSession(lastSpeakerRole, ""); } catch (_) {}
@@ -326,6 +362,7 @@
           if (!t.cacheUrl && t.cacheKey) t.cacheUrl = cleanBase(cfg.apiBase) + "/cache_audio/" + encodeURIComponent(t.cacheKey);
           setTrackState(t, "saved");
           attachCacheAudio(t, { forceElement: true, autoplay: false });
+          t.livePageExited = true;
           if (t.cacheKey && t.cacheUrl) scheduleOfflineAudioSave(t, "ended offline", 800);
           if (messageId) saveTracksForMessage(messageId, generatedTracks).catch(function(){});
           removePendingJobForTrack(t).catch(function(){});
@@ -444,15 +481,60 @@
       }
       if (scriptFlagEnabled("debugSeek")) debugLog("✅ seeked  → " + audio.currentTime.toFixed(2), "#9ff");
     });
+    function scheduleSavedLiveSourceStallCheck(track, rawAudioSec, resumeSec) {
+      if (!track || !isSavedTrack(track) || !elementLiveAudioBelongsToTrack(track)) return false;
+      track.savedLiveStallCheckToken = Number(track.savedLiveStallCheckToken || 0) + 1;
+      var token = track.savedLiveStallCheckToken;
+      track.savedLiveLastStallAt = Date.now();
+      track.savedLiveLastStallRawSec = Math.max(0, Number(rawAudioSec || 0) || 0);
+      setTimeout(function () {
+        if (!track || currentTrack() !== track || !isSavedTrack(track)) return;
+        if (Number(track.savedLiveStallCheckToken || 0) !== token) return;
+        if (!elementLiveAudioBelongsToTrack(track)) return;
+        try {
+          if (audio.paused || audio.ended) return;
+        } catch (_) {}
+        var nowRawSec = 0;
+        try { nowRawSec = Math.max(0, Number(audio.currentTime || 0) || 0); } catch (_) { nowRawSec = 0; }
+        if (nowRawSec > rawAudioSec + 0.35) {
+          track.savedLiveSourceStalledCount = 0;
+          debugLog("✅ saved LIVE source stalled 已恢复，继续流式播放", "#9f9");
+          return;
+        }
+        var totalHint = 0;
+        try { totalHint = trackDurationHintSec(track); } catch (_) { totalHint = 0; }
+        if (totalHint > 0 && resumeSec >= totalHint - 0.25) {
+          debugLog("✅ saved LIVE source 接近结尾，等待 ended，不抢切完整音频", "#9f9");
+          return;
+        }
+        track.savedLiveSourceStalledCount = Number(track.savedLiveSourceStalledCount || 0) + 1;
+        track.stalledCount = Number(track.stalledCount || 0) + 1;
+        setTrackStreamHealth(track, "stalled");
+        setStatus("实时流缓冲中");
+        showTrackNotice(track, "实时流缓冲中", "正在等待当前音频继续播放");
+        updateTrackButtons();
+        debugLog("⏳ saved LIVE source 持续 stalled，保留当前实时源，不自动切完整音频", "#fc9");
+      }, 8000);
+      return true;
+    }
     on(audio, 'stalled', function () {
       var t = currentTrack();
+      var savedLiveSource = false;
+      try { savedLiveSource = !!(t && savedTrackHasActiveLiveAudioSource(t)); } catch (_) { savedLiveSource = false; }
       if (t) {
-        t.stalledCount = Number(t.stalledCount || 0) + 1;
-        setTrackStreamHealth(t, "stalled");
         t.lastStalledAt = Date.now();
         t.lastStalledSec = isLiveProgressTrack(t) ? rememberLiveResumeSec(t, elementPlaybackTimeSec(t), "native stalled") : elementPlaybackTimeSec(t);
+        if (!savedLiveSource) {
+          t.stalledCount = Number(t.stalledCount || 0) + 1;
+          setTrackStreamHealth(t, "stalled");
+        }
       }
-      debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2) + (t ? " count=" + t.stalledCount : ""), "#fc9");
+      debugLog("⚠️ stalled @ " + audio.currentTime.toFixed(2) + (t ? " count=" + (savedLiveSource ? Number(t.savedLiveSourceStalledCount || 0) : Number(t.stalledCount || 0)) : ""), "#fc9");
+      if (savedLiveSource) {
+        debugLog("⏳ saved LIVE source stalled 先观察，不立即切完整音频", "#fc9");
+        scheduleSavedLiveSourceStallCheck(t, Math.max(0, Number(audio.currentTime || 0) || 0), t.lastStalledSec);
+        return;
+      }
       if (t && isSavedTrack(t)) {
         switchSavedTrackFromLiveSourceToCompleteAudio(t, "saved live source stalled", { autoplay: true, resumeSec: t.lastStalledSec, status: "流式卡顿，切换完整音频…", title: "切换完整音频…", detail: "完整音频已保存，从卡顿位置继续" });
       }

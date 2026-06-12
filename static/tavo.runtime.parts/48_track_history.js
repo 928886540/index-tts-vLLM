@@ -242,6 +242,7 @@
       track.liveEndedAwaitSaved = false;
       track.streamPlaybackFinished = false;
       track.livePageSuspended = false;
+      track.savedLiveSourceActive = !!(liveElementOwnsTrack && !opts.forceElement && !opts.autoplay && normalizePlaybackMode(track.playbackMode) === "live");
       if (!liveElementOwnsTrack || opts.forceElement || opts.autoplay) clearLiveMp3AudioState(track);
       if (isCurrentTrack) {
         updateTrackButtons();
@@ -588,21 +589,18 @@
         var msg = String((metrics && metrics.message) || "");
         var mode = normalizeModeName((trackEntry && (trackEntry.mode || trackEntry.parseMode)) || (metrics && metrics.parse_mode) || cfg.mode);
         var playback = normalizePlaybackMode((trackEntry && trackEntry.playbackMode) || cfg.playbackMode);
-        var total = Number((metrics && metrics.segments_total) || 0) || 0;
+        var total = typeof plannedSegmentTotalForStatus === "function"
+          ? plannedSegmentTotalForStatus(trackEntry, payload, metrics)
+          : (Number((metrics && metrics.segments_total) || 0) || 0);
         if (!total && metrics && Array.isArray(metrics.segments_plan)) total = metrics.segments_plan.length;
-        var doneSegs = Number(metrics && metrics.segments_done);
+        var doneSegs = typeof generatedSegmentCountForStatus === "function"
+          ? generatedSegmentCountForStatus(trackEntry, payload, metrics)
+          : Number(metrics && metrics.segments_done);
         if (!isFinite(doneSegs)) doneSegs = payload && Array.isArray(payload.segments_meta) ? payload.segments_meta.length : 0;
         doneSegs = Math.max(0, Math.floor(doneSegs || 0));
         if (total) doneSegs = Math.min(total, doneSegs);
-        var playbackSecForStatus = NaN;
-        try {
-          playbackSecForStatus = currentTrack() === trackEntry ? elementPlaybackTimeSec(trackEntry) : trackResumeSec(trackEntry);
-        } catch (_) {
-          playbackSecForStatus = NaN;
-        }
-        var playingSeg = playbackSegmentStatusText(trackEntry, payload, total, playbackSecForStatus);
         function withPlayingSegment(text) {
-          return playingSeg ? (text + " · " + playingSeg) : text;
+          return text;
         }
         function queueStatusText() {
           var rawAhead = Number(metrics && metrics.queue_ahead);
@@ -641,6 +639,18 @@
         if (/文本已拆分|等待 TTS 合成|拆分文本|拆段/.test(msg)) return "等待合成";
         return withPlayingSegment(msg || "处理中");
       }
+      function stripPlaybackSegmentStatus(text) {
+        return String(text || "").replace(/\s*·\s*(?:当前在播第|正在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/g, "");
+      }
+      function currentProgressKeepsSameBase(baseText) {
+        try {
+          var current = String(progressLine && progressLine.textContent || "");
+          if (!/(?:当前在播第|正在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(current)) return false;
+          return stripPlaybackSegmentStatus(current) === String(baseText || "");
+        } catch (_) {
+          return false;
+        }
+      }
       (async function () {
         var done = false;
         for (var i = 0; i < 240; i++) {
@@ -663,8 +673,8 @@
                   var phase = String(j.metrics.phase || "");
                   if (phase === "llm_parse" || phase === "llm_parse_cache" || phase === "created" || phase === "tts_queue" || phase === "tts" || phase === "saving") {
                     var uiMsg = jobStatusMessage(j.metrics, trackEntry, j);
-                    trackEntry.latestSynthesisStatusText = String(uiMsg || "").replace(/\s*·\s*(?:当前在播第|正在播第|播第)\s*\d+(?:\s*\/\s*\d+)?\s*段/g, "");
-                    setStatus(uiMsg);
+                    trackEntry.latestSynthesisStatusText = stripPlaybackSegmentStatus(uiMsg);
+                    if (!currentProgressKeepsSameBase(trackEntry.latestSynthesisStatusText)) setStatus(trackEntry.latestSynthesisStatusText);
                     if (!isTransientProgressNotice(uiMsg)) showTrackNotice(trackEntry, uiMsg || "正在生成…", formatJobMetrics(j.metrics) || "请稍等");
                   }
                 }
@@ -684,6 +694,11 @@
                     return { role: s.role || "", text: s.text || "", style: s.style || "neutral", style_alpha: s.style_alpha, start_s: s.start_s, start_offset_bytes: s.start_offset_bytes, duration_s: s.duration_s };
                   });
                 }
+              }
+              if (currentTrack() === trackEntry && !isSavedTrack(trackEntry) && typeof updatePlaybackSegmentProgressStatus === "function") {
+                try {
+                  updatePlaybackSegmentProgressStatus(trackEntry, elementPlaybackTimeSec(trackEntry), { force: true });
+                } catch (_) {}
               }
               try { saveReusableSegmentsFromStatus(messageText, cfg, context, trackEntry, j, label || "poll status").catch(function(){}); } catch (_) {}
               var cacheHeadReady = false;
@@ -774,32 +789,21 @@
               if (j && j.state === "failed") {
                 var failedDetached = generatedTracks.indexOf(trackEntry) < 0;
                 var failMsg = (j.metrics && j.metrics.message ? j.metrics.message + ": " : "") + (j.error || "服务端生成失败");
-                trackEntry.error = failMsg;
-                setTrackState(trackEntry, "failed");
-                removePendingJobForTrack(trackEntry).catch(function(){});
-                forgetDetachedBackgroundJob(trackEntry);
-                if (currentTrack() === trackEntry || !currentTrack()) setStatus("生成失败");
+                finalizeTerminalTrack(trackEntry, "failed", failMsg, label || "poll status");
                 if (failedDetached) {
                   if (!currentTrack()) showTrackNotice(null, "后台生成失败", failMsg);
                 } else {
                   if (currentTrack() === trackEntry) {
                     setPlayState("idle");
-                    setError(failMsg);
                     showTrackNotice(trackEntry, "生成失败", failMsg);
                   }
                 }
-                updateTrackButtons();
-                debugLog("❌ 服务端任务失败: " + failMsg, "#f99");
                 done = true;
                 break;
               }
               if (j && j.state === "cancelled") {
                 var cancelledDetached = generatedTracks.indexOf(trackEntry) < 0;
-                trackEntry.cancelled = true;
-                setTrackState(trackEntry, "cancelled");
-                removePendingJobForTrack(trackEntry).catch(function(){});
-                forgetDetachedBackgroundJob(trackEntry);
-                if (currentTrack() === trackEntry || !currentTrack()) setStatus("已取消");
+                finalizeTerminalTrack(trackEntry, "cancelled", "后台任务已停止", label || "poll status");
                 if (cancelledDetached) {
                   if (!currentTrack()) showTrackNotice(null, "任务已取消", "后台任务已停止");
                 } else {
@@ -808,8 +812,6 @@
                     showTrackNotice(trackEntry, "任务已取消", "后台任务已停止");
                   }
                 }
-                updateTrackButtons();
-                debugLog("🛑 服务端任务已取消: " + trackEntry.cacheKey, "#fc9");
                 done = true;
                 break;
               }

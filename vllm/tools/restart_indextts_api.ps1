@@ -70,6 +70,58 @@ function Write-Step {
     Write-Host ("[indextts-restart] " + $Message)
 }
 
+function Get-TavoScriptVersion {
+    $scriptPath = Join-Path $StaticDir "tavo.js"
+    if (Test-Path -LiteralPath $scriptPath -PathType Leaf) {
+        $content = Get-Content -LiteralPath $scriptPath -Raw -ErrorAction SilentlyContinue
+        if ($content -match 'LOADER_VERSION\s*=\s*"([^"]+)"') {
+            return $Matches[1]
+        }
+    }
+    return "latest"
+}
+
+function Get-LanIPv4Addresses {
+    try {
+        $addresses = [System.Net.Dns]::GetHostAddresses([System.Net.Dns]::GetHostName()) |
+            Where-Object {
+                $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and
+                -not [System.Net.IPAddress]::IsLoopback($_) -and
+                -not $_.ToString().StartsWith("169.254.")
+            } |
+            ForEach-Object { $_.ToString() } |
+            Sort-Object -Unique
+        return $addresses
+    }
+    catch {
+        return @()
+    }
+}
+
+function Write-ReadyBanner {
+    $tavoVersion = Get-TavoScriptVersion
+    $lanAddresses = @(Get-LanIPv4Addresses)
+
+    Write-Host ""
+    Write-Host "============================================================"
+    Write-Host "                         L E O N"
+    Write-Host "                      READY - LEON is ready"
+    Write-Host "============================================================"
+    Write-Host ("Local API: http://127.0.0.1:{0}" -f $Port)
+    if ($lanAddresses.Count -gt 0) {
+        foreach ($address in $lanAddresses) {
+            Write-Host ("LAN API: http://{0}:{1}" -f $address, $Port)
+            Write-Host ("Tavo script: http://{0}:{1}/static/tavo.js?v={2}" -f $address, $Port, $tavoVersion)
+        }
+    }
+    else {
+        Write-Host "LAN API: no LAN IPv4 detected"
+        Write-Host ("Tavo script: http://127.0.0.1:{0}/static/tavo.js?v={1}" -f $Port, $tavoVersion)
+    }
+    Write-Host "============================================================"
+    Write-Host ""
+}
+
 function Get-FreeTcpPort {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), 0)
     $listener.Start()
@@ -414,7 +466,7 @@ try {
 
         if (Wait-ApiReady -Run $run) {
             Write-Step "API ready: http://127.0.0.1:$Port/health"
-            Write-Step "LAN script URL example: http://<LAN-IP>:$Port/static/tavo.js"
+            Write-ReadyBanner
             exit 0
         }
 

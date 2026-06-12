@@ -2,7 +2,7 @@
   "use strict";
 
   var loaderScript = (typeof window !== "undefined" && window.__indextts_tavo_runtime_script_override) || document.currentScript;
-  var RUNTIME_PARTS_VERSION = "20260612-mp3-cache-v66";
+  var RUNTIME_PARTS_VERSION = "20260612-mp3-cache-v70";
   var MANIFEST_FILE = "tavo.runtime.manifest.json";
   var FALLBACK_PARTS = [
     "tavo.runtime.parts/00_base_context.js",

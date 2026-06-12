@@ -118,6 +118,13 @@
       if (track.cacheKey && /\/tts_dialogue_stream_job\//.test(src) && src.indexOf(String(track.cacheKey)) >= 0) return true;
       return false;
     }
+    function savedTrackHasLiveAudioSource(track) {
+      if (!track || !isSavedTrack(track) || track.livePageExited || track.streamPlaybackFinished) return false;
+      return elementLiveAudioBelongsToTrack(track);
+    }
+    function savedTrackHasActiveLiveAudioSource(track) {
+      return !!(savedTrackHasLiveAudioSource(track) && track.savedLiveSourceActive);
+    }
     function liveElementOffsetSec(track) {
       if (!track || !audio) return 0;
       try {
@@ -194,6 +201,12 @@
     }
     function trackResumeSec(track) {
       if (!track) return 0;
+      if (savedTrackHasActiveLiveAudioSource(track)) {
+        try {
+          if (isFinite(Number(audio.currentTime))) return Math.max(0, elementPlaybackTimeSec(track));
+        } catch (_) {}
+        return bestStoredLiveResumeSec(track);
+      }
       if (isSavedTrack(track)) return savedTrackResumeSec(track);
       if (track.livePageSuspended || track.pausedByUser || String(track.playbackState || "") === "paused") {
         return bestStoredLiveResumeSec(track);
@@ -314,6 +327,47 @@
       var total = Math.max(knownTotal, raw.length, displayIdx);
       return "正在播第 " + displayIdx + (total ? "/" + total : "") + " 段";
     }
+    function generatedSegmentCountForStatus(track, payload, metrics) {
+      var raw = null;
+      var trustAllRows = false;
+      if (payload && Array.isArray(payload.segments_meta)) {
+        raw = payload.segments_meta;
+        trustAllRows = true;
+      } else if (track && Array.isArray(track.segments)) {
+        raw = track.segments;
+      }
+      if (raw) {
+        var seen = {};
+        var count = 0;
+        raw.forEach(function (seg, i) {
+          if (!trustAllRows) {
+            var hasTiming = !!(seg && (
+              (seg.start_s != null && isFinite(Number(seg.start_s)))
+              || (seg.start_offset_bytes != null && isFinite(Number(seg.start_offset_bytes)))
+              || (seg.duration_s != null && isFinite(Number(seg.duration_s)) && Number(seg.duration_s) > 0)
+            ));
+            if (!hasTiming) return;
+          }
+          var idx = seg && seg.idx != null && isFinite(Number(seg.idx)) ? String(Math.floor(Number(seg.idx))) : String(i);
+          if (seen[idx]) return;
+          seen[idx] = true;
+          count += 1;
+        });
+        return count;
+      }
+      var metricDone = Number(metrics && metrics.segments_done);
+      return isFinite(metricDone) ? Math.max(0, Math.floor(metricDone || 0)) : 0;
+    }
+    function plannedSegmentTotalForStatus(track, payload, metrics) {
+      var total = Math.max(
+        Number(metrics && metrics.segments_total) || 0,
+        payload && Array.isArray(payload.segments_plan) ? payload.segments_plan.length : 0,
+        track && Array.isArray(track.segmentPlan) ? track.segmentPlan.length : 0,
+        payload && Array.isArray(payload.segments_meta) ? payload.segments_meta.length : 0,
+        track && Array.isArray(track.segments) ? track.segments.length : 0
+      );
+      return Math.max(0, Math.floor(total || 0));
+    }
     function updatePlaybackSegmentProgressStatus(track, positionSec, opts) {
       opts = opts || {};
       if (!track || !track.latestSynthesisStatusText) return false;
@@ -364,6 +418,7 @@
     function isLiveProgressTrack(track) {
       if (!track) return false;
       try {
+        if (savedTrackHasActiveLiveAudioSource(track)) return true;
         if (isSavedTrack(track)) return false;
         if (isElementUsingTrackLiveSegment(track) || isElementUsingTrackLiveMp3(track)) return true;
         if (track.webAudioPlaying || webAudioActiveTrack === track) return true;
@@ -424,6 +479,7 @@
     }
     function canSeekTrackByControls(track) {
       if (!track || track.deleted || isTerminalTrack(track)) return false;
+      if (savedTrackHasActiveLiveAudioSource(track)) return false;
       if (isSavedTrack(track)) return !!(trackPlayableUrl(track) || track.cacheUrl || track.cacheKey);
       return canSeekLiveTrack(track);
     }

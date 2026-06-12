@@ -1703,6 +1703,255 @@ async function runLivePlayClickSmoke(browser, targetUrl) {
   }
 }
 
+async function runGeneratedProgressUsesMetaSmoke(browser, targetUrl) {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { if (indexedDB) indexedDB.deleteDatabase("indextts_tavo_audio_v1"); } catch (_) {}
+    window.__metaProgressPlayCalls = [];
+    try {
+      Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+        configurable: true,
+        get: function () { return !this.__idxPlaying; }
+      });
+      Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+        configurable: true,
+        get: function () { return 3; }
+      });
+      Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+        configurable: true,
+        get: function () { return Number(this.__idxMockCurrentTime || 0) || 0; },
+        set: function (v) { this.__idxMockCurrentTime = Math.max(0, Number(v || 0) || 0); }
+      });
+      HTMLMediaElement.prototype.load = function () { this.__idxMockCurrentTime = 0; };
+      HTMLMediaElement.prototype.play = function () {
+        const src = this.currentSrc || this.src || "";
+        this.__idxPlaying = true;
+        try {
+          window.__metaProgressPlayCalls.push({
+            src,
+            kind: this.dataset ? (this.dataset.idxSourceKind || "") : "",
+            cacheKey: this.dataset ? (this.dataset.idxCacheKey || "") : ""
+          });
+        } catch (_) {}
+        try { if (src) fetch(src, { cache: "no-store" }).catch(() => {}); } catch (_) {}
+        try {
+          this.dispatchEvent(new Event("play"));
+          this.dispatchEvent(new Event("playing"));
+          this.dispatchEvent(new Event("loadedmetadata"));
+        } catch (_) {}
+        return Promise.resolve();
+      };
+    } catch (_) {}
+  });
+
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message || String(err)));
+  page.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" && !/favicon|net::ERR|连不上 IndexTTS 后端|status of 404/i.test(text)) pageErrors.push(text);
+  });
+
+  const liveKey = "b".repeat(40);
+  let jobCount = 0;
+  let statusCount = 0;
+  let allowSecondMeta = false;
+  const plan = [
+    { idx: 0, role: "旁白", text: "第一段。", style: "neutral" },
+    { idx: 1, role: "对白", text: "第二段。", style: "neutral" },
+    { idx: 2, role: "旁白", text: "第三段。", style: "neutral" }
+  ];
+  const metaRows = [
+    { idx: 0, role: "旁白", text: "第一段。", style: "neutral", start_s: 0, duration_s: 1.2 },
+    { idx: 1, role: "对白", text: "第二段。", style: "neutral", start_s: 1.2, duration_s: 1.0 }
+  ];
+  const activeProfile = {
+    version: 3,
+    name: "Meta progress smoke profile",
+    llmPrompt: "PROFILE PROMPT",
+    quality: {
+      defaultMode: "balanced",
+      customLabel: "临时自定义",
+      modes: [{ id: "balanced", label: "平衡" }],
+      presets: {
+        live: {
+          balanced: profilePreset({
+            diffusion_steps: 11,
+            prompt_audio_seconds: 7,
+            segment_tokens: 44,
+            first_tokens: 12,
+            s2mel_cfg_rate: 0.61
+          })
+        },
+        generate: {
+          balanced: profilePreset({
+            diffusion_steps: 17,
+            prompt_audio_seconds: 12,
+            segment_tokens: 82,
+            first_tokens: 29,
+            s2mel_cfg_rate: 0.83
+          })
+        }
+      }
+    }
+  };
+
+  await page.route("**/profiles/active", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(activeProfile) });
+  });
+  await page.route("**/cache_audio/**", async (route) => {
+    await route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+  await page.route("**/tts_dialogue_job_status/**", async (route) => {
+    statusCount += 1;
+    const rows = allowSecondMeta ? metaRows : metaRows.slice(0, 1);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "running",
+        cache_key: liveKey,
+        cache_url: "/cache_audio/" + liveKey,
+        sample_rate: 8000,
+        duration_s: 3,
+        metrics: {
+          state: "running",
+          phase: "tts",
+          message: "后端正在合成…",
+          segments_done: 2,
+          segments_total: 3
+        },
+        segments_meta: rows,
+        segments_plan: plan
+      })
+    });
+  });
+  await page.route(/\/tts_dialogue_stream_job(?:\/[^/?#]+(?:(?:\/mp3)|(?:\/pcm)|(?:\/segment\/\d+))?)?(?:[?#].*)?$/, async (route) => {
+    const req = route.request();
+    const method = req.method().toUpperCase();
+    const pathname = new URL(req.url()).pathname;
+    if (method === "POST" && /\/tts_dialogue_stream_job\/?$/.test(pathname)) {
+      jobCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          url: "/tts_dialogue_stream_job/" + liveKey,
+          cache_url: "/cache_audio/" + liveKey,
+          cache_key: liveKey,
+          cached: false,
+          live: true
+        })
+      });
+      return;
+    }
+    if (method === "GET" && pathname.indexOf("/tts_dialogue_stream_job/") >= 0) {
+      await route.fulfill({ status: 200, contentType: "audio/mpeg", body: tinyMp3Buffer() });
+      return;
+    }
+    await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ message: "unexpected generated progress method" }) });
+  });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".idx-lazy-card", { timeout: 10000 });
+    await page.evaluate(async () => {
+      const cfg = {
+        configVersion: 13,
+        mode: "normal",
+        playbackMode: "live",
+        qualityMode: "balanced",
+        intervalMs: 50,
+        topP: 0.8,
+        topK: 30,
+        temperature: 0.7,
+        repetitionPenalty: 1.2,
+        emoAlpha: 0.38,
+        speedFactor: 1.0,
+        offlineAudioEnabled: false
+      };
+      const charCfg = {
+        defaultVoice: "女声/高圆圆.wav",
+        characterName: "潘金莲",
+        roleVoiceList: []
+      };
+      localStorage.setItem("indextts_tavo_config_v3", JSON.stringify(cfg));
+      localStorage.setItem("indextts_tavo_character_v1:34", JSON.stringify(charCfg));
+      if (window.tavo && typeof window.tavo.set === "function") {
+        await window.tavo.set("indextts_tavo_config_v3", cfg, "global");
+        await window.tavo.set("indextts_tavo_character_v1:34", charCfg, "global");
+      }
+    });
+    await remountTavoScript(page, "");
+    await page.click('[data-role="lazy-open"]');
+    await page.waitForSelector(".idx-card", { timeout: 10000 });
+    await page.evaluate(() => {
+      const add = document.querySelector('[data-role="add"]');
+      if (!add) throw new Error("missing add button");
+      add.click();
+    });
+    await page.waitForFunction(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const progress = (document.querySelector('[data-role="progress"]') || {}).textContent || "";
+      return fetches.some((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url))
+        && fetches.some((r) => /\/tts_dialogue_job_status\//.test(r.url))
+        && /已生成\s*1\/3\s*段/.test(progress);
+    }, { timeout: 10000 });
+    await page.waitForTimeout(1300);
+    const beforeMetaCatchesUp = await page.evaluate(() => {
+      const progress = (document.querySelector('[data-role="progress"]') || {}).textContent || "";
+      const debugTrack = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      return { progress, debugTrack };
+    });
+    if (!/已生成\s*1\/3\s*段/.test(beforeMetaCatchesUp.progress) || /已生成\s*2\/3\s*段/.test(beforeMetaCatchesUp.progress)) {
+      throw new Error("generated progress must prefer actual segments_meta over early metrics: " + JSON.stringify(beforeMetaCatchesUp));
+    }
+
+    allowSecondMeta = true;
+    await page.waitForFunction(() => {
+      const progress = (document.querySelector('[data-role="progress"]') || {}).textContent || "";
+      return /已生成\s*2\/3\s*段/.test(progress);
+    }, { timeout: 5000 });
+    await page.evaluate(() => {
+      const audio = document.querySelector('[data-role="audio"]');
+      if (!audio) throw new Error("missing audio for playback segment status");
+      audio.currentTime = 0.3;
+      audio.dispatchEvent(new Event("timeupdate"));
+    });
+    await page.waitForFunction(() => {
+      const progress = (document.querySelector('[data-role="progress"]') || {}).textContent || "";
+      return /已生成\s*2\/3\s*段\s*·\s*正在播第\s*1\/3\s*段/.test(progress);
+    }, { timeout: 5000 });
+    await page.waitForTimeout(1600);
+    const afterSameBasePoll = await page.evaluate(() => {
+      const progress = (document.querySelector('[data-role="progress"]') || {}).textContent || "";
+      const fetches = window.__idxTest.getFetchLog();
+      const debugTrack = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      return {
+        progress,
+        jobs: fetches.filter((r) => r.method === "POST" && /\/tts_dialogue_stream_job(?:[?#]|$)/.test(r.url)).length,
+        statuses: fetches.filter((r) => /\/tts_dialogue_job_status\//.test(r.url)).length,
+        playCalls: window.__metaProgressPlayCalls || [],
+        debugTrack
+      };
+    });
+    if (!/已生成\s*2\/3\s*段\s*·\s*正在播第\s*1\/3\s*段/.test(afterSameBasePoll.progress)) {
+      throw new Error("same-base polling must not strip current playback segment: " + JSON.stringify(afterSameBasePoll));
+    }
+    if (jobCount !== 1 || afterSameBasePoll.jobs !== 1) {
+      throw new Error("generated progress smoke should create one job: " + JSON.stringify({ jobCount, afterSameBasePoll }));
+    }
+    if (statusCount < 2 || afterSameBasePoll.statuses < 2) {
+      throw new Error("generated progress smoke should poll status more than once: " + JSON.stringify({ statusCount, afterSameBasePoll }));
+    }
+    if (pageErrors.length) throw new Error("generated progress meta smoke page error: " + pageErrors.join(" | "));
+    return { beforeMetaCatchesUp, afterSameBasePoll, statusCount, jobCount };
+  } finally {
+    await context.close();
+  }
+}
+
 async function runNativeLiveFlagSmoke(browser, targetUrl, flagName) {
   const smokeName = flagName || "defaultLive";
   const expectsMp3 = flagName !== "nativeLive";
@@ -2569,26 +2818,45 @@ async function runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl) {
         t.lastPlaybackSegmentStatusAt = 0;
       }
       const audio = document.querySelector('[data-role="audio"]');
+      if (!audio) throw new Error("missing audio before saved-live transient stall");
+      audio.currentTime = 1.2;
+      audio.dispatchEvent(new Event("stalled"));
+      setTimeout(() => {
+        audio.currentTime = 1.9;
+        audio.dispatchEvent(new Event("timeupdate"));
+      }, 500);
+    });
+    await page.waitForTimeout(3600);
+    const afterTransientStall = await page.evaluate(() => {
+      const fetches = window.__idxTest.getFetchLog();
+      const audio = document.querySelector('[data-role="audio"]');
+      return {
+        audioKind: audio && audio.dataset ? audio.dataset.idxSourceKind || "" : "",
+        audioSrc: audio ? (audio.currentSrc || audio.src || "") : "",
+        audioCurrentTime: audio ? Number(audio.currentTime || 0) : 0,
+        debugTrack: window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null,
+        cacheGets: fetches.filter((r) => r.method === "GET" && /\/cache_audio\//.test(r.url)).length
+      };
+    });
+    if (afterTransientStall.audioKind !== "live-mp3" || !/\/tts_dialogue_stream_job\/[^/?#]+\/mp3/.test(afterTransientStall.audioSrc)) {
+      throw new Error("transient saved live stalled event must keep live MP3 playback: " + JSON.stringify(afterTransientStall));
+    }
+    if (afterTransientStall.cacheGets > cacheGetsBeforeStall) {
+      throw new Error("transient saved live stalled event must not GET saved cache audio: " + JSON.stringify(afterTransientStall));
+    }
+    await page.evaluate(() => {
+      const t = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
+      if (t) {
+        t.latestSynthesisStatusText = "已生成 10/12 段";
+        t.lastPlaybackSegmentStatusAt = 0;
+      }
+      const audio = document.querySelector('[data-role="audio"]');
       if (!audio) throw new Error("missing audio before saved-live stalled handoff");
       audio.currentTime = 1.2;
       audio.dispatchEvent(new Event("stalled"));
     });
-    await page.waitForFunction((liveKey) => {
-      const audio = document.querySelector('[data-role="audio"]');
-      const play = document.querySelector('[data-role="play"]');
-      return audio
-        && audio.dataset
-        && audio.dataset.idxSourceKind === "saved"
-        && audio.dataset.idxCacheKey === liveKey
-        && /\/cache_audio\//.test(audio.currentSrc || audio.src || "")
-        && play
-        && play.dataset.state === "playing";
-    }, liveKey, { timeout: 5000 });
-    await page.waitForFunction(() => {
-      const currentLyric = document.querySelector(".idx-sub-row.is-current .idx-sub-text");
-      return currentLyric && /第二句/.test(currentLyric.textContent || "");
-    }, { timeout: 5000 });
-    const afterStallHandoff = await page.evaluate(() => {
+    await page.waitForTimeout(8500);
+    const afterSustainedStall = await page.evaluate(() => {
       const fetches = window.__idxTest.getFetchLog();
       const audio = document.querySelector('[data-role="audio"]');
       const play = document.querySelector('[data-role="play"]');
@@ -2610,26 +2878,20 @@ async function runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl) {
         playCalls: window.__cacheReadyPlayCalls || []
       };
     });
-    if (afterStallHandoff.audioKind !== "saved" || !/\/cache_audio\//.test(afterStallHandoff.audioSrc)) {
-      throw new Error("saved live stalled source should switch to complete cache audio: " + JSON.stringify(afterStallHandoff));
+    if (afterSustainedStall.audioKind !== "live-mp3" || !/\/tts_dialogue_stream_job\/[^/?#]+\/mp3/.test(afterSustainedStall.audioSrc)) {
+      throw new Error("sustained saved-live stalled event must keep live MP3 playback: " + JSON.stringify(afterSustainedStall));
     }
-    if (Math.abs(Number(afterStallHandoff.audioCurrentTime || 0) - 1.2) > 0.2 || !/第二句/.test(afterStallHandoff.currentLyricText)) {
-      throw new Error("saved live stalled handoff should preserve playback second and lyric: " + JSON.stringify(afterStallHandoff));
+    if (!afterSustainedStall.debugTrack || afterSustainedStall.debugTrack.state !== "saved" || afterSustainedStall.debugTrack.playbackState !== "playing" || afterSustainedStall.debugTrack.livePageExited) {
+      throw new Error("sustained saved-live stalled event should keep the LIVE session active: " + JSON.stringify(afterSustainedStall));
     }
-    if (!afterStallHandoff.debugTrack || afterStallHandoff.debugTrack.state !== "saved" || afterStallHandoff.debugTrack.playbackState !== "playing" || !afterStallHandoff.debugTrack.livePageExited) {
-      throw new Error("saved live stalled handoff should exit LIVE and keep the saved card playing: " + JSON.stringify(afterStallHandoff));
+    if (afterSustainedStall.liveExitHidden) {
+      throw new Error("sustained saved-live stalled event should keep LIVE controls visible: " + JSON.stringify(afterSustainedStall));
     }
-    if (!afterStallHandoff.liveExitHidden) {
-      throw new Error("saved live stalled handoff should hide the LIVE exit control: " + JSON.stringify(afterStallHandoff));
+    if (afterSustainedStall.liveGets.length > liveGetsBeforeStall || afterSustainedStall.liveStartGets.length || deleteCount !== 0) {
+      throw new Error("sustained saved-live stalled event must not reconnect or delete the LIVE job: " + JSON.stringify({ afterSustainedStall, deleteCount }));
     }
-    if (afterStallHandoff.liveGets.length > liveGetsBeforeStall || afterStallHandoff.liveStartGets.length || deleteCount !== 0) {
-      throw new Error("saved live stalled handoff must not reconnect or delete the LIVE job: " + JSON.stringify({ afterStallHandoff, deleteCount }));
-    }
-    if (afterStallHandoff.cacheGets <= cacheGetsBeforeStall) {
-      throw new Error("saved live stalled handoff should play the complete cache audio: " + JSON.stringify(afterStallHandoff));
-    }
-    if (/已生成\s*\d+\/\d+\s*段|正在播第\s*\d+(?:\s*\/\s*\d+)?\s*段/.test(afterStallHandoff.progress || "")) {
-      throw new Error("saved live stalled handoff should clear stale synthesis progress: " + JSON.stringify(afterStallHandoff));
+    if (afterSustainedStall.cacheGets > cacheGetsBeforeStall) {
+      throw new Error("sustained saved-live stalled event must not play complete cache audio: " + JSON.stringify(afterSustainedStall));
     }
     await page.evaluate((liveKey) => {
       const t = window.__indextts_tavo_debug_playback ? window.__indextts_tavo_debug_playback.currentTrack() : null;
@@ -2693,7 +2955,7 @@ async function runLiveMp3CacheReadyKeepsLiveSourceSmoke(browser, targetUrl) {
       throw new Error("saved live ended handoff should clear stale synthesis progress: " + JSON.stringify(afterEndedHandoff));
     }
     if (pageErrors.length) throw new Error("live MP3 cache-ready keep-source smoke page error: " + pageErrors.join(" | "));
-    return { result, afterStallHandoff, afterEndedHandoff, statusCount, cacheHeadCount, cacheGetCount, liveRequests };
+    return { result, afterSustainedStall, afterEndedHandoff, statusCount, cacheHeadCount, cacheGetCount, liveRequests };
   } finally {
     await context.close();
   }
@@ -6091,6 +6353,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
     const missingActiveProfileBlocksGeneration = await runMissingActiveProfileBlocksGenerationSmoke(browser, targetUrl);
     const groupRoleAvatar = await runGroupRoleAvatarSmoke(browser, targetUrl);
     const livePlayClick = await runLivePlayClickSmoke(browser, targetUrl);
+    const generatedProgressUsesMeta = await runGeneratedProgressUsesMetaSmoke(browser, targetUrl);
     const defaultLiveMp3 = await runNativeLiveFlagSmoke(browser, targetUrl, "");
     const defaultMp3Background = await runDefaultMp3BackgroundSmoke(browser, targetUrl);
     const liveMp3EndedAwaitCache = await runLiveMp3EndedAwaitCacheSmoke(browser, targetUrl);
@@ -6127,6 +6390,7 @@ async function runLiveResumeStartOffsetSmoke(browser, targetUrl) {
       missingActiveProfileBlocksGeneration,
       groupRoleAvatar,
       livePlayClick,
+      generatedProgressUsesMeta,
       defaultLiveMp3,
       defaultMp3Background,
       liveMp3EndedAwaitCache,
