@@ -119,6 +119,18 @@ function Assert-Preset {
     if ($null -eq $preset -or $preset -isnot [System.Management.Automation.PSCustomObject]) {
         throw "active profile missing quality.presets.$Stream.$Mode."
     }
+    foreach ($field in @("diffusion_steps", "prompt_audio_seconds", "segment_tokens", "first_tokens", "s2mel_cfg_rate", "interval_ms", "top_p", "top_k", "temperature", "repetition_penalty")) {
+        $value = Get-JsonProperty -Object $preset -Name $field
+        if ($null -eq $value) {
+            throw "active profile missing quality.presets.$Stream.$Mode.$field."
+        }
+        try {
+            [void][double]::Parse([string]$value, [System.Globalization.CultureInfo]::InvariantCulture)
+        }
+        catch {
+            throw "active profile quality.presets.$Stream.$Mode.$field must be numeric."
+        }
+    }
 }
 
 function Resolve-StyleReferencePath {

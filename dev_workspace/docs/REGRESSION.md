@@ -54,7 +54,7 @@ Current smoke must prove:
 - settings order is mode buttons, quality, voice mapping, playback/offline;
 - Tavo quality dropdown must be rendered from active profile `quality.modes` Chinese labels, plus the profile `customLabel` for the local temporary `custom` mode;
 - Tavo must fetch `/profiles/active` before generation. If the active profile is missing, invalid, missing the selected mode, or missing a LIVE/DISK preset, show `Profile 配置错误`, keep `[data-role="error"]` populated, and do not POST `/tts_dialogue_stream_job`;
-- non-`custom` quality modes must read params from `quality.presets.live[mode]` or `quality.presets.generate[mode]`; no JS code default should hide a broken profile;
+- non-`custom` quality modes must read params from `quality.presets.live[mode]` or `quality.presets.generate[mode]`, including `diffusion_steps`, `prompt_audio_seconds`, `segment_tokens`, `first_tokens`, `s2mel_cfg_rate`, `interval_ms`, `top_p`, `top_k`, `temperature`, and `repetition_penalty`; no JS code default should hide a broken profile;
 - `custom` is the only Tavo-local temporary parameter mode and may use the current settings fields;
 - normal mode shows only `旁白` and `对白`;
 - AI role mapping does not include normal dialogue rows and does not submit `voices.default`;
@@ -214,10 +214,14 @@ Latest validation passed 2026-06-11 after style-reference editor and log-noise f
 - Logs page filter/search should keep the in-memory log list intact, show visible/total count, highlight the search term, and classify `fatal` / `panic` / `exception` as error and `retry` as warning.
 - Logs page should not display progress-only backend noise: checkpoint shard progress and tqdm bars such as `0/14 ... ?it/s` or `100%|...| 14/14 ... it/s` must be hidden even when stderr stores them with carriage returns. Useful diagnostics such as `RuntimeWarning`, `s2mel input`, timing, RTF, and actual error/traceback lines must stay visible.
 - Logs page category filters should expose `重点`, `启动`, `错误`, `RTF`, and `全部`. The default useful view should prioritize startup, error/warning/success, and RTF/timing lines while preserving retained raw lines for `全部`.
-- Monitor page should not show placeholder-only recent generation content when `vllm/outputs/cache/*.json` or `fast6g/outputs/cache/*.json` exists. It should show recent generation key, role/text preview, RTF, audio duration, wall time, segment count, format, and size from local cache metadata.
-- Monitor page should separate service/API status, resource facts, recent generation records, RTF/timing log lines, and error log lines. Service uptime refresh must not call missing helpers.
+- `生成记录` page should not poll or flicker. It should query only on page entry, manual refresh, previous/next page, or version switch.
+- `生成记录` page should not show placeholder-only content when `vllm/outputs/cache/*.json` or `fast6g/outputs/cache/*.json` exists. It should show paginated generation key, readable role/text preview, RTF, audio duration, wall time, format, and size from local cache metadata.
+- `生成记录` row role should prefer `readable_cache.role` or `outputs/cache/by_role/<role>` over the first segment role, so mixed jobs do not all display `旁白`.
+- `生成记录` rows should not expose raw `分段 12/12` style copy; segment counts and segment text belong in the `查看` detail modal.
 - Voice library should render a dense searchable list with group counts and stable row sizing. When no group is selected, only `全部` should be active, not every group.
-- Quick test voice/style selection should use the searchable grouped picker with current selection and preview. Generation must submit the selected item's `name`, not a missing `.path`; history replay should restore the visible selected voice/style labels.
+- Mixer style-reference `选择声腔` and quick-test `选择声腔` should list only shared `prompts/library/声腔` items. Normal voice selection and the voice library may still show the full shared library.
+- Quick test voice/style selection should use the searchable grouped picker with current selection and preview. Generation must submit the selected item's `name`, not a missing `.path`; history replay should restore the visible selected voice/style labels and must not bypass the声腔-folder guard.
+- Profile preset editing must expose and save the full generation parameter set aligned with Tavo custom: diffusion steps, prompt seconds, segment tokens, first tokens, S2Mel CFG, interval ms, top P, top K, temperature, and repetition penalty. Launcher/profile/startup validation should reject missing or non-numeric preset fields instead of falling back to hidden defaults.
 - `Ctrl+R` should refresh the current page, `Ctrl+L` should clear logs, and shortcuts must not intercept while an input/select/textarea/contenteditable field is focused.
 - GUI manual smoke should verify no auto-start, profile list, create, details/editor, save, save-and-apply, test, copy, delete, logs, shortcuts, status, and warmup error when the API is stopped.
 - Run `npm --prefix launcher-tauri run frontend:build` before Cargo checks/builds, not in parallel. Vite clears `launcher-tauri/dist/`; Tauri `generate_context!` can fail if Cargo reads assets while the dist directory is being rebuilt.

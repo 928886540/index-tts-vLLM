@@ -41,35 +41,60 @@
           "first_tokens": 18,
           "prompt_audio_seconds": 10,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 60
+          "segment_tokens": 60,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         },
         "custom": {
           "diffusion_steps": 14,
           "first_tokens": 18,
           "prompt_audio_seconds": 10,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 60
+          "segment_tokens": 60,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         },
         "expressive": {
           "diffusion_steps": 16,
           "first_tokens": 24,
           "prompt_audio_seconds": 12,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 72
+          "segment_tokens": 72,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         },
         "fast": {
           "diffusion_steps": 8,
           "first_tokens": 10,
           "prompt_audio_seconds": 6,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 40
+          "segment_tokens": 40,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         },
         "ultra": {
           "diffusion_steps": 20,
           "first_tokens": 32,
           "prompt_audio_seconds": 14,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 96
+          "segment_tokens": 96,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         }
       },
       "live": {
@@ -78,35 +103,60 @@
           "first_tokens": 18,
           "prompt_audio_seconds": 10,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 60
+          "segment_tokens": 60,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         },
         "custom": {
           "diffusion_steps": 14,
           "first_tokens": 18,
           "prompt_audio_seconds": 10,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 60
+          "segment_tokens": 60,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         },
         "expressive": {
           "diffusion_steps": 16,
           "first_tokens": 24,
           "prompt_audio_seconds": 12,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 72
+          "segment_tokens": 72,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         },
         "fast": {
           "diffusion_steps": 8,
           "first_tokens": 10,
           "prompt_audio_seconds": 6,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 40
+          "segment_tokens": 40,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         },
         "ultra": {
           "diffusion_steps": 20,
           "first_tokens": 32,
           "prompt_audio_seconds": 14,
           "s2mel_cfg_rate": 0.7,
-          "segment_tokens": 96
+          "segment_tokens": 96,
+          "interval_ms": 50,
+          "top_p": 0.8,
+          "top_k": 30,
+          "temperature": 0.7,
+          "repetition_penalty": 1.2
         }
       }
     }

@@ -80,7 +80,7 @@ function sidebarTemplate() {
                     <line x1="12" y1="19" x2="12" y2="23"></line>
                     <line x1="8" y1="23" x2="16" y2="23"></line>
                 `)}
-                ${navItem('monitor', '实时监控', `
+                ${navItem('monitor', '生成记录', `
                     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
                 `)}
                 ${navItem('environment', '环境检测', `

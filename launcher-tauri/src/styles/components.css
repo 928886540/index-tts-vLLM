@@ -544,7 +544,7 @@ select option:checked {
 
 .preset-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(76px, 1fr));
+    grid-template-columns: repeat(5, minmax(88px, 1fr));
     gap: 10px;
 }
 
@@ -1431,7 +1431,7 @@ select option:checked {
 }
 
 .preset-grid {
-    grid-template-columns: repeat(5, minmax(72px, 1fr));
+    grid-template-columns: repeat(5, minmax(88px, 1fr));
     gap: 8px;
 }
 
@@ -2342,7 +2342,7 @@ select option:checked {
     height: 32px;
 }
 
-/* ==================== 实时监控页面 ==================== */
+/* ==================== 生成记录页面 ==================== */
 
 .monitor-grid {
     display: grid;
@@ -2925,6 +2925,10 @@ select option:checked {
     gap: 14px;
 }
 
+.generation-records-grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .monitor-card {
     padding: 16px;
 }
@@ -2936,6 +2940,12 @@ select option:checked {
 
 .monitor-card .card-header h3 {
     color: rgba(245, 248, 251, 0.94);
+}
+
+.card-subtitle {
+    margin: 4px 0 0;
+    color: rgba(218, 228, 238, 0.52);
+    font-size: 12px;
 }
 
 .card-count {
@@ -2955,7 +2965,7 @@ select option:checked {
 
 .generation-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(380px, 0.95fr) 150px;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.82fr) 118px;
     gap: 12px;
     align-items: center;
     min-height: 68px;
@@ -2985,7 +2995,7 @@ select option:checked {
 
 .generation-metrics {
     display: grid;
-    grid-template-columns: repeat(5, minmax(70px, 1fr));
+    grid-template-columns: repeat(4, minmax(70px, 1fr));
     gap: 6px;
     min-width: 0;
 }
@@ -3016,6 +3026,107 @@ select option:checked {
     text-align: right;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.generation-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    min-width: 0;
+}
+
+.generation-pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+    color: rgba(218, 228, 238, 0.62);
+    font-size: 12px;
+}
+
+.generation-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.generation-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.generation-detail-grid div {
+    min-width: 0;
+    padding: 9px 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(151, 178, 205, 0.12);
+    border-radius: 7px;
+}
+
+.generation-detail-grid span {
+    display: block;
+    margin-bottom: 4px;
+    color: rgba(218, 228, 238, 0.48);
+    font-size: 11px;
+}
+
+.generation-detail-grid b {
+    display: block;
+    overflow: hidden;
+    color: rgba(245, 248, 251, 0.9);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.generation-detail-section h4 {
+    margin: 0 0 8px;
+    color: rgba(245, 248, 251, 0.9);
+    font-size: 13px;
+}
+
+.generation-segment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    max-height: 320px;
+    overflow: auto;
+}
+
+.generation-segment-row {
+    display: grid;
+    grid-template-columns: 34px 86px minmax(0, 1fr) 120px;
+    gap: 8px;
+    align-items: start;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(151, 178, 205, 0.10);
+    border-radius: 7px;
+}
+
+.generation-segment-row span,
+.generation-segment-row em {
+    color: rgba(218, 228, 238, 0.48);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 11px;
+    font-style: normal;
+}
+
+.generation-segment-row b {
+    color: #6ee7c7;
+    font-size: 12px;
+}
+
+.generation-segment-row p {
+    min-width: 0;
+    margin: 0;
+    color: rgba(225, 234, 242, 0.84);
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
 }
 
 .monitor-log-line {
@@ -3074,6 +3185,15 @@ select option:checked {
 
     .generation-time {
         text-align: left;
+    }
+
+    .generation-actions {
+        align-items: flex-start;
+    }
+
+    .generation-detail-grid,
+    .generation-segment-row {
+        grid-template-columns: 1fr;
     }
 
     .modal-select.refined-select,

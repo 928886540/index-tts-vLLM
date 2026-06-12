@@ -102,7 +102,30 @@ struct RecentGenerationItem {
     performance_mode: Option<String>,
     role: Option<String>,
     first_text: Option<String>,
+    segments: Vec<GenerationSegmentSummary>,
     status: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerationSegmentSummary {
+    index: u64,
+    role: Option<String>,
+    text: Option<String>,
+    style: Option<String>,
+    start_s: Option<f64>,
+    duration_s: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentGenerationsPage {
+    version: String,
+    page: usize,
+    page_size: usize,
+    total: usize,
+    has_more: bool,
+    items: Vec<RecentGenerationItem>,
 }
 
 #[derive(Debug, Serialize)]
@@ -225,7 +248,7 @@ fn smoke_test() -> Result<(), String> {
     }
     validate_profile(profiles[0].file.clone())?;
     get_log_snapshot("fast6g".to_string(), Some(5))?;
-    get_recent_generations("fast6g".to_string(), Some(3))?;
+    get_recent_generations("fast6g".to_string(), Some(1), Some(3), None)?;
     let active_path = profile_dir.join("active.json");
     if !active_path.exists() {
         return Err(format!("缺少 active profile: {}", active_path.display()));
@@ -874,22 +897,7 @@ fn get_log_snapshot(version: String, max_lines: Option<usize>) -> Result<LogSnap
         });
     };
 
-    let selected: Vec<&(PathBuf, Option<std::time::SystemTime>)> =
-        candidates.iter().take(5).collect();
-    let per_file = (max_lines / selected.len().max(1)).clamp(20, 220);
-    let mut lines = Vec::new();
-    for (index, item) in selected.iter().enumerate() {
-        let path = &item.0;
-        if index > 0 {
-            lines.push(String::new());
-        }
-        let file = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-        lines.push(format!("===== {} =====", file));
-        lines.extend(read_tail_lines(path, per_file)?);
-    }
+    let lines = read_tail_lines(active_path, max_lines)?;
 
     Ok(LogSnapshot {
         version: normalized,
@@ -905,15 +913,25 @@ fn get_log_snapshot(version: String, max_lines: Option<usize>) -> Result<LogSnap
 #[tauri::command]
 fn get_recent_generations(
     version: String,
+    page: Option<usize>,
+    page_size: Option<usize>,
     max_items: Option<usize>,
-) -> Result<Vec<RecentGenerationItem>, String> {
+) -> Result<RecentGenerationsPage, String> {
     let root = leon_root()?;
     let normalized = normalize_version(&version);
     let cache_dir = root.join(&normalized).join("outputs").join("cache");
-    let max_items = max_items.unwrap_or(12).clamp(1, 50);
+    let page = page.unwrap_or(1).max(1);
+    let page_size = page_size.or(max_items).unwrap_or(12).clamp(1, 50);
 
     if !cache_dir.is_dir() {
-        return Ok(Vec::new());
+        return Ok(RecentGenerationsPage {
+            version: normalized,
+            page,
+            page_size,
+            total: 0,
+            has_more: false,
+            items: Vec::new(),
+        });
     }
 
     let mut candidates = Vec::new();
@@ -934,17 +952,28 @@ fn get_recent_generations(
     candidates.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mut items = Vec::new();
-    for (path, modified_time) in candidates.into_iter().take(max_items * 3) {
-        match recent_generation_from_json(&normalized, &cache_dir, &path, modified_time) {
-            Ok(item) => items.push(item),
+    let start = page.saturating_sub(1).saturating_mul(page_size);
+    let mut total = 0usize;
+    for (path, modified_time) in candidates {
+        let item = match recent_generation_from_json(&normalized, &cache_dir, &path, modified_time)
+        {
+            Ok(item) => item,
             Err(_) => continue,
+        };
+        if total >= start && items.len() < page_size {
+            items.push(item);
         }
-        if items.len() >= max_items {
-            break;
-        }
+        total += 1;
     }
 
-    Ok(items)
+    Ok(RecentGenerationsPage {
+        version: normalized,
+        page,
+        page_size,
+        total,
+        has_more: start.saturating_add(items.len()) < total,
+        items,
+    })
 }
 
 async fn health_check_internal() -> ServiceHealth {
@@ -1314,6 +1343,11 @@ fn validate_preset(value: &Value, mode: &str, group: &str) -> Result<(), String>
         "segment_tokens",
         "first_tokens",
         "s2mel_cfg_rate",
+        "interval_ms",
+        "top_p",
+        "top_k",
+        "temperature",
+        "repetition_penalty",
     ] {
         if !preset.get(key).is_some_and(Value::is_number) {
             return Err(format!(
@@ -1638,11 +1672,17 @@ fn recent_generation_from_json(
     let status = value_string(metrics, "state")
         .or_else(|| value_string(metrics, "phase"))
         .unwrap_or_else(|| "done".to_string());
+    let role = generation_display_role(&value);
+    let first_text = role
+        .as_deref()
+        .and_then(|role| first_segment_text_for_role(&value, role))
+        .or_else(|| first_segment_string(&value, "text"));
 
     Ok(RecentGenerationItem {
         version: version.to_string(),
         key,
-        created_at: value_string(&value, "created_at"),
+        created_at: value_string(&value, "created_at")
+            .or_else(|| readable_cache_created_at(&value)),
         modified: modified_time.and_then(system_time_to_rfc3339),
         audio_format,
         audio_bytes,
@@ -1657,8 +1697,9 @@ fn recent_generation_from_json(
             .or_else(|| array_len_u64(value.get("segments_meta"))),
         parse_mode: value_string(metrics, "parse_mode"),
         performance_mode: value_string(metrics, "performance_mode"),
-        role: first_segment_string(&value, "role"),
-        first_text: first_segment_string(&value, "text"),
+        role,
+        first_text,
+        segments: generation_segment_summaries(&value),
         status,
     })
 }
@@ -1712,6 +1753,22 @@ fn array_len_u64(value: Option<&Value>) -> Option<u64> {
 }
 
 fn first_segment_string(value: &Value, key: &str) -> Option<String> {
+    segment_items(value)
+        .and_then(|items| items.first())
+        .and_then(|item| value_string(item, key))
+}
+
+fn first_segment_text_for_role(value: &Value, role: &str) -> Option<String> {
+    if role.contains(" / ") {
+        return None;
+    }
+    segment_items(value)?
+        .iter()
+        .find(|item| value_string(item, "role").as_deref() == Some(role))
+        .and_then(|item| value_string(item, "text"))
+}
+
+fn segment_items(value: &Value) -> Option<&Vec<Value>> {
     let metrics = value.get("metrics").unwrap_or(&Value::Null);
     [
         value.get("segments_meta"),
@@ -1719,10 +1776,101 @@ fn first_segment_string(value: &Value, key: &str) -> Option<String> {
         value.get("segments_plan"),
     ]
     .iter()
-    .filter_map(|section| section.and_then(Value::as_array))
-    .filter_map(|items| items.first())
-    .filter_map(|item| value_string(item, key))
-    .next()
+    .find_map(|section| section.and_then(Value::as_array))
+}
+
+fn generation_segment_summaries(value: &Value) -> Vec<GenerationSegmentSummary> {
+    let Some(items) = segment_items(value) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| GenerationSegmentSummary {
+            index: value_u64(item, "idx").unwrap_or(index as u64),
+            role: value_string(item, "role"),
+            text: value_string(item, "text"),
+            style: value_string(item, "style"),
+            start_s: value_f64(item, "start_s"),
+            duration_s: value_f64(item, "duration_s"),
+        })
+        .collect()
+}
+
+fn generation_display_role(value: &Value) -> Option<String> {
+    let roles = readable_cache_roles(value);
+    if !roles.is_empty() {
+        return Some(roles.join(" / "));
+    }
+    first_non_narrator_segment_role(value).or_else(|| first_segment_string(value, "role"))
+}
+
+fn first_non_narrator_segment_role(value: &Value) -> Option<String> {
+    segment_items(value)?
+        .iter()
+        .filter_map(|item| value_string(item, "role"))
+        .find(|role| role != "旁白")
+}
+
+fn readable_cache_roles(value: &Value) -> Vec<String> {
+    let mut roles = Vec::new();
+    let Some(readable) = value.get("readable_cache") else {
+        return roles;
+    };
+    match readable {
+        Value::Array(items) => {
+            for item in items {
+                push_unique_role(&mut roles, role_from_readable_cache_item(item));
+            }
+        }
+        Value::Object(_) => push_unique_role(&mut roles, role_from_readable_cache_item(readable)),
+        _ => {}
+    }
+    roles
+}
+
+fn push_unique_role(roles: &mut Vec<String>, role: Option<String>) {
+    let Some(role) = role
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+    else {
+        return;
+    };
+    if !roles.iter().any(|item| item == &role) {
+        roles.push(role);
+    }
+}
+
+fn role_from_readable_cache_item(item: &Value) -> Option<String> {
+    value_string(item, "role").or_else(|| {
+        ["path", "metadata_path"]
+            .iter()
+            .filter_map(|key| item.get(*key).and_then(Value::as_str))
+            .find_map(role_from_by_role_path)
+    })
+}
+
+fn readable_cache_created_at(value: &Value) -> Option<String> {
+    let readable = value.get("readable_cache")?;
+    match readable {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| value_string(item, "created_at"))
+            .next(),
+        Value::Object(_) => value_string(readable, "created_at"),
+        _ => None,
+    }
+}
+
+fn role_from_by_role_path(path: &str) -> Option<String> {
+    let parts: Vec<&str> = path
+        .split(|ch| ch == '\\' || ch == '/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    parts
+        .windows(2)
+        .find(|pair| pair[0].eq_ignore_ascii_case("by_role"))
+        .map(|pair| pair[1].to_string())
 }
 
 fn format_ratio(ratio: f32) -> String {

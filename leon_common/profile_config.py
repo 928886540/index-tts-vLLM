@@ -48,12 +48,26 @@ def default_profile_prompt_template() -> str:
 
 
 def default_quality_presets() -> dict:
+    def preset(diffusion_steps: int, prompt_audio_seconds: int, segment_tokens: int, first_tokens: int) -> dict:
+        return {
+            "diffusion_steps": diffusion_steps,
+            "prompt_audio_seconds": prompt_audio_seconds,
+            "segment_tokens": segment_tokens,
+            "first_tokens": first_tokens,
+            "s2mel_cfg_rate": 0.7,
+            "interval_ms": 50,
+            "top_p": 0.8,
+            "top_k": 30,
+            "temperature": 0.7,
+            "repetition_penalty": 1.2,
+        }
+
     presets = {
-        "fast": {"diffusion_steps": 8, "prompt_audio_seconds": 6, "segment_tokens": 40, "first_tokens": 10, "s2mel_cfg_rate": 0.7},
-        "balanced": {"diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7},
-        "expressive": {"diffusion_steps": 16, "prompt_audio_seconds": 12, "segment_tokens": 72, "first_tokens": 24, "s2mel_cfg_rate": 0.7},
-        "ultra": {"diffusion_steps": 20, "prompt_audio_seconds": 14, "segment_tokens": 96, "first_tokens": 32, "s2mel_cfg_rate": 0.7},
-        "custom": {"diffusion_steps": 14, "prompt_audio_seconds": 10, "segment_tokens": 60, "first_tokens": 18, "s2mel_cfg_rate": 0.7},
+        "fast": preset(8, 6, 40, 10),
+        "balanced": preset(14, 10, 60, 18),
+        "expressive": preset(16, 12, 72, 24),
+        "ultra": preset(20, 14, 96, 32),
+        "custom": preset(14, 10, 60, 18),
     }
     return {"live": dict(presets), "generate": dict(presets)}
 

@@ -64,6 +64,16 @@ function tinyMp3Buffer() {
   );
 }
 
+function profilePreset(params) {
+  return Object.assign({
+    interval_ms: 50,
+    top_p: 0.8,
+    top_k: 30,
+    temperature: 0.7,
+    repetition_penalty: 1.2
+  }, params || {});
+}
+
 async function remountTavoScript(page, extraQuery) {
   await page.waitForSelector("#scriptSlot", { timeout: 10000 });
   await page.evaluate((query) => {
@@ -651,22 +661,22 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
       modes: [{ id: "balanced", label: "平衡" }],
       presets: {
         live: {
-          balanced: {
+          balanced: profilePreset({
             diffusion_steps: 11,
             prompt_audio_seconds: 7,
             segment_tokens: 44,
             first_tokens: 12,
             s2mel_cfg_rate: 0.61
-          }
+          })
         },
         generate: {
-          balanced: {
+          balanced: profilePreset({
             diffusion_steps: 17,
             prompt_audio_seconds: 12,
             segment_tokens: 82,
             first_tokens: 29,
             s2mel_cfg_rate: 0.83
-          }
+          })
         }
       }
     }
@@ -793,7 +803,7 @@ async function runNormalExplicitDialogueMappingSmoke(browser, targetUrl) {
     if (/assistant message mock|IndexTTS Tavo 测试页|用户身份名|角色名/.test(body.text)) {
       throw new Error("message text should prefer Tavo API content over DOM chrome: " + JSON.stringify(body));
     }
-    if (body.performance_mode !== "custom" || body.diffusion_steps !== 16 || body.prompt_audio_seconds !== 12 || body.segment_tokens !== 72 || body.first_tokens !== 24 || body.s2mel_cfg_rate !== 0.7) {
+    if (body.performance_mode !== "custom" || body.diffusion_steps !== 16 || body.prompt_audio_seconds !== 12 || body.segment_tokens !== 72 || body.first_tokens !== 24 || body.s2mel_cfg_rate !== 0.7 || body.interval_ms !== 50 || body.top_p !== 0.8 || body.top_k !== 30 || body.temperature !== 0.7 || body.repetition_penalty !== 1.2) {
       throw new Error("custom mode should submit Tavo temporary params when active profile is valid: " + JSON.stringify(body));
     }
     if (pageErrors.length) throw new Error("normal explicit dialogue smoke page error: " + pageErrors.join(" | "));
@@ -835,22 +845,32 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
         ],
         presets: {
           live: {
-            balanced: {
+            balanced: profilePreset({
               diffusion_steps: 11,
               prompt_audio_seconds: 7,
               segment_tokens: 44,
               first_tokens: 12,
-              s2mel_cfg_rate: 0.61
-            }
+              s2mel_cfg_rate: 0.61,
+              interval_ms: 90,
+              top_p: 0.72,
+              top_k: 28,
+              temperature: 0.66,
+              repetition_penalty: 1.11
+            })
           },
           generate: {
-            balanced: {
+            balanced: profilePreset({
               diffusion_steps: 17,
               prompt_audio_seconds: 12,
               segment_tokens: 82,
               first_tokens: 29,
-              s2mel_cfg_rate: 0.83
-            }
+              s2mel_cfg_rate: 0.83,
+              interval_ms: 140,
+              top_p: 0.91,
+              top_k: 42,
+              temperature: 0.88,
+              repetition_penalty: 1.33
+            })
           }
         }
       }
@@ -971,10 +991,10 @@ async function runActiveProfileQualitySmoke(browser, targetUrl) {
   if (!live.qualityOptions.some((o) => o.value === "balanced" && o.text === "烟测平衡档") || !live.qualityOptions.some((o) => o.value === "custom" && o.text === "临时自定义")) {
     throw new Error("Tavo quality dropdown should be rendered from active profile labels: " + JSON.stringify(live.qualityOptions));
   }
-  if (live.body.performance_mode !== "balanced" || live.body.diffusion_steps !== 11 || live.body.prompt_audio_seconds !== 7 || live.body.segment_tokens !== 44 || live.body.first_tokens !== 12 || live.body.s2mel_cfg_rate !== 0.61) {
+  if (live.body.performance_mode !== "balanced" || live.body.diffusion_steps !== 11 || live.body.prompt_audio_seconds !== 7 || live.body.segment_tokens !== 44 || live.body.first_tokens !== 12 || live.body.s2mel_cfg_rate !== 0.61 || live.body.interval_ms !== 90 || live.body.top_p !== 0.72 || live.body.top_k !== 28 || live.body.temperature !== 0.66 || live.body.repetition_penalty !== 1.11) {
     throw new Error("LIVE should keep Tavo-selected balanced mode and read active profile live balanced params: " + JSON.stringify(live.body));
   }
-  if (disk.body.performance_mode !== "balanced" || disk.body.diffusion_steps !== 17 || disk.body.prompt_audio_seconds !== 12 || disk.body.segment_tokens !== 82 || disk.body.first_tokens !== 29 || disk.body.s2mel_cfg_rate !== 0.83) {
+  if (disk.body.performance_mode !== "balanced" || disk.body.diffusion_steps !== 17 || disk.body.prompt_audio_seconds !== 12 || disk.body.segment_tokens !== 82 || disk.body.first_tokens !== 29 || disk.body.s2mel_cfg_rate !== 0.83 || disk.body.interval_ms !== 140 || disk.body.top_p !== 0.91 || disk.body.top_k !== 42 || disk.body.temperature !== 0.88 || disk.body.repetition_penalty !== 1.33) {
     throw new Error("DISK should keep Tavo-selected balanced mode and read active profile generate balanced params: " + JSON.stringify(disk.body));
   }
   if (live.body.parse_system_prompt !== "PROFILE PROMPT FROM ACTIVE" || disk.body.parse_system_prompt !== "PROFILE PROMPT FROM ACTIVE") {

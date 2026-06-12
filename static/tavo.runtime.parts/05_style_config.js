@@ -130,7 +130,12 @@
       prompt_audio_seconds: readProfileNumber(item, "prompt_audio_seconds", 2, 16, false, context),
       segment_tokens: segmentTokens,
       first_tokens: firstTokens,
-      s2mel_cfg_rate: readProfileNumber(item, "s2mel_cfg_rate", 0, 1.2, false, context)
+      s2mel_cfg_rate: readProfileNumber(item, "s2mel_cfg_rate", 0, 1.2, false, context),
+      interval_ms: readProfileNumber(item, "interval_ms", 0, 2000, true, context),
+      top_p: readProfileNumber(item, "top_p", 0.1, 1, false, context),
+      top_k: readProfileNumber(item, "top_k", 1, 100, true, context),
+      temperature: readProfileNumber(item, "temperature", 0.1, 1.5, false, context),
+      repetition_penalty: readProfileNumber(item, "repetition_penalty", 1, 2, false, context)
     };
   }
   function collectProfilePresetStream(source, modes, stream) {

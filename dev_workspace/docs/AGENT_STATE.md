@@ -13,10 +13,12 @@ Read the archive only when investigating old decisions, benchmark history, or fi
 Current launcher UX slice:
 
 - Logs page now defaults to a useful operational view with explicit `重点` / `启动` / `错误` / `RTF` / `全部` filters. The frontend classifies startup, error, warning, and timing/RTF lines while continuing to hide checkpoint/tqdm/self-poll noise.
-- Tauri backend exposes `get_recent_generations`, reading top-level `vllm/outputs/cache/*.json` or `fast6g/outputs/cache/*.json` plus matching audio file metadata. The monitor page now shows recent generation records with RTF, audio duration, total wall time, segment count, format, and size instead of a hard-coded placeholder.
-- Monitor page now separates service/API status, local resource facts, recent generation records, RTF/timing log lines, and error log lines. It also fixes the missing `formatUptime()` call that could break monitor refresh after the service started.
+- Log snapshot now tails only the latest active log file. The UI no longer merges the last five historical files into the current view, so stale timestamps should not look like current startup logs.
+- Tauri backend exposes paginated `get_recent_generations`, reading top-level `vllm/outputs/cache/*.json` or `fast6g/outputs/cache/*.json` plus matching audio file metadata and segment summaries. Record role display now prefers `readable_cache.role` / `outputs/cache/by_role/<role>` over the first segment role.
+- The old monitor page has been renamed to `生成记录`. It does not poll; it queries by page only on enter, refresh, previous, next, or version switch. Rows show role/text preview and useful timing/audio metrics, while segment details live behind `查看`.
 - Voice library UI is now a denser scan-friendly list with group counts, stable row sizing, search across name/group/path, and cleaner preview/move/delete controls.
-- Quick test voice/style picker uses a shared searchable modal with group counts, current selection, row preview, and selected state. Quick test generation now submits the selected item `name` instead of an undefined `.path`.
+- Quick test voice/style picker uses a shared searchable modal with group counts, current selection, row preview, and selected state. The `选择声腔` entry in both mixer and quick test is now restricted to shared `prompts/library/声腔`, while regular voice selection still sees the full library.
+- Profile quality presets now include the Tavo custom-aligned request parameters: `interval_ms`, `top_p`, `top_k`, `temperature`, and `repetition_penalty`. Tavo active-profile parsing, launcher validation, shared startup validation, and tracked profile JSON all require those fields.
 
 Validation for this slice:
 
@@ -24,14 +26,26 @@ Validation for this slice:
 node --check launcher-tauri\src\scripts\app.js
 node --check launcher-tauri\src\scripts\mock-api.js
 node --check launcher-tauri\src\scripts\main.js
+node --check static\tavo.js
+node --check static\tavo.runtime.js
+node --check static\tavo.runtime.parts\05_style_config.js
+node --check static\tavo.runtime.parts\10_tracks_icons.js
+node --check dev_workspace\dev_tools\test_tavo_widget_playwright.js
+$manifest = Get-Content -Raw static\tavo.runtime.manifest.json | ConvertFrom-Json; $code = "(async function(){`n"; foreach ($m in $manifest.modules) { $code += (Get-Content -Raw (Join-Path static $m.file)) + "`n" }; $code += "`n})();"; $code | node --check -
+node dev_workspace\dev_tools\test_tavo_widget_playwright.js
+python -m py_compile leon_common\profile_config.py
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version vllm -ValidateOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart-leon-api.ps1 -Version fast6g -ValidateOnly
 npm --prefix launcher-tauri run frontend:build
 cargo fmt --manifest-path launcher-tauri\src-tauri\Cargo.toml --check
 cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
 cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
-$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+Copy-Item launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe LEON-Launcher-Tauri.exe -Force
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+git diff --check
 ```
 
-Note: copying the release exe over root `LEON-Launcher-Tauri.exe` failed because the root launcher was open as PID `20500`. The release exe smoke passed from `launcher-tauri/src-tauri/target/release/leon-launcher-tauri.exe`. Close the running launcher before overwriting the root exe.
+Note: root `LEON-Launcher-Tauri.exe` was open as PID `33232` during this pass. The launcher UI process was closed, the root exe was overwritten, and `LEON_LAUNCHER_SMOKE_TEST=1` exited with code `0`.
 
 ## Package Split Handoff 2026-06-12
 
@@ -225,13 +239,13 @@ Use these boundaries when reporting bugs or fixes.
 Cache-busted script:
 
 ```html
-<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260611-mp3-cache-v65"></script>
+<script src="http://<LAN-IP>:9880/static/tavo.js?v=20260612-mp3-cache-v66"></script>
 ```
 
 Current code state:
 
 - Root `README.md`, `dev_workspace/README.md`, and `dev_workspace/AGENTS.md` now point Tavo playback/generation work to `dev_workspace/docs/LOGIC.md`.
-- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260611-mp3-cache-v65`.
+- `static/tavo.js`, `static/tavo.runtime.js`, `static/tavo.runtime.manifest.json`, root `README.md`, and `dev_workspace/README.md` use `20260612-mp3-cache-v66`.
 - Launcher tuning first slice now uses profile schema v3: `config/profiles/*.json` are editable source profiles, `config/profiles/active.json` is the applied runtime snapshot, `quality.presets.live/generate` stores parameters for every Tavo quality mode, and `styles` stores voice-cavity defaults/ref audio. The launcher editor can now edit style id, label, enabled flag, ref, `style_alpha`, `emo_alpha`, `emo_vec`, and description. Saving writes the selected profile; applying writes `active.json`; backend startup receives `LEON_ACTIVE_PROFILE_PATH` pointing at the active snapshot.
 - Tavo generation now reads `/profiles/active` at config load and again immediately before generation. Tavo only stores/selects the quality mode name; request parameters are taken from active profile `quality.presets.live[mode]` or `quality.presets.generate[mode]`. Profile `llmPrompt` is submitted as `parse_system_prompt` and rendered by the API backend as a template with runtime role/user/style placeholders.
 - vLLM and fast6g LLM proxy requests now send a stable LEON user-agent. This fixes real OpenAI-compatible gateways that reject urllib's default Python user-agent with Cloudflare 1010 while direct keyed requests succeed.

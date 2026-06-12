@@ -224,7 +224,12 @@
       prompt_audio_seconds: clampNumber(cfg.promptAudioSeconds, 10, 2, 16),
       segment_tokens: segmentTokens,
       first_tokens: Math.round(clampNumber(cfg.firstTokens, 18, 4, Math.max(4, segmentTokens))),
-      s2mel_cfg_rate: clampNumber(cfg.s2melCfgRate, 0.7, 0, 1.2)
+      s2mel_cfg_rate: clampNumber(cfg.s2melCfgRate, 0.7, 0, 1.2),
+      interval_ms: Math.round(clampNumber(cfg.intervalMs, 50, 0, 2000)),
+      top_p: clampNumber(cfg.topP, 0.8, 0.1, 1),
+      top_k: Math.round(clampNumber(cfg.topK, 30, 1, 100)),
+      temperature: clampNumber(cfg.temperature, 0.7, 0.1, 1.5),
+      repetition_penalty: clampNumber(cfg.repetitionPenalty, 1.2, 1, 2)
     };
   }
   function generationQualityOverrides(mode, cfg, playbackMode) {
@@ -237,7 +242,12 @@
       prompt_audio_seconds: profilePreset.prompt_audio_seconds,
       segment_tokens: profilePreset.segment_tokens,
       first_tokens: profilePreset.first_tokens,
-      s2mel_cfg_rate: profilePreset.s2mel_cfg_rate
+      s2mel_cfg_rate: profilePreset.s2mel_cfg_rate,
+      interval_ms: profilePreset.interval_ms,
+      top_p: profilePreset.top_p,
+      top_k: profilePreset.top_k,
+      temperature: profilePreset.temperature,
+      repetition_penalty: profilePreset.repetition_penalty
     };
   }
   function applyGenerationParamsToSearchParams(p, cfg, playbackMode) {
@@ -249,4 +259,9 @@
     p.set("segment_tokens", String(q.segment_tokens));
     p.set("first_tokens", String(q.first_tokens));
     p.set("s2mel_cfg_rate", String(q.s2mel_cfg_rate));
+    p.set("interval_ms", String(q.interval_ms));
+    p.set("top_p", String(q.top_p));
+    p.set("top_k", String(q.top_k));
+    p.set("temperature", String(q.temperature));
+    p.set("repetition_penalty", String(q.repetition_penalty));
   }

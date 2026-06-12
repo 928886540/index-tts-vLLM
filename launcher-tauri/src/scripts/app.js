@@ -2,11 +2,16 @@
 
 const tauriInvoke = window.__TAURI__?.core?.invoke;
 const PRESET_FIELDS = [
-    { key: 'diffusion_steps', label: '扩散步数', step: '1' },
-    { key: 'prompt_audio_seconds', label: '参考秒数', step: '1' },
-    { key: 'segment_tokens', label: '分段 tokens', step: '1' },
-    { key: 'first_tokens', label: '首段 tokens', step: '1' },
-    { key: 's2mel_cfg_rate', label: 'CFG rate', step: '0.01' }
+    { key: 'diffusion_steps', label: '扩散步数', step: '1', defaultValue: 14 },
+    { key: 'prompt_audio_seconds', label: '参考秒数', step: '0.5', defaultValue: 10 },
+    { key: 'segment_tokens', label: '分段 tokens', step: '1', defaultValue: 60 },
+    { key: 'first_tokens', label: '首段 tokens', step: '1', defaultValue: 18 },
+    { key: 's2mel_cfg_rate', label: 'CFG rate', step: '0.01', defaultValue: 0.7 },
+    { key: 'interval_ms', label: '段间隔 ms', step: '1', defaultValue: 50 },
+    { key: 'top_p', label: 'Top P', step: '0.01', defaultValue: 0.8 },
+    { key: 'top_k', label: 'Top K', step: '1', defaultValue: 30 },
+    { key: 'temperature', label: 'Temperature', step: '0.01', defaultValue: 0.7 },
+    { key: 'repetition_penalty', label: '重复惩罚', step: '0.01', defaultValue: 1.2 }
 ];
 const PRESET_GROUPS = [
     { key: 'live', label: 'LIVE' },
@@ -137,9 +142,9 @@ const api = {
         return window.tauri_mock.getLogSnapshot(version, maxLines);
     },
 
-    async getRecentGenerations(version, maxItems) {
-        if (tauriInvoke) return tauriInvoke('get_recent_generations', { version, maxItems });
-        return window.tauri_mock.getRecentGenerations(version, maxItems);
+    async getRecentGenerations(version, page = 1, pageSize = 12) {
+        if (tauriInvoke) return tauriInvoke('get_recent_generations', { version, page, pageSize });
+        return window.tauri_mock.getRecentGenerations(version, page, pageSize);
     },
 
     async uploadVoice(name, data, ext) {
@@ -189,6 +194,10 @@ class LeonLauncher {
         this.currentAudio = null;
         this.currentAudioName = null;
         this.monitorInterval = null;
+        this.generationRecords = [];
+        this.generationRecordsPage = 1;
+        this.generationRecordsPageSize = 10;
+        this.generationRecordsTotal = 0;
         this.selectedTestVoice = null;
         this.selectedTestStyle = null;
 
@@ -339,6 +348,18 @@ class LeonLauncher {
             if (logCategoryButton) {
                 this.setLogCategory(logCategoryButton.dataset.logCategory);
             }
+            const generationPageButton = e.target.closest('[data-generation-page]');
+            if (generationPageButton) {
+                const targetPage = Number(generationPageButton.dataset.generationPage);
+                if (Number.isFinite(targetPage)) {
+                    this.refreshGenerationRecords(targetPage);
+                }
+            }
+            const generationDetailButton = e.target.closest('[data-generation-detail]');
+            if (generationDetailButton) {
+                const index = Number(generationDetailButton.dataset.generationDetail);
+                if (Number.isFinite(index)) this.openGenerationRecordModal(index);
+            }
         });
 
         document.addEventListener('input', (e) => {
@@ -430,7 +451,7 @@ class LeonLauncher {
         });
 
         document.getElementById('btn-refresh-monitor')?.addEventListener('click', () => {
-            this.refreshMonitor();
+            this.refreshGenerationRecords(this.generationRecordsPage);
         });
 
         document.addEventListener('keydown', (event) => {
@@ -474,6 +495,8 @@ class LeonLauncher {
             this.addLog('info', `已选择 ${normalized === 'vllm' ? 'vLLM' : 'Fast6G'} 启动模式`);
             if (this.currentPage === 'logs') {
                 this.loadLogSnapshot(true);
+            } else if (this.currentPage === 'monitor') {
+                this.refreshGenerationRecords(1);
             }
         }
     }
@@ -706,12 +729,20 @@ class LeonLauncher {
         const datalist = document.getElementById('voice-ref-options');
         if (!datalist) return;
         datalist.innerHTML = '';
-        this.voiceRefs.slice(0, 900).forEach(item => {
+        this.voiceCavityRefs().slice(0, 900).forEach(item => {
             const option = document.createElement('option');
             option.value = item.name;
             option.label = item.relativePath || item.name;
             datalist.appendChild(option);
         });
+    }
+
+    voiceCavityRefs() {
+        return this.voiceRefs.filter(isVoiceCavityRef);
+    }
+
+    voiceCavityItems() {
+        return this.voices.filter(isVoiceCavityRef);
     }
 
     findVoiceRef(value) {
@@ -1126,6 +1157,7 @@ class LeonLauncher {
     async openRefPicker(row, options = {}) {
         if (!row) return;
         if (!this.voiceRefs.length) await this.loadVoiceRefs();
+        const cavityRefs = this.voiceCavityRefs();
 
         const styleId = row.dataset.styleId || '';
         const selected = new Set(this.getRowRefs(row));
@@ -1158,7 +1190,7 @@ class LeonLauncher {
             const search = panel.querySelector('#ref-picker-search');
             const list = panel.querySelector('#ref-picker-list');
             const count = panel.querySelector('#ref-selected-count');
-            const order = new Map(this.voiceRefs.map((item, index) => [item.name, index]));
+            const order = new Map(cavityRefs.map((item, index) => [item.name, index]));
             let previewAudio = null;
             let previewRef = '';
             let previewToken = 0;
@@ -1239,7 +1271,7 @@ class LeonLauncher {
 
             const renderList = () => {
                 const query = (search?.value || '').trim().toLowerCase();
-                const filtered = this.voiceRefs.filter(item => {
+                const filtered = cavityRefs.filter(item => {
                     if (!query) return true;
                     const group = voiceRefGroupName(item).toLowerCase();
                     return String(item.name || '').toLowerCase().includes(query)
@@ -1248,7 +1280,7 @@ class LeonLauncher {
                 });
 
                 const groups = groupVoiceRefs(filtered);
-                const knownNames = new Set(this.voiceRefs.map(item => item.name));
+                const knownNames = new Set(cavityRefs.map(item => item.name));
                 const unknownSelected = [...selected]
                     .filter(ref => !knownNames.has(ref))
                     .map(ref => ({ name: ref, relativePath: '当前配置中保留，但声腔目录未找到', subdir: '未找到' }));
@@ -1586,7 +1618,7 @@ class LeonLauncher {
                                 data-preset-field="${escapeAttribute(field.key)}"
                                 type="number"
                                 step="${escapeAttribute(field.step)}"
-                                value="${escapeAttribute(preset[field.key] ?? '')}"
+                                value="${escapeAttribute(presetFieldValue(preset, field))}"
                             >
                         </label>
                     `).join('')}
@@ -1754,7 +1786,12 @@ ${completenessRules}`;
             if (!silent) this.addLog('error', formatError(error));
             return null;
         }
-        this.syncPresetFieldsIntoProfile(profile);
+        try {
+            this.syncPresetFieldsIntoProfile(profile);
+        } catch (error) {
+            if (!silent) this.addLog('error', formatError(error));
+            return null;
+        }
 
         this.editorProfile = profile;
         document.getElementById('editor-json').value = JSON.stringify(profile, null, 2);
@@ -1775,8 +1812,13 @@ ${completenessRules}`;
             const preset = profile.quality.presets[group.key][mode] || {};
             document.querySelectorAll(`[data-preset-group="${group.key}"]`).forEach(input => {
                 const key = input.dataset.presetField;
+                const field = PRESET_FIELDS.find(item => item.key === key);
                 const raw = input.value.trim();
-                preset[key] = raw === '' ? null : Number(raw);
+                const value = raw === '' ? field?.defaultValue : Number(raw);
+                if (!Number.isFinite(value)) {
+                    throw new Error(`${group.label}.${mode}.${key} 必须是数字`);
+                }
+                preset[key] = value;
             });
             profile.quality.presets[group.key][mode] = preset;
         });
@@ -1918,6 +1960,8 @@ ${completenessRules}`;
             this.loadLogSnapshot();
         } else if (this.currentPage === 'environment') {
             this.loadEnvironment();
+        } else if (this.currentPage === 'monitor') {
+            this.refreshGenerationRecords(this.generationRecordsPage);
         } else {
             this.refreshAll();
         }
@@ -1930,9 +1974,11 @@ ${completenessRules}`;
         const fileLabel = snapshot.activeFile || '无日志文件';
         this.addLog('info', `${snapshot.version} · ${fileLabel}`, null, { category: 'startup' });
 
-        if (snapshot.files?.length) {
-            const summary = snapshot.files.slice(0, 5).map(file => `${file.file} (${formatBytes(file.bytes)})`).join(' · ');
-            this.addLog('info', `日志文件: ${summary}`, null, { category: 'startup' });
+        if (snapshot.files?.length && snapshot.activeFile) {
+            const activeInfo = snapshot.files.find(file => file.file === snapshot.activeFile);
+            const size = activeInfo ? ` (${formatBytes(activeInfo.bytes)})` : '';
+            const modified = activeInfo?.modified ? ` · 修改 ${formatDateTime(activeInfo.modified)}` : '';
+            this.addLog('info', `当前日志文件: ${snapshot.activeFile}${size}${modified}`, null, { category: 'startup' });
         }
 
         let lastSnapshotTimestamp = null;
@@ -2144,9 +2190,9 @@ ${completenessRules}`;
         });
     }
 
-    voiceGroupCounts() {
-        const counts = new Map([['全部', this.voices.length]]);
-        this.voices.forEach(voice => {
+    voiceGroupCounts(items = this.voices) {
+        const counts = new Map([['全部', items.length]]);
+        items.forEach(voice => {
             const group = voice.subdir || '根目录';
             counts.set(group, (counts.get(group) || 0) + 1);
         });
@@ -2497,6 +2543,10 @@ ${completenessRules}`;
             this.addLog('error', '请选择音色和声腔');
             return;
         }
+        if (!isVoiceCavityRef(this.selectedTestStyle)) {
+            this.addLog('error', '声腔必须选择 prompts/library/声腔 下的音频');
+            return;
+        }
 
         result.innerHTML = '<div class="test-loading">生成中...</div>';
         try {
@@ -2577,8 +2627,7 @@ ${completenessRules}`;
 
     startMonitor() {
         this.stopMonitor();
-        this.refreshMonitor();
-        this.monitorInterval = setInterval(() => this.refreshMonitor(), 3000);
+        this.refreshGenerationRecords(this.generationRecordsPage || 1);
     }
 
     stopMonitor() {
@@ -2589,26 +2638,33 @@ ${completenessRules}`;
     }
 
     async refreshMonitor() {
+        return this.refreshGenerationRecords(this.generationRecordsPage || 1);
+    }
+
+    async refreshGenerationRecords(page = 1) {
+        const targetPage = Math.max(1, Number(page) || 1);
         try {
-            const [status, env, generations] = await Promise.all([
-                api.getServiceStatus(),
-                api.getEnvironment(),
-                api.getRecentGenerations(this.selectedVersion, 8)
-            ]);
+            const result = await api.getRecentGenerations(this.selectedVersion, targetPage, this.generationRecordsPageSize);
+            const pageData = normalizeGenerationPage(result, this.selectedVersion, targetPage, this.generationRecordsPageSize);
+            if (!pageData.items.length && pageData.total > 0 && targetPage > 1) {
+                return this.refreshGenerationRecords(targetPage - 1);
+            }
 
-            document.getElementById('monitor-service-status').textContent = status.running ? '运行中' : '已停止';
-            document.getElementById('monitor-service-status').className = 'status-indicator ' + (status.running ? 'running' : 'stopped');
-            document.getElementById('monitor-version').textContent = status.health.version || '-';
-            document.getElementById('monitor-api-message').textContent = cleanStatusMessage(status.health.message || status.health.status || '-');
-            document.getElementById('monitor-uptime').textContent = this.isRunning ? formatUptime(this.uptime) : '-';
-            document.getElementById('monitor-port').textContent = env.port || '9880';
-            document.getElementById('monitor-gpu').textContent = env.cuda || '-';
-            document.getElementById('monitor-pid').textContent = this.extractPID(env.port) || '-';
+            this.generationRecords = pageData.items;
+            this.generationRecordsPage = pageData.page;
+            this.generationRecordsPageSize = pageData.pageSize;
+            this.generationRecordsTotal = pageData.total;
 
-            this.renderMonitorRecentGenerations(generations || []);
-            await this.loadMonitorLogInsights();
+            const versionLabel = document.getElementById('generation-record-version');
+            if (versionLabel) {
+                versionLabel.textContent = `${pageData.version === 'fast6g' ? 'Fast6G' : 'vLLM'} · 手动刷新 · 第 ${pageData.page} 页`;
+            }
+            this.renderMonitorRecentGenerations(pageData.items, pageData);
         } catch (error) {
-            this.addLog('error', `刷新监控数据失败: ${formatError(error)}`);
+            this.addLog('error', `刷新生成记录失败: ${formatError(error)}`);
+            const container = document.getElementById('monitor-recent-tasks');
+            if (container) container.innerHTML = '<div class="empty-state compact">生成记录加载失败</div>';
+            this.renderGenerationPager({ page: targetPage, pageSize: this.generationRecordsPageSize, total: 0, hasMore: false });
         }
     }
 
@@ -2617,26 +2673,26 @@ ${completenessRules}`;
         return match ? match[1] : null;
     }
 
-    renderMonitorRecentGenerations(items) {
+    renderMonitorRecentGenerations(items, pageData = {}) {
         const container = document.getElementById('monitor-recent-tasks');
         const count = document.getElementById('monitor-generation-count');
         if (!container) return;
-        if (count) count.textContent = `${items.length} 条`;
+        const total = Number(pageData.total || items.length || 0);
+        const start = total && items.length ? ((Number(pageData.page || 1) - 1) * Number(pageData.pageSize || items.length) + 1) : 0;
+        const end = start ? start + items.length - 1 : 0;
+        if (count) count.textContent = total ? `${start}-${end}/${total} 条` : '0 条';
 
         if (!items.length) {
             container.innerHTML = '<div class="empty-state compact">没有生成记录</div>';
+            this.renderGenerationPager(pageData);
             return;
         }
 
-        container.innerHTML = items.map(item => {
-            const segmentText = item.segmentsTotal
-                ? `${item.segmentsDone || 0}/${item.segmentsTotal}`
-                : `${item.segmentsDone || 0}`;
-            return `
+        container.innerHTML = items.map((item, index) => `
                 <div class="generation-row">
                     <div class="generation-main">
                         <div class="generation-title">
-                            <b>${escapeHtml(item.role || item.parseMode || '生成')}</b>
+                            <b>${escapeHtml(generationRoleLabel(item))}</b>
                             <span>${escapeHtml(shortKey(item.key))}</span>
                         </div>
                         <p>${escapeHtml(truncateText(item.firstText || '-', 88))}</p>
@@ -2645,46 +2701,75 @@ ${completenessRules}`;
                         <span>RTF <b>${escapeHtml(formatRtf(item.rtf))}</b></span>
                         <span>音频 <b>${escapeHtml(formatSeconds(item.durationS))}</b></span>
                         <span>总耗时 <b>${escapeHtml(formatSeconds(item.wallS))}</b></span>
-                        <span>分段 <b>${escapeHtml(segmentText)}</b></span>
                         <span>${escapeHtml((item.audioFormat || '-').toUpperCase())} <b>${escapeHtml(formatBytes(item.audioBytes))}</b></span>
                     </div>
-                    <div class="generation-time">${escapeHtml(formatDateTime(item.createdAt || item.modified))}</div>
+                    <div class="generation-actions">
+                        <div class="generation-time">${escapeHtml(formatDateTime(item.createdAt || item.modified))}</div>
+                        <button type="button" class="btn-secondary compact" data-generation-detail="${index}">查看</button>
+                    </div>
                 </div>
-            `;
-        }).join('');
-    }
-
-    async loadMonitorLogInsights() {
-        try {
-            const snapshot = await api.getLogSnapshot(this.selectedVersion, 320);
-            const entries = (snapshot.lines || [])
-                .filter(line => !isNoisySnapshotLogLine(line))
-                .map(line => parseLogSnapshotLine(line));
-            const errors = entries.filter(entry => logCategoryForLine(entry.message, entry.level) === 'error').slice(-10);
-            const timings = entries.filter(entry => logCategoryForLine(entry.message, entry.level) === 'rtf').slice(-10);
-
-            this.renderMonitorLogList('monitor-rtf-logs', timings, '没有 RTF/耗时日志');
-            this.renderMonitorLogList('monitor-errors', errors, '没有错误日志');
-        } catch (error) {
-            this.renderMonitorLogList('monitor-rtf-logs', [], '加载失败');
-            this.renderMonitorLogList('monitor-errors', [], '加载失败');
-        }
-    }
-
-    renderMonitorLogList(id, entries, emptyText) {
-        const container = document.getElementById(id);
-        if (!container) return;
-        if (!entries.length) {
-            container.innerHTML = `<div class="empty-state compact">${escapeHtml(emptyText)}</div>`;
-            return;
-        }
-
-        container.innerHTML = entries.map(entry => `
-            <div class="monitor-log-line log-${escapeAttribute(entry.level)}">
-                <span>${escapeHtml(entry.timestamp || '历史')}</span>
-                <p>${escapeHtml(entry.message)}</p>
-            </div>
         `).join('');
+        this.renderGenerationPager(pageData);
+    }
+
+    renderGenerationPager(pageData = {}) {
+        const pager = document.getElementById('generation-record-pager');
+        if (!pager) return;
+        const page = Math.max(1, Number(pageData.page || 1));
+        const pageSize = Math.max(1, Number(pageData.pageSize || this.generationRecordsPageSize || 10));
+        const total = Math.max(0, Number(pageData.total || 0));
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const hasMore = Boolean(pageData.hasMore);
+        pager.innerHTML = `
+            <button type="button" class="btn-secondary compact" data-generation-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+            <span>${total ? `第 ${page}/${totalPages} 页` : '第 1/1 页'}</span>
+            <button type="button" class="btn-secondary compact" data-generation-page="${page + 1}" ${!hasMore ? 'disabled' : ''}>下一页</button>
+        `;
+    }
+
+    openGenerationRecordModal(index) {
+        const item = this.generationRecords[index];
+        if (!item) return;
+        const segments = Array.isArray(item.segments) ? item.segments : [];
+        this.openModal(`
+            <div class="modal-header">
+                <div>
+                    <h3>生成详情</h3>
+                    <p>${escapeHtml(item.key || '-')}</p>
+                </div>
+                <button type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body generation-detail">
+                <div class="generation-detail-grid">
+                    <div><span>角色</span><b>${escapeHtml(generationRoleLabel(item))}</b></div>
+                    <div><span>状态</span><b>${escapeHtml(item.status || '-')}</b></div>
+                    <div><span>解析</span><b>${escapeHtml(item.parseMode || '-')}</b></div>
+                    <div><span>档位</span><b>${escapeHtml(item.performanceMode || '-')}</b></div>
+                    <div><span>RTF</span><b>${escapeHtml(formatRtf(item.rtf))}</b></div>
+                    <div><span>音频时长</span><b>${escapeHtml(formatSeconds(item.durationS))}</b></div>
+                    <div><span>总耗时</span><b>${escapeHtml(formatSeconds(item.wallS))}</b></div>
+                    <div><span>音频文件</span><b>${escapeHtml((item.audioFormat || '-').toUpperCase())} · ${escapeHtml(formatBytes(item.audioBytes))}</b></div>
+                    <div><span>分段</span><b>${escapeHtml(formatGenerationSegmentCount(item))}</b></div>
+                    <div><span>创建时间</span><b>${escapeHtml(formatDateTime(item.createdAt || item.modified))}</b></div>
+                </div>
+                <section class="generation-detail-section">
+                    <h4>分段文本</h4>
+                    <div class="generation-segment-list">
+                        ${segments.length ? segments.map(segment => `
+                            <div class="generation-segment-row">
+                                <span>${escapeHtml(`${Number(segment.index ?? 0) + 1}`)}</span>
+                                <b>${escapeHtml(segment.role || '-')}</b>
+                                <p>${escapeHtml(segment.text || '-')}</p>
+                                <em>${escapeHtml(segment.style || '-')} · ${escapeHtml(formatSeconds(segment.durationS))}</em>
+                            </div>
+                        `).join('') : '<div class="empty-state compact">没有分段详情</div>'}
+                    </div>
+                </section>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary modal-close">关闭</button>
+            </div>
+        `);
     }
 
     openSelectVoiceModal() {
@@ -2701,10 +2786,13 @@ ${completenessRules}`;
     }
 
     openSelectStyleModal() {
+        const cavityItems = this.voiceCavityItems();
+        const current = isVoiceCavityRef(this.selectedTestStyle) ? this.selectedTestStyle : null;
         this.openAudioRefSelectModal({
             title: '选择声腔',
-            searchPlaceholder: '搜索声腔、分组或路径',
-            current: this.selectedTestStyle,
+            searchPlaceholder: '搜索 prompts/library/声腔 下的声腔',
+            current,
+            items: cavityItems,
             confirmId: 'btn-confirm-style',
             onConfirm: (selected) => {
                 this.selectedTestStyle = selected;
@@ -2713,12 +2801,14 @@ ${completenessRules}`;
         });
     }
 
-    openAudioRefSelectModal({ title, searchPlaceholder, current, confirmId, onConfirm }) {
+    openAudioRefSelectModal({ title, searchPlaceholder, current, confirmId, onConfirm, items = null }) {
+        const sourceItems = Array.isArray(items) ? items : this.voices;
+        const sourceGroups = this.extractVoiceGroups(sourceItems);
         let selectedGroup = current?.subdir || null;
         let selected = current || null;
         let currentAudio = null;
         let currentAudioName = null;
-        const counts = this.voiceGroupCounts();
+        const counts = this.voiceGroupCounts(sourceItems);
 
         this.openModal(`
             <div class="modal-header">
@@ -2750,7 +2840,7 @@ ${completenessRules}`;
 
             const renderGroups = () => {
                 const container = panel.querySelector('#select-audio-groups');
-                container.innerHTML = this.voiceGroups.map(group => `
+                container.innerHTML = sourceGroups.map(group => `
                     <button type="button" class="select-group-item ${((!selectedGroup && group === '全部') || selectedGroup === group) ? 'active' : ''}" data-group="${escapeAttribute(group)}">
                         <span>${escapeHtml(group)}</span>
                         <b>${counts.get(group) || 0}</b>
@@ -2775,7 +2865,7 @@ ${completenessRules}`;
 
             const filteredItems = () => {
                 const search = panel.querySelector('#select-audio-search')?.value.toLowerCase() || '';
-                return this.voices.filter(item => {
+                return sourceItems.filter(item => {
                     if (selectedGroup && item.subdir !== selectedGroup) return false;
                     const haystack = [item.name, item.subdir, item.relativePath].join(' ').toLowerCase();
                     return !search || haystack.includes(search);
@@ -2807,7 +2897,7 @@ ${completenessRules}`;
 
                 container.querySelectorAll('.select-row').forEach(row => {
                     row.addEventListener('click', () => {
-                        selected = this.voices.find(item => item.name === row.dataset.name) || selected;
+                        selected = sourceItems.find(item => item.name === row.dataset.name) || selected;
                         renderCurrent();
                         renderList();
                     });
@@ -2976,6 +3066,16 @@ function voiceRefGroupName(item) {
     return item?.subdir || '声腔素材';
 }
 
+function isVoiceCavityRef(item) {
+    const subdir = String(item?.subdir || '').trim().replaceAll('\\', '/');
+    const name = String(item?.name || '').trim().replaceAll('\\', '/');
+    const relativePath = String(item?.relativePath || '').trim().replaceAll('\\', '/');
+    return subdir === '声腔'
+        || name.startsWith('声腔/')
+        || relativePath.includes('/prompts/library/声腔/')
+        || relativePath.startsWith('prompts/library/声腔/');
+}
+
 function groupVoiceRefs(refs) {
     const map = new Map();
     refs.forEach(item => {
@@ -2994,6 +3094,11 @@ function groupVoiceRefs(refs) {
 function formatEmoVec(value) {
     const vec = Array.isArray(value) && value.length ? value : EMO_VEC_DEFAULT;
     return `[${vec.map(item => Number(item || 0)).join(', ')}]`;
+}
+
+function presetFieldValue(preset, field) {
+    const value = preset?.[field.key];
+    return value === undefined || value === null || value === '' ? field.defaultValue : value;
 }
 
 function parseEmoVec(value, fieldName) {
@@ -3042,6 +3147,60 @@ function shortKey(value) {
     const text = String(value ?? '');
     if (text.length <= 12) return text || '-';
     return `${text.slice(0, 8)}…${text.slice(-4)}`;
+}
+
+function normalizeGenerationPage(result, version, page, pageSize) {
+    if (Array.isArray(result)) {
+        return {
+            version,
+            page,
+            pageSize,
+            total: result.length,
+            hasMore: false,
+            items: result
+        };
+    }
+    const items = Array.isArray(result?.items) ? result.items : [];
+    return {
+        version: result?.version || version,
+        page: Number(result?.page || page || 1),
+        pageSize: Number(result?.pageSize || pageSize || items.length || 10),
+        total: Number(result?.total ?? items.length),
+        hasMore: Boolean(result?.hasMore),
+        items
+    };
+}
+
+function generationRoleLabel(item) {
+    const direct = String(item?.role || '').trim();
+    if (direct) return direct;
+    return roleSummaryFromSegments(item?.segments) || item?.parseMode || '生成';
+}
+
+function roleSummaryFromSegments(segments) {
+    if (!Array.isArray(segments)) return '';
+    const roles = [];
+    segments.forEach(segment => {
+        const role = String(segment?.role || '').trim();
+        if (!role || role === '旁白' || roles.includes(role)) return;
+        roles.push(role);
+    });
+    if (roles.length) {
+        const head = roles.slice(0, 3).join(' / ');
+        return roles.length > 3 ? `${head} 等 ${roles.length} 个角色` : head;
+    }
+    return segments.some(segment => String(segment?.role || '').trim() === '旁白') ? '旁白' : '';
+}
+
+function formatGenerationSegmentCount(item) {
+    const done = Number(item?.segmentsDone);
+    const total = Number(item?.segmentsTotal);
+    if (Number.isFinite(done) && Number.isFinite(total) && total > 0) {
+        return `已完成 ${done} 段 / 计划 ${total} 段`;
+    }
+    if (Number.isFinite(done) && done > 0) return `已完成 ${done} 段`;
+    const segments = Array.isArray(item?.segments) ? item.segments.length : 0;
+    return segments ? `${segments} 段` : '-';
 }
 
 function formatUptime(seconds) {

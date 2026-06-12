@@ -17,14 +17,14 @@ const mockProfiles = [
             ],
             presets: {
                 live: {
-                    fast: { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7 },
-                    balanced: { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18, s2mel_cfg_rate: 0.7 },
-                    expressive: { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24, s2mel_cfg_rate: 0.7 }
+                    fast: { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7, interval_ms: 50, top_p: 0.8, top_k: 30, temperature: 0.7, repetition_penalty: 1.2 },
+                    balanced: { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18, s2mel_cfg_rate: 0.7, interval_ms: 50, top_p: 0.8, top_k: 30, temperature: 0.7, repetition_penalty: 1.2 },
+                    expressive: { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24, s2mel_cfg_rate: 0.7, interval_ms: 50, top_p: 0.8, top_k: 30, temperature: 0.7, repetition_penalty: 1.2 }
                 },
                 generate: {
-                    fast: { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7 },
-                    balanced: { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18, s2mel_cfg_rate: 0.7 },
-                    expressive: { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24, s2mel_cfg_rate: 0.7 }
+                    fast: { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7, interval_ms: 50, top_p: 0.8, top_k: 30, temperature: 0.7, repetition_penalty: 1.2 },
+                    balanced: { diffusion_steps: 14, prompt_audio_seconds: 10, segment_tokens: 60, first_tokens: 18, s2mel_cfg_rate: 0.7, interval_ms: 50, top_p: 0.8, top_k: 30, temperature: 0.7, repetition_penalty: 1.2 },
+                    expressive: { diffusion_steps: 16, prompt_audio_seconds: 12, segment_tokens: 72, first_tokens: 24, s2mel_cfg_rate: 0.7, interval_ms: 50, top_p: 0.8, top_k: 30, temperature: 0.7, repetition_penalty: 1.2 }
                 }
             }
         },
@@ -63,10 +63,10 @@ const mockProfiles = [
             modes: [{ id: "fast", label: "极速模式" }],
             presets: {
                 live: {
-                    fast: { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7 }
+                    fast: { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7, interval_ms: 50, top_p: 0.8, top_k: 30, temperature: 0.7, repetition_penalty: 1.2 }
                 },
                 generate: {
-                    fast: { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7 }
+                    fast: { diffusion_steps: 8, prompt_audio_seconds: 6, segment_tokens: 40, first_tokens: 10, s2mel_cfg_rate: 0.7, interval_ms: 50, top_p: 0.8, top_k: 30, temperature: 0.7, repetition_penalty: 1.2 }
                 }
             }
         },
@@ -314,8 +314,8 @@ window.tauri_mock = {
         });
     },
 
-    getRecentGenerations: (version) => {
-        return Promise.resolve([
+    getRecentGenerations: (version, page = 1, pageSize = 10) => {
+        const items = [
             {
                 version,
                 key: 'bc3845c69e36ddedd6a4c828c677c463204357be',
@@ -332,9 +332,21 @@ window.tauri_mock = {
                 performanceMode: 'fast',
                 role: '用户',
                 firstText: '白夜雨停在门口，轻声说：',
+                segments: [
+                    { index: 0, role: '旁白', text: '白夜雨停在门口，轻声说：', style: 'neutral', durationS: 2.03 },
+                    { index: 1, role: '用户', text: '我到了。', style: 'whisper_soft', durationS: 0.56 }
+                ],
                 status: 'done'
             }
-        ]);
+        ];
+        return Promise.resolve({
+            version,
+            page,
+            pageSize,
+            total: items.length,
+            hasMore: page * pageSize < items.length,
+            items: items.slice((page - 1) * pageSize, page * pageSize)
+        });
     }
 };
 
