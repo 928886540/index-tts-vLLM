@@ -137,6 +137,23 @@ const api = {
         return window.tauri_mock.getEnvironment();
     },
 
+    async getEnvironmentReport() {
+        if (tauriInvoke) return tauriInvoke('get_environment_report');
+        if (window.tauri_mock?.getEnvironmentReport) return window.tauri_mock.getEnvironmentReport();
+        const env = await window.tauri_mock.getEnvironment();
+        return legacyEnvironmentReport(env);
+    },
+
+    async repairEnvironment() {
+        if (tauriInvoke) return tauriInvoke('repair_environment');
+        if (window.tauri_mock?.repairEnvironment) return window.tauri_mock.repairEnvironment();
+        return {
+            fixed: [],
+            skipped: ['浏览器预览不支持自动修复'],
+            report: await this.getEnvironmentReport()
+        };
+    },
+
     async getLogSnapshot(version, maxLines) {
         if (tauriInvoke) return tauriInvoke('get_log_snapshot', { version, maxLines });
         return window.tauri_mock.getLogSnapshot(version, maxLines);
@@ -408,6 +425,10 @@ class LeonLauncher {
 
         document.getElementById('btn-check-env').addEventListener('click', () => {
             this.loadEnvironment();
+        });
+
+        document.getElementById('btn-repair-env')?.addEventListener('click', () => {
+            this.repairEnvironment();
         });
 
         document.getElementById('btn-import-voice')?.addEventListener('click', () => {
@@ -1948,29 +1969,180 @@ ${completenessRules}`;
     }
 
     async loadEnvironment() {
-        this.addLog('info', '检测系统环境...');
-
-        this.setEnvValue('env-os', '检测中...');
-        this.setEnvValue('env-python', '检测中...');
-        this.setEnvValue('env-network', '检测中...');
-        this.setEnvValue('env-cuda', '检测中...');
+        this.addLog('info', '运行环境医生检测...');
+        this.setEnvironmentLoading();
 
         try {
-            const env = await api.getEnvironment();
-
-            this.setEnvValue('env-os', env.os || '未知', 'success');
-            this.setEnvValue('env-python', env.python || '未检测到', env.python?.includes('未检测') ? 'error' : 'success');
-            this.setEnvValue('env-network', env.port || env.network || '未检测', 'success');
-            this.setEnvValue('env-cuda', env.cuda || '未检测到', env.cuda?.includes('未检测') ? 'error' : 'success');
-
-            this.addLog('success', `环境检测完成 · ${env.root || '浏览器预览'}`);
+            const report = await api.getEnvironmentReport();
+            this.renderEnvironmentReport(report);
+            const level = report.status === 'error' ? 'warning' : 'success';
+            this.addLog(level, `环境检测完成 · ${report.summary || '已生成报告'}`);
         } catch (error) {
+            try {
+                const env = await api.getEnvironment();
+                const report = legacyEnvironmentReport(env);
+                this.renderEnvironmentReport(report);
+                this.addLog('warning', `环境医生不可用，已显示基础检测: ${formatError(error)}`);
+                return;
+            } catch (_) {
+                this.renderEnvironmentError(error);
+            }
             this.addLog('error', `环境检测失败: ${formatError(error)}`);
+        }
+    }
+
+    async repairEnvironment() {
+        const btn = document.getElementById('btn-repair-env');
+        const originalHtml = btn?.innerHTML || '自动修复安全项';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '修复中...';
+        }
+        this.addLog('info', '执行环境安全修复...');
+
+        try {
+            const result = await api.repairEnvironment();
+            (result.fixed || []).forEach(message => this.addLog('success', message));
+            (result.skipped || []).forEach(message => this.addLog('warning', message));
+            if (!result.fixed?.length && !result.skipped?.length) {
+                this.addLog('info', '没有需要自动修复的项目');
+            }
+            this.renderEnvironmentReport(result.report);
+            this.addLog('success', `修复后检测完成 · ${result.report?.summary || '已生成报告'}`);
+        } catch (error) {
+            this.addLog('error', `环境修复失败: ${formatError(error)}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+        }
+    }
+
+    setEnvironmentLoading() {
+        const summary = document.getElementById('env-summary');
+        if (summary) {
+            summary.innerHTML = `
+                <div class="env-summary-main">
+                    <span class="env-status-pill loading">检测中</span>
+                    <div>
+                        <h3>正在检测启动环境</h3>
+                        <p>等待环境报告...</p>
+                    </div>
+                </div>
+                <div class="env-summary-meta" id="env-root">根目录检测中...</div>
+            `;
+        }
+
+        const readiness = document.getElementById('env-startability');
+        if (readiness) {
+            readiness.innerHTML = ['vLLM', '6G', '可修复项'].map(label => `
+                <div class="env-ready-item loading">
+                    <span>${escapeHtml(label)}</span>
+                    <strong>检测中</strong>
+                </div>
+            `).join('');
+        }
+
+        const list = document.getElementById('env-check-list');
+        if (list) {
+            list.innerHTML = `
+                <div class="env-check-row loading">
+                    <div class="env-check-mark">...</div>
+                    <div class="env-check-body">
+                        <div class="env-check-title">检测中</div>
+                        <div class="env-check-detail">等待环境报告...</div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    renderEnvironmentReport(report) {
+        const normalized = report || legacyEnvironmentReport({});
+        const status = normalized.status || 'warn';
+        const fixableCount = Number(normalized.fixableCount || 0);
+
+        const summary = document.getElementById('env-summary');
+        if (summary) {
+            summary.innerHTML = `
+                <div class="env-summary-main">
+                    <span class="env-status-pill ${escapeAttribute(status)}">${escapeHtml(environmentStatusLabel(status))}</span>
+                    <div>
+                        <h3>${escapeHtml(normalized.summary || '环境报告已生成')}</h3>
+                        <p>${escapeHtml(environmentSummaryDetail(normalized))}</p>
+                    </div>
+                </div>
+                <div class="env-summary-meta" id="env-root">${escapeHtml(normalized.root || '根目录未知')}</div>
+            `;
+        }
+
+        const readiness = document.getElementById('env-startability');
+        if (readiness) {
+            const items = [
+                { label: 'vLLM', ready: normalized.canStartVllm, value: normalized.canStartVllm ? '可启动' : '未就绪' },
+                { label: '6G', ready: normalized.canStartFast6g, value: normalized.canStartFast6g ? '可启动' : '未就绪' },
+                { label: '可修复项', ready: fixableCount === 0, value: `${fixableCount}` }
+            ];
+            readiness.innerHTML = items.map(item => `
+                <div class="env-ready-item ${item.ready ? 'ok' : 'warn'}">
+                    <span>${escapeHtml(item.label)}</span>
+                    <strong>${escapeHtml(item.value)}</strong>
+                </div>
+            `).join('');
+        }
+
+        const list = document.getElementById('env-check-list');
+        if (list) {
+            const checks = normalized.checks || [];
+            if (!checks.length) {
+                list.innerHTML = '<div class="empty-state compact">没有环境检测项</div>';
+                return;
+            }
+            list.innerHTML = checks.map(check => `
+                <div class="env-check-row ${escapeAttribute(check.status || 'warn')}">
+                    <div class="env-check-mark">${escapeHtml(environmentMark(check.status))}</div>
+                    <div class="env-check-body">
+                        <div class="env-check-title">
+                            <b>${escapeHtml(check.title || check.id || '检查项')}</b>
+                            <span>${escapeHtml(check.summary || environmentStatusLabel(check.status))}</span>
+                        </div>
+                        <div class="env-check-detail">${escapeHtml(check.detail || '-')}</div>
+                    </div>
+                    ${check.fixable ? '<span class="env-fixable">可修复</span>' : ''}
+                </div>
+            `).join('');
+        }
+    }
+
+    renderEnvironmentError(error) {
+        const message = formatError(error);
+        const summary = document.getElementById('env-summary');
+        if (summary) {
+            summary.innerHTML = `
+                <div class="env-summary-main">
+                    <span class="env-status-pill error">失败</span>
+                    <div>
+                        <h3>环境检测失败</h3>
+                        <p>${escapeHtml(message)}</p>
+                    </div>
+                </div>
+                <div class="env-summary-meta" id="env-root">根目录未知</div>
+            `;
+        }
+        const readiness = document.getElementById('env-startability');
+        if (readiness) {
+            readiness.innerHTML = '';
+        }
+        const list = document.getElementById('env-check-list');
+        if (list) {
+            list.innerHTML = `<div class="empty-state compact">${escapeHtml(message)}</div>`;
         }
     }
 
     setEnvValue(id, text, state) {
         const el = document.getElementById(id);
+        if (!el) return;
         el.textContent = text;
         el.className = `env-value ${state || ''}`.trim();
     }
@@ -2727,28 +2899,32 @@ ${completenessRules}`;
             return;
         }
 
-        container.innerHTML = items.map((item, index) => `
+        container.innerHTML = items.map((item, index) => {
+            const roleLabel = generationRoleLabel(item);
+            const qualityLabel = generationQualityLabel(item.performanceMode);
+            return `
                 <div class="generation-row">
-                    <div class="generation-main">
+                    <div class="generation-header">
                         <div class="generation-title">
-                            <b>${escapeHtml(generationRoleLabel(item))}</b>
-                            <span>${escapeHtml(shortKey(item.key))}</span>
+                            ${rolePillHtml(roleLabel)}
+                            <span class="generation-key">${escapeHtml(shortKey(item.key))}</span>
+                            <span class="generation-mode-badge">档位 ${escapeHtml(qualityLabel)}</span>
                         </div>
-                        <p>${escapeHtml(truncateText(item.firstText || '-', 88))}</p>
+                        <div class="generation-time">${escapeHtml(formatDateTime(item.createdAt || item.modified))}</div>
                     </div>
+                    <p class="generation-preview">${escapeHtml(truncateText(item.firstText || '-', 120))}</p>
                     <div class="generation-metrics">
-                        <span class="generation-quality-metric">档位名称 <b>${escapeHtml(generationQualityLabel(item.performanceMode))}</b></span>
                         <span>RTF <b>${escapeHtml(formatRtf(item.rtf))}</b></span>
                         <span>音频 <b>${escapeHtml(formatSeconds(item.durationS))}</b></span>
                         <span>总耗时 <b>${escapeHtml(formatSeconds(item.wallS))}</b></span>
                         <span>${escapeHtml((item.audioFormat || '-').toUpperCase())} <b>${escapeHtml(formatBytes(item.audioBytes))}</b></span>
                     </div>
                     <div class="generation-actions">
-                        <div class="generation-time">${escapeHtml(formatDateTime(item.createdAt || item.modified))}</div>
                         <button type="button" class="btn-secondary compact" data-generation-detail="${index}">查看</button>
                     </div>
                 </div>
-        `).join('');
+            `;
+        }).join('');
         this.renderGenerationPager(pageData);
     }
 
@@ -3038,6 +3214,82 @@ function escapeHtml(value) {
 
 function escapeAttribute(value) {
     return escapeHtml(value).replaceAll('`', '&#96;');
+}
+
+function legacyEnvironmentReport(env) {
+    const pythonOk = env?.python && !String(env.python).includes('未检测');
+    const cudaOk = env?.cuda && !String(env.cuda).includes('未检测');
+    const checks = [
+        {
+            id: 'legacy_os',
+            title: '操作系统',
+            status: env?.os ? 'ok' : 'warn',
+            summary: env?.os ? '已检测' : '未知',
+            detail: env?.os || '未返回操作系统信息',
+            fixable: false
+        },
+        {
+            id: 'legacy_python',
+            title: 'Python',
+            status: pythonOk ? 'ok' : 'error',
+            summary: pythonOk ? '已检测' : '未检测到',
+            detail: env?.python || '未检测到 Python',
+            fixable: false
+        },
+        {
+            id: 'legacy_port',
+            title: 'API 端口',
+            status: 'ok',
+            summary: env?.port || env?.network || '基础检测通过',
+            detail: env?.port || env?.network || '旧版检测未返回详细端口状态',
+            fixable: false
+        },
+        {
+            id: 'legacy_cuda',
+            title: 'CUDA / NVIDIA',
+            status: cudaOk ? 'ok' : 'error',
+            summary: cudaOk ? '已检测' : '未检测到',
+            detail: env?.cuda || '未检测到 CUDA / NVIDIA 信息',
+            fixable: false
+        }
+    ];
+
+    return {
+        status: checks.some(check => check.status === 'error') ? 'error' : 'warn',
+        summary: '基础环境检测结果',
+        root: env?.root || '浏览器预览',
+        canStartVllm: false,
+        canStartFast6g: false,
+        fixableCount: 0,
+        checks
+    };
+}
+
+function environmentStatusLabel(status) {
+    if (status === 'ok') return '就绪';
+    if (status === 'error') return '阻塞';
+    if (status === 'loading') return '检测中';
+    return '需处理';
+}
+
+function environmentSummaryDetail(report) {
+    const ready = [];
+    if (report?.canStartVllm) ready.push('vLLM');
+    if (report?.canStartFast6g) ready.push('6G');
+    if (ready.length) {
+        return `${ready.join(' / ')} 可直接启动；可修复项 ${Number(report?.fixableCount || 0)} 个。`;
+    }
+    if (Number(report?.fixableCount || 0) > 0) {
+        return `${Number(report.fixableCount)} 个安全项可自动处理；红色项需要手动补齐。`;
+    }
+    return '红色项会阻止启动，黄色项需要确认显存、残留进程或可选 engine 状态。';
+}
+
+function environmentMark(status) {
+    if (status === 'ok') return 'OK';
+    if (status === 'error') return '!';
+    if (status === 'loading') return '...';
+    return '!';
 }
 
 function highlightQuery(value, query) {

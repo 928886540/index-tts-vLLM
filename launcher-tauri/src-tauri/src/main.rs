@@ -5,6 +5,7 @@ use chrono::{Local, Utc};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     fs,
     io::Write,
     net::{SocketAddr, TcpListener, TcpStream},
@@ -65,6 +66,37 @@ struct EnvironmentInfo {
     cuda: String,
     port: String,
     root: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnvironmentReport {
+    status: String,
+    summary: String,
+    root: String,
+    can_start_vllm: bool,
+    can_start_fast6g: bool,
+    fixable_count: usize,
+    checks: Vec<EnvironmentCheck>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnvironmentCheck {
+    id: String,
+    title: String,
+    status: String,
+    summary: String,
+    detail: String,
+    fixable: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnvironmentRepairResult {
+    fixed: Vec<String>,
+    skipped: Vec<String>,
+    report: EnvironmentReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -250,6 +282,8 @@ fn main() {
             health_check,
             get_service_status,
             get_environment,
+            get_environment_report,
+            repair_environment,
             get_log_snapshot,
             get_recent_generations,
             upload_voice,
@@ -380,13 +414,11 @@ fn get_voice_ref_audio(ref_name: String) -> Result<String, String> {
         return Err(format!("不是支持的音频文件: {}", canonical.display()));
     }
 
-    let inside_cavity_library = voice_library_roots(&root)
+    let inside_voice_library = voice_library_roots(&root)
         .into_iter()
-        .map(|library_root| library_root.join("声腔"))
-        .filter_map(|candidate| candidate.canonicalize().ok())
-        .any(|cavity_root| canonical.starts_with(cavity_root));
-    if !inside_cavity_library {
-        return Err("试听只允许读取 prompts/library/声腔 下的参考音频".to_string());
+        .any(|library_root| canonical.starts_with(library_root));
+    if !inside_voice_library {
+        return Err("试听只允许读取 prompts/library 下的参考音频".to_string());
     }
 
     let meta = fs::metadata(&canonical)
@@ -869,6 +901,48 @@ fn get_environment() -> Result<EnvironmentInfo, String> {
 }
 
 #[tauri::command]
+fn get_environment_report() -> Result<EnvironmentReport, String> {
+    build_environment_report()
+}
+
+#[tauri::command]
+fn repair_environment() -> Result<EnvironmentRepairResult, String> {
+    let root = leon_root()?;
+    let mut fixed = Vec::new();
+    let mut skipped = Vec::new();
+
+    match ensure_active_profile(&root) {
+        Ok(Some(message)) => fixed.push(message),
+        Ok(None) => {}
+        Err(error) => skipped.push(error),
+    }
+
+    for dir in release_runtime_dirs(&root) {
+        match fs::create_dir_all(&dir) {
+            Ok(_) => fixed.push(format!("确认目录存在: {}", dir.display())),
+            Err(error) => skipped.push(format!("创建目录失败 {}: {}", dir.display(), error)),
+        }
+    }
+
+    match kill_project_api_listeners(9880) {
+        Ok(count) if count > 0 => fixed.push(format!("清理 LEON API 端口残留进程: {}", count)),
+        Ok(_) => {}
+        Err(error) => skipped.push(format!("API 端口残留清理失败: {}", error)),
+    }
+    match kill_project_gpu_runtime_processes() {
+        Ok(count) if count > 0 => fixed.push(format!("清理 LEON GPU worker 残留进程: {}", count)),
+        Ok(_) => {}
+        Err(error) => skipped.push(format!("GPU worker 残留清理失败: {}", error)),
+    }
+
+    Ok(EnvironmentRepairResult {
+        fixed,
+        skipped,
+        report: build_environment_report()?,
+    })
+}
+
+#[tauri::command]
 fn get_log_snapshot(version: String, max_lines: Option<usize>) -> Result<LogSnapshot, String> {
     let root = leon_root()?;
     let normalized = normalize_version(&version);
@@ -972,37 +1046,29 @@ fn get_recent_generations(
         });
     }
 
-    let mut candidates = Vec::new();
-    for entry in fs::read_dir(&cache_dir)
-        .map_err(|e| format!("读取生成记录目录失败 {}: {}", cache_dir.display(), e))?
-    {
-        let entry = entry.map_err(|e| format!("读取生成记录失败: {}", e))?;
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
-        }
-        let metadata = entry
-            .metadata()
-            .map_err(|e| format!("读取生成记录元数据失败 {}: {}", path.display(), e))?;
-        candidates.push((path, metadata.modified().ok()));
-    }
+    let mut candidates = collect_generation_json_candidates(&cache_dir)?;
+    candidates.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)));
 
-    candidates.sort_by(|a, b| b.1.cmp(&a.1));
-
-    let mut items = Vec::new();
-    let start = page.saturating_sub(1).saturating_mul(page_size);
-    let mut total = 0usize;
-    for (path, modified_time) in candidates {
+    let mut unique_items = Vec::new();
+    let mut seen_keys = HashSet::new();
+    for (path, modified_time, _) in candidates {
         let item = match recent_generation_from_json(&normalized, &cache_dir, &path, modified_time)
         {
             Ok(item) => item,
             Err(_) => continue,
         };
-        if total >= start && items.len() < page_size {
-            items.push(item);
+        if seen_keys.insert(item.key.clone()) {
+            unique_items.push(item);
         }
-        total += 1;
     }
+
+    let start = page.saturating_sub(1).saturating_mul(page_size);
+    let total = unique_items.len();
+    let items = unique_items
+        .into_iter()
+        .skip(start)
+        .take(page_size)
+        .collect::<Vec<_>>();
 
     Ok(RecentGenerationsPage {
         version: normalized,
@@ -1687,6 +1753,48 @@ fn normalize_version(version: &str) -> String {
     }
 }
 
+fn collect_generation_json_candidates(
+    cache_dir: &Path,
+) -> Result<Vec<(PathBuf, Option<std::time::SystemTime>, bool)>, String> {
+    let mut candidates = Vec::new();
+    collect_generation_json_candidates_inner(cache_dir, cache_dir, &mut candidates)?;
+    Ok(candidates)
+}
+
+fn collect_generation_json_candidates_inner(
+    cache_dir: &Path,
+    current_dir: &Path,
+    candidates: &mut Vec<(PathBuf, Option<std::time::SystemTime>, bool)>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(current_dir)
+        .map_err(|e| format!("读取生成记录目录失败 {}: {}", current_dir.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("读取生成记录失败: {}", e))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_generation_json_candidates_inner(cache_dir, &path, candidates)?;
+            continue;
+        }
+        let is_json = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+        if !path.is_file() || !is_json {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("读取生成记录元数据失败 {}: {}", path.display(), e))?;
+        let is_top_level = path
+            .parent()
+            .map(|parent| parent == cache_dir)
+            .unwrap_or(false);
+        candidates.push((path, metadata.modified().ok(), is_top_level));
+    }
+    Ok(())
+}
+
 fn recent_generation_from_json(
     version: &str,
     cache_dir: &Path,
@@ -1706,7 +1814,7 @@ fn recent_generation_from_json(
         })
         .ok_or_else(|| format!("生成记录文件名无效: {}", path.display()))?;
 
-    let (audio_format, audio_bytes) = generation_audio_info(cache_dir, &key, &value);
+    let (audio_format, audio_bytes) = generation_audio_info(cache_dir, &key, path, &value);
     let status = value_string(metrics, "state")
         .or_else(|| value_string(metrics, "phase"))
         .unwrap_or_else(|| "done".to_string());
@@ -1754,6 +1862,7 @@ fn recent_generation_from_json(
 fn generation_audio_info(
     cache_dir: &Path,
     key: &str,
+    metadata_path: &Path,
     value: &Value,
 ) -> (Option<String>, Option<u64>) {
     let mut extensions = Vec::new();
@@ -1768,9 +1877,14 @@ fn generation_audio_info(
 
     let known_format = extensions.first().cloned();
     for ext in extensions {
-        let candidate = cache_dir.join(format!("{}.{}", key, ext));
-        if let Ok(metadata) = fs::metadata(&candidate) {
-            return (Some(ext), Some(metadata.len()));
+        let candidates = [
+            cache_dir.join(format!("{}.{}", key, ext)),
+            metadata_path.with_extension(&ext),
+        ];
+        for candidate in candidates {
+            if let Ok(metadata) = fs::metadata(&candidate) {
+                return (Some(ext), Some(metadata.len()));
+            }
         }
     }
 
@@ -1974,6 +2088,442 @@ fn check_port_text(port: u16) -> String {
         } else {
             format!("{} 已监听，PID: {}", port, pids.join(", "))
         }
+    }
+}
+
+fn build_environment_report() -> Result<EnvironmentReport, String> {
+    let root = leon_root()?;
+    let mut checks = Vec::new();
+
+    let static_ok = root.join("static").join("tavo.js").is_file();
+    let script_ok = root.join("scripts").join("restart-leon-api.ps1").is_file();
+    let profiles_ok = root.join("config").join("profiles").is_dir();
+    let voices_ok = root.join("prompts").join("library").is_dir();
+    let common_ok = static_ok && script_ok && profiles_ok && voices_ok;
+    checks.push(env_check(
+        "common",
+        "Common 包",
+        if common_ok { "ok" } else { "error" },
+        if common_ok {
+            "公共文件完整"
+        } else {
+            "公共包不完整"
+        },
+        format!(
+            "static/tavo.js={} · scripts/restart-leon-api.ps1={} · config/profiles={} · prompts/library={}",
+            yes_no(static_ok),
+            yes_no(script_ok),
+            yes_no(profiles_ok),
+            yes_no(voices_ok)
+        ),
+        false,
+    ));
+
+    let profile_status = active_profile_status(&root);
+    checks.push(profile_status.check);
+
+    let gpu = gpu_status();
+    checks.push(gpu.check);
+
+    let port = port_status(&root, 9880);
+    checks.push(port.check);
+
+    let stale_gpu_count = project_gpu_runtime_process_count(&root);
+    checks.push(env_check(
+        "stale_gpu",
+        "LEON GPU 残留",
+        if stale_gpu_count > 0 { "warn" } else { "ok" },
+        if stale_gpu_count > 0 {
+            "发现可清理的残留 worker"
+        } else {
+            "没有 LEON GPU 残留"
+        },
+        if stale_gpu_count > 0 {
+            format!(
+                "检测到 {} 个 LEON indextts2runtime GPU 进程。",
+                stale_gpu_count
+            )
+        } else {
+            "nvidia-smi 中未发现 LEON indextts2runtime GPU 进程。".to_string()
+        },
+        stale_gpu_count > 0,
+    ));
+
+    let vllm = engine_status(&root, "vllm", gpu.free_mib, 9000);
+    let fast6g = engine_status(&root, "fast6g", gpu.free_mib, 5500);
+    let any_engine_installed = vllm.installed || fast6g.installed;
+    let can_start_vllm = common_ok
+        && profile_status.ready
+        && port.ready
+        && gpu.available
+        && vllm.ready
+        && gpu.free_mib.unwrap_or(0) >= 9000;
+    let can_start_fast6g = common_ok
+        && profile_status.ready
+        && port.ready
+        && gpu.available
+        && fast6g.ready
+        && gpu.free_mib.unwrap_or(0) >= 5500;
+
+    checks.push(vllm.check);
+    checks.push(fast6g.check);
+    checks.push(env_check(
+        "engine_choice",
+        "启动组合",
+        if any_engine_installed { "ok" } else { "error" },
+        if any_engine_installed {
+            "至少安装了一个 engine"
+        } else {
+            "缺少 engine 包"
+        },
+        "common 必装；vllm 和 fast6g 至少解压一个到同级目录。".to_string(),
+        false,
+    ));
+
+    let has_error = checks.iter().any(|check| check.status == "error");
+    let has_warn = checks.iter().any(|check| check.status == "warn");
+    let fixable_count = checks.iter().filter(|check| check.fixable).count();
+    let status = if has_error {
+        "error"
+    } else if has_warn {
+        "warn"
+    } else {
+        "ok"
+    }
+    .to_string();
+    let summary = if can_start_vllm && can_start_fast6g {
+        "vLLM 和 6G 都具备启动条件".to_string()
+    } else if can_start_vllm {
+        "vLLM 具备启动条件；6G 未就绪或显存不足".to_string()
+    } else if can_start_fast6g {
+        "6G 具备启动条件；vLLM 未就绪或显存不足".to_string()
+    } else if fixable_count > 0 {
+        "存在可自动修复项，修复后再检测".to_string()
+    } else {
+        "当前环境还不能保证一键启动".to_string()
+    };
+
+    Ok(EnvironmentReport {
+        status,
+        summary,
+        root: root.display().to_string(),
+        can_start_vllm,
+        can_start_fast6g,
+        fixable_count,
+        checks,
+    })
+}
+
+struct CheckState {
+    check: EnvironmentCheck,
+    ready: bool,
+}
+
+struct GpuState {
+    check: EnvironmentCheck,
+    available: bool,
+    free_mib: Option<u64>,
+}
+
+struct EngineState {
+    check: EnvironmentCheck,
+    installed: bool,
+    ready: bool,
+}
+
+fn active_profile_status(root: &Path) -> CheckState {
+    let profile_dir = root.join("config").join("profiles");
+    let active = profile_dir.join("active.json");
+    if active.is_file() {
+        match read_json(&active).and_then(|value| validate_profile_value(&value).map(|_| value)) {
+            Ok(_) => CheckState {
+                check: env_check(
+                    "active_profile",
+                    "Active Profile",
+                    "ok",
+                    "active.json 可用",
+                    active.display().to_string(),
+                    false,
+                ),
+                ready: true,
+            },
+            Err(error) => CheckState {
+                check: env_check(
+                    "active_profile",
+                    "Active Profile",
+                    "error",
+                    "active.json 无效",
+                    error,
+                    false,
+                ),
+                ready: false,
+            },
+        }
+    } else {
+        let template = preferred_profile_template(&profile_dir).ok();
+        CheckState {
+            check: env_check(
+                "active_profile",
+                "Active Profile",
+                "error",
+                "缺少 active.json",
+                template
+                    .map(|path| format!("可从模板创建: {}", path.display()))
+                    .unwrap_or_else(|| {
+                        "缺少 leon-default.json，无法自动创建 active.json。".to_string()
+                    }),
+                profile_dir.join("leon-default.json").is_file(),
+            ),
+            ready: false,
+        }
+    }
+}
+
+fn gpu_status() -> GpuState {
+    let Some((name, total_mib, free_mib)) = query_gpu_summary() else {
+        return GpuState {
+            check: env_check(
+                "gpu",
+                "NVIDIA GPU",
+                "error",
+                "未检测到 nvidia-smi",
+                "需要安装可用的 NVIDIA 驱动；此项不能由 LEON 自动修复。".to_string(),
+                false,
+            ),
+            available: false,
+            free_mib: None,
+        };
+    };
+    let status = if free_mib < 5500 { "warn" } else { "ok" };
+    GpuState {
+        check: env_check(
+            "gpu",
+            "NVIDIA GPU",
+            status,
+            if free_mib < 5500 {
+                "GPU 空闲显存偏低"
+            } else {
+                "GPU 可用"
+            },
+            format!("{} · total={} MiB · free={} MiB", name, total_mib, free_mib),
+            false,
+        ),
+        available: true,
+        free_mib: Some(free_mib),
+    }
+}
+
+fn query_gpu_summary() -> Option<(String, u64, u64)> {
+    let mut command = Command::new("nvidia-smi");
+    command.args([
+        "--query-gpu=name,memory.total,memory.free",
+        "--format=csv,noheader,nounits",
+    ]);
+    hide_child_window(&mut command);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let first = text.lines().find(|line| !line.trim().is_empty())?;
+    let parts: Vec<&str> = first.split(',').map(str::trim).collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    Some((
+        parts[0].to_string(),
+        parts[1].parse::<u64>().ok()?,
+        parts[2].parse::<u64>().ok()?,
+    ))
+}
+
+fn port_status(root: &Path, port: u16) -> CheckState {
+    let pids = listening_pids(port);
+    if pids.is_empty() {
+        return CheckState {
+            check: env_check(
+                "port",
+                "API 端口 9880",
+                "ok",
+                "端口可用",
+                "127.0.0.1:9880 未被监听。".to_string(),
+                false,
+            ),
+            ready: true,
+        };
+    }
+    let mut project = Vec::new();
+    let mut foreign = Vec::new();
+    for pid_text in pids {
+        match pid_text.parse::<u32>() {
+            Ok(pid) if project_process_matches_root(pid, root) => project.push(pid),
+            Ok(pid) => foreign.push(pid),
+            Err(_) => {}
+        }
+    }
+    if !foreign.is_empty() {
+        CheckState {
+            check: env_check(
+                "port",
+                "API 端口 9880",
+                "error",
+                "端口被非 LEON 进程占用",
+                format!("占用 PID: {:?}", foreign),
+                false,
+            ),
+            ready: false,
+        }
+    } else {
+        CheckState {
+            check: env_check(
+                "port",
+                "API 端口 9880",
+                "warn",
+                "发现 LEON 端口残留",
+                format!("可清理 PID: {:?}", project),
+                true,
+            ),
+            ready: true,
+        }
+    }
+}
+
+fn engine_status(
+    root: &Path,
+    engine: &str,
+    free_mib: Option<u64>,
+    min_free_mib: u64,
+) -> EngineState {
+    let engine_root = root.join(engine);
+    if !engine_root.is_dir() {
+        return EngineState {
+            check: env_check(
+                &format!("engine_{}", engine),
+                &format!("{} engine", engine),
+                "warn",
+                "未安装",
+                format!("未找到目录: {}", engine_root.display()),
+                false,
+            ),
+            installed: false,
+            ready: false,
+        };
+    }
+
+    let runtime_ok = engine_root
+        .join("indextts2runtime")
+        .join("python.exe")
+        .is_file();
+    let api_ok = engine_root.join("indextts2_api.py").is_file();
+    let checkpoint_files = ["gpt.pth", "s2mel.pth", "bpe.model", "config.yaml"];
+    let missing_checkpoints: Vec<&str> = checkpoint_files
+        .iter()
+        .copied()
+        .filter(|name| !engine_root.join("checkpoints").join(name).is_file())
+        .collect();
+    let files_ok = runtime_ok && api_ok && missing_checkpoints.is_empty();
+    let free_ok = free_mib.map(|value| value >= min_free_mib).unwrap_or(false);
+    let ready = files_ok && free_ok;
+    let status = if !files_ok {
+        "error"
+    } else if !free_ok {
+        "warn"
+    } else {
+        "ok"
+    };
+    let detail = format!(
+        "runtime={} · api={} · missing_checkpoints={} · required_free={} MiB · current_free={}",
+        yes_no(runtime_ok),
+        yes_no(api_ok),
+        if missing_checkpoints.is_empty() {
+            "none".to_string()
+        } else {
+            missing_checkpoints.join(",")
+        },
+        min_free_mib,
+        free_mib
+            .map(|value| format!("{} MiB", value))
+            .unwrap_or_else(|| "unknown".to_string())
+    );
+    EngineState {
+        check: env_check(
+            &format!("engine_{}", engine),
+            &format!("{} engine", engine),
+            status,
+            if ready {
+                "具备启动条件"
+            } else if files_ok {
+                "文件完整但显存不足"
+            } else {
+                "engine 包不完整"
+            },
+            detail,
+            false,
+        ),
+        installed: true,
+        ready: files_ok,
+    }
+}
+
+fn ensure_active_profile(root: &Path) -> Result<Option<String>, String> {
+    let profile_dir = root.join("config").join("profiles");
+    let active = profile_dir.join("active.json");
+    if active.is_file() {
+        return Ok(None);
+    }
+    let template = profile_dir.join("leon-default.json");
+    if !template.is_file() {
+        return Err("缺少 leon-default.json，无法创建 active.json".to_string());
+    }
+    fs::copy(&template, &active).map_err(|e| format!("创建 active.json 失败: {}", e))?;
+    Ok(Some("已从 leon-default.json 创建 active.json".to_string()))
+}
+
+fn release_runtime_dirs(root: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![
+        root.join("logs").join("vllm"),
+        root.join("logs").join("fast6g"),
+    ];
+    for engine in ["vllm", "fast6g"] {
+        let engine_root = root.join(engine);
+        if engine_root.is_dir() {
+            dirs.push(engine_root.join("outputs").join("cache"));
+            dirs.push(engine_root.join("outputs").join("tmp"));
+        }
+    }
+    dirs
+}
+
+fn project_gpu_runtime_process_count(root: &Path) -> usize {
+    gpu_process_pids()
+        .into_iter()
+        .filter(|pid| project_runtime_python_matches_root(*pid, root))
+        .count()
+}
+
+fn env_check(
+    id: &str,
+    title: &str,
+    status: &str,
+    summary: &str,
+    detail: String,
+    fixable: bool,
+) -> EnvironmentCheck {
+    EnvironmentCheck {
+        id: id.to_string(),
+        title: title.to_string(),
+        status: status.to_string(),
+        summary: summary.to_string(),
+        detail,
+        fixable,
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "ok"
+    } else {
+        "missing"
     }
 }
 

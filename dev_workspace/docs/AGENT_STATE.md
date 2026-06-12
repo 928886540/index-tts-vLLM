@@ -8,6 +8,34 @@ This is the active handoff summary. Full historical state was archived on 2026-0
 
 Read the archive only when investigating old decisions, benchmark history, or fixed regressions.
 
+## Launcher Voice Preview / Generation Records Fix 2026-06-12
+
+Current launcher slice:
+
+- Voice-library preview now allows canonical paths under the full shared `prompts/library` instead of only `prompts/library/声腔`, while still rejecting paths outside the library and non-audio files.
+- `生成记录` now recursively scans `outputs/cache/**/*.json`, including `outputs/cache/by_role/<role>/...`, dedupes by cache key, and reads companion audio size from either top-level `key.ext` or the readable-cache sidecar path.
+- Generation record rows now put role, short key, visible `档位 ...` badge, time, preview text, and wrapped RTF/audio/wall/file metrics into separate lines. Segment counts/details stay in the `查看` modal.
+- Root `LEON-Launcher-Tauri.exe` was rebuilt and overwritten after closing stale PID `34100`. Smoke mode exited with code `0`.
+
+Validation for this slice:
+
+```powershell
+node --check launcher-tauri\src\scripts\app.js
+node --check launcher-tauri\src\scripts\mock-api.js
+npm --prefix launcher-tauri run frontend:build
+cargo fmt --manifest-path launcher-tauri\src-tauri\Cargo.toml --check
+cargo check --manifest-path launcher-tauri\src-tauri\Cargo.toml
+cargo build --release --manifest-path launcher-tauri\src-tauri\Cargo.toml
+Copy-Item launcher-tauri\src-tauri\target\release\leon-launcher-tauri.exe LEON-Launcher-Tauri.exe -Force
+$env:LEON_LAUNCHER_SMOKE_TEST='1'; Start-Process -FilePath D:\apiWorkSpace\leon_api\LEON-Launcher-Tauri.exe -WorkingDirectory D:\apiWorkSpace\leon_api -Wait -PassThru
+git diff --check
+```
+
+Notes:
+
+- `git diff --check` reported only Windows LF-to-CRLF warnings.
+- The worktree also contains environment-check / auto-repair launcher changes in `launcher-tauri/src/scripts/ui/pages/environment.js`, `launcher-tauri/src/scripts/app.js`, and `launcher-tauri/src-tauri/src/main.rs`; those were preserved and included in the successful build.
+
 ## LIVE Progress Count Stabilization 2026-06-12
 
 Current Tavo playback slice:

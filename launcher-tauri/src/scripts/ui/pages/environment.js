@@ -3,61 +3,60 @@ export function environmentPage() {
         <div id="page-environment" class="page">
             <div class="page-header">
                 <h2 class="page-title">环境检测</h2>
-                <button class="btn-secondary" id="btn-check-env">重新检测</button>
-            </div>
-            <div class="env-grid">
-                <div class="env-card">
-                    <div class="env-header">
-                        <svg class="env-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                            <line x1="8" y1="21" x2="16" y2="21"></line>
-                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                <div class="page-actions">
+                    <button class="btn-secondary" id="btn-check-env" type="button">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+                            <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
                         </svg>
-                        <h3 class="env-title">操作系统</h3>
-                    </div>
-                    <div class="env-value" id="env-os">检测中...</div>
-                </div>
-                <div class="env-card">
-                    <div class="env-header">
-                        <svg class="env-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
-                            <rect x="9" y="9" width="6" height="6"></rect>
-                            <line x1="9" y1="1" x2="9" y2="4"></line>
-                            <line x1="15" y1="1" x2="15" y2="4"></line>
-                            <line x1="9" y1="20" x2="9" y2="23"></line>
-                            <line x1="15" y1="20" x2="15" y2="23"></line>
-                            <line x1="20" y1="9" x2="23" y2="9"></line>
-                            <line x1="20" y1="14" x2="23" y2="14"></line>
-                            <line x1="1" y1="9" x2="4" y2="9"></line>
-                            <line x1="1" y1="14" x2="4" y2="14"></line>
+                        重新检测
+                    </button>
+                    <button class="btn-secondary primary" id="btn-repair-env" type="button">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.3-3.3a6 6 0 0 1-7.9 7.9l-6.4 6.4a2.1 2.1 0 0 1-3-3l6.4-6.4a6 6 0 0 1 7.9-7.9l-3.3 3.3z"></path>
                         </svg>
-                        <h3 class="env-title">Python 版本</h3>
-                    </div>
-                    <div class="env-value" id="env-python">检测中...</div>
-                </div>
-                <div class="env-card">
-                    <div class="env-header">
-                        <svg class="env-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <line x1="2" y1="12" x2="22" y2="12"></line>
-                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                        </svg>
-                        <h3 class="env-title">网络连接</h3>
-                    </div>
-                    <div class="env-value" id="env-network">检测中...</div>
-                </div>
-                <div class="env-card">
-                    <div class="env-header">
-                        <svg class="env-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                        </svg>
-                        <h3 class="env-title">CUDA 可用</h3>
-                    </div>
-                    <div class="env-value" id="env-cuda">检测中...</div>
+                        自动修复安全项
+                    </button>
                 </div>
             </div>
+
+            <section class="env-summary" id="env-summary">
+                <div class="env-summary-main">
+                    <span class="env-status-pill loading">检测中</span>
+                    <div>
+                        <h3>正在检测启动环境</h3>
+                        <p>等待检测结果...</p>
+                    </div>
+                </div>
+                <div class="env-summary-meta" id="env-root">根目录检测中...</div>
+            </section>
+
+            <section class="env-readiness" id="env-startability">
+                <div class="env-ready-item loading">
+                    <span>vLLM</span>
+                    <strong>检测中</strong>
+                </div>
+                <div class="env-ready-item loading">
+                    <span>6G</span>
+                    <strong>检测中</strong>
+                </div>
+                <div class="env-ready-item loading">
+                    <span>可修复项</span>
+                    <strong>检测中</strong>
+                </div>
+            </section>
+
+            <section class="env-check-list" id="env-check-list">
+                <div class="env-check-row loading">
+                    <div class="env-check-mark">...</div>
+                    <div class="env-check-body">
+                        <div class="env-check-title">检测中</div>
+                        <div class="env-check-detail">等待环境报告...</div>
+                    </div>
+                </div>
+            </section>
         </div>
     `;
 }

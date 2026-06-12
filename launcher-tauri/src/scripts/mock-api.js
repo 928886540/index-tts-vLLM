@@ -284,6 +284,116 @@ window.tauri_mock = {
         });
     },
 
+    getEnvironmentReport: () => {
+        return Promise.resolve({
+            status: "warn",
+            summary: "6G 具备启动条件；vLLM 显存不足",
+            root: "D:\\apiWorkSpace\\leon_api",
+            canStartVllm: false,
+            canStartFast6g: true,
+            fixableCount: 1,
+            checks: [
+                {
+                    id: "common",
+                    title: "Common 包",
+                    status: "ok",
+                    summary: "公共文件完整",
+                    detail: "static/tavo.js=ok · scripts/restart-leon-api.ps1=ok · config/profiles=ok · prompts/library=ok",
+                    fixable: false
+                },
+                {
+                    id: "active_profile",
+                    title: "Active Profile",
+                    status: "ok",
+                    summary: "active.json 可用",
+                    detail: "config/profiles/active.json",
+                    fixable: false
+                },
+                {
+                    id: "gpu",
+                    title: "NVIDIA GPU",
+                    status: "warn",
+                    summary: "GPU 空闲显存偏低",
+                    detail: "RTX 3060 · total=12288 MiB · free=6200 MiB",
+                    fixable: false
+                },
+                {
+                    id: "port",
+                    title: "API 端口 9880",
+                    status: "warn",
+                    summary: "发现 LEON 端口残留",
+                    detail: "可清理 PID: [12345]",
+                    fixable: true
+                },
+                {
+                    id: "engine_vllm",
+                    title: "vllm engine",
+                    status: "warn",
+                    summary: "文件完整但显存不足",
+                    detail: "runtime=ok · api=ok · missing_checkpoints=none · required_free=9000 MiB · current_free=6200 MiB",
+                    fixable: false
+                },
+                {
+                    id: "engine_fast6g",
+                    title: "fast6g engine",
+                    status: "ok",
+                    summary: "具备启动条件",
+                    detail: "runtime=ok · api=ok · missing_checkpoints=none · required_free=5500 MiB · current_free=6200 MiB",
+                    fixable: false
+                }
+            ]
+        });
+    },
+
+    repairEnvironment: () => {
+        return Promise.resolve({
+            fixed: ["清理 LEON API 端口残留进程: 1"],
+            skipped: [],
+            report: {
+                status: "warn",
+                summary: "6G 具备启动条件；vLLM 显存不足",
+                root: "D:\\apiWorkSpace\\leon_api",
+                canStartVllm: false,
+                canStartFast6g: true,
+                fixableCount: 0,
+                checks: [
+                    {
+                        id: "common",
+                        title: "Common 包",
+                        status: "ok",
+                        summary: "公共文件完整",
+                        detail: "static/tavo.js=ok · scripts/restart-leon-api.ps1=ok · config/profiles=ok · prompts/library=ok",
+                        fixable: false
+                    },
+                    {
+                        id: "port",
+                        title: "API 端口 9880",
+                        status: "ok",
+                        summary: "端口可用",
+                        detail: "127.0.0.1:9880 未被监听。",
+                        fixable: false
+                    },
+                    {
+                        id: "engine_fast6g",
+                        title: "fast6g engine",
+                        status: "ok",
+                        summary: "具备启动条件",
+                        detail: "runtime=ok · api=ok · missing_checkpoints=none · required_free=5500 MiB · current_free=6200 MiB",
+                        fixable: false
+                    },
+                    {
+                        id: "engine_vllm",
+                        title: "vllm engine",
+                        status: "warn",
+                        summary: "文件完整但显存不足",
+                        detail: "runtime=ok · api=ok · missing_checkpoints=none · required_free=9000 MiB · current_free=6200 MiB",
+                        fixable: false
+                    }
+                ]
+            }
+        });
+    },
+
     // 获取系统状态
     getSystemStatus: () => {
         return new Promise((resolve) => {
